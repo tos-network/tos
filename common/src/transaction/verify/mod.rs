@@ -1691,6 +1691,26 @@ impl Transaction {
                 }
             }
             TransactionType::RevokeKyc(payload) => {
+                // SECURITY: Verify that the committee is the user's verifying committee
+                // This prevents unauthorized committees from revoking KYC they didn't issue
+                let user_verifying_committee = state
+                    .get_verifying_committee(payload.get_account())
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| {
+                        VerificationError::AnyError(anyhow::anyhow!(
+                            "User has no KYC record to revoke"
+                        ))
+                    })?;
+
+                if &user_verifying_committee != payload.get_committee_id() {
+                    return Err(VerificationError::AnyError(anyhow::anyhow!(
+                        "RevokeKyc: committee {} is not the user's verifying committee {}",
+                        payload.get_committee_id(),
+                        user_verifying_committee
+                    )));
+                }
+
                 // Get the committee and verify approvals
                 let committee = state
                     .get_committee(payload.get_committee_id())
@@ -1724,6 +1744,26 @@ impl Transaction {
                 }
             }
             TransactionType::RenewKyc(payload) => {
+                // SECURITY: Verify that the committee is the user's verifying committee
+                // This prevents unauthorized committees from renewing KYC they didn't issue
+                let user_verifying_committee = state
+                    .get_verifying_committee(payload.get_account())
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| {
+                        VerificationError::AnyError(anyhow::anyhow!(
+                            "User has no KYC record to renew"
+                        ))
+                    })?;
+
+                if &user_verifying_committee != payload.get_committee_id() {
+                    return Err(VerificationError::AnyError(anyhow::anyhow!(
+                        "RenewKyc: committee {} is not the user's verifying committee {}",
+                        payload.get_committee_id(),
+                        user_verifying_committee
+                    )));
+                }
+
                 // Get the committee and verify approvals
                 let committee = state
                     .get_committee(payload.get_committee_id())
@@ -1763,6 +1803,26 @@ impl Transaction {
             }
             TransactionType::TransferKyc(payload) => {
                 let current_time = state.get_verification_timestamp();
+
+                // SECURITY: Verify that the user is currently bound to the source committee
+                // This prevents unauthorized committees from transferring users they don't manage
+                let user_verifying_committee = state
+                    .get_verifying_committee(payload.get_account())
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| {
+                        VerificationError::AnyError(anyhow::anyhow!(
+                            "User has no KYC record to transfer"
+                        ))
+                    })?;
+
+                if &user_verifying_committee != payload.get_source_committee_id() {
+                    return Err(VerificationError::AnyError(anyhow::anyhow!(
+                        "TransferKyc: source committee {} does not match user's verifying committee {}",
+                        payload.get_source_committee_id(),
+                        user_verifying_committee
+                    )));
+                }
 
                 // Get and verify source committee approvals
                 let source_committee = state

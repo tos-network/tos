@@ -228,6 +228,18 @@ pub trait BlockchainApplyState<'a, P: ContractProvider, E>:
         committee_id: &'a Hash,
     ) -> Result<Option<crate::kyc::SecurityCommittee>, E>;
 
+    /// Get the committee ID that verified a user's KYC
+    ///
+    /// # Arguments
+    /// * `user` - The user's public key
+    ///
+    /// # Returns
+    /// The committee ID if the user has KYC, None otherwise
+    async fn get_verifying_committee(
+        &self,
+        user: &'a CompressedPublicKey,
+    ) -> Result<Option<Hash>, E>;
+
     /// Check if the global committee has been bootstrapped
     async fn is_global_committee_bootstrapped(&self) -> Result<bool, E>;
 

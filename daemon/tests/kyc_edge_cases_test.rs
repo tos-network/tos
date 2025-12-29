@@ -790,6 +790,13 @@ impl<'a> BlockchainApplyState<'a, DummyContractProvider, TestError> for EdgeCase
         Ok(self.committees.get(committee_id).cloned())
     }
 
+    async fn get_verifying_committee(
+        &self,
+        user: &'a CompressedPublicKey,
+    ) -> Result<Option<Hash>, TestError> {
+        Ok(self.kyc_data.get(user).map(|kyc| kyc.committee_id.clone()))
+    }
+
     async fn is_global_committee_bootstrapped(&self) -> Result<bool, TestError> {
         Ok(self.global_committee_id.is_some())
     }

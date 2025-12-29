@@ -754,6 +754,13 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for Applicable
         self.inner.storage.get_committee(committee_id).await
     }
 
+    async fn get_verifying_committee(
+        &self,
+        user: &'a CompressedPublicKey,
+    ) -> Result<Option<Hash>, BlockchainError> {
+        self.inner.storage.get_verifying_committee(user).await
+    }
+
     async fn is_global_committee_bootstrapped(&self) -> Result<bool, BlockchainError> {
         self.inner.storage.is_global_committee_bootstrapped().await
     }

@@ -668,6 +668,13 @@ impl<'a> BlockchainApplyState<'a, DummyContractProvider, TestError> for TestChai
         Ok(None)
     }
 
+    async fn get_verifying_committee(
+        &self,
+        _user: &'a CompressedPublicKey,
+    ) -> Result<Option<Hash>, TestError> {
+        Ok(None)
+    }
+
     async fn is_global_committee_bootstrapped(&self) -> Result<bool, TestError> {
         Ok(false)
     }

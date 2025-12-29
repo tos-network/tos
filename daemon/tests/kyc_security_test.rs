@@ -20,9 +20,8 @@
 use tos_common::{
     crypto::{Hash, KeyPair, PublicKey},
     kyc::{
-        CommitteeApproval, CommitteeMember, CommitteeStatus,
-        KycRegion, MemberRole, SecurityCommittee,
-        APPROVAL_EXPIRY_SECONDS,
+        CommitteeApproval, CommitteeMember, CommitteeStatus, KycRegion, MemberRole,
+        SecurityCommittee, APPROVAL_EXPIRY_SECONDS,
     },
 };
 
@@ -130,10 +129,8 @@ mod security_attack_tests {
             .collect();
 
         // Compute config hashes
-        let hash_a =
-            CommitteeApproval::compute_register_config_hash(&members_a, 2, 2, 100);
-        let hash_b =
-            CommitteeApproval::compute_register_config_hash(&members_b, 2, 2, 100);
+        let hash_a = CommitteeApproval::compute_register_config_hash(&members_a, 2, 2, 100);
+        let hash_b = CommitteeApproval::compute_register_config_hash(&members_b, 2, 2, 100);
 
         // Hashes MUST be different for different member lists
         assert_ne!(
@@ -157,10 +154,8 @@ mod security_attack_tests {
             .collect();
 
         // Same members, different thresholds
-        let hash_threshold_3 =
-            CommitteeApproval::compute_register_config_hash(&members, 3, 2, 100);
-        let hash_threshold_2 =
-            CommitteeApproval::compute_register_config_hash(&members, 2, 2, 100);
+        let hash_threshold_3 = CommitteeApproval::compute_register_config_hash(&members, 3, 2, 100);
+        let hash_threshold_2 = CommitteeApproval::compute_register_config_hash(&members, 2, 2, 100);
 
         assert_ne!(
             hash_threshold_3, hash_threshold_2,
@@ -183,10 +178,8 @@ mod security_attack_tests {
             .collect();
 
         // Same members, different max_kyc_level
-        let hash_level_100 =
-            CommitteeApproval::compute_register_config_hash(&members, 2, 2, 100);
-        let hash_level_50 =
-            CommitteeApproval::compute_register_config_hash(&members, 2, 2, 50);
+        let hash_level_100 = CommitteeApproval::compute_register_config_hash(&members, 2, 2, 100);
+        let hash_level_50 = CommitteeApproval::compute_register_config_hash(&members, 2, 2, 50);
 
         assert_ne!(
             hash_level_100, hash_level_50,
@@ -277,13 +270,8 @@ mod boundary_tests {
     #[test]
     fn test_boundary_transfer_level_exceeds_destination_max() {
         // Source committee: max_kyc_level = 1000
-        let (_source_committee, _) = create_test_committee(
-            Hash::new([1u8; 32]),
-            5,
-            3,
-            1000,
-            CommitteeStatus::Active,
-        );
+        let (_source_committee, _) =
+            create_test_committee(Hash::new([1u8; 32]), 5, 3, 1000, CommitteeStatus::Active);
 
         // Destination committee: max_kyc_level = 50 (lower)
         let (dest_committee, _) = create_test_committee(
@@ -309,13 +297,8 @@ mod boundary_tests {
     /// Test: Transfer KYC at exact boundary (level == max)
     #[test]
     fn test_boundary_transfer_level_equals_destination_max() {
-        let (dest_committee, _) = create_test_committee(
-            Hash::new([2u8; 32]),
-            5,
-            3,
-            100,
-            CommitteeStatus::Active,
-        );
+        let (dest_committee, _) =
+            create_test_committee(Hash::new([2u8; 32]), 5, 3, 100, CommitteeStatus::Active);
 
         // User has KYC level exactly at max
         let user_kyc_level = 100u16;
@@ -379,8 +362,8 @@ mod boundary_tests {
         let (committee, keypairs) = create_test_committee_with_kyc_threshold(
             Hash::new([1u8; 32]),
             5,
-            3,  // governance threshold
-            3,  // kyc_threshold = 3
+            3, // governance threshold
+            3, // kyc_threshold = 3
             100,
             CommitteeStatus::Active,
         );
@@ -413,23 +396,15 @@ mod boundary_tests {
             current_time,
         );
 
-        assert!(
-            result.is_err(),
-            "One below kyc_threshold should fail"
-        );
+        assert!(result.is_err(), "One below kyc_threshold should fail");
     }
 
     /// Test: Approval expiry boundary - just after expiry
     /// Note: is_expired uses `>` (not `>=`), so at exactly APPROVAL_EXPIRY_SECONDS it's still valid
     #[test]
     fn test_boundary_approval_expiry_exactly_at_limit() {
-        let (committee, keypairs) = create_test_committee(
-            Hash::new([1u8; 32]),
-            5,
-            3,
-            100,
-            CommitteeStatus::Active,
-        );
+        let (committee, keypairs) =
+            create_test_committee(Hash::new([1u8; 32]), 5, 3, 100, CommitteeStatus::Active);
 
         let approval_time = 1000u64;
         // Just after expiry boundary (APPROVAL_EXPIRY_SECONDS + 1)
@@ -471,13 +446,8 @@ mod boundary_tests {
     /// Test: Approval just before expiry
     #[test]
     fn test_boundary_approval_just_before_expiry() {
-        let (committee, keypairs) = create_test_committee(
-            Hash::new([1u8; 32]),
-            5,
-            3,
-            100,
-            CommitteeStatus::Active,
-        );
+        let (committee, keypairs) =
+            create_test_committee(Hash::new([1u8; 32]), 5, 3, 100, CommitteeStatus::Active);
 
         let approval_time = 1000u64;
         // One second before expiry
@@ -661,13 +631,8 @@ mod state_machine_tests {
     /// Test: Suspended committee cannot issue SetKyc
     #[test]
     fn test_state_suspended_committee_cannot_set_kyc() {
-        let (committee, keypairs) = create_test_committee(
-            Hash::new([1u8; 32]),
-            5,
-            3,
-            100,
-            CommitteeStatus::Suspended,
-        );
+        let (committee, keypairs) =
+            create_test_committee(Hash::new([1u8; 32]), 5, 3, 100, CommitteeStatus::Suspended);
 
         let current_time = 2000u64;
         let user_pk = create_test_pubkey(99);
@@ -705,13 +670,8 @@ mod state_machine_tests {
     /// Test: Active committee can perform all operations
     #[test]
     fn test_state_active_committee_can_set_kyc() {
-        let (committee, keypairs) = create_test_committee(
-            Hash::new([1u8; 32]),
-            5,
-            3,
-            100,
-            CommitteeStatus::Active,
-        );
+        let (committee, keypairs) =
+            create_test_committee(Hash::new([1u8; 32]), 5, 3, 100, CommitteeStatus::Active);
 
         let current_time = 2000u64;
         let user_pk = create_test_pubkey(99);
@@ -754,13 +714,8 @@ mod malicious_input_tests {
     /// Test: Empty approval list
     #[test]
     fn test_malicious_empty_approvals() {
-        let (committee, _) = create_test_committee(
-            Hash::new([1u8; 32]),
-            5,
-            3,
-            100,
-            CommitteeStatus::Active,
-        );
+        let (committee, _) =
+            create_test_committee(Hash::new([1u8; 32]), 5, 3, 100, CommitteeStatus::Active);
 
         let current_time = 2000u64;
         let user_pk = create_test_pubkey(99);
@@ -783,13 +738,8 @@ mod malicious_input_tests {
     /// Test: Approval from non-member
     #[test]
     fn test_malicious_non_member_approval() {
-        let (committee, _) = create_test_committee(
-            Hash::new([1u8; 32]),
-            5,
-            3,
-            100,
-            CommitteeStatus::Active,
-        );
+        let (committee, _) =
+            create_test_committee(Hash::new([1u8; 32]), 5, 3, 100, CommitteeStatus::Active);
 
         let current_time = 2000u64;
         let user_pk = create_test_pubkey(99);
@@ -832,8 +782,8 @@ mod malicious_input_tests {
         let (committee, keypairs) = create_test_committee_with_kyc_threshold(
             Hash::new([1u8; 32]),
             5,
-            3,  // governance threshold
-            3,  // kyc_threshold = 3
+            3, // governance threshold
+            3, // kyc_threshold = 3
             100,
             CommitteeStatus::Active,
         );
@@ -882,13 +832,8 @@ mod malicious_input_tests {
     /// Consider this a potential security improvement for the future.
     #[test]
     fn test_malicious_future_timestamp() {
-        let (committee, keypairs) = create_test_committee(
-            Hash::new([1u8; 32]),
-            5,
-            3,
-            100,
-            CommitteeStatus::Active,
-        );
+        let (committee, keypairs) =
+            create_test_committee(Hash::new([1u8; 32]), 5, 3, 100, CommitteeStatus::Active);
 
         let current_time = 2000u64;
         let future_time = current_time + 1000000; // Far future
@@ -968,12 +913,9 @@ mod determinism_tests {
         // Order 3: Bob, Alice, Charlie
         let members_bac = vec![member2.clone(), member1.clone(), member3.clone()];
 
-        let hash_abc =
-            CommitteeApproval::compute_register_config_hash(&members_abc, 2, 2, 100);
-        let hash_cba =
-            CommitteeApproval::compute_register_config_hash(&members_cba, 2, 2, 100);
-        let hash_bac =
-            CommitteeApproval::compute_register_config_hash(&members_bac, 2, 2, 100);
+        let hash_abc = CommitteeApproval::compute_register_config_hash(&members_abc, 2, 2, 100);
+        let hash_cba = CommitteeApproval::compute_register_config_hash(&members_cba, 2, 2, 100);
+        let hash_bac = CommitteeApproval::compute_register_config_hash(&members_bac, 2, 2, 100);
 
         assert_eq!(
             hash_abc, hash_cba,
@@ -1000,12 +942,9 @@ mod determinism_tests {
         );
         let members = vec![member];
 
-        let hash1 =
-            CommitteeApproval::compute_register_config_hash(&members, 1, 1, 100);
-        let hash2 =
-            CommitteeApproval::compute_register_config_hash(&members, 1, 1, 100);
-        let hash3 =
-            CommitteeApproval::compute_register_config_hash(&members, 1, 1, 100);
+        let hash1 = CommitteeApproval::compute_register_config_hash(&members, 1, 1, 100);
+        let hash2 = CommitteeApproval::compute_register_config_hash(&members, 1, 1, 100);
+        let hash3 = CommitteeApproval::compute_register_config_hash(&members, 1, 1, 100);
 
         assert_eq!(hash1, hash2, "Same input must produce same hash (1 vs 2)");
         assert_eq!(hash2, hash3, "Same input must produce same hash (2 vs 3)");
@@ -1049,13 +988,8 @@ mod negative_tests {
     /// Test: Expired approval is rejected
     #[test]
     fn test_negative_expired_approval_rejected() {
-        let (committee, keypairs) = create_test_committee(
-            Hash::new([1u8; 32]),
-            5,
-            3,
-            100,
-            CommitteeStatus::Active,
-        );
+        let (committee, keypairs) =
+            create_test_committee(Hash::new([1u8; 32]), 5, 3, 100, CommitteeStatus::Active);
 
         let approval_time = 1000u64;
         // Way past expiry
@@ -1093,13 +1027,8 @@ mod negative_tests {
     /// Test: Wrong data hash in message
     #[test]
     fn test_negative_wrong_data_hash() {
-        let (committee, keypairs) = create_test_committee(
-            Hash::new([1u8; 32]),
-            5,
-            3,
-            100,
-            CommitteeStatus::Active,
-        );
+        let (committee, keypairs) =
+            create_test_committee(Hash::new([1u8; 32]), 5, 3, 100, CommitteeStatus::Active);
 
         let current_time = 2000u64;
         let user_pk = create_test_pubkey(99);
@@ -1140,13 +1069,8 @@ mod negative_tests {
     /// Test: Wrong user in verification
     #[test]
     fn test_negative_wrong_user() {
-        let (committee, keypairs) = create_test_committee(
-            Hash::new([1u8; 32]),
-            5,
-            3,
-            100,
-            CommitteeStatus::Active,
-        );
+        let (committee, keypairs) =
+            create_test_committee(Hash::new([1u8; 32]), 5, 3, 100, CommitteeStatus::Active);
 
         let current_time = 2000u64;
         let correct_user = create_test_pubkey(99);
@@ -1178,22 +1102,14 @@ mod negative_tests {
             current_time,
         );
 
-        assert!(
-            result.is_err(),
-            "Verification with wrong user should fail"
-        );
+        assert!(result.is_err(), "Verification with wrong user should fail");
     }
 
     /// Test: Wrong KYC level in verification
     #[test]
     fn test_negative_wrong_kyc_level() {
-        let (committee, keypairs) = create_test_committee(
-            Hash::new([1u8; 32]),
-            5,
-            3,
-            100,
-            CommitteeStatus::Active,
-        );
+        let (committee, keypairs) =
+            create_test_committee(Hash::new([1u8; 32]), 5, 3, 100, CommitteeStatus::Active);
 
         let current_time = 2000u64;
         let user_pk = create_test_pubkey(99);
@@ -1240,8 +1156,8 @@ mod negative_tests {
         let (committee, keypairs) = create_test_committee_with_kyc_threshold(
             Hash::new([1u8; 32]),
             5,
-            4,  // governance threshold
-            4,  // kyc_threshold = 4
+            4, // governance threshold
+            4, // kyc_threshold = 4
             100,
             CommitteeStatus::Active,
         );
@@ -1274,10 +1190,7 @@ mod negative_tests {
             current_time,
         );
 
-        assert!(
-            result.is_err(),
-            "Insufficient approvals should be rejected"
-        );
+        assert!(result.is_err(), "Insufficient approvals should be rejected");
     }
 }
 
@@ -1289,7 +1202,9 @@ mod negative_tests {
 fn test_security_test_suite_summary() {
     println!("KYC Security Test Suite");
     println!("=======================");
-    println!("1. Security/Attack Tests: Signature replay, duplicate detection, privilege escalation");
+    println!(
+        "1. Security/Attack Tests: Signature replay, duplicate detection, privilege escalation"
+    );
     println!("2. Boundary Tests: Level limits, threshold boundaries, expiry timing");
     println!("3. State Machine Tests: Committee status × operation combinations");
     println!("4. Malicious Input Tests: Empty data, non-members, duplicates, time manipulation");
