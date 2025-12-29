@@ -328,7 +328,8 @@ impl Transaction {
                 kyc::verify_transfer_kyc(payload, current_time)?;
             }
             TransactionType::BootstrapCommittee(payload) => {
-                kyc::verify_bootstrap_committee(payload)?;
+                // SECURITY FIX (Issue #33): Pass sender to verify only BOOTSTRAP_ADDRESS can bootstrap
+                kyc::verify_bootstrap_committee(payload, &self.source)?;
             }
             TransactionType::RegisterCommittee(payload) => {
                 let current_time = state.get_verification_timestamp();
@@ -754,7 +755,8 @@ impl Transaction {
                 kyc::verify_appeal_kyc(payload, current_time)?;
             }
             TransactionType::BootstrapCommittee(payload) => {
-                kyc::verify_bootstrap_committee(payload)?;
+                // SECURITY FIX (Issue #33): Pass sender to verify only BOOTSTRAP_ADDRESS can bootstrap
+                kyc::verify_bootstrap_committee(payload, &self.source)?;
             }
             TransactionType::RegisterCommittee(payload) => {
                 let current_time = state.get_verification_timestamp();
@@ -1675,6 +1677,7 @@ impl Transaction {
                     })?;
 
                 // Verify approvals (signatures, membership, threshold)
+                // SECURITY FIX (Issue #34): Pass verified_at to bind approval signatures to timestamp
                 let current_time = state.get_verification_timestamp();
                 crate::kyc::verify_set_kyc_approvals(
                     &committee,
@@ -1682,6 +1685,7 @@ impl Transaction {
                     payload.get_account(),
                     payload.get_level(),
                     payload.get_data_hash(),
+                    payload.get_verified_at(),
                     current_time,
                 )
                 .map_err(|e| VerificationError::AnyError(anyhow::anyhow!("{}", e)))?;
@@ -1793,12 +1797,14 @@ impl Transaction {
                     })?;
 
                 // Verify approvals (signatures, membership, threshold)
+                // SECURITY FIX (Issue #34): Pass verified_at to bind approval signatures to timestamp
                 let current_time = state.get_verification_timestamp();
                 crate::kyc::verify_renew_kyc_approvals(
                     &committee,
                     payload.get_approvals(),
                     payload.get_account(),
                     payload.get_data_hash(),
+                    payload.get_verified_at(),
                     current_time,
                 )
                 .map_err(|e| VerificationError::AnyError(anyhow::anyhow!("{}", e)))?;
@@ -1852,11 +1858,13 @@ impl Transaction {
                         ))
                     })?;
 
+                // SECURITY FIX (Issue #34): Pass transferred_at to bind approval signatures to timestamp
                 crate::kyc::verify_transfer_kyc_source_approvals(
                     &source_committee,
                     payload.get_source_approvals(),
                     payload.get_dest_committee_id(),
                     payload.get_account(),
+                    payload.get_transferred_at(),
                     current_time,
                 )
                 .map_err(|e| VerificationError::AnyError(anyhow::anyhow!("Source: {}", e)))?;
@@ -1873,12 +1881,14 @@ impl Transaction {
                         ))
                     })?;
 
+                // SECURITY FIX (Issue #34): Pass transferred_at to bind approval signatures to timestamp
                 crate::kyc::verify_transfer_kyc_dest_approvals(
                     &dest_committee,
                     payload.get_dest_approvals(),
                     payload.get_source_committee_id(),
                     payload.get_account(),
                     payload.get_new_data_hash(),
+                    payload.get_transferred_at(),
                     current_time,
                 )
                 .map_err(|e| VerificationError::AnyError(anyhow::anyhow!("Destination: {}", e)))?;

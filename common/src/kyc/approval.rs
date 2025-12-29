@@ -145,10 +145,12 @@ pub enum ApprovalError {
 
 /// Verify approvals for SetKyc operation
 ///
+/// SECURITY FIX (Issue #34): Now requires verified_at parameter to bind approvals to timestamp
+///
 /// Validates:
 /// - Committee exists and is active
 /// - Each approver is an active member
-/// - Each signature is valid for the SetKyc message
+/// - Each signature is valid for the SetKyc message (including verified_at)
 /// - Threshold is met for the KYC level
 pub fn verify_set_kyc_approvals(
     committee: &SecurityCommittee,
@@ -156,6 +158,7 @@ pub fn verify_set_kyc_approvals(
     account: &PublicKey,
     level: u16,
     data_hash: &Hash,
+    verified_at: u64,
     current_time: u64,
 ) -> Result<ApprovalVerificationResult, ApprovalError> {
     // Check committee is active
@@ -172,12 +175,14 @@ pub fn verify_set_kyc_approvals(
     }
 
     // Build the signing message
+    // SECURITY FIX (Issue #34): Include verified_at in message to bind approval to timestamp
     let build_message = |approval: &CommitteeApproval| {
         CommitteeApproval::build_set_kyc_message(
             &committee.id,
             account,
             level,
             data_hash,
+            verified_at,
             approval.timestamp,
         )
     };
@@ -217,11 +222,14 @@ pub fn verify_revoke_kyc_approvals(
 }
 
 /// Verify approvals for RenewKyc operation
+///
+/// SECURITY FIX (Issue #34): Now requires verified_at parameter to bind approvals to timestamp
 pub fn verify_renew_kyc_approvals(
     committee: &SecurityCommittee,
     approvals: &[CommitteeApproval],
     account: &PublicKey,
     data_hash: &Hash,
+    verified_at: u64,
     current_time: u64,
 ) -> Result<ApprovalVerificationResult, ApprovalError> {
     // Check committee is active
@@ -229,11 +237,13 @@ pub fn verify_renew_kyc_approvals(
         return Err(ApprovalError::CommitteeNotActive(committee.id.clone()));
     }
 
+    // SECURITY FIX (Issue #34): Include verified_at in message to bind approval to timestamp
     let build_message = |approval: &CommitteeApproval| {
         CommitteeApproval::build_renew_kyc_message(
             &committee.id,
             account,
             data_hash,
+            verified_at,
             approval.timestamp,
         )
     };
@@ -244,11 +254,14 @@ pub fn verify_renew_kyc_approvals(
 }
 
 /// Verify approvals for TransferKyc - source committee side
+///
+/// SECURITY FIX (Issue #34): Now requires transferred_at parameter to bind approvals to timestamp
 pub fn verify_transfer_kyc_source_approvals(
     source_committee: &SecurityCommittee,
     approvals: &[CommitteeApproval],
     dest_committee_id: &Hash,
     account: &PublicKey,
+    transferred_at: u64,
     current_time: u64,
 ) -> Result<ApprovalVerificationResult, ApprovalError> {
     if source_committee.status != CommitteeStatus::Active {
@@ -261,11 +274,13 @@ pub fn verify_transfer_kyc_source_approvals(
     let dest_id = dest_committee_id.clone();
     let account = account.clone();
 
+    // SECURITY FIX (Issue #34): Include transferred_at in message to bind approval to timestamp
     let build_message = move |approval: &CommitteeApproval| {
         CommitteeApproval::build_transfer_kyc_source_message(
             &source_id,
             &dest_id,
             &account,
+            transferred_at,
             approval.timestamp,
         )
     };
@@ -282,12 +297,15 @@ pub fn verify_transfer_kyc_source_approvals(
 }
 
 /// Verify approvals for TransferKyc - destination committee side
+///
+/// SECURITY FIX (Issue #34): Now requires transferred_at parameter to bind approvals to timestamp
 pub fn verify_transfer_kyc_dest_approvals(
     dest_committee: &SecurityCommittee,
     approvals: &[CommitteeApproval],
     source_committee_id: &Hash,
     account: &PublicKey,
     new_data_hash: &Hash,
+    transferred_at: u64,
     current_time: u64,
 ) -> Result<ApprovalVerificationResult, ApprovalError> {
     if dest_committee.status != CommitteeStatus::Active {
@@ -299,12 +317,14 @@ pub fn verify_transfer_kyc_dest_approvals(
     let account = account.clone();
     let new_data_hash = new_data_hash.clone();
 
+    // SECURITY FIX (Issue #34): Include transferred_at in message to bind approval to timestamp
     let build_message = move |approval: &CommitteeApproval| {
         CommitteeApproval::build_transfer_kyc_dest_message(
             &source_id,
             &dest_id,
             &account,
             &new_data_hash,
+            transferred_at,
             approval.timestamp,
         )
     };
@@ -578,6 +598,7 @@ mod tests {
 
         // Create valid approvals from first 2 members
         let mut approvals = Vec::new();
+        let verified_at = current_time - 100;
         for keypair in keypairs.iter().take(2) {
             let timestamp = current_time - 100;
             let message = CommitteeApproval::build_set_kyc_message(
@@ -585,6 +606,7 @@ mod tests {
                 &account,
                 level,
                 &data_hash,
+                verified_at,
                 timestamp,
             );
             approvals.push(create_signed_approval(keypair, &message, timestamp));
@@ -596,6 +618,7 @@ mod tests {
             &account,
             level,
             &data_hash,
+            verified_at,
             current_time,
         );
 
@@ -616,6 +639,7 @@ mod tests {
 
         // Create approval with wrong message (forged signature)
         let timestamp = current_time - 100;
+        let verified_at = timestamp;
         let wrong_message = b"wrong message";
         let signature = keypairs[0].sign(wrong_message);
         let forged_approval = CommitteeApproval::new(
@@ -630,6 +654,7 @@ mod tests {
             &account,
             level,
             &data_hash,
+            verified_at,
             current_time,
         );
 
@@ -648,11 +673,13 @@ mod tests {
         // Create approval from non-member
         let outsider = KeyPair::new();
         let timestamp = current_time - 100;
+        let verified_at = timestamp;
         let message = CommitteeApproval::build_set_kyc_message(
             &committee.id,
             &account,
             level,
             &data_hash,
+            verified_at,
             timestamp,
         );
         let approval = create_signed_approval(&outsider, &message, timestamp);
@@ -663,6 +690,7 @@ mod tests {
             &account,
             level,
             &data_hash,
+            verified_at,
             current_time,
         );
 
@@ -680,11 +708,13 @@ mod tests {
 
         // Create approval with old timestamp (expired)
         let timestamp = 1000u64; // Very old
+        let verified_at = timestamp;
         let message = CommitteeApproval::build_set_kyc_message(
             &committee.id,
             &account,
             level,
             &data_hash,
+            verified_at,
             timestamp,
         );
         let approval = create_signed_approval(&keypairs[0], &message, timestamp);
@@ -695,6 +725,7 @@ mod tests {
             &account,
             level,
             &data_hash,
+            verified_at,
             current_time,
         );
 
@@ -714,11 +745,13 @@ mod tests {
         let current_time = 2000u64;
 
         let timestamp = current_time - 100;
+        let verified_at = timestamp;
         let message = CommitteeApproval::build_set_kyc_message(
             &committee.id,
             &account,
             level,
             &data_hash,
+            verified_at,
             timestamp,
         );
         let approval = create_signed_approval(&keypairs[0], &message, timestamp);
@@ -729,6 +762,7 @@ mod tests {
             &account,
             level,
             &data_hash,
+            verified_at,
             current_time,
         );
 

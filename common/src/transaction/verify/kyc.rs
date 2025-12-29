@@ -249,9 +249,32 @@ pub fn verify_appeal_kyc<E>(
 }
 
 /// Verify BootstrapCommittee transaction payload
+///
+/// SECURITY (Issue #33): Requires sender to be BOOTSTRAP_ADDRESS to prevent
+/// unauthorized accounts from seizing control of the global committee.
 pub fn verify_bootstrap_committee<E>(
     payload: &BootstrapCommitteePayload,
+    sender: &crate::crypto::elgamal::CompressedPublicKey,
 ) -> Result<(), VerificationError<E>> {
+    // SECURITY FIX (Issue #33): Verify sender is BOOTSTRAP_ADDRESS
+    // Only the designated bootstrap address can create the global committee
+    let bootstrap_pubkey = {
+        use crate::crypto::Address;
+        // Parse bootstrap address - this is a compile-time constant
+        // Note: PublicKey is an alias for CompressedPublicKey, no compression needed
+        let addr = Address::from_string(crate::config::BOOTSTRAP_ADDRESS)
+            .map_err(|e| VerificationError::AnyError(anyhow::anyhow!(
+                "Invalid bootstrap address configuration: {}", e
+            )))?;
+        addr.to_public_key()
+    };
+
+    if sender != &bootstrap_pubkey {
+        return Err(VerificationError::AnyError(anyhow::anyhow!(
+            "BootstrapCommittee can only be submitted by BOOTSTRAP_ADDRESS"
+        )));
+    }
+
     // Validate committee name
     if payload.get_name().is_empty() {
         return Err(VerificationError::AnyError(anyhow::anyhow!(
@@ -298,22 +321,31 @@ pub fn verify_bootstrap_committee<E>(
         }
     }
 
-    // Validate threshold >= 2/3 of members
-    let min_threshold = calculate_min_threshold(member_count);
+    // SECURITY FIX (Issue #35): Count only members who can approve (non-observers)
+    // Observers cannot approve, so thresholds must be achievable with actual approvers
+    let approver_count = payload
+        .get_members()
+        .iter()
+        .filter(|m| m.role.can_approve())
+        .count();
+
+    // Validate threshold >= 2/3 of approvers (not all members)
+    let min_threshold = calculate_min_threshold(approver_count);
     if (payload.get_threshold() as usize) < min_threshold {
         return Err(VerificationError::AnyError(anyhow::anyhow!(
-            "Governance threshold {} is below minimum {} (2/3 of {} members)",
+            "Governance threshold {} is below minimum {} (2/3 of {} approvers)",
             payload.get_threshold(),
             min_threshold,
-            member_count
+            approver_count
         )));
     }
 
-    if (payload.get_threshold() as usize) > member_count {
+    // SECURITY FIX (Issue #35): Threshold must be <= approver count
+    if (payload.get_threshold() as usize) > approver_count {
         return Err(VerificationError::AnyError(anyhow::anyhow!(
-            "Governance threshold {} exceeds member count {}",
+            "Governance threshold {} exceeds approver count {} (observers cannot approve)",
             payload.get_threshold(),
-            member_count
+            approver_count
         )));
     }
 
@@ -334,11 +366,12 @@ pub fn verify_bootstrap_committee<E>(
         )));
     }
 
-    if (payload.get_kyc_threshold() as usize) > member_count {
+    // SECURITY FIX (Issue #35): KYC threshold must be <= approver count
+    if (payload.get_kyc_threshold() as usize) > approver_count {
         return Err(VerificationError::AnyError(anyhow::anyhow!(
-            "KYC threshold {} exceeds member count {}",
+            "KYC threshold {} exceeds approver count {} (observers cannot approve)",
             payload.get_kyc_threshold(),
-            member_count
+            approver_count
         )));
     }
 
@@ -438,22 +471,31 @@ pub fn verify_register_committee<E>(
         }
     }
 
-    // Validate threshold >= 2/3 of members
-    let min_threshold = calculate_min_threshold(member_count);
+    // SECURITY FIX (Issue #35): Count only members who can approve (non-observers)
+    // Observers cannot approve, so thresholds must be achievable with actual approvers
+    let approver_count = payload
+        .get_members()
+        .iter()
+        .filter(|m| m.role.can_approve())
+        .count();
+
+    // Validate threshold >= 2/3 of approvers (not all members)
+    let min_threshold = calculate_min_threshold(approver_count);
     if (payload.get_threshold() as usize) < min_threshold {
         return Err(VerificationError::AnyError(anyhow::anyhow!(
-            "Governance threshold {} is below minimum {} (2/3 of {} members)",
+            "Governance threshold {} is below minimum {} (2/3 of {} approvers)",
             payload.get_threshold(),
             min_threshold,
-            member_count
+            approver_count
         )));
     }
 
-    if (payload.get_threshold() as usize) > member_count {
+    // SECURITY FIX (Issue #35): Threshold must be <= approver count
+    if (payload.get_threshold() as usize) > approver_count {
         return Err(VerificationError::AnyError(anyhow::anyhow!(
-            "Governance threshold {} exceeds member count {}",
+            "Governance threshold {} exceeds approver count {} (observers cannot approve)",
             payload.get_threshold(),
-            member_count
+            approver_count
         )));
     }
 
@@ -474,11 +516,12 @@ pub fn verify_register_committee<E>(
         )));
     }
 
-    if (payload.get_kyc_threshold() as usize) > member_count {
+    // SECURITY FIX (Issue #35): KYC threshold must be <= approver count
+    if (payload.get_kyc_threshold() as usize) > approver_count {
         return Err(VerificationError::AnyError(anyhow::anyhow!(
-            "KYC threshold {} exceeds member count {}",
+            "KYC threshold {} exceeds approver count {} (observers cannot approve)",
             payload.get_kyc_threshold(),
-            member_count
+            approver_count
         )));
     }
 
@@ -884,6 +927,14 @@ mod tests {
         })
     }
 
+    fn create_bootstrap_sender() -> CompressedPublicKey {
+        use crate::crypto::Address;
+        let addr = Address::from_string(crate::config::BOOTSTRAP_ADDRESS)
+            .expect("Bootstrap address should be valid");
+        // PublicKey is an alias for CompressedPublicKey
+        addr.to_public_key()
+    }
+
     fn create_test_approval(seed: u8) -> CommitteeApproval {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -988,8 +1039,31 @@ mod tests {
             32767, // Max level
         );
 
-        let result: Result<(), VerificationError<()>> = verify_bootstrap_committee(&payload);
+        let bootstrap_sender = create_bootstrap_sender();
+        let result: Result<(), VerificationError<()>> =
+            verify_bootstrap_committee(&payload, &bootstrap_sender);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_verify_bootstrap_committee_wrong_sender() {
+        let members: Vec<CommitteeMemberInit> = (1..=5)
+            .map(|i| CommitteeMemberInit::new(create_test_pubkey(i), None, MemberRole::Member))
+            .collect();
+
+        let payload = BootstrapCommitteePayload::new(
+            "Global Committee".to_string(),
+            members,
+            4,
+            1,
+            32767,
+        );
+
+        // Use a random sender instead of bootstrap address
+        let wrong_sender = create_test_pubkey(99);
+        let result: Result<(), VerificationError<()>> =
+            verify_bootstrap_committee(&payload, &wrong_sender);
+        assert!(result.is_err());
     }
 
     #[test]
@@ -1001,7 +1075,9 @@ mod tests {
         let payload =
             BootstrapCommitteePayload::new("Test Committee".to_string(), members, 2, 1, 32767);
 
-        let result: Result<(), VerificationError<()>> = verify_bootstrap_committee(&payload);
+        let bootstrap_sender = create_bootstrap_sender();
+        let result: Result<(), VerificationError<()>> =
+            verify_bootstrap_committee(&payload, &bootstrap_sender);
         assert!(result.is_err());
     }
 
@@ -1019,7 +1095,9 @@ mod tests {
             32767,
         );
 
-        let result: Result<(), VerificationError<()>> = verify_bootstrap_committee(&payload);
+        let bootstrap_sender = create_bootstrap_sender();
+        let result: Result<(), VerificationError<()>> =
+            verify_bootstrap_committee(&payload, &bootstrap_sender);
         assert!(result.is_err());
     }
 

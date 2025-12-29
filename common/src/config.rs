@@ -82,6 +82,11 @@ pub const PREFIX_ADDRESS: &str = "tos";
 // testnet prefix address
 pub const TESTNET_PREFIX_ADDRESS: &str = "tst";
 
+// Bootstrap address for creating Global Committee
+// This is the same as DEV_ADDRESS - only the developer can bootstrap the global committee
+// SECURITY: This restricts BootstrapCommittee transactions to a known, trusted address
+pub const BOOTSTRAP_ADDRESS: &str = "tos1qsl6sj2u0gp37tr6drrq964rd4d8gnaxnezgytmt0cfltnp2wsgqqak28je";
+
 // Proof prefix
 pub const PREFIX_PROOF: &str = "proof";
 

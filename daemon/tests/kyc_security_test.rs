@@ -204,11 +204,14 @@ mod security_attack_tests {
         let data_hash = Hash::new([2u8; 32]);
 
         // Build message for SetKyc
+        // SECURITY FIX (Issue #34): Now includes verified_at parameter
+        let verified_at = current_time;
         let message = CommitteeApproval::build_set_kyc_message(
             &committee.id,
             &user_pk,
             100,
             &data_hash,
+            verified_at,
             current_time,
         );
 
@@ -218,12 +221,14 @@ mod security_attack_tests {
             .collect();
 
         // Verify approvals - should only count as 1 unique approver
+        // SECURITY FIX (Issue #34): Now includes verified_at parameter
         let result = tos_common::kyc::verify_set_kyc_approvals(
             &committee,
             &duplicate_approvals,
             &user_pk,
             100,
             &data_hash,
+            verified_at,
             current_time,
         );
 
@@ -327,11 +332,13 @@ mod boundary_tests {
         let user_pk = create_test_pubkey(99);
         let data_hash = Hash::new([2u8; 32]);
 
+        let verified_at = current_time;
         let message = CommitteeApproval::build_set_kyc_message(
             &committee.id,
             &user_pk,
             100,
             &data_hash,
+            verified_at,
             current_time,
         );
 
@@ -348,6 +355,7 @@ mod boundary_tests {
             &user_pk,
             100,
             &data_hash,
+            verified_at,
             current_time,
         );
 
@@ -372,11 +380,13 @@ mod boundary_tests {
         let user_pk = create_test_pubkey(99);
         let data_hash = Hash::new([2u8; 32]);
 
+        let verified_at = current_time;
         let message = CommitteeApproval::build_set_kyc_message(
             &committee.id,
             &user_pk,
             100,
             &data_hash,
+            verified_at,
             current_time,
         );
 
@@ -393,6 +403,7 @@ mod boundary_tests {
             &user_pk,
             100,
             &data_hash,
+            verified_at,
             current_time,
         );
 
@@ -413,11 +424,13 @@ mod boundary_tests {
         let user_pk = create_test_pubkey(99);
         let data_hash = Hash::new([2u8; 32]);
 
+        let verified_at = approval_time;
         let message = CommitteeApproval::build_set_kyc_message(
             &committee.id,
             &user_pk,
             100,
             &data_hash,
+            verified_at,
             approval_time,
         );
 
@@ -433,6 +446,7 @@ mod boundary_tests {
             &user_pk,
             100,
             &data_hash,
+            verified_at,
             current_time,
         );
 
@@ -456,11 +470,13 @@ mod boundary_tests {
         let user_pk = create_test_pubkey(99);
         let data_hash = Hash::new([2u8; 32]);
 
+        let verified_at = approval_time;
         let message = CommitteeApproval::build_set_kyc_message(
             &committee.id,
             &user_pk,
             100,
             &data_hash,
+            verified_at,
             approval_time,
         );
 
@@ -476,6 +492,7 @@ mod boundary_tests {
             &user_pk,
             100,
             &data_hash,
+            verified_at,
             current_time,
         );
 
@@ -508,11 +525,13 @@ mod state_machine_tests {
         let user_pk = create_test_pubkey(99);
         let data_hash = Hash::new([2u8; 32]);
 
+        let verified_at = current_time;
         let message = CommitteeApproval::build_set_kyc_message(
             &committee.id,
             &user_pk,
             100,
             &data_hash,
+            verified_at,
             current_time,
         );
 
@@ -528,6 +547,7 @@ mod state_machine_tests {
             &user_pk,
             100,
             &data_hash,
+            verified_at,
             current_time,
         );
 
@@ -638,11 +658,13 @@ mod state_machine_tests {
         let user_pk = create_test_pubkey(99);
         let data_hash = Hash::new([2u8; 32]);
 
+        let verified_at = current_time;
         let message = CommitteeApproval::build_set_kyc_message(
             &committee.id,
             &user_pk,
             100,
             &data_hash,
+            verified_at,
             current_time,
         );
 
@@ -658,6 +680,7 @@ mod state_machine_tests {
             &user_pk,
             100,
             &data_hash,
+            verified_at,
             current_time,
         );
 
@@ -677,11 +700,13 @@ mod state_machine_tests {
         let user_pk = create_test_pubkey(99);
         let data_hash = Hash::new([2u8; 32]);
 
+        let verified_at = current_time;
         let message = CommitteeApproval::build_set_kyc_message(
             &committee.id,
             &user_pk,
             100,
             &data_hash,
+            verified_at,
             current_time,
         );
 
@@ -697,6 +722,7 @@ mod state_machine_tests {
             &user_pk,
             100,
             &data_hash,
+            verified_at,
             current_time,
         );
 
@@ -723,12 +749,14 @@ mod malicious_input_tests {
 
         let empty_approvals: Vec<CommitteeApproval> = vec![];
 
+        let verified_at = current_time;
         let result = tos_common::kyc::verify_set_kyc_approvals(
             &committee,
             &empty_approvals,
             &user_pk,
             100,
             &data_hash,
+            verified_at,
             current_time,
         );
 
@@ -745,11 +773,13 @@ mod malicious_input_tests {
         let user_pk = create_test_pubkey(99);
         let data_hash = Hash::new([2u8; 32]);
 
+        let verified_at = current_time;
         let message = CommitteeApproval::build_set_kyc_message(
             &committee.id,
             &user_pk,
             100,
             &data_hash,
+            verified_at,
             current_time,
         );
 
@@ -766,6 +796,7 @@ mod malicious_input_tests {
             &user_pk,
             100,
             &data_hash,
+            verified_at,
             current_time,
         );
 
@@ -792,11 +823,13 @@ mod malicious_input_tests {
         let user_pk = create_test_pubkey(99);
         let data_hash = Hash::new([2u8; 32]);
 
+        let verified_at = current_time;
         let message = CommitteeApproval::build_set_kyc_message(
             &committee.id,
             &user_pk,
             100,
             &data_hash,
+            verified_at,
             current_time,
         );
 
@@ -815,6 +848,7 @@ mod malicious_input_tests {
             &user_pk,
             100,
             &data_hash,
+            verified_at,
             current_time,
         );
 
@@ -841,11 +875,13 @@ mod malicious_input_tests {
         let user_pk = create_test_pubkey(99);
         let data_hash = Hash::new([2u8; 32]);
 
+        let verified_at = future_time;
         let message = CommitteeApproval::build_set_kyc_message(
             &committee.id,
             &user_pk,
             100,
             &data_hash,
+            verified_at,
             future_time,
         );
 
@@ -861,6 +897,7 @@ mod malicious_input_tests {
             &user_pk,
             100,
             &data_hash,
+            verified_at,
             current_time,
         );
 
@@ -958,12 +995,14 @@ mod determinism_tests {
         let data_hash = Hash::new([2u8; 32]);
         let timestamp = 1000u64;
         let level = 100u16;
+        let verified_at = timestamp;
 
         let msg1 = CommitteeApproval::build_set_kyc_message(
             &committee_id,
             &user_pk,
             level,
             &data_hash,
+            verified_at,
             timestamp,
         );
         let msg2 = CommitteeApproval::build_set_kyc_message(
@@ -971,6 +1010,7 @@ mod determinism_tests {
             &user_pk,
             level,
             &data_hash,
+            verified_at,
             timestamp,
         );
 
@@ -998,11 +1038,13 @@ mod negative_tests {
         let user_pk = create_test_pubkey(99);
         let data_hash = Hash::new([2u8; 32]);
 
+        let verified_at = approval_time;
         let message = CommitteeApproval::build_set_kyc_message(
             &committee.id,
             &user_pk,
             100,
             &data_hash,
+            verified_at,
             approval_time,
         );
 
@@ -1018,6 +1060,7 @@ mod negative_tests {
             &user_pk,
             100,
             &data_hash,
+            verified_at,
             current_time,
         );
 
@@ -1035,12 +1078,14 @@ mod negative_tests {
         let correct_hash = Hash::new([2u8; 32]);
         let wrong_hash = Hash::new([3u8; 32]);
 
+        let verified_at = current_time;
         // Sign with correct hash
         let message = CommitteeApproval::build_set_kyc_message(
             &committee.id,
             &user_pk,
             100,
             &correct_hash,
+            verified_at,
             current_time,
         );
 
@@ -1057,6 +1102,7 @@ mod negative_tests {
             &user_pk,
             100,
             &wrong_hash, // Different from signed
+            verified_at,
             current_time,
         );
 
@@ -1077,12 +1123,14 @@ mod negative_tests {
         let wrong_user = create_test_pubkey(88);
         let data_hash = Hash::new([2u8; 32]);
 
+        let verified_at = current_time;
         // Sign for correct user
         let message = CommitteeApproval::build_set_kyc_message(
             &committee.id,
             &correct_user,
             100,
             &data_hash,
+            verified_at,
             current_time,
         );
 
@@ -1099,6 +1147,7 @@ mod negative_tests {
             &wrong_user, // Different from signed
             100,
             &data_hash,
+            verified_at,
             current_time,
         );
 
@@ -1117,12 +1166,14 @@ mod negative_tests {
         let signed_level = 100u16;
         let claimed_level = 200u16;
 
+        let verified_at = current_time;
         // Sign with correct level
         let message = CommitteeApproval::build_set_kyc_message(
             &committee.id,
             &user_pk,
             signed_level,
             &data_hash,
+            verified_at,
             current_time,
         );
 
@@ -1139,6 +1190,7 @@ mod negative_tests {
             &user_pk,
             claimed_level, // Different from signed
             &data_hash,
+            verified_at,
             current_time,
         );
 
@@ -1166,11 +1218,13 @@ mod negative_tests {
         let user_pk = create_test_pubkey(99);
         let data_hash = Hash::new([2u8; 32]);
 
+        let verified_at = current_time;
         let message = CommitteeApproval::build_set_kyc_message(
             &committee.id,
             &user_pk,
             100,
             &data_hash,
+            verified_at,
             current_time,
         );
 
@@ -1187,6 +1241,7 @@ mod negative_tests {
             &user_pk,
             100,
             &data_hash,
+            verified_at,
             current_time,
         );
 

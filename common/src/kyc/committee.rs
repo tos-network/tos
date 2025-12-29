@@ -261,6 +261,18 @@ impl SecurityCommittee {
             .count()
     }
 
+    /// Get active approver count (excludes observers who cannot approve)
+    ///
+    /// SECURITY FIX (Issue #35): This count is used for threshold validation.
+    /// Thresholds should be based on members who can actually approve, not all active members.
+    /// Observers have `role.can_approve() == false` and cannot contribute to approval counts.
+    pub fn active_approver_count(&self) -> usize {
+        self.members
+            .iter()
+            .filter(|m| m.status == MemberStatus::Active && m.role.can_approve())
+            .count()
+    }
+
     /// Get total member count (including inactive/suspended/removed members)
     ///
     /// SECURITY: This count is used for MAX_COMMITTEE_MEMBERS enforcement
@@ -281,6 +293,9 @@ impl SecurityCommittee {
     }
 
     /// Validate committee configuration
+    ///
+    /// SECURITY FIX (Issue #35): Uses active_approver_count() for threshold validation
+    /// to ensure thresholds are achievable with actual approvers (excludes observers).
     pub fn validate(&self) -> KycResult<()> {
         let active_count = self.active_member_count();
 
@@ -292,14 +307,24 @@ impl SecurityCommittee {
             });
         }
 
-        // Governance threshold must be >= 2/3 of active members
-        let min_threshold = Self::calculate_min_threshold(active_count);
+        // SECURITY FIX (Issue #35): Use approver count for threshold validation
+        // This ensures thresholds are achievable since observers can't approve
+        let approver_count = self.active_approver_count();
+
+        // Governance threshold must be >= 2/3 of approvers AND <= approver count
+        let min_threshold = Self::calculate_min_threshold(approver_count);
         if (self.threshold as usize) < min_threshold {
             return Err(KycError::InvalidThreshold);
         }
+        if (self.threshold as usize) > approver_count {
+            return Err(KycError::InvalidThreshold);
+        }
 
-        // KYC threshold must be >= 1
+        // KYC threshold must be >= 1 AND <= approver count
         if self.kyc_threshold < 1 {
+            return Err(KycError::InvalidKycThreshold);
+        }
+        if (self.kyc_threshold as usize) > approver_count {
             return Err(KycError::InvalidKycThreshold);
         }
 
@@ -603,20 +628,24 @@ impl CommitteeApproval {
 
     /// Build domain-separated signing message for SetKyc operation
     ///
-    /// Message format: "TOS_KYC_SET" || committee_id || account || level || data_hash || timestamp
+    /// SECURITY FIX (Issue #34): Now includes verified_at to bind the approval to a specific timestamp
+    /// Message format: "TOS_KYC_SET" || committee_id || account || level || data_hash || verified_at || timestamp
     pub fn build_set_kyc_message(
         committee_id: &Hash,
         account: &PublicKey,
         level: u16,
         data_hash: &Hash,
+        verified_at: u64,
         timestamp: u64,
     ) -> Vec<u8> {
-        let mut message = Vec::with_capacity(128);
+        let mut message = Vec::with_capacity(144);
         message.extend_from_slice(b"TOS_KYC_SET");
         message.extend_from_slice(committee_id.as_bytes());
         message.extend_from_slice(account.as_bytes());
         message.extend_from_slice(&level.to_le_bytes());
         message.extend_from_slice(data_hash.as_bytes());
+        // SECURITY FIX (Issue #34): Bind verified_at to prevent timestamp manipulation
+        message.extend_from_slice(&verified_at.to_le_bytes());
         message.extend_from_slice(&timestamp.to_le_bytes());
         message
     }
@@ -641,56 +670,68 @@ impl CommitteeApproval {
 
     /// Build domain-separated signing message for RenewKyc operation
     ///
-    /// Message format: "TOS_KYC_RENEW" || committee_id || account || data_hash || timestamp
+    /// SECURITY FIX (Issue #34): Now includes verified_at to bind the approval to a specific timestamp
+    /// Message format: "TOS_KYC_RENEW" || committee_id || account || data_hash || verified_at || timestamp
     pub fn build_renew_kyc_message(
         committee_id: &Hash,
         account: &PublicKey,
         data_hash: &Hash,
+        verified_at: u64,
         timestamp: u64,
     ) -> Vec<u8> {
-        let mut message = Vec::with_capacity(128);
+        let mut message = Vec::with_capacity(144);
         message.extend_from_slice(b"TOS_KYC_RENEW");
         message.extend_from_slice(committee_id.as_bytes());
         message.extend_from_slice(account.as_bytes());
         message.extend_from_slice(data_hash.as_bytes());
+        // SECURITY FIX (Issue #34): Bind verified_at to prevent timestamp manipulation
+        message.extend_from_slice(&verified_at.to_le_bytes());
         message.extend_from_slice(&timestamp.to_le_bytes());
         message
     }
 
     /// Build domain-separated signing message for TransferKyc (source committee)
     ///
-    /// Message format: "TOS_KYC_TRANSFER_SRC" || source_committee || dest_committee || account || timestamp
+    /// SECURITY FIX (Issue #34): Now includes transferred_at to bind the approval to a specific timestamp
+    /// Message format: "TOS_KYC_TRANSFER_SRC" || source_committee || dest_committee || account || transferred_at || timestamp
     pub fn build_transfer_kyc_source_message(
         source_committee: &Hash,
         dest_committee: &Hash,
         account: &PublicKey,
+        transferred_at: u64,
         timestamp: u64,
     ) -> Vec<u8> {
-        let mut message = Vec::with_capacity(128);
+        let mut message = Vec::with_capacity(144);
         message.extend_from_slice(b"TOS_KYC_TRANSFER_SRC");
         message.extend_from_slice(source_committee.as_bytes());
         message.extend_from_slice(dest_committee.as_bytes());
         message.extend_from_slice(account.as_bytes());
+        // SECURITY FIX (Issue #34): Bind transferred_at to prevent timestamp manipulation
+        message.extend_from_slice(&transferred_at.to_le_bytes());
         message.extend_from_slice(&timestamp.to_le_bytes());
         message
     }
 
     /// Build domain-separated signing message for TransferKyc (destination committee)
     ///
-    /// Message format: "TOS_KYC_TRANSFER_DST" || source_committee || dest_committee || account || new_data_hash || timestamp
+    /// SECURITY FIX (Issue #34): Now includes transferred_at to bind the approval to a specific timestamp
+    /// Message format: "TOS_KYC_TRANSFER_DST" || source_committee || dest_committee || account || new_data_hash || transferred_at || timestamp
     pub fn build_transfer_kyc_dest_message(
         source_committee: &Hash,
         dest_committee: &Hash,
         account: &PublicKey,
         new_data_hash: &Hash,
+        transferred_at: u64,
         timestamp: u64,
     ) -> Vec<u8> {
-        let mut message = Vec::with_capacity(160);
+        let mut message = Vec::with_capacity(176);
         message.extend_from_slice(b"TOS_KYC_TRANSFER_DST");
         message.extend_from_slice(source_committee.as_bytes());
         message.extend_from_slice(dest_committee.as_bytes());
         message.extend_from_slice(account.as_bytes());
         message.extend_from_slice(new_data_hash.as_bytes());
+        // SECURITY FIX (Issue #34): Bind transferred_at to prevent timestamp manipulation
+        message.extend_from_slice(&transferred_at.to_le_bytes());
         message.extend_from_slice(&timestamp.to_le_bytes());
         message
     }
