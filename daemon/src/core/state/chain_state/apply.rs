@@ -771,6 +771,14 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for Applicable
         Ok(kyc_data.map(|d| d.status))
     }
 
+    async fn get_kyc_level(
+        &self,
+        user: &'a CompressedPublicKey,
+    ) -> Result<Option<u16>, BlockchainError> {
+        let kyc_data = self.inner.storage.get_kyc(user).await?;
+        Ok(kyc_data.map(|d| d.level))
+    }
+
     async fn is_global_committee_bootstrapped(&self) -> Result<bool, BlockchainError> {
         self.inner.storage.is_global_committee_bootstrapped().await
     }

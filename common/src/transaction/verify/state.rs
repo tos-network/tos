@@ -252,6 +252,17 @@ pub trait BlockchainApplyState<'a, P: ContractProvider, E>:
         user: &'a CompressedPublicKey,
     ) -> Result<Option<crate::kyc::KycStatus>, E>;
 
+    /// Get the KYC level for a user
+    ///
+    /// SECURITY FIX (Issue #45): Added to support binding TransferKyc approvals to current level
+    ///
+    /// # Arguments
+    /// * `user` - The user's public key
+    ///
+    /// # Returns
+    /// The KYC level if the user has KYC, None otherwise
+    async fn get_kyc_level(&self, user: &'a CompressedPublicKey) -> Result<Option<u16>, E>;
+
     /// Check if the global committee has been bootstrapped
     async fn is_global_committee_bootstrapped(&self) -> Result<bool, E>;
 

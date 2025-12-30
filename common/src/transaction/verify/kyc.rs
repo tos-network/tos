@@ -161,6 +161,23 @@ pub fn verify_transfer_kyc<E>(
         )));
     }
 
+    // SECURITY FIX (Issue #38): Enforce combined approval count limit
+    // TransferKyc has two approval lists, but the total should not exceed
+    // a reasonable limit to prevent DoS via oversized transactions.
+    // We use 2 * MAX_APPROVALS as the combined limit for dual-committee transfers.
+    let combined_approval_count =
+        payload.get_source_approvals().len() + payload.get_dest_approvals().len();
+    let max_combined_approvals = MAX_APPROVALS * 2;
+    if combined_approval_count > max_combined_approvals {
+        return Err(VerificationError::AnyError(anyhow::anyhow!(
+            "TransferKyc combined approval count {} exceeds maximum {} ({}+{} per committee)",
+            combined_approval_count,
+            max_combined_approvals,
+            MAX_APPROVALS,
+            MAX_APPROVALS
+        )));
+    }
+
     // Validate source approvals
     verify_approvals(payload.get_source_approvals(), current_time)?;
 
@@ -223,11 +240,21 @@ pub fn verify_appeal_kyc<E>(
         )));
     }
 
-    // Appeal submitted_at must not be in far future
-    let max_future = current_time + 3600; // 1 hour tolerance
+    // SECURITY FIX (Issue #43): Appeal submitted_at must be within a reasonable window
+    // to prevent backdating attacks that could bypass time-based appeal policies.
+    // We enforce both upper and lower bounds on the submission timestamp.
+    let max_future = current_time + 3600; // 1 hour future tolerance
+    let max_past = current_time.saturating_sub(3600); // 1 hour past tolerance
+
     if payload.get_submitted_at() > max_future {
         return Err(VerificationError::AnyError(anyhow::anyhow!(
             "Appeal submission timestamp too far in the future"
+        )));
+    }
+
+    if payload.get_submitted_at() < max_past {
+        return Err(VerificationError::AnyError(anyhow::anyhow!(
+            "Appeal submission timestamp too far in the past (possible backdating)"
         )));
     }
 
@@ -262,10 +289,12 @@ pub fn verify_bootstrap_committee<E>(
         use crate::crypto::Address;
         // Parse bootstrap address - this is a compile-time constant
         // Note: PublicKey is an alias for CompressedPublicKey, no compression needed
-        let addr = Address::from_string(crate::config::BOOTSTRAP_ADDRESS)
-            .map_err(|e| VerificationError::AnyError(anyhow::anyhow!(
-                "Invalid bootstrap address configuration: {}", e
-            )))?;
+        let addr = Address::from_string(crate::config::BOOTSTRAP_ADDRESS).map_err(|e| {
+            VerificationError::AnyError(anyhow::anyhow!(
+                "Invalid bootstrap address configuration: {}",
+                e
+            ))
+        })?;
         addr.to_public_key()
     };
 
@@ -631,12 +660,23 @@ pub fn verify_update_committee<E>(
 pub struct CommitteeGovernanceInfo {
     /// Current number of active members in the committee
     pub member_count: usize,
+    /// Current number of active members who can approve (excludes observers)
+    /// SECURITY FIX (Issue #36): Used for threshold validation to prevent
+    /// setting thresholds higher than the number of members who can actually approve.
+    pub approver_count: usize,
     /// Total member count including inactive/suspended/removed members
     /// SECURITY: Used for MAX_COMMITTEE_MEMBERS enforcement to prevent
     /// committees from bypassing limits by suspending members.
     pub total_member_count: usize,
     /// Current governance threshold
     pub threshold: u8,
+    /// Current KYC threshold
+    /// SECURITY FIX (Issue #37): Used to validate role changes don't brick KYC operations
+    pub kyc_threshold: u8,
+    /// Target member is active (for member updates/removals)
+    pub target_is_active: Option<bool>,
+    /// Target member can approve (role-based, for member updates/removals)
+    pub target_can_approve: Option<bool>,
 }
 
 /// Verify UpdateCommittee transaction payload with state-dependent validation
@@ -662,25 +702,27 @@ pub fn verify_update_committee_with_state<E>(
     match payload.get_update() {
         crate::transaction::payload::CommitteeUpdateData::UpdateThreshold { new_threshold } => {
             let new_threshold = *new_threshold as usize;
-            let member_count = committee_info.member_count;
+            // SECURITY FIX (Issue #36): Use approver_count instead of member_count
+            // Observers cannot approve, so threshold must be achievable with actual approvers
+            let approver_count = committee_info.approver_count;
 
-            // Threshold must be <= member count
-            if new_threshold > member_count {
+            // Threshold must be <= approver count (not member count, which includes observers)
+            if new_threshold > approver_count {
                 return Err(VerificationError::AnyError(anyhow::anyhow!(
-                    "Governance threshold {} exceeds member count {}",
+                    "Governance threshold {} exceeds approver count {} (observers cannot approve)",
                     new_threshold,
-                    member_count
+                    approver_count
                 )));
             }
 
-            // Threshold must meet 2/3 rule: threshold >= ceil(2/3 * members)
-            let min_threshold = calculate_min_threshold(member_count);
+            // Threshold must meet 2/3 rule: threshold >= ceil(2/3 * approvers)
+            let min_threshold = calculate_min_threshold(approver_count);
             if new_threshold < min_threshold {
                 return Err(VerificationError::AnyError(anyhow::anyhow!(
-                    "Governance threshold {} is below minimum {} (2/3 of {} members)",
+                    "Governance threshold {} is below minimum {} (2/3 of {} approvers)",
                     new_threshold,
                     min_threshold,
-                    member_count
+                    approver_count
                 )));
             }
 
@@ -697,15 +739,26 @@ pub fn verify_update_committee_with_state<E>(
         crate::transaction::payload::CommitteeUpdateData::RemoveMember { .. } => {
             let current_members = committee_info.member_count;
             let threshold = committee_info.threshold as usize;
+            let kyc_threshold = committee_info.kyc_threshold as usize;
+            let target_is_active = committee_info.target_is_active.unwrap_or(true);
+            let target_can_approve = committee_info.target_can_approve.unwrap_or(true);
 
             // After removal, remaining members count
-            let remaining_members = current_members.saturating_sub(1);
+            let remaining_members =
+                current_members.saturating_sub(if target_is_active { 1 } else { 0 });
+            let remaining_approvers = committee_info.approver_count.saturating_sub(
+                if target_is_active && target_can_approve {
+                    1
+                } else {
+                    0
+                },
+            );
 
             // Remaining members must be >= threshold (otherwise committee becomes inoperable)
-            if remaining_members < threshold {
+            if remaining_approvers < threshold {
                 return Err(VerificationError::AnyError(anyhow::anyhow!(
-                    "Cannot remove member: remaining {} members would be less than threshold {}",
-                    remaining_members,
+                    "Cannot remove member: remaining {} approvers would be less than threshold {}",
+                    remaining_approvers,
                     threshold
                 )));
             }
@@ -718,19 +771,30 @@ pub fn verify_update_committee_with_state<E>(
                     MIN_COMMITTEE_MEMBERS
                 )));
             }
+
+            // Remaining approvers must be >= KYC threshold
+            if remaining_approvers < kyc_threshold {
+                return Err(VerificationError::AnyError(anyhow::anyhow!(
+                    "Cannot remove member: remaining {} approvers would be less than KYC threshold {}",
+                    remaining_approvers,
+                    kyc_threshold
+                )));
+            }
         }
         crate::transaction::payload::CommitteeUpdateData::UpdateKycThreshold {
             new_kyc_threshold,
         } => {
             let new_kyc_threshold = *new_kyc_threshold as usize;
-            let member_count = committee_info.member_count;
+            // SECURITY FIX (Issue #36): Use approver_count instead of member_count
+            // Observers cannot approve, so KYC threshold must be achievable with actual approvers
+            let approver_count = committee_info.approver_count;
 
-            // KYC threshold must be <= member count
-            if new_kyc_threshold > member_count {
+            // KYC threshold must be <= approver count (not member count, which includes observers)
+            if new_kyc_threshold > approver_count {
                 return Err(VerificationError::AnyError(anyhow::anyhow!(
-                    "KYC threshold {} exceeds member count {}",
+                    "KYC threshold {} exceeds approver count {} (observers cannot approve)",
                     new_kyc_threshold,
-                    member_count
+                    approver_count
                 )));
             }
 
@@ -744,7 +808,7 @@ pub fn verify_update_committee_with_state<E>(
                 )));
             }
         }
-        crate::transaction::payload::CommitteeUpdateData::AddMember { .. } => {
+        crate::transaction::payload::CommitteeUpdateData::AddMember { role, .. } => {
             // SECURITY FIX (Issue #23): Use total member count (including inactive/suspended)
             // for MAX_COMMITTEE_MEMBERS check. This prevents committees from bypassing the
             // hard cap by suspending members and then adding new ones.
@@ -760,18 +824,19 @@ pub fn verify_update_committee_with_state<E>(
 
             // SECURITY FIX (Issue #18): After adding a member, the current threshold may
             // no longer meet the 2/3 governance invariant. Re-validate that:
-            // threshold >= ceil(2/3 * new_active_members)
-            // Note: This uses active member count since governance requires active members
-            let current_active = committee_info.member_count;
-            let new_active_count = current_active.saturating_add(1);
+            // threshold >= ceil(2/3 * new_approver_count)
+            // Use approver count since observers cannot approve governance actions
+            let current_approvers = committee_info.approver_count;
+            let new_approver_count =
+                current_approvers.saturating_add(if role.can_approve() { 1 } else { 0 });
             let threshold = committee_info.threshold as usize;
-            let min_threshold = calculate_min_threshold(new_active_count);
+            let min_threshold = calculate_min_threshold(new_approver_count);
             if threshold < min_threshold {
                 return Err(VerificationError::AnyError(anyhow::anyhow!(
-                    "Cannot add member: current threshold {} would be below required minimum {} (2/3 of {} members). Increase threshold first.",
+                    "Cannot add member: current threshold {} would be below required minimum {} (2/3 of {} approvers). Increase threshold first.",
                     threshold,
                     min_threshold,
-                    new_active_count
+                    new_approver_count
                 )));
             }
         }
@@ -783,19 +848,30 @@ pub fn verify_update_committee_with_state<E>(
             // we must ensure that remaining active members >= threshold and >= MIN_COMMITTEE_MEMBERS.
             use crate::kyc::MemberStatus;
 
-            // Only validate if the new status would make the member inactive
-            if *new_status == MemberStatus::Suspended || *new_status == MemberStatus::Removed {
-                let current_active = committee_info.member_count;
-                let threshold = committee_info.threshold as usize;
+            let current_active = committee_info.member_count;
+            let current_approvers = committee_info.approver_count;
+            let threshold = committee_info.threshold as usize;
+            let kyc_threshold = committee_info.kyc_threshold as usize;
+            let target_is_active = committee_info.target_is_active.unwrap_or(true);
+            let target_can_approve = committee_info.target_can_approve.unwrap_or(true);
 
+            // Validate if the new status would make the member inactive
+            if *new_status == MemberStatus::Suspended || *new_status == MemberStatus::Removed {
                 // After status change, one fewer active member
-                let remaining_active = current_active.saturating_sub(1);
+                let remaining_active =
+                    current_active.saturating_sub(if target_is_active { 1 } else { 0 });
+                let remaining_approvers =
+                    current_approvers.saturating_sub(if target_is_active && target_can_approve {
+                        1
+                    } else {
+                        0
+                    });
 
                 // Remaining active members must be >= threshold
-                if remaining_active < threshold {
+                if remaining_approvers < threshold {
                     return Err(VerificationError::AnyError(anyhow::anyhow!(
-                        "Cannot deactivate member: remaining {} active members would be less than threshold {}",
-                        remaining_active,
+                        "Cannot deactivate member: remaining {} approvers would be less than threshold {}",
+                        remaining_approvers,
                         threshold
                     )));
                 }
@@ -806,6 +882,85 @@ pub fn verify_update_committee_with_state<E>(
                         "Cannot deactivate member: remaining {} active members would be below minimum {} required",
                         remaining_active,
                         MIN_COMMITTEE_MEMBERS
+                    )));
+                }
+
+                // Remaining approvers must be >= KYC threshold
+                if remaining_approvers < kyc_threshold {
+                    return Err(VerificationError::AnyError(anyhow::anyhow!(
+                        "Cannot deactivate member: remaining {} approvers would be less than KYC threshold {}",
+                        remaining_approvers,
+                        kyc_threshold
+                    )));
+                }
+            } else if *new_status == MemberStatus::Active && !target_is_active && target_can_approve
+            {
+                // SECURITY FIX (Issue #42): When reactivating a suspended/removed member who is an approver,
+                // approver_count increases. Must revalidate 2/3 governance invariant.
+                let new_approver_count = current_approvers + 1;
+                let required_threshold = (new_approver_count * 2).div_ceil(3);
+
+                if threshold < required_threshold {
+                    return Err(VerificationError::AnyError(anyhow::anyhow!(
+                        "Cannot reactivate approver member: governance threshold {} is below required 2/3 ({}) for {} approvers. Increase threshold first.",
+                        threshold,
+                        required_threshold,
+                        new_approver_count
+                    )));
+                }
+            }
+        }
+        crate::transaction::payload::CommitteeUpdateData::UpdateMemberRole { new_role, .. } => {
+            // SECURITY FIX (Issue #37): UpdateMemberRole can downgrade approvers to Observer
+            // without checking if remaining approvers >= threshold/kyc_threshold.
+            // When a member is changed to Observer, they can no longer approve operations.
+            use crate::kyc::MemberRole;
+
+            let current_approvers = committee_info.approver_count;
+            let threshold = committee_info.threshold as usize;
+            let kyc_threshold = committee_info.kyc_threshold as usize;
+            let target_is_active = committee_info.target_is_active.unwrap_or(true);
+            let target_can_approve = committee_info.target_can_approve.unwrap_or(true);
+
+            // Check if role change reduces approval capability (downgrade to Observer)
+            if *new_role == MemberRole::Observer {
+                // After role change to Observer, reduce approver count only if target is an active approver
+                let remaining_approvers =
+                    current_approvers.saturating_sub(if target_is_active && target_can_approve {
+                        1
+                    } else {
+                        0
+                    });
+
+                // Remaining approvers must be >= governance threshold
+                if remaining_approvers < threshold {
+                    return Err(VerificationError::AnyError(anyhow::anyhow!(
+                        "Cannot change member to Observer: remaining {} approvers would be less than governance threshold {}",
+                        remaining_approvers,
+                        threshold
+                    )));
+                }
+
+                // Remaining approvers must be >= KYC threshold
+                if remaining_approvers < kyc_threshold {
+                    return Err(VerificationError::AnyError(anyhow::anyhow!(
+                        "Cannot change member to Observer: remaining {} approvers would be less than KYC threshold {}",
+                        remaining_approvers,
+                        kyc_threshold
+                    )));
+                }
+            } else if new_role.can_approve() && !target_can_approve && target_is_active {
+                // SECURITY FIX (Issue #42): When promoting from Observer to Member/Chair,
+                // approver_count increases. Must revalidate 2/3 governance invariant.
+                let new_approver_count = current_approvers + 1;
+                let required_threshold = (new_approver_count * 2).div_ceil(3);
+
+                if threshold < required_threshold {
+                    return Err(VerificationError::AnyError(anyhow::anyhow!(
+                        "Cannot promote member to approver role: governance threshold {} is below required 2/3 ({}) for {} approvers. Increase threshold first.",
+                        threshold,
+                        required_threshold,
+                        new_approver_count
                     )));
                 }
             }
@@ -1051,13 +1206,8 @@ mod tests {
             .map(|i| CommitteeMemberInit::new(create_test_pubkey(i), None, MemberRole::Member))
             .collect();
 
-        let payload = BootstrapCommitteePayload::new(
-            "Global Committee".to_string(),
-            members,
-            4,
-            1,
-            32767,
-        );
+        let payload =
+            BootstrapCommitteePayload::new("Global Committee".to_string(), members, 4, 1, 32767);
 
         // Use a random sender instead of bootstrap address
         let wrong_sender = create_test_pubkey(99);
@@ -1187,14 +1337,18 @@ mod tests {
             .map(|d| d.as_secs())
             .unwrap_or(0);
 
-        // 5 members, min threshold = 4 (ceil(5*2/3))
+        // 5 approvers, min threshold = 4 (ceil(5*2/3))
         let committee_info = CommitteeGovernanceInfo {
             member_count: 5,
+            approver_count: 5,
             total_member_count: 5,
             threshold: 4,
+            kyc_threshold: 1,
+            target_is_active: None,
+            target_can_approve: None,
         };
 
-        // Valid: threshold 4 <= 5 members AND 4 >= 4 (2/3 rule)
+        // Valid: threshold 4 <= 5 approvers AND 4 >= 4 (2/3 rule)
         let payload = create_update_committee_payload(
             CommitteeUpdateData::UpdateThreshold { new_threshold: 4 },
             vec![create_test_approval(1)],
@@ -1216,7 +1370,7 @@ mod tests {
     }
 
     #[test]
-    fn test_update_threshold_exceeds_member_count() {
+    fn test_update_threshold_exceeds_approver_count() {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
@@ -1224,11 +1378,15 @@ mod tests {
 
         let committee_info = CommitteeGovernanceInfo {
             member_count: 5,
+            approver_count: 5,
             total_member_count: 5,
             threshold: 4,
+            kyc_threshold: 1,
+            target_is_active: None,
+            target_can_approve: None,
         };
 
-        // Invalid: threshold 6 > 5 members
+        // Invalid: threshold 6 > 5 approvers
         let payload = create_update_committee_payload(
             CommitteeUpdateData::UpdateThreshold { new_threshold: 6 },
             vec![create_test_approval(1)],
@@ -1238,7 +1396,7 @@ mod tests {
             verify_update_committee_with_state(&payload, &committee_info, now);
         assert!(result.is_err());
         let err_msg = format!("{:?}", result.unwrap_err());
-        assert!(err_msg.contains("exceeds member count"));
+        assert!(err_msg.contains("exceeds approver count"));
     }
 
     #[test]
@@ -1250,8 +1408,12 @@ mod tests {
 
         let committee_info = CommitteeGovernanceInfo {
             member_count: 6,
+            approver_count: 6,
             total_member_count: 6,
             threshold: 4,
+            kyc_threshold: 1,
+            target_is_active: None,
+            target_can_approve: None,
         };
 
         // Invalid: threshold 3 < 4 (ceil(6*2/3) = 4)
@@ -1277,8 +1439,12 @@ mod tests {
         // 5 members with threshold 4, removing one leaves 4 members >= threshold 4
         let committee_info = CommitteeGovernanceInfo {
             member_count: 5,
+            approver_count: 5,
             total_member_count: 5,
             threshold: 4,
+            kyc_threshold: 1,
+            target_is_active: Some(true),
+            target_can_approve: Some(true),
         };
 
         let payload = create_update_committee_payload(
@@ -1303,8 +1469,12 @@ mod tests {
         // 4 members with threshold 4, removing one leaves 3 members < threshold 4
         let committee_info = CommitteeGovernanceInfo {
             member_count: 4,
+            approver_count: 4,
             total_member_count: 4,
             threshold: 4,
+            kyc_threshold: 1,
+            target_is_active: Some(true),
+            target_can_approve: Some(true),
         };
 
         let payload = create_update_committee_payload(
@@ -1331,8 +1501,12 @@ mod tests {
         // 3 members (minimum), threshold 2, removing one leaves 2 members < MIN_COMMITTEE_MEMBERS
         let committee_info = CommitteeGovernanceInfo {
             member_count: 3,
+            approver_count: 3,
             total_member_count: 3,
             threshold: 2,
+            kyc_threshold: 1,
+            target_is_active: Some(true),
+            target_can_approve: Some(true),
         };
 
         let payload = create_update_committee_payload(
@@ -1358,11 +1532,15 @@ mod tests {
 
         let committee_info = CommitteeGovernanceInfo {
             member_count: 5,
+            approver_count: 5,
             total_member_count: 5,
             threshold: 4,
+            kyc_threshold: 1,
+            target_is_active: None,
+            target_can_approve: None,
         };
 
-        // Valid: KYC threshold 3 <= 5 members
+        // Valid: KYC threshold 3 <= 5 approvers
         let payload = create_update_committee_payload(
             CommitteeUpdateData::UpdateKycThreshold {
                 new_kyc_threshold: 3,
@@ -1376,7 +1554,7 @@ mod tests {
     }
 
     #[test]
-    fn test_update_kyc_threshold_exceeds_member_count() {
+    fn test_update_kyc_threshold_exceeds_approver_count() {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
@@ -1384,11 +1562,15 @@ mod tests {
 
         let committee_info = CommitteeGovernanceInfo {
             member_count: 5,
+            approver_count: 5,
             total_member_count: 5,
             threshold: 4,
+            kyc_threshold: 1,
+            target_is_active: None,
+            target_can_approve: None,
         };
 
-        // Invalid: KYC threshold 6 > 5 members
+        // Invalid: KYC threshold 6 > 5 approvers
         let payload = create_update_committee_payload(
             CommitteeUpdateData::UpdateKycThreshold {
                 new_kyc_threshold: 6,
@@ -1400,7 +1582,7 @@ mod tests {
             verify_update_committee_with_state(&payload, &committee_info, now);
         assert!(result.is_err());
         let err_msg = format!("{:?}", result.unwrap_err());
-        assert!(err_msg.contains("exceeds member count"));
+        assert!(err_msg.contains("exceeds approver count"));
     }
 
     #[test]
@@ -1412,8 +1594,12 @@ mod tests {
 
         let committee_info = CommitteeGovernanceInfo {
             member_count: 5,
+            approver_count: 5,
             total_member_count: 5,
             threshold: 4,
+            kyc_threshold: 1,
+            target_is_active: None,
+            target_can_approve: None,
         };
 
         // AddMember should pass state validation (adding is safe within limits)
@@ -1422,6 +1608,101 @@ mod tests {
                 public_key: create_test_pubkey(99),
                 name: Some("New Member".to_string()),
                 role: MemberRole::Member,
+            },
+            vec![create_test_approval(1)],
+        );
+
+        let result: Result<(), VerificationError<()>> =
+            verify_update_committee_with_state(&payload, &committee_info, now);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_remove_member_breaks_kyc_threshold_when_approver_removed() {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        // 2 approvers, kyc_threshold=2, removing an approver would leave 1 < 2
+        let committee_info = CommitteeGovernanceInfo {
+            member_count: 4,
+            approver_count: 2,
+            total_member_count: 4,
+            threshold: 1,
+            kyc_threshold: 2,
+            target_is_active: Some(true),
+            target_can_approve: Some(true),
+        };
+
+        let payload = create_update_committee_payload(
+            CommitteeUpdateData::RemoveMember {
+                public_key: create_test_pubkey(99),
+            },
+            vec![create_test_approval(1)],
+        );
+
+        let result: Result<(), VerificationError<()>> =
+            verify_update_committee_with_state(&payload, &committee_info, now);
+        assert!(result.is_err());
+        let err_msg = format!("{:?}", result.unwrap_err());
+        assert!(err_msg.contains("KYC threshold"));
+    }
+
+    #[test]
+    fn test_update_member_status_observer_does_not_reduce_approvers() {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        // Suspending an observer should not reduce approver count
+        let committee_info = CommitteeGovernanceInfo {
+            member_count: 4,
+            approver_count: 2,
+            total_member_count: 4,
+            threshold: 2,
+            kyc_threshold: 1,
+            target_is_active: Some(true),
+            target_can_approve: Some(false),
+        };
+
+        let payload = create_update_committee_payload(
+            CommitteeUpdateData::UpdateMemberStatus {
+                public_key: create_test_pubkey(99),
+                new_status: crate::kyc::MemberStatus::Suspended,
+            },
+            vec![create_test_approval(1)],
+        );
+
+        let result: Result<(), VerificationError<()>> =
+            verify_update_committee_with_state(&payload, &committee_info, now);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_add_member_observer_does_not_force_threshold_increase() {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        // Adding an Observer should not change approver count or require threshold changes
+        let committee_info = CommitteeGovernanceInfo {
+            member_count: 5,
+            approver_count: 3,
+            total_member_count: 5,
+            threshold: 2,
+            kyc_threshold: 1,
+            target_is_active: None,
+            target_can_approve: None,
+        };
+
+        let payload = create_update_committee_payload(
+            CommitteeUpdateData::AddMember {
+                public_key: create_test_pubkey(99),
+                name: Some("Observer".to_string()),
+                role: MemberRole::Observer,
             },
             vec![create_test_approval(1)],
         );
@@ -1567,5 +1848,457 @@ mod tests {
         assert!(result.is_err());
         let err_msg = format!("{:?}", result.unwrap_err());
         assert!(err_msg.contains("Appeal reason hash cannot be empty"));
+    }
+
+    // ============================================================================
+    // ROUND 15 BUG FIX TESTS: Role Heterogeneity & Observer/Approver Distinction
+    // ============================================================================
+    // These tests address gaps identified in security review Round 14-15:
+    // - Bug #35: Threshold validation counts observers but approval excludes them
+    // - Bug #36: UpdateCommittee thresholds validated against active members, not approvers
+    // - Bug #37: UpdateMemberRole lacks approver-count safety checks
+
+    #[test]
+    fn test_bootstrap_committee_with_observers_threshold_uses_approver_count() {
+        // Bug #35: Bootstrap with observers should validate threshold against approver_count
+        // 5 total members: 3 approvers (Chair, Member, Member) + 2 observers
+        // threshold=4 should FAIL because only 3 can approve
+        let members: Vec<CommitteeMemberInit> = vec![
+            CommitteeMemberInit::new(create_test_pubkey(1), None, MemberRole::Chair),
+            CommitteeMemberInit::new(create_test_pubkey(2), None, MemberRole::Member),
+            CommitteeMemberInit::new(create_test_pubkey(3), None, MemberRole::Member),
+            CommitteeMemberInit::new(create_test_pubkey(4), None, MemberRole::Observer),
+            CommitteeMemberInit::new(create_test_pubkey(5), None, MemberRole::Observer),
+        ];
+
+        // threshold=4 exceeds approver_count=3
+        let payload = BootstrapCommitteePayload::new(
+            "Test Committee".to_string(),
+            members,
+            4, // threshold > approver_count (3)
+            1,
+            32767,
+        );
+
+        let bootstrap_sender = create_bootstrap_sender();
+        let result: Result<(), VerificationError<()>> =
+            verify_bootstrap_committee(&payload, &bootstrap_sender);
+        assert!(result.is_err());
+        let err_msg = format!("{:?}", result.unwrap_err());
+        assert!(
+            err_msg.contains("exceeds") || err_msg.contains("approver"),
+            "Expected error about threshold exceeding approver count, got: {}",
+            err_msg
+        );
+    }
+
+    #[test]
+    fn test_bootstrap_committee_with_observers_valid_threshold() {
+        // 5 total members: 3 approvers + 2 observers
+        // threshold=2 (2/3 of 3 approvers) should PASS
+        let members: Vec<CommitteeMemberInit> = vec![
+            CommitteeMemberInit::new(create_test_pubkey(1), None, MemberRole::Chair),
+            CommitteeMemberInit::new(create_test_pubkey(2), None, MemberRole::Member),
+            CommitteeMemberInit::new(create_test_pubkey(3), None, MemberRole::Member),
+            CommitteeMemberInit::new(create_test_pubkey(4), None, MemberRole::Observer),
+            CommitteeMemberInit::new(create_test_pubkey(5), None, MemberRole::Observer),
+        ];
+
+        // threshold=2 meets 2/3 of approver_count=3 (ceil(3*2/3)=2)
+        let payload = BootstrapCommitteePayload::new(
+            "Test Committee".to_string(),
+            members,
+            2, // threshold <= approver_count AND >= 2/3 of approvers
+            1,
+            32767,
+        );
+
+        let bootstrap_sender = create_bootstrap_sender();
+        let result: Result<(), VerificationError<()>> =
+            verify_bootstrap_committee(&payload, &bootstrap_sender);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_update_threshold_with_observers_uses_approver_count() {
+        // Bug #36: UpdateThreshold should use approver_count, not member_count
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        // 5 total members, but only 3 approvers (2 are observers)
+        let committee_info = CommitteeGovernanceInfo {
+            member_count: 5,   // active members (includes observers)
+            approver_count: 3, // only members who can approve
+            total_member_count: 5,
+            threshold: 2,
+            kyc_threshold: 1,
+            target_is_active: None,
+            target_can_approve: None,
+        };
+
+        // Invalid: threshold 4 > 3 approvers
+        let payload = create_update_committee_payload(
+            CommitteeUpdateData::UpdateThreshold { new_threshold: 4 },
+            vec![create_test_approval(1)],
+        );
+
+        let result: Result<(), VerificationError<()>> =
+            verify_update_committee_with_state(&payload, &committee_info, now);
+        assert!(result.is_err());
+        let err_msg = format!("{:?}", result.unwrap_err());
+        assert!(
+            err_msg.contains("exceeds approver count"),
+            "Expected error about threshold exceeding approver count, got: {}",
+            err_msg
+        );
+    }
+
+    #[test]
+    fn test_update_threshold_with_observers_valid() {
+        // Bug #36: Valid threshold update when accounting for observers
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        // 5 total members, 3 approvers
+        let committee_info = CommitteeGovernanceInfo {
+            member_count: 5,
+            approver_count: 3,
+            total_member_count: 5,
+            threshold: 2,
+            kyc_threshold: 1,
+            target_is_active: None,
+            target_can_approve: None,
+        };
+
+        // Valid: threshold 3 <= 3 approvers AND 3 >= ceil(3*2/3) = 2
+        let payload = create_update_committee_payload(
+            CommitteeUpdateData::UpdateThreshold { new_threshold: 3 },
+            vec![create_test_approval(1)],
+        );
+
+        let result: Result<(), VerificationError<()>> =
+            verify_update_committee_with_state(&payload, &committee_info, now);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_update_kyc_threshold_with_observers_exceeds_approvers() {
+        // Bug #36: UpdateKycThreshold should also use approver_count
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        // 6 total members, only 4 approvers
+        let committee_info = CommitteeGovernanceInfo {
+            member_count: 6,
+            approver_count: 4,
+            total_member_count: 6,
+            threshold: 3,
+            kyc_threshold: 2,
+            target_is_active: None,
+            target_can_approve: None,
+        };
+
+        // Invalid: KYC threshold 5 > 4 approvers
+        let payload = create_update_committee_payload(
+            CommitteeUpdateData::UpdateKycThreshold {
+                new_kyc_threshold: 5,
+            },
+            vec![create_test_approval(1)],
+        );
+
+        let result: Result<(), VerificationError<()>> =
+            verify_update_committee_with_state(&payload, &committee_info, now);
+        assert!(result.is_err());
+        let err_msg = format!("{:?}", result.unwrap_err());
+        assert!(
+            err_msg.contains("exceeds approver count"),
+            "Expected error about KYC threshold exceeding approver count, got: {}",
+            err_msg
+        );
+    }
+
+    // ============================================================================
+    // Bug #37: UpdateMemberRole Safety Tests
+    // ============================================================================
+
+    #[test]
+    fn test_update_member_role_to_observer_breaks_governance_threshold() {
+        // Bug #37: Changing member to Observer should check if it breaks threshold
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        // 4 approvers, threshold=4 (exactly at limit)
+        let committee_info = CommitteeGovernanceInfo {
+            member_count: 4,
+            approver_count: 4,
+            total_member_count: 4,
+            threshold: 4, // governance threshold
+            kyc_threshold: 2,
+            target_is_active: None,
+            target_can_approve: None,
+        };
+
+        // Changing one to Observer would leave 3 approvers < threshold 4
+        let payload = create_update_committee_payload(
+            CommitteeUpdateData::UpdateMemberRole {
+                public_key: create_test_pubkey(1),
+                new_role: MemberRole::Observer,
+            },
+            vec![create_test_approval(1)],
+        );
+
+        let result: Result<(), VerificationError<()>> =
+            verify_update_committee_with_state(&payload, &committee_info, now);
+        assert!(result.is_err());
+        let err_msg = format!("{:?}", result.unwrap_err());
+        assert!(
+            err_msg.contains("governance threshold") || err_msg.contains("Observer"),
+            "Expected error about breaking governance threshold, got: {}",
+            err_msg
+        );
+    }
+
+    #[test]
+    fn test_update_member_role_to_observer_breaks_kyc_threshold() {
+        // Bug #37: Changing member to Observer should also check KYC threshold
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        // 5 approvers, governance_threshold=3, kyc_threshold=5
+        let committee_info = CommitteeGovernanceInfo {
+            member_count: 5,
+            approver_count: 5,
+            total_member_count: 5,
+            threshold: 3, // governance threshold (OK after change: 4 >= 3)
+            kyc_threshold: 5,
+            target_is_active: None,
+            target_can_approve: None, // KYC threshold (will break: 4 < 5)
+        };
+
+        // Changing one to Observer would leave 4 approvers < kyc_threshold 5
+        let payload = create_update_committee_payload(
+            CommitteeUpdateData::UpdateMemberRole {
+                public_key: create_test_pubkey(1),
+                new_role: MemberRole::Observer,
+            },
+            vec![create_test_approval(1)],
+        );
+
+        let result: Result<(), VerificationError<()>> =
+            verify_update_committee_with_state(&payload, &committee_info, now);
+        assert!(result.is_err());
+        let err_msg = format!("{:?}", result.unwrap_err());
+        assert!(
+            err_msg.contains("KYC threshold") || err_msg.contains("Observer"),
+            "Expected error about breaking KYC threshold, got: {}",
+            err_msg
+        );
+    }
+
+    #[test]
+    fn test_update_member_role_to_observer_valid() {
+        // Bug #37: Valid role change when enough approvers remain
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        // 5 approvers, threshold=3, kyc_threshold=3
+        let committee_info = CommitteeGovernanceInfo {
+            member_count: 5,
+            approver_count: 5,
+            total_member_count: 5,
+            threshold: 3,
+            kyc_threshold: 3,
+            target_is_active: None,
+            target_can_approve: None,
+        };
+
+        // Changing one to Observer leaves 4 approvers >= both thresholds
+        let payload = create_update_committee_payload(
+            CommitteeUpdateData::UpdateMemberRole {
+                public_key: create_test_pubkey(1),
+                new_role: MemberRole::Observer,
+            },
+            vec![create_test_approval(1)],
+        );
+
+        let result: Result<(), VerificationError<()>> =
+            verify_update_committee_with_state(&payload, &committee_info, now);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_update_member_role_to_member_always_valid() {
+        // Changing Observer to Member should always be valid (increases approvers)
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        // 3 approvers with threshold=3 (at limit)
+        let committee_info = CommitteeGovernanceInfo {
+            member_count: 4, // includes 1 observer
+            approver_count: 3,
+            total_member_count: 4,
+            threshold: 3,
+            kyc_threshold: 3,
+            target_is_active: None,
+            target_can_approve: None,
+        };
+
+        // Changing Observer to Member increases approvers (safe)
+        let payload = create_update_committee_payload(
+            CommitteeUpdateData::UpdateMemberRole {
+                public_key: create_test_pubkey(4),
+                new_role: MemberRole::Member,
+            },
+            vec![create_test_approval(1)],
+        );
+
+        let result: Result<(), VerificationError<()>> =
+            verify_update_committee_with_state(&payload, &committee_info, now);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_update_member_role_to_chair_always_valid() {
+        // Changing to Chair should be valid (Chair can approve)
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        let committee_info = CommitteeGovernanceInfo {
+            member_count: 4,
+            approver_count: 3,
+            total_member_count: 4,
+            threshold: 3,
+            kyc_threshold: 2,
+            target_is_active: None,
+            target_can_approve: None,
+        };
+
+        let payload = create_update_committee_payload(
+            CommitteeUpdateData::UpdateMemberRole {
+                public_key: create_test_pubkey(1),
+                new_role: MemberRole::Chair,
+            },
+            vec![create_test_approval(1)],
+        );
+
+        let result: Result<(), VerificationError<()>> =
+            verify_update_committee_with_state(&payload, &committee_info, now);
+        assert!(result.is_ok());
+    }
+
+    // ============================================================================
+    // State Divergence Tests: member_count vs approver_count
+    // ============================================================================
+
+    #[test]
+    fn test_threshold_two_thirds_rule_uses_approver_count() {
+        // The 2/3 rule should be calculated on approver_count, not member_count
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        // 6 members but only 3 approvers (3 are observers)
+        // min_threshold for 3 approvers = ceil(3*2/3) = 2
+        let committee_info = CommitteeGovernanceInfo {
+            member_count: 6,
+            approver_count: 3,
+            total_member_count: 6,
+            threshold: 2,
+            kyc_threshold: 1,
+            target_is_active: None,
+            target_can_approve: None,
+        };
+
+        // threshold=1 is below 2/3 of approver_count (should fail)
+        let payload = create_update_committee_payload(
+            CommitteeUpdateData::UpdateThreshold { new_threshold: 1 },
+            vec![create_test_approval(1)],
+        );
+
+        let result: Result<(), VerificationError<()>> =
+            verify_update_committee_with_state(&payload, &committee_info, now);
+        assert!(result.is_err());
+        let err_msg = format!("{:?}", result.unwrap_err());
+        assert!(
+            err_msg.contains("below minimum"),
+            "Expected error about threshold below 2/3 minimum, got: {}",
+            err_msg
+        );
+    }
+
+    #[test]
+    fn test_large_committee_with_many_observers() {
+        // Stress test: 15 members, only 5 approvers (10 observers)
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        let committee_info = CommitteeGovernanceInfo {
+            member_count: 15,
+            approver_count: 5,
+            total_member_count: 15,
+            threshold: 4, // 4/5 = 80% >= 2/3 of approvers
+            kyc_threshold: 3,
+            target_is_active: None,
+            target_can_approve: None,
+        };
+
+        // threshold=6 exceeds approver_count=5
+        let payload = create_update_committee_payload(
+            CommitteeUpdateData::UpdateThreshold { new_threshold: 6 },
+            vec![create_test_approval(1)],
+        );
+
+        let result: Result<(), VerificationError<()>> =
+            verify_update_committee_with_state(&payload, &committee_info, now);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_boundary_approver_equals_threshold() {
+        // Boundary test: exactly at the limit
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        // 5 approvers, threshold=5 (exactly at limit)
+        let committee_info = CommitteeGovernanceInfo {
+            member_count: 7,
+            approver_count: 5,
+            total_member_count: 7,
+            threshold: 4,
+            kyc_threshold: 3,
+            target_is_active: None,
+            target_can_approve: None,
+        };
+
+        // threshold=5 == approver_count (should pass)
+        let payload = create_update_committee_payload(
+            CommitteeUpdateData::UpdateThreshold { new_threshold: 5 },
+            vec![create_test_approval(1)],
+        );
+
+        let result: Result<(), VerificationError<()>> =
+            verify_update_committee_with_state(&payload, &committee_info, now);
+        assert!(result.is_ok());
     }
 }

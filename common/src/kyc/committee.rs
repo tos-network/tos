@@ -9,6 +9,7 @@
 
 use crate::crypto::{Hash, PublicKey, Signature};
 use crate::kyc::{KycError, KycRegion, KycResult};
+use crate::network::Network;
 use crate::serializer::{Reader, ReaderError, Serializer, Writer};
 use serde::{Deserialize, Serialize};
 
@@ -629,8 +630,10 @@ impl CommitteeApproval {
     /// Build domain-separated signing message for SetKyc operation
     ///
     /// SECURITY FIX (Issue #34): Now includes verified_at to bind the approval to a specific timestamp
-    /// Message format: "TOS_KYC_SET" || committee_id || account || level || data_hash || verified_at || timestamp
+    /// SECURITY FIX (Issue #44): Now includes chain_id to prevent cross-network replay attacks
+    /// Message format: "TOS_KYC_SET" || chain_id || committee_id || account || level || data_hash || verified_at || timestamp
     pub fn build_set_kyc_message(
+        network: &Network,
         committee_id: &Hash,
         account: &PublicKey,
         level: u16,
@@ -638,8 +641,10 @@ impl CommitteeApproval {
         verified_at: u64,
         timestamp: u64,
     ) -> Vec<u8> {
-        let mut message = Vec::with_capacity(144);
+        let mut message = Vec::with_capacity(152);
         message.extend_from_slice(b"TOS_KYC_SET");
+        // SECURITY FIX (Issue #44): Include chain_id to prevent cross-network replay
+        message.extend_from_slice(&network.chain_id().to_le_bytes());
         message.extend_from_slice(committee_id.as_bytes());
         message.extend_from_slice(account.as_bytes());
         message.extend_from_slice(&level.to_le_bytes());
@@ -652,15 +657,19 @@ impl CommitteeApproval {
 
     /// Build domain-separated signing message for RevokeKyc operation
     ///
-    /// Message format: "TOS_KYC_REVOKE" || committee_id || account || reason_hash || timestamp
+    /// SECURITY FIX (Issue #44): Now includes chain_id to prevent cross-network replay attacks
+    /// Message format: "TOS_KYC_REVOKE" || chain_id || committee_id || account || reason_hash || timestamp
     pub fn build_revoke_kyc_message(
+        network: &Network,
         committee_id: &Hash,
         account: &PublicKey,
         reason_hash: &Hash,
         timestamp: u64,
     ) -> Vec<u8> {
-        let mut message = Vec::with_capacity(128);
+        let mut message = Vec::with_capacity(136);
         message.extend_from_slice(b"TOS_KYC_REVOKE");
+        // SECURITY FIX (Issue #44): Include chain_id to prevent cross-network replay
+        message.extend_from_slice(&network.chain_id().to_le_bytes());
         message.extend_from_slice(committee_id.as_bytes());
         message.extend_from_slice(account.as_bytes());
         message.extend_from_slice(reason_hash.as_bytes());
@@ -671,16 +680,20 @@ impl CommitteeApproval {
     /// Build domain-separated signing message for RenewKyc operation
     ///
     /// SECURITY FIX (Issue #34): Now includes verified_at to bind the approval to a specific timestamp
-    /// Message format: "TOS_KYC_RENEW" || committee_id || account || data_hash || verified_at || timestamp
+    /// SECURITY FIX (Issue #44): Now includes chain_id to prevent cross-network replay attacks
+    /// Message format: "TOS_KYC_RENEW" || chain_id || committee_id || account || data_hash || verified_at || timestamp
     pub fn build_renew_kyc_message(
+        network: &Network,
         committee_id: &Hash,
         account: &PublicKey,
         data_hash: &Hash,
         verified_at: u64,
         timestamp: u64,
     ) -> Vec<u8> {
-        let mut message = Vec::with_capacity(144);
+        let mut message = Vec::with_capacity(152);
         message.extend_from_slice(b"TOS_KYC_RENEW");
+        // SECURITY FIX (Issue #44): Include chain_id to prevent cross-network replay
+        message.extend_from_slice(&network.chain_id().to_le_bytes());
         message.extend_from_slice(committee_id.as_bytes());
         message.extend_from_slice(account.as_bytes());
         message.extend_from_slice(data_hash.as_bytes());
@@ -693,19 +706,31 @@ impl CommitteeApproval {
     /// Build domain-separated signing message for TransferKyc (source committee)
     ///
     /// SECURITY FIX (Issue #34): Now includes transferred_at to bind the approval to a specific timestamp
-    /// Message format: "TOS_KYC_TRANSFER_SRC" || source_committee || dest_committee || account || transferred_at || timestamp
+    /// SECURITY FIX (Issue #39): Now includes new_data_hash to bind source approval to the transferred data
+    /// SECURITY FIX (Issue #44): Now includes chain_id to prevent cross-network replay attacks
+    /// SECURITY FIX (Issue #45): Now includes current_level to bind approval to user's KYC level at signing time
+    /// Message format: "TOS_KYC_TRANSFER_SRC" || chain_id || source_committee || dest_committee || account || current_level || new_data_hash || transferred_at || timestamp
     pub fn build_transfer_kyc_source_message(
+        network: &Network,
         source_committee: &Hash,
         dest_committee: &Hash,
         account: &PublicKey,
+        current_level: u16,
+        new_data_hash: &Hash,
         transferred_at: u64,
         timestamp: u64,
     ) -> Vec<u8> {
-        let mut message = Vec::with_capacity(144);
+        let mut message = Vec::with_capacity(186);
         message.extend_from_slice(b"TOS_KYC_TRANSFER_SRC");
+        // SECURITY FIX (Issue #44): Include chain_id to prevent cross-network replay
+        message.extend_from_slice(&network.chain_id().to_le_bytes());
         message.extend_from_slice(source_committee.as_bytes());
         message.extend_from_slice(dest_committee.as_bytes());
         message.extend_from_slice(account.as_bytes());
+        // SECURITY FIX (Issue #45): Bind current_level to prevent transferring upgraded KYC
+        message.extend_from_slice(&current_level.to_le_bytes());
+        // SECURITY FIX (Issue #39): Bind new_data_hash so source committee approves the exact data
+        message.extend_from_slice(new_data_hash.as_bytes());
         // SECURITY FIX (Issue #34): Bind transferred_at to prevent timestamp manipulation
         message.extend_from_slice(&transferred_at.to_le_bytes());
         message.extend_from_slice(&timestamp.to_le_bytes());
@@ -715,8 +740,10 @@ impl CommitteeApproval {
     /// Build domain-separated signing message for TransferKyc (destination committee)
     ///
     /// SECURITY FIX (Issue #34): Now includes transferred_at to bind the approval to a specific timestamp
-    /// Message format: "TOS_KYC_TRANSFER_DST" || source_committee || dest_committee || account || new_data_hash || transferred_at || timestamp
+    /// SECURITY FIX (Issue #44): Now includes chain_id to prevent cross-network replay attacks
+    /// Message format: "TOS_KYC_TRANSFER_DST" || chain_id || source_committee || dest_committee || account || new_data_hash || transferred_at || timestamp
     pub fn build_transfer_kyc_dest_message(
+        network: &Network,
         source_committee: &Hash,
         dest_committee: &Hash,
         account: &PublicKey,
@@ -724,8 +751,10 @@ impl CommitteeApproval {
         transferred_at: u64,
         timestamp: u64,
     ) -> Vec<u8> {
-        let mut message = Vec::with_capacity(176);
+        let mut message = Vec::with_capacity(184);
         message.extend_from_slice(b"TOS_KYC_TRANSFER_DST");
+        // SECURITY FIX (Issue #44): Include chain_id to prevent cross-network replay
+        message.extend_from_slice(&network.chain_id().to_le_bytes());
         message.extend_from_slice(source_committee.as_bytes());
         message.extend_from_slice(dest_committee.as_bytes());
         message.extend_from_slice(account.as_bytes());
@@ -738,16 +767,20 @@ impl CommitteeApproval {
 
     /// Build domain-separated signing message for EmergencySuspend
     ///
-    /// Message format: "TOS_KYC_EMERGENCY" || committee_id || account || reason_hash || expires_at || timestamp
+    /// SECURITY FIX (Issue #44): Now includes chain_id to prevent cross-network replay attacks
+    /// Message format: "TOS_KYC_EMERGENCY" || chain_id || committee_id || account || reason_hash || expires_at || timestamp
     pub fn build_emergency_suspend_message(
+        network: &Network,
         committee_id: &Hash,
         account: &PublicKey,
         reason_hash: &Hash,
         expires_at: u64,
         timestamp: u64,
     ) -> Vec<u8> {
-        let mut message = Vec::with_capacity(136);
+        let mut message = Vec::with_capacity(144);
         message.extend_from_slice(b"TOS_KYC_EMERGENCY");
+        // SECURITY FIX (Issue #44): Include chain_id to prevent cross-network replay
+        message.extend_from_slice(&network.chain_id().to_le_bytes());
         message.extend_from_slice(committee_id.as_bytes());
         message.extend_from_slice(account.as_bytes());
         message.extend_from_slice(reason_hash.as_bytes());
@@ -758,7 +791,8 @@ impl CommitteeApproval {
 
     /// Build domain-separated signing message for RegisterCommittee
     ///
-    /// Message format: "TOS_COMMITTEE_REG" || parent_id || name || region || config_hash || timestamp
+    /// SECURITY FIX (Issue #44): Now includes chain_id to prevent cross-network replay attacks
+    /// Message format: "TOS_COMMITTEE_REG" || chain_id || parent_id || name || region || config_hash || timestamp
     ///
     /// The config_hash binds the signature to the full committee configuration:
     /// - members (public keys, names, roles)
@@ -768,14 +802,17 @@ impl CommitteeApproval {
     ///
     /// This prevents replay attacks where valid approvals are reused with different configurations.
     pub fn build_register_committee_message(
+        network: &Network,
         parent_id: &Hash,
         name: &str,
         region: KycRegion,
         config_hash: &Hash,
         timestamp: u64,
     ) -> Vec<u8> {
-        let mut message = Vec::with_capacity(160);
+        let mut message = Vec::with_capacity(168);
         message.extend_from_slice(b"TOS_COMMITTEE_REG");
+        // SECURITY FIX (Issue #44): Include chain_id to prevent cross-network replay
+        message.extend_from_slice(&network.chain_id().to_le_bytes());
         message.extend_from_slice(parent_id.as_bytes());
         message.extend_from_slice(name.as_bytes());
         message.push(region as u8);
@@ -834,15 +871,19 @@ impl CommitteeApproval {
 
     /// Build domain-separated signing message for UpdateCommittee
     ///
-    /// Message format: "TOS_COMMITTEE_UPD" || committee_id || update_type || update_data_hash || timestamp
+    /// SECURITY FIX (Issue #44): Now includes chain_id to prevent cross-network replay attacks
+    /// Message format: "TOS_COMMITTEE_UPD" || chain_id || committee_id || update_type || update_data_hash || timestamp
     pub fn build_update_committee_message(
+        network: &Network,
         committee_id: &Hash,
         update_type: u8,
         update_data_hash: &Hash,
         timestamp: u64,
     ) -> Vec<u8> {
-        let mut message = Vec::with_capacity(96);
+        let mut message = Vec::with_capacity(104);
         message.extend_from_slice(b"TOS_COMMITTEE_UPD");
+        // SECURITY FIX (Issue #44): Include chain_id to prevent cross-network replay
+        message.extend_from_slice(&network.chain_id().to_le_bytes());
         message.extend_from_slice(committee_id.as_bytes());
         message.push(update_type);
         message.extend_from_slice(update_data_hash.as_bytes());

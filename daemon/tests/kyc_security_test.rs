@@ -23,7 +23,13 @@ use tos_common::{
         CommitteeApproval, CommitteeMember, CommitteeStatus, KycRegion, MemberRole,
         SecurityCommittee, APPROVAL_EXPIRY_SECONDS,
     },
+    network::Network,
 };
+
+// Use Devnet for testing
+fn test_network() -> Network {
+    Network::Devnet
+}
 
 // ============================================================================
 // Test Helpers
@@ -207,6 +213,7 @@ mod security_attack_tests {
         // SECURITY FIX (Issue #34): Now includes verified_at parameter
         let verified_at = current_time;
         let message = CommitteeApproval::build_set_kyc_message(
+            &test_network(),
             &committee.id,
             &user_pk,
             100,
@@ -223,6 +230,7 @@ mod security_attack_tests {
         // Verify approvals - should only count as 1 unique approver
         // SECURITY FIX (Issue #34): Now includes verified_at parameter
         let result = tos_common::kyc::verify_set_kyc_approvals(
+            &test_network(),
             &committee,
             &duplicate_approvals,
             &user_pk,
@@ -334,6 +342,7 @@ mod boundary_tests {
 
         let verified_at = current_time;
         let message = CommitteeApproval::build_set_kyc_message(
+            &test_network(),
             &committee.id,
             &user_pk,
             100,
@@ -350,6 +359,7 @@ mod boundary_tests {
             .collect();
 
         let result = tos_common::kyc::verify_set_kyc_approvals(
+            &test_network(),
             &committee,
             &approvals,
             &user_pk,
@@ -382,6 +392,7 @@ mod boundary_tests {
 
         let verified_at = current_time;
         let message = CommitteeApproval::build_set_kyc_message(
+            &test_network(),
             &committee.id,
             &user_pk,
             100,
@@ -398,6 +409,7 @@ mod boundary_tests {
             .collect();
 
         let result = tos_common::kyc::verify_set_kyc_approvals(
+            &test_network(),
             &committee,
             &approvals,
             &user_pk,
@@ -426,6 +438,7 @@ mod boundary_tests {
 
         let verified_at = approval_time;
         let message = CommitteeApproval::build_set_kyc_message(
+            &test_network(),
             &committee.id,
             &user_pk,
             100,
@@ -441,6 +454,7 @@ mod boundary_tests {
             .collect();
 
         let result = tos_common::kyc::verify_set_kyc_approvals(
+            &test_network(),
             &committee,
             &approvals,
             &user_pk,
@@ -472,6 +486,7 @@ mod boundary_tests {
 
         let verified_at = approval_time;
         let message = CommitteeApproval::build_set_kyc_message(
+            &test_network(),
             &committee.id,
             &user_pk,
             100,
@@ -487,6 +502,7 @@ mod boundary_tests {
             .collect();
 
         let result = tos_common::kyc::verify_set_kyc_approvals(
+            &test_network(),
             &committee,
             &approvals,
             &user_pk,
@@ -527,6 +543,7 @@ mod state_machine_tests {
 
         let verified_at = current_time;
         let message = CommitteeApproval::build_set_kyc_message(
+            &test_network(),
             &committee.id,
             &user_pk,
             100,
@@ -542,6 +559,7 @@ mod state_machine_tests {
             .collect();
 
         let result = tos_common::kyc::verify_set_kyc_approvals(
+            &test_network(),
             &committee,
             &approvals,
             &user_pk,
@@ -575,6 +593,7 @@ mod state_machine_tests {
         let expires_at = current_time + 86400;
 
         let message = CommitteeApproval::build_emergency_suspend_message(
+            &test_network(),
             &committee.id,
             &user_pk,
             &reason_hash,
@@ -589,6 +608,7 @@ mod state_machine_tests {
             .collect();
 
         let result = tos_common::kyc::verify_emergency_suspend_approvals(
+            &test_network(),
             &committee,
             &approvals,
             &user_pk,
@@ -620,6 +640,7 @@ mod state_machine_tests {
         let expires_at = current_time + 86400;
 
         let message = CommitteeApproval::build_emergency_suspend_message(
+            &test_network(),
             &committee.id,
             &user_pk,
             &reason_hash,
@@ -634,6 +655,7 @@ mod state_machine_tests {
             .collect();
 
         let result = tos_common::kyc::verify_emergency_suspend_approvals(
+            &test_network(),
             &committee,
             &approvals,
             &user_pk,
@@ -660,6 +682,7 @@ mod state_machine_tests {
 
         let verified_at = current_time;
         let message = CommitteeApproval::build_set_kyc_message(
+            &test_network(),
             &committee.id,
             &user_pk,
             100,
@@ -675,6 +698,7 @@ mod state_machine_tests {
             .collect();
 
         let result = tos_common::kyc::verify_set_kyc_approvals(
+            &test_network(),
             &committee,
             &approvals,
             &user_pk,
@@ -702,6 +726,7 @@ mod state_machine_tests {
 
         let verified_at = current_time;
         let message = CommitteeApproval::build_set_kyc_message(
+            &test_network(),
             &committee.id,
             &user_pk,
             100,
@@ -717,6 +742,7 @@ mod state_machine_tests {
             .collect();
 
         let result = tos_common::kyc::verify_set_kyc_approvals(
+            &test_network(),
             &committee,
             &approvals,
             &user_pk,
@@ -751,6 +777,7 @@ mod malicious_input_tests {
 
         let verified_at = current_time;
         let result = tos_common::kyc::verify_set_kyc_approvals(
+            &test_network(),
             &committee,
             &empty_approvals,
             &user_pk,
@@ -775,6 +802,7 @@ mod malicious_input_tests {
 
         let verified_at = current_time;
         let message = CommitteeApproval::build_set_kyc_message(
+            &test_network(),
             &committee.id,
             &user_pk,
             100,
@@ -791,6 +819,7 @@ mod malicious_input_tests {
             .collect();
 
         let result = tos_common::kyc::verify_set_kyc_approvals(
+            &test_network(),
             &committee,
             &approvals,
             &user_pk,
@@ -825,6 +854,7 @@ mod malicious_input_tests {
 
         let verified_at = current_time;
         let message = CommitteeApproval::build_set_kyc_message(
+            &test_network(),
             &committee.id,
             &user_pk,
             100,
@@ -843,6 +873,7 @@ mod malicious_input_tests {
         ];
 
         let result = tos_common::kyc::verify_set_kyc_approvals(
+            &test_network(),
             &committee,
             &approvals,
             &user_pk,
@@ -877,6 +908,7 @@ mod malicious_input_tests {
 
         let verified_at = future_time;
         let message = CommitteeApproval::build_set_kyc_message(
+            &test_network(),
             &committee.id,
             &user_pk,
             100,
@@ -892,6 +924,7 @@ mod malicious_input_tests {
             .collect();
 
         let result = tos_common::kyc::verify_set_kyc_approvals(
+            &test_network(),
             &committee,
             &approvals,
             &user_pk,
@@ -998,6 +1031,7 @@ mod determinism_tests {
         let verified_at = timestamp;
 
         let msg1 = CommitteeApproval::build_set_kyc_message(
+            &test_network(),
             &committee_id,
             &user_pk,
             level,
@@ -1006,6 +1040,7 @@ mod determinism_tests {
             timestamp,
         );
         let msg2 = CommitteeApproval::build_set_kyc_message(
+            &test_network(),
             &committee_id,
             &user_pk,
             level,
@@ -1040,6 +1075,7 @@ mod negative_tests {
 
         let verified_at = approval_time;
         let message = CommitteeApproval::build_set_kyc_message(
+            &test_network(),
             &committee.id,
             &user_pk,
             100,
@@ -1055,6 +1091,7 @@ mod negative_tests {
             .collect();
 
         let result = tos_common::kyc::verify_set_kyc_approvals(
+            &test_network(),
             &committee,
             &approvals,
             &user_pk,
@@ -1081,6 +1118,7 @@ mod negative_tests {
         let verified_at = current_time;
         // Sign with correct hash
         let message = CommitteeApproval::build_set_kyc_message(
+            &test_network(),
             &committee.id,
             &user_pk,
             100,
@@ -1097,6 +1135,7 @@ mod negative_tests {
 
         // Verify with wrong hash
         let result = tos_common::kyc::verify_set_kyc_approvals(
+            &test_network(),
             &committee,
             &approvals,
             &user_pk,
@@ -1126,6 +1165,7 @@ mod negative_tests {
         let verified_at = current_time;
         // Sign for correct user
         let message = CommitteeApproval::build_set_kyc_message(
+            &test_network(),
             &committee.id,
             &correct_user,
             100,
@@ -1142,6 +1182,7 @@ mod negative_tests {
 
         // Verify for wrong user
         let result = tos_common::kyc::verify_set_kyc_approvals(
+            &test_network(),
             &committee,
             &approvals,
             &wrong_user, // Different from signed
@@ -1169,6 +1210,7 @@ mod negative_tests {
         let verified_at = current_time;
         // Sign with correct level
         let message = CommitteeApproval::build_set_kyc_message(
+            &test_network(),
             &committee.id,
             &user_pk,
             signed_level,
@@ -1185,6 +1227,7 @@ mod negative_tests {
 
         // Verify with different level
         let result = tos_common::kyc::verify_set_kyc_approvals(
+            &test_network(),
             &committee,
             &approvals,
             &user_pk,
@@ -1220,6 +1263,7 @@ mod negative_tests {
 
         let verified_at = current_time;
         let message = CommitteeApproval::build_set_kyc_message(
+            &test_network(),
             &committee.id,
             &user_pk,
             100,
@@ -1236,6 +1280,7 @@ mod negative_tests {
             .collect();
 
         let result = tos_common::kyc::verify_set_kyc_approvals(
+            &test_network(),
             &committee,
             &approvals,
             &user_pk,

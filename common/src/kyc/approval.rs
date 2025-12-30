@@ -86,6 +86,7 @@ use crate::kyc::{
     level_to_tier, CommitteeApproval, CommitteeStatus, MemberStatus, OperationType,
     SecurityCommittee,
 };
+use crate::network::Network;
 
 /// Result of approval verification
 #[derive(Debug, Clone)]
@@ -146,6 +147,7 @@ pub enum ApprovalError {
 /// Verify approvals for SetKyc operation
 ///
 /// SECURITY FIX (Issue #34): Now requires verified_at parameter to bind approvals to timestamp
+/// SECURITY FIX (Issue #44): Now requires network parameter for cross-network replay protection
 ///
 /// Validates:
 /// - Committee exists and is active
@@ -153,6 +155,7 @@ pub enum ApprovalError {
 /// - Each signature is valid for the SetKyc message (including verified_at)
 /// - Threshold is met for the KYC level
 pub fn verify_set_kyc_approvals(
+    network: &Network,
     committee: &SecurityCommittee,
     approvals: &[CommitteeApproval],
     account: &PublicKey,
@@ -176,8 +179,10 @@ pub fn verify_set_kyc_approvals(
 
     // Build the signing message
     // SECURITY FIX (Issue #34): Include verified_at in message to bind approval to timestamp
+    // SECURITY FIX (Issue #44): Include network chain_id for cross-network replay protection
     let build_message = |approval: &CommitteeApproval| {
         CommitteeApproval::build_set_kyc_message(
+            network,
             &committee.id,
             account,
             level,
@@ -195,7 +200,10 @@ pub fn verify_set_kyc_approvals(
 }
 
 /// Verify approvals for RevokeKyc operation
+///
+/// SECURITY FIX (Issue #44): Now requires network parameter for cross-network replay protection
 pub fn verify_revoke_kyc_approvals(
+    network: &Network,
     committee: &SecurityCommittee,
     approvals: &[CommitteeApproval],
     account: &PublicKey,
@@ -209,6 +217,7 @@ pub fn verify_revoke_kyc_approvals(
 
     let build_message = |approval: &CommitteeApproval| {
         CommitteeApproval::build_revoke_kyc_message(
+            network,
             &committee.id,
             account,
             reason_hash,
@@ -224,7 +233,9 @@ pub fn verify_revoke_kyc_approvals(
 /// Verify approvals for RenewKyc operation
 ///
 /// SECURITY FIX (Issue #34): Now requires verified_at parameter to bind approvals to timestamp
+/// SECURITY FIX (Issue #44): Now requires network parameter for cross-network replay protection
 pub fn verify_renew_kyc_approvals(
+    network: &Network,
     committee: &SecurityCommittee,
     approvals: &[CommitteeApproval],
     account: &PublicKey,
@@ -238,8 +249,10 @@ pub fn verify_renew_kyc_approvals(
     }
 
     // SECURITY FIX (Issue #34): Include verified_at in message to bind approval to timestamp
+    // SECURITY FIX (Issue #44): Include network chain_id for cross-network replay protection
     let build_message = |approval: &CommitteeApproval| {
         CommitteeApproval::build_renew_kyc_message(
+            network,
             &committee.id,
             account,
             data_hash,
@@ -256,11 +269,17 @@ pub fn verify_renew_kyc_approvals(
 /// Verify approvals for TransferKyc - source committee side
 ///
 /// SECURITY FIX (Issue #34): Now requires transferred_at parameter to bind approvals to timestamp
+/// SECURITY FIX (Issue #39): Now requires new_data_hash parameter to bind source approval to the transferred data
+/// SECURITY FIX (Issue #44): Now requires network parameter for cross-network replay protection
+/// SECURITY FIX (Issue #45): Now requires current_level parameter to bind approval to user's KYC level
 pub fn verify_transfer_kyc_source_approvals(
+    network: &Network,
     source_committee: &SecurityCommittee,
     approvals: &[CommitteeApproval],
     dest_committee_id: &Hash,
     account: &PublicKey,
+    current_level: u16,
+    new_data_hash: &Hash,
     transferred_at: u64,
     current_time: u64,
 ) -> Result<ApprovalVerificationResult, ApprovalError> {
@@ -273,13 +292,20 @@ pub fn verify_transfer_kyc_source_approvals(
     let source_id = source_committee.id.clone();
     let dest_id = dest_committee_id.clone();
     let account = account.clone();
+    let new_data_hash = new_data_hash.clone();
 
     // SECURITY FIX (Issue #34): Include transferred_at in message to bind approval to timestamp
+    // SECURITY FIX (Issue #39): Include new_data_hash so source committee approves the exact data
+    // SECURITY FIX (Issue #44): Include network chain_id for cross-network replay protection
+    // SECURITY FIX (Issue #45): Include current_level to bind approval to user's KYC level
     let build_message = move |approval: &CommitteeApproval| {
         CommitteeApproval::build_transfer_kyc_source_message(
+            network,
             &source_id,
             &dest_id,
             &account,
+            current_level,
+            &new_data_hash,
             transferred_at,
             approval.timestamp,
         )
@@ -299,7 +325,9 @@ pub fn verify_transfer_kyc_source_approvals(
 /// Verify approvals for TransferKyc - destination committee side
 ///
 /// SECURITY FIX (Issue #34): Now requires transferred_at parameter to bind approvals to timestamp
+/// SECURITY FIX (Issue #44): Now requires network parameter for cross-network replay protection
 pub fn verify_transfer_kyc_dest_approvals(
+    network: &Network,
     dest_committee: &SecurityCommittee,
     approvals: &[CommitteeApproval],
     source_committee_id: &Hash,
@@ -318,8 +346,10 @@ pub fn verify_transfer_kyc_dest_approvals(
     let new_data_hash = new_data_hash.clone();
 
     // SECURITY FIX (Issue #34): Include transferred_at in message to bind approval to timestamp
+    // SECURITY FIX (Issue #44): Include network chain_id for cross-network replay protection
     let build_message = move |approval: &CommitteeApproval| {
         CommitteeApproval::build_transfer_kyc_dest_message(
+            network,
             &source_id,
             &dest_id,
             &account,
@@ -342,6 +372,8 @@ pub fn verify_transfer_kyc_dest_approvals(
 
 /// Verify approvals for EmergencySuspend operation
 ///
+/// SECURITY FIX (Issue #44): Now requires network parameter for cross-network replay protection
+///
 /// # Policy Decision
 /// Emergency suspend operations are allowed even if the issuing committee is suspended.
 /// Rationale: Emergency actions (e.g., responding to fraud, security incidents) must
@@ -352,6 +384,7 @@ pub fn verify_transfer_kyc_dest_approvals(
 /// no longer have operational authority.
 /// Approved: 2025-12-29
 pub fn verify_emergency_suspend_approvals(
+    network: &Network,
     committee: &SecurityCommittee,
     approvals: &[CommitteeApproval],
     account: &PublicKey,
@@ -367,6 +400,7 @@ pub fn verify_emergency_suspend_approvals(
 
     let build_message = |approval: &CommitteeApproval| {
         CommitteeApproval::build_emergency_suspend_message(
+            network,
             &committee.id,
             account,
             reason_hash,
@@ -382,9 +416,12 @@ pub fn verify_emergency_suspend_approvals(
 
 /// Verify approvals for RegisterCommittee operation
 ///
+/// SECURITY FIX (Issue #44): Now requires network parameter for cross-network replay protection
+///
 /// The `config_hash` binds the approval signatures to the full committee configuration
 /// (members, thresholds, max_kyc_level), preventing approval replay with different configs.
 pub fn verify_register_committee_approvals(
+    network: &Network,
     parent_committee: &SecurityCommittee,
     approvals: &[CommitteeApproval],
     name: &str,
@@ -404,6 +441,7 @@ pub fn verify_register_committee_approvals(
 
     let build_message = move |approval: &CommitteeApproval| {
         CommitteeApproval::build_register_committee_message(
+            network,
             &parent_id,
             &name,
             region,
@@ -424,7 +462,10 @@ pub fn verify_register_committee_approvals(
 }
 
 /// Verify approvals for UpdateCommittee operation
+///
+/// SECURITY FIX (Issue #44): Now requires network parameter for cross-network replay protection
 pub fn verify_update_committee_approvals(
+    network: &Network,
     committee: &SecurityCommittee,
     approvals: &[CommitteeApproval],
     update_type: u8,
@@ -443,6 +484,7 @@ pub fn verify_update_committee_approvals(
 
     let build_message = move |approval: &CommitteeApproval| {
         CommitteeApproval::build_update_committee_message(
+            network,
             &committee_id,
             update_type,
             &update_data_hash,
@@ -544,6 +586,12 @@ mod tests {
     use super::*;
     use crate::crypto::KeyPair;
     use crate::kyc::{CommitteeMember, KycRegion, MemberRole};
+    use crate::network::Network;
+
+    // Use Devnet for testing
+    fn test_network() -> Network {
+        Network::Devnet
+    }
 
     fn create_test_committee(member_count: usize) -> (SecurityCommittee, Vec<KeyPair>) {
         let mut keypairs = Vec::with_capacity(member_count);
@@ -590,6 +638,7 @@ mod tests {
 
     #[test]
     fn test_verify_set_kyc_approvals_valid() {
+        let network = test_network();
         let (committee, keypairs) = create_test_committee(5);
         let account = keypairs[0].get_public_key().compress();
         let level = 31u16;
@@ -602,6 +651,7 @@ mod tests {
         for keypair in keypairs.iter().take(2) {
             let timestamp = current_time - 100;
             let message = CommitteeApproval::build_set_kyc_message(
+                &network,
                 &committee.id,
                 &account,
                 level,
@@ -613,6 +663,7 @@ mod tests {
         }
 
         let result = verify_set_kyc_approvals(
+            &network,
             &committee,
             &approvals,
             &account,
@@ -631,6 +682,7 @@ mod tests {
 
     #[test]
     fn test_verify_set_kyc_approvals_invalid_signature() {
+        let network = test_network();
         let (committee, keypairs) = create_test_committee(5);
         let account = keypairs[0].get_public_key().compress();
         let level = 31u16;
@@ -649,6 +701,7 @@ mod tests {
         );
 
         let result = verify_set_kyc_approvals(
+            &network,
             &committee,
             &[forged_approval],
             &account,
@@ -664,6 +717,7 @@ mod tests {
 
     #[test]
     fn test_verify_set_kyc_approvals_non_member() {
+        let network = test_network();
         let (committee, keypairs) = create_test_committee(5);
         let account = keypairs[0].get_public_key().compress();
         let level = 31u16;
@@ -675,6 +729,7 @@ mod tests {
         let timestamp = current_time - 100;
         let verified_at = timestamp;
         let message = CommitteeApproval::build_set_kyc_message(
+            &network,
             &committee.id,
             &account,
             level,
@@ -685,6 +740,7 @@ mod tests {
         let approval = create_signed_approval(&outsider, &message, timestamp);
 
         let result = verify_set_kyc_approvals(
+            &network,
             &committee,
             &[approval],
             &account,
@@ -700,6 +756,7 @@ mod tests {
 
     #[test]
     fn test_verify_set_kyc_approvals_expired() {
+        let network = test_network();
         let (committee, keypairs) = create_test_committee(5);
         let account = keypairs[0].get_public_key().compress();
         let level = 31u16;
@@ -710,6 +767,7 @@ mod tests {
         let timestamp = 1000u64; // Very old
         let verified_at = timestamp;
         let message = CommitteeApproval::build_set_kyc_message(
+            &network,
             &committee.id,
             &account,
             level,
@@ -720,6 +778,7 @@ mod tests {
         let approval = create_signed_approval(&keypairs[0], &message, timestamp);
 
         let result = verify_set_kyc_approvals(
+            &network,
             &committee,
             &[approval],
             &account,
@@ -735,6 +794,7 @@ mod tests {
 
     #[test]
     fn test_verify_set_kyc_level_exceeds_max() {
+        let network = test_network();
         let mut committee_data = create_test_committee(5);
         committee_data.0.max_kyc_level = 255; // Tier 4 max
         let (committee, keypairs) = committee_data;
@@ -747,6 +807,7 @@ mod tests {
         let timestamp = current_time - 100;
         let verified_at = timestamp;
         let message = CommitteeApproval::build_set_kyc_message(
+            &network,
             &committee.id,
             &account,
             level,
@@ -757,6 +818,7 @@ mod tests {
         let approval = create_signed_approval(&keypairs[0], &message, timestamp);
 
         let result = verify_set_kyc_approvals(
+            &network,
             &committee,
             &[approval],
             &account,
@@ -773,5 +835,228 @@ mod tests {
                 max_level: 255
             })
         ));
+    }
+
+    // ============================================================================
+    // ROUND 14-15 BUG FIX TESTS: Timestamp Binding (Bug #34)
+    // ============================================================================
+    // These tests verify that approval signatures are properly bound to timestamps,
+    // preventing relayers from manipulating verified_at after approvals are signed.
+
+    #[test]
+    fn test_timestamp_tampering_rejected_set_kyc() {
+        // Bug #34: Signature must bind to verified_at timestamp
+        // Sign with verified_at=T1, but verify with verified_at=T2 should FAIL
+        let network = test_network();
+        let (committee, keypairs) = create_test_committee(5);
+        let account = keypairs[0].get_public_key().compress();
+        let level = 31u16;
+        let data_hash = Hash::zero();
+        let current_time = 2000u64;
+
+        // Sign with verified_at = 1000
+        let signed_verified_at = 1000u64;
+        let timestamp = current_time - 100;
+        let message = CommitteeApproval::build_set_kyc_message(
+            &network,
+            &committee.id,
+            &account,
+            level,
+            &data_hash,
+            signed_verified_at, // Signed with this timestamp
+            timestamp,
+        );
+        let approval = create_signed_approval(&keypairs[0], &message, timestamp);
+
+        // Try to verify with different verified_at = 1500 (tampered)
+        let tampered_verified_at = 1500u64;
+        let result = verify_set_kyc_approvals(
+            &network,
+            &committee,
+            &[approval],
+            &account,
+            level,
+            &data_hash,
+            tampered_verified_at, // Different from what was signed
+            current_time,
+        );
+
+        // Should fail because signature doesn't match tampered timestamp
+        assert!(
+            result.is_err(),
+            "Timestamp tampering should be rejected - signature should bind to verified_at"
+        );
+    }
+
+    #[test]
+    fn test_timestamp_binding_valid_set_kyc() {
+        // Verify that matching timestamps work correctly
+        let network = test_network();
+        let (committee, keypairs) = create_test_committee(5);
+        let account = keypairs[0].get_public_key().compress();
+        let level = 31u16;
+        let data_hash = Hash::zero();
+        let current_time = 2000u64;
+
+        // Sign and verify with same verified_at
+        let verified_at = 1500u64;
+        let timestamp = current_time - 100;
+        let message = CommitteeApproval::build_set_kyc_message(
+            &network,
+            &committee.id,
+            &account,
+            level,
+            &data_hash,
+            verified_at,
+            timestamp,
+        );
+        let approval = create_signed_approval(&keypairs[0], &message, timestamp);
+
+        let result = verify_set_kyc_approvals(
+            &network,
+            &committee,
+            &[approval],
+            &account,
+            level,
+            &data_hash,
+            verified_at, // Same as signed
+            current_time,
+        );
+
+        assert!(
+            result.is_ok(),
+            "Matching timestamps should pass verification"
+        );
+    }
+
+    #[test]
+    fn test_timestamp_tampering_extend_validity() {
+        // Attack scenario: Attacker tries to extend KYC validity by changing verified_at
+        // Original: verified_at = old_time (would expire soon)
+        // Tampered: verified_at = recent_time (extends validity)
+        let network = test_network();
+        let (committee, keypairs) = create_test_committee(5);
+        let account = keypairs[0].get_public_key().compress();
+        let level = 31u16;
+        let data_hash = Hash::zero();
+        let current_time = 100_000u64;
+
+        // Sign with old verified_at (legitimate, from 50000 seconds ago)
+        let original_verified_at = 50_000u64;
+        let timestamp = current_time - 100;
+        let message = CommitteeApproval::build_set_kyc_message(
+            &network,
+            &committee.id,
+            &account,
+            level,
+            &data_hash,
+            original_verified_at,
+            timestamp,
+        );
+        let approval = create_signed_approval(&keypairs[0], &message, timestamp);
+
+        // Attack: Try to submit with recent verified_at to extend validity
+        let tampered_verified_at = current_time - 100; // Much more recent
+        let result = verify_set_kyc_approvals(
+            &network,
+            &committee,
+            &[approval],
+            &account,
+            level,
+            &data_hash,
+            tampered_verified_at,
+            current_time,
+        );
+
+        assert!(
+            result.is_err(),
+            "Extending validity via timestamp tampering should be rejected"
+        );
+    }
+
+    #[test]
+    fn test_timestamp_tampering_backdate_kyc() {
+        // Attack scenario: Attacker tries to backdate KYC to create immediately-expired record
+        let network = test_network();
+        let (committee, keypairs) = create_test_committee(5);
+        let account = keypairs[0].get_public_key().compress();
+        let level = 31u16;
+        let data_hash = Hash::zero();
+        let current_time = 100_000u64;
+
+        // Sign with recent verified_at
+        let original_verified_at = current_time - 100;
+        let timestamp = current_time - 100;
+        let message = CommitteeApproval::build_set_kyc_message(
+            &network,
+            &committee.id,
+            &account,
+            level,
+            &data_hash,
+            original_verified_at,
+            timestamp,
+        );
+        let approval = create_signed_approval(&keypairs[0], &message, timestamp);
+
+        // Attack: Try to submit with old verified_at to create expired record
+        let tampered_verified_at = 1000u64; // Very old, would be expired
+        let result = verify_set_kyc_approvals(
+            &network,
+            &committee,
+            &[approval],
+            &account,
+            level,
+            &data_hash,
+            tampered_verified_at,
+            current_time,
+        );
+
+        assert!(
+            result.is_err(),
+            "Backdating via timestamp tampering should be rejected"
+        );
+    }
+
+    #[test]
+    fn test_multiple_approvals_same_verified_at() {
+        // All approvals must use the same verified_at that was signed
+        let network = test_network();
+        let (committee, keypairs) = create_test_committee(5);
+        let account = keypairs[0].get_public_key().compress();
+        let level = 31u16;
+        let data_hash = Hash::zero();
+        let current_time = 2000u64;
+        let verified_at = 1500u64;
+
+        // Create multiple valid approvals with same verified_at
+        let mut approvals = Vec::new();
+        for keypair in keypairs.iter().take(3) {
+            let timestamp = current_time - 100;
+            let message = CommitteeApproval::build_set_kyc_message(
+                &network,
+                &committee.id,
+                &account,
+                level,
+                &data_hash,
+                verified_at,
+                timestamp,
+            );
+            approvals.push(create_signed_approval(keypair, &message, timestamp));
+        }
+
+        let result = verify_set_kyc_approvals(
+            &network,
+            &committee,
+            &approvals,
+            &account,
+            level,
+            &data_hash,
+            verified_at,
+            current_time,
+        );
+
+        assert!(result.is_ok());
+        let result = result.unwrap();
+        assert_eq!(result.valid_count, 3);
     }
 }

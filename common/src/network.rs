@@ -46,6 +46,18 @@ impl clap::ValueEnum for Network {
 }
 
 impl Network {
+    /// Get the chain ID for this network.
+    /// Used in approval signatures to prevent cross-network replay attacks.
+    /// Returns: Mainnet=0, Testnet=1, Stagenet=2, Devnet=3
+    pub const fn chain_id(&self) -> u64 {
+        match self {
+            Self::Mainnet => 0,
+            Self::Testnet => 1,
+            Self::Stagenet => 2,
+            Self::Devnet => 3,
+        }
+    }
+
     pub fn is_mainnet(&self) -> bool {
         matches!(self, Self::Mainnet)
     }

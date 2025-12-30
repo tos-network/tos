@@ -1678,8 +1678,11 @@ impl Transaction {
 
                 // Verify approvals (signatures, membership, threshold)
                 // SECURITY FIX (Issue #34): Pass verified_at to bind approval signatures to timestamp
+                // SECURITY FIX (Issue #44): Pass network for cross-network replay protection
                 let current_time = state.get_verification_timestamp();
+                let network = state.get_network();
                 crate::kyc::verify_set_kyc_approvals(
+                    &network,
                     &committee,
                     payload.get_approvals(),
                     payload.get_account(),
@@ -1744,8 +1747,11 @@ impl Transaction {
                     })?;
 
                 // Verify approvals (signatures, membership, threshold)
+                // SECURITY FIX (Issue #44): Pass network for cross-network replay protection
                 let current_time = state.get_verification_timestamp();
+                let network = state.get_network();
                 crate::kyc::verify_revoke_kyc_approvals(
+                    &network,
                     &committee,
                     payload.get_approvals(),
                     payload.get_account(),
@@ -1798,8 +1804,11 @@ impl Transaction {
 
                 // Verify approvals (signatures, membership, threshold)
                 // SECURITY FIX (Issue #34): Pass verified_at to bind approval signatures to timestamp
+                // SECURITY FIX (Issue #44): Pass network for cross-network replay protection
                 let current_time = state.get_verification_timestamp();
+                let network = state.get_network();
                 crate::kyc::verify_renew_kyc_approvals(
+                    &network,
                     &committee,
                     payload.get_approvals(),
                     payload.get_account(),
@@ -1846,6 +1855,17 @@ impl Transaction {
                     )));
                 }
 
+                // SECURITY FIX (Issue #45): Get current KYC level to bind source approval
+                let current_level = state
+                    .get_kyc_level(payload.get_account())
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| {
+                        VerificationError::AnyError(anyhow::anyhow!(
+                            "User has no KYC level to transfer"
+                        ))
+                    })?;
+
                 // Get and verify source committee approvals
                 let source_committee = state
                     .get_committee(payload.get_source_committee_id())
@@ -1859,11 +1879,18 @@ impl Transaction {
                     })?;
 
                 // SECURITY FIX (Issue #34): Pass transferred_at to bind approval signatures to timestamp
+                // SECURITY FIX (Issue #39): Pass new_data_hash so source committee approves the exact data
+                // SECURITY FIX (Issue #44): Pass network for cross-network replay protection
+                // SECURITY FIX (Issue #45): Pass current_level to bind approval to user's KYC level
+                let network = state.get_network();
                 crate::kyc::verify_transfer_kyc_source_approvals(
+                    &network,
                     &source_committee,
                     payload.get_source_approvals(),
                     payload.get_dest_committee_id(),
                     payload.get_account(),
+                    current_level,
+                    payload.get_new_data_hash(),
                     payload.get_transferred_at(),
                     current_time,
                 )
@@ -1882,7 +1909,9 @@ impl Transaction {
                     })?;
 
                 // SECURITY FIX (Issue #34): Pass transferred_at to bind approval signatures to timestamp
+                // SECURITY FIX (Issue #44): Pass network for cross-network replay protection
                 crate::kyc::verify_transfer_kyc_dest_approvals(
+                    &network,
                     &dest_committee,
                     payload.get_dest_approvals(),
                     payload.get_source_committee_id(),
@@ -2125,8 +2154,11 @@ impl Transaction {
                 );
 
                 // Verify parent committee approvals with config binding
+                // SECURITY FIX (Issue #44): Pass network for cross-network replay protection
                 let current_time = state.get_verification_timestamp();
+                let network = state.get_network();
                 crate::kyc::verify_register_committee_approvals(
+                    &network,
                     &parent_committee,
                     payload.get_approvals(),
                     payload.get_name(),
@@ -2186,10 +2218,35 @@ impl Transaction {
                     })?;
 
                 // Validate governance constraints using committee state
+                // SECURITY FIX (Issue #36, #37): Include approver_count and kyc_threshold
+                // to properly validate threshold changes and role updates
+                let (target_is_active, target_can_approve) = match payload.get_update() {
+                    crate::transaction::CommitteeUpdateData::RemoveMember { public_key }
+                    | crate::transaction::CommitteeUpdateData::UpdateMemberRole {
+                        public_key,
+                        ..
+                    }
+                    | crate::transaction::CommitteeUpdateData::UpdateMemberStatus {
+                        public_key,
+                        ..
+                    } => committee.get_member(public_key).map(|member| {
+                        (
+                            member.status == crate::kyc::MemberStatus::Active,
+                            member.role.can_approve(),
+                        )
+                    }),
+                    _ => None,
+                }
+                .unwrap_or((true, true));
+
                 let committee_info = kyc::CommitteeGovernanceInfo {
                     member_count: committee.active_member_count(),
+                    approver_count: committee.active_approver_count(),
                     total_member_count: committee.total_member_count(),
                     threshold: committee.threshold,
+                    kyc_threshold: committee.kyc_threshold,
+                    target_is_active: Some(target_is_active),
+                    target_can_approve: Some(target_can_approve),
                 };
                 let current_time = state.get_verification_timestamp();
                 kyc::verify_update_committee_with_state(payload, &committee_info, current_time)?;
@@ -2217,7 +2274,10 @@ impl Transaction {
                 };
 
                 // Verify committee approvals
+                // SECURITY FIX (Issue #44): Pass network for cross-network replay protection
+                let network = state.get_network();
                 crate::kyc::verify_update_committee_approvals(
+                    &network,
                     &committee,
                     payload.get_approvals(),
                     update_type,
@@ -2274,8 +2334,11 @@ impl Transaction {
                     })?;
 
                 // Verify emergency suspend approvals (requires 2 members)
+                // SECURITY FIX (Issue #44): Pass network for cross-network replay protection
                 let current_time = state.get_verification_timestamp();
+                let network = state.get_network();
                 crate::kyc::verify_emergency_suspend_approvals(
+                    &network,
                     &committee,
                     payload.get_approvals(),
                     payload.get_account(),
