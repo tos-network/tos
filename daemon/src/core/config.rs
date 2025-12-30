@@ -380,6 +380,16 @@ pub struct P2pConfig {
     #[clap(name = "p2p-disable-fast-sync-support", long)]
     #[serde(default)]
     pub disable_fast_sync_support: bool,
+    /// During the sync from peers, only sync from priority nodes.
+    /// This is useful to ensure that we only sync from trusted nodes.
+    #[clap(name = "p2p-sync-from-priority-only", long)]
+    #[serde(default)]
+    pub sync_from_priority_only: bool,
+    /// During a reorg, only accept blocks from priority nodes.
+    /// This is useful to ensure that we only accept blocks from trusted nodes.
+    #[clap(name = "p2p-reorg-from-priority-only", long)]
+    #[serde(default)]
+    pub reorg_from_priority_only: bool,
 }
 
 #[derive(Debug, Clone, Copy, clap::ValueEnum, Serialize, Deserialize)]

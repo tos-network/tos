@@ -175,6 +175,10 @@ pub struct P2pServer<S: Storage> {
     // Proxy address to use in case we try to connect
     // to an outgoing peer
     proxy: Option<(ProxyKind, SocketAddr, Option<(String, String)>)>,
+    // During the sync from peers, only sync from priority nodes
+    sync_from_priority_only: bool,
+    // During a reorg, only accept blocks from priority nodes
+    reorg_from_priority_only: bool,
 }
 
 impl<S: Storage> P2pServer<S> {
@@ -203,6 +207,8 @@ impl<S: Storage> P2pServer<S> {
         handle_peer_packets_in_dedicated_task: bool,
         disable_fast_sync_support: bool,
         proxy: Option<(ProxyKind, SocketAddr, Option<(String, String)>)>,
+        sync_from_priority_only: bool,
+        reorg_from_priority_only: bool,
     ) -> Result<Arc<Self>, P2pError> {
         if tag
             .as_ref()
@@ -296,6 +302,8 @@ impl<S: Storage> P2pServer<S> {
             disable_fetching_txs_propagated,
             handle_peer_packets_in_dedicated_task,
             proxy,
+            sync_from_priority_only,
+            reorg_from_priority_only,
         };
 
         let arc = Arc::new(server);
@@ -1019,6 +1027,7 @@ impl<S: Storage> P2pServer<S> {
             }
         }
 
+        let sync_from_priority_only = self.sync_from_priority_only;
         let mut peers = stream::iter(available_peers)
             .map(|p| async move {
                 // Don't select peers that are on a bad chain
@@ -1027,6 +1036,14 @@ impl<S: Storage> P2pServer<S> {
                         if log::log_enabled!(log::Level::Debug) {
                         debug!("{} has failed chain sync before, skipping...", p);
                         }
+                    }
+                    return None;
+                }
+
+                // If sync_from_priority_only is enabled, skip non-priority nodes
+                if sync_from_priority_only && !p.is_priority() {
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("{} is not a priority node for syncing, skipping...", p);
                     }
                     return None;
                 }
