@@ -1,6 +1,8 @@
 use crate::core::{
     error::BlockchainError,
-    storage::{rocksdb::Column, sled::PRUNED_TOPOHEIGHT, PrunedTopoheightProvider, RocksStorage},
+    storage::{
+        constants::PRUNED_TOPOHEIGHT, rocksdb::Column, PrunedTopoheightProvider, RocksStorage,
+    },
 };
 use async_trait::async_trait;
 use log::trace;
