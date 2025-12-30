@@ -3323,10 +3323,19 @@ impl<S: Storage> P2pServer<S> {
 
     // Returns the best topoheight based on all peers
     // If sync_from_priority_only is enabled, only consider priority nodes
+    // Falls back to our_topoheight if no qualifying peers are found
     pub async fn get_best_topoheight(&self) -> TopoHeight {
-        self.peer_list
+        let our_topoheight = self.blockchain.get_topo_height();
+        let best = self
+            .peer_list
             .get_best_topoheight(self.sync_from_priority_only)
-            .await
+            .await;
+        // Use our_topoheight as fallback when no qualifying peers
+        if best == 0 {
+            our_topoheight
+        } else {
+            best
+        }
     }
 
     // Returns whether sync_from_priority_only is enabled
