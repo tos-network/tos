@@ -16,6 +16,8 @@ pub enum VerificationError<T> {
     SenderIsReceiver,
     #[error("Invalid signature")]
     InvalidSignature,
+    #[error("Invalid chain ID: expected {expected}, got {got}")]
+    InvalidChainId { expected: u8, got: u8 },
     #[error("Proof verification error: {0}")]
     Proof(#[from] ProofVerificationError),
     #[error("Extra Data is too big in transfer")]

@@ -173,6 +173,13 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError>
     ) -> Result<(&Module, &Environment), BlockchainError> {
         self.inner.get_contract_module_with_environment(hash).await
     }
+
+    fn get_network(&self) -> tos_common::network::Network {
+        self.inner
+            .storage
+            .get_network()
+            .unwrap_or(tos_common::network::Network::Mainnet)
+    }
 }
 
 #[async_trait]
@@ -205,13 +212,6 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for Applicable
 
     fn is_mainnet(&self) -> bool {
         self.inner.storage.is_mainnet()
-    }
-
-    fn get_network(&self) -> tos_common::network::Network {
-        self.inner
-            .storage
-            .get_network()
-            .unwrap_or(tos_common::network::Network::Mainnet)
     }
 
     async fn set_contract_outputs(

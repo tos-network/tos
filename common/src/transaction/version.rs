@@ -5,9 +5,11 @@ use core::fmt;
 #[repr(u8)]
 #[derive(Default)]
 pub enum TxVersion {
-    // All operations: Burn, Transfer, Multisig, Deploy Contract, Invoke Contract, Energy
-    #[default]
+    // Legacy: no chain_id in signing bytes
     T0 = 0,
+    // New: includes chain_id in signing bytes for cross-network replay protection
+    #[default]
+    T1 = 1,
 }
 
 impl TryFrom<u8> for TxVersion {
@@ -16,6 +18,7 @@ impl TryFrom<u8> for TxVersion {
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
             0 => Ok(TxVersion::T0),
+            1 => Ok(TxVersion::T1),
             _ => Err(()),
         }
     }
@@ -25,6 +28,7 @@ impl From<TxVersion> for u8 {
     fn from(val: TxVersion) -> Self {
         match val {
             TxVersion::T0 => 0,
+            TxVersion::T1 => 1,
         }
     }
 }
@@ -40,6 +44,7 @@ impl Serializer for TxVersion {
     fn write(&self, writer: &mut Writer) {
         match self {
             TxVersion::T0 => writer.write_u8(0),
+            TxVersion::T1 => writer.write_u8(1),
         }
     }
 
@@ -60,6 +65,7 @@ impl fmt::Display for TxVersion {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             TxVersion::T0 => write!(f, "T0"),
+            TxVersion::T1 => write!(f, "T1"),
         }
     }
 }
@@ -89,14 +95,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_tx_version() {
+    fn test_tx_version_t0() {
         let version = TxVersion::T0;
         let read_version = TxVersion::from_bytes(&version.to_bytes()).unwrap();
         assert_eq!(version, read_version);
     }
 
     #[test]
-    fn test_tx_version_serde() {
+    fn test_tx_version_t1() {
+        let version = TxVersion::T1;
+        let read_version = TxVersion::from_bytes(&version.to_bytes()).unwrap();
+        assert_eq!(version, read_version);
+    }
+
+    #[test]
+    fn test_tx_version_serde_t0() {
         let version = TxVersion::T0;
         let serialized = serde_json::to_string(&version).unwrap();
         assert!(serialized == "0");
@@ -105,9 +118,24 @@ mod tests {
     }
 
     #[test]
+    fn test_tx_version_serde_t1() {
+        let version = TxVersion::T1;
+        let serialized = serde_json::to_string(&version).unwrap();
+        assert!(serialized == "1");
+        let deserialized: TxVersion = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(version, deserialized);
+    }
+
+    #[test]
     fn test_tx_version_ord() {
         let version0 = TxVersion::T0;
-        let version1 = TxVersion::T0;
-        assert!(version0 == version1);
+        let version1 = TxVersion::T1;
+        assert!(version0 < version1);
+    }
+
+    #[test]
+    fn test_tx_version_default() {
+        let version = TxVersion::default();
+        assert_eq!(version, TxVersion::T1);
     }
 }

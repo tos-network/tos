@@ -288,6 +288,7 @@ impl StatelessWallet {
         // Create the transaction builder
         let builder = TransactionBuilder::new(
             self.tx_version,
+            self.network.chain_id() as u8,
             self.get_public_key(),
             threshold,
             transaction_type,

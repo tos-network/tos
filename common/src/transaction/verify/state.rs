@@ -99,6 +99,9 @@ pub trait BlockchainVerificationState<'a, E> {
     /// Get the environment
     async fn get_environment(&mut self) -> Result<&Environment, E>;
 
+    /// Get the network type (for chain_id validation)
+    fn get_network(&self) -> crate::network::Network;
+
     /// Set the contract module
     async fn set_contract_module(&mut self, hash: &Hash, module: &'a Module) -> Result<(), E>;
 
@@ -142,9 +145,6 @@ pub trait BlockchainApplyState<'a, P: ContractProvider, E>:
 
     /// Is mainnet network
     fn is_mainnet(&self) -> bool;
-
-    /// Get the network type
-    fn get_network(&self) -> crate::network::Network;
 
     /// Track the contract outputs
     async fn set_contract_outputs(

@@ -832,4 +832,10 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for ChainS
         let module = self.internal_get_contract_module(hash).await?;
         Ok((module, self.environment))
     }
+
+    fn get_network(&self) -> tos_common::network::Network {
+        self.storage
+            .get_network()
+            .unwrap_or(tos_common::network::Network::Mainnet)
+    }
 }

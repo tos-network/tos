@@ -108,6 +108,9 @@ impl Serializer for FeeType {
 pub struct Transaction {
     /// Version of the transaction
     version: TxVersion,
+    /// Chain ID for cross-network replay protection (T1+)
+    /// 0 = Mainnet, 1 = Testnet, 2 = Stagenet, 3 = Devnet
+    chain_id: u8,
     // Source of the transaction
     source: CompressedPublicKey,
     /// Type of the transaction
@@ -133,6 +136,7 @@ impl Transaction {
     #[inline(always)]
     pub fn new(
         version: TxVersion,
+        chain_id: u8,
         source: CompressedPublicKey,
         data: TransactionType,
         fee: u64,
@@ -144,6 +148,7 @@ impl Transaction {
     ) -> Self {
         Self {
             version,
+            chain_id,
             source,
             data,
             fee,
@@ -158,6 +163,11 @@ impl Transaction {
     // Get the transaction version
     pub fn get_version(&self) -> TxVersion {
         self.version
+    }
+
+    // Get the chain ID (for cross-network replay protection)
+    pub fn get_chain_id(&self) -> u8 {
+        self.chain_id
     }
 
     // Get the source key
@@ -287,12 +297,17 @@ impl Transaction {
         let mut buffer = Vec::new();
         let mut writer = Writer::new(&mut buffer);
 
-        // T0 format: always include fee_type but NOT multisig (multisig participants sign without multisig field)
         self.version.write(&mut writer);
+
+        // T1+: include chain_id for cross-network replay protection
+        if self.version >= TxVersion::T1 {
+            self.chain_id.write(&mut writer);
+        }
+
         self.source.write(&mut writer);
         self.data.write(&mut writer);
         self.fee.write(&mut writer);
-        self.fee_type.write(&mut writer); // Always include fee_type for T0
+        self.fee_type.write(&mut writer);
         self.nonce.write(&mut writer);
         self.reference.write(&mut writer);
         // Do NOT include multisig - multisig participants sign without it
@@ -309,10 +324,16 @@ impl Transaction {
         // Multisig participants sign the transaction data without the multisig field
         // This matches the logic in UnsignedTransaction::write_no_signature
         self.version.write(&mut writer);
+
+        // T1+: include chain_id for cross-network replay protection
+        if self.version >= TxVersion::T1 {
+            self.chain_id.write(&mut writer);
+        }
+
         self.source.write(&mut writer);
         self.data.write(&mut writer);
         self.fee.write(&mut writer);
-        self.fee_type.write(&mut writer); // Always include fee_type for T0
+        self.fee_type.write(&mut writer);
         self.nonce.write(&mut writer);
         self.reference.write(&mut writer);
         // Do NOT include multisig field - it should not be part of the main signature
@@ -486,6 +507,12 @@ impl Serializer for TransactionType {
 impl Serializer for Transaction {
     fn write(&self, writer: &mut Writer) {
         self.version.write(writer);
+
+        // T1+: include chain_id for cross-network replay protection
+        if self.version >= TxVersion::T1 {
+            self.chain_id.write(writer);
+        }
+
         self.source.write(writer);
         self.data.write(writer);
         self.fee.write(writer);
@@ -493,7 +520,6 @@ impl Serializer for Transaction {
         self.nonce.write(writer);
         self.reference.write(writer);
 
-        // Always include multisig for T0
         self.multisig.write(writer);
 
         self.signature.write(writer);
@@ -504,6 +530,13 @@ impl Serializer for Transaction {
 
         reader.context_mut().store(version);
 
+        // T1+: read chain_id, T0: default to 0
+        let chain_id = if version >= TxVersion::T1 {
+            reader.read_u8()?
+        } else {
+            0
+        };
+
         let source = CompressedPublicKey::read(reader)?;
         let data = TransactionType::read(reader)?;
         let fee = reader.read_u64()?;
@@ -511,13 +544,12 @@ impl Serializer for Transaction {
         let nonce = Nonce::read(reader)?;
         let reference = Reference::read(reader)?;
 
-        // Always read multisig for T0
         let multisig = Option::read(reader)?;
 
         let signature = Signature::read(reader)?;
 
         Ok(Transaction::new(
-            version, source, data, fee, fee_type, nonce, reference, multisig, signature,
+            version, chain_id, source, data, fee, fee_type, nonce, reference, multisig, signature,
         ))
     }
 
@@ -532,7 +564,11 @@ impl Serializer for Transaction {
             + self.reference.size()
             + self.signature.size();
 
-        // Always include multisig size for T0
+        // T1+: add chain_id byte
+        if self.version >= TxVersion::T1 {
+            size += 1;
+        }
+
         size += self.multisig.size();
 
         size

@@ -45,8 +45,9 @@ pub use zkp_cache::*;
 impl Transaction {
     pub fn has_valid_version_format(&self) -> bool {
         match self.version {
-            TxVersion::T0 => {
-                // T0 supports all transaction types
+            TxVersion::T0 | TxVersion::T1 => {
+                // T0 and T1 support all transaction types
+                // T1 adds chain_id for cross-network replay protection
                 match &self.data {
                     TransactionType::Transfers(_)
                     | TransactionType::Burn(_)
@@ -777,14 +778,31 @@ impl Transaction {
             .decompress()
             .map_err(|err| VerificationError::Proof(err.into()))?;
 
-        // 0.a Verify Signature
+        // 0.a Verify chain_id for T1+ transactions (cross-network replay protection)
+        if self.version >= TxVersion::T1 {
+            let expected_chain_id = state.get_network().chain_id() as u8;
+            if self.chain_id != expected_chain_id {
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "transaction chain_id mismatch: expected {}, got {}",
+                        expected_chain_id, self.chain_id
+                    );
+                }
+                return Err(VerificationError::InvalidChainId {
+                    expected: expected_chain_id,
+                    got: self.chain_id,
+                });
+            }
+        }
+
+        // 0.b Verify Signature
         let bytes = self.get_signing_bytes();
         if !self.signature.verify(&bytes, &source_decompressed) {
             debug!("transaction signature is invalid");
             return Err(VerificationError::InvalidSignature);
         }
 
-        // 0.b Verify multisig
+        // 0.c Verify multisig
         if let Some(config) = state
             .get_multisig_state(&self.source)
             .await

@@ -208,6 +208,8 @@ pub struct RPCTransaction<'a> {
     pub hash: Cow<'a, Hash>,
     /// Version of the transaction
     pub version: TxVersion,
+    /// Chain ID for cross-network replay protection (T1+)
+    pub chain_id: u8,
     // Source of the transaction
     pub source: Address,
     /// Type of the transaction
@@ -232,6 +234,7 @@ impl<'a> RPCTransaction<'a> {
         Self {
             hash: Cow::Borrowed(hash),
             version: tx.get_version(),
+            chain_id: tx.get_chain_id(),
             source: tx.get_source().as_address(mainnet),
             data: RPCTransactionType::from_type(tx.get_data(), mainnet),
             fee: tx.get_fee(),
@@ -248,6 +251,7 @@ impl<'a> From<RPCTransaction<'a>> for Transaction {
     fn from(tx: RPCTransaction<'a>) -> Self {
         Transaction::new(
             tx.version,
+            tx.chain_id,
             tx.source.to_public_key(),
             tx.data.into(),
             tx.fee,

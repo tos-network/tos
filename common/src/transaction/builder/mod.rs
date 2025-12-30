@@ -101,6 +101,8 @@ pub enum TransactionTypeBuilder {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct TransactionBuilder {
     version: TxVersion,
+    /// Chain ID for cross-network replay protection (T1+)
+    chain_id: u8,
     source: CompressedPublicKey,
     required_thresholds: Option<u8>,
     data: TransactionTypeBuilder,
@@ -112,6 +114,7 @@ pub struct TransactionBuilder {
 impl TransactionBuilder {
     pub fn new(
         version: TxVersion,
+        chain_id: u8,
         source: CompressedPublicKey,
         required_thresholds: Option<u8>,
         data: TransactionTypeBuilder,
@@ -119,6 +122,7 @@ impl TransactionBuilder {
     ) -> Self {
         Self {
             version,
+            chain_id,
             source,
             required_thresholds,
             data,
@@ -726,6 +730,7 @@ impl TransactionBuilder {
 
         let unsigned_tx = UnsignedTransaction::new_with_fee_type(
             self.version,
+            self.chain_id,
             self.source,
             data,
             fee,
@@ -848,6 +853,7 @@ mod tests {
         // This should not cause an error during construction
         let _ = TransactionBuilder::new(
             TxVersion::T0,
+            0, // chain_id: 0 for tests
             CompressedPublicKey::new(curve25519_dalek::ristretto::CompressedRistretto::default()),
             None,
             transfer_builder,
@@ -864,6 +870,7 @@ mod tests {
         // This should cause an error when building
         let _builder = TransactionBuilder::new(
             TxVersion::T0,
+            0, // chain_id: 0 for tests
             CompressedPublicKey::new(curve25519_dalek::ristretto::CompressedRistretto::default()),
             None,
             burn_builder.clone(),
@@ -901,6 +908,7 @@ mod tests {
         // This should cause an error when building due to new address validation
         let _builder = TransactionBuilder::new(
             TxVersion::T0,
+            0, // chain_id: 0 for tests
             CompressedPublicKey::new(curve25519_dalek::ristretto::CompressedRistretto::default()),
             None,
             transfer_to_new_address.clone(),

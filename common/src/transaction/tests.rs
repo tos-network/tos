@@ -159,6 +159,7 @@ fn create_tx_for(
 
     let builder = TransactionBuilder::new(
         TxVersion::T0,
+        0, // chain_id: 0 for tests
         account.keypair.get_public_key().compress(),
         None,
         data,
@@ -443,6 +444,7 @@ async fn test_burn_tx_verify() {
         });
         let builder = TransactionBuilder::new(
             TxVersion::T0,
+            0, // chain_id: 0 for tests
             alice.keypair.get_public_key().compress(),
             None,
             data,
@@ -519,6 +521,7 @@ async fn test_tx_invoke_contract() {
         });
         let builder = TransactionBuilder::new(
             TxVersion::T0,
+            0, // chain_id: 0 for tests
             alice.keypair.get_public_key().compress(),
             None,
             data,
@@ -605,6 +608,7 @@ async fn test_tx_invoke_contract_multiple_deposits() {
         });
         let builder = TransactionBuilder::new(
             TxVersion::T0,
+            0, // chain_id: 0 for tests
             alice.keypair.get_public_key().compress(),
             None,
             data,
@@ -681,6 +685,7 @@ async fn test_tx_deploy_contract() {
         });
         let builder = TransactionBuilder::new(
             TxVersion::T0,
+            0, // chain_id: 0 for tests
             alice.keypair.get_public_key().compress(),
             None,
             data,
@@ -763,6 +768,7 @@ async fn test_max_transfers() {
         let data = TransactionTypeBuilder::Transfers(transfers);
         let builder = TransactionBuilder::new(
             TxVersion::T0,
+            0, // chain_id: 0 for tests
             alice.keypair.get_public_key().compress(),
             None,
             data,
@@ -841,6 +847,7 @@ async fn test_multisig_setup() {
         });
         let builder = TransactionBuilder::new(
             TxVersion::T0,
+            0, // chain_id: 0 for tests
             alice.keypair.get_public_key().compress(),
             None,
             data,
@@ -925,6 +932,7 @@ async fn test_multisig() {
         }]);
         let builder = TransactionBuilder::new(
             TxVersion::T0,
+            0, // chain_id: 0 for tests
             alice.keypair.get_public_key().compress(),
             Some(2),
             data,
@@ -1017,6 +1025,7 @@ async fn test_transfer_extra_data_limits() {
 
         let builder = TransactionBuilder::new(
             TxVersion::T0,
+            0, // chain_id: 0 for tests
             alice.keypair.get_public_key().compress(),
             None,
             data,
@@ -1112,6 +1121,7 @@ async fn test_transfer_extra_data_limits() {
 
         let builder = TransactionBuilder::new(
             TxVersion::T0,
+            0, // chain_id: 0 for tests
             alice.keypair.get_public_key().compress(),
             None,
             data,
@@ -1159,6 +1169,7 @@ async fn test_transfer_extra_data_limits() {
         let data = TransactionTypeBuilder::Transfers(transfers);
         let builder = TransactionBuilder::new(
             TxVersion::T0,
+            0, // chain_id: 0 for tests
             alice.keypair.get_public_key().compress(),
             None,
             data,
@@ -1213,6 +1224,7 @@ async fn test_unfreeze_tos_balance_refund() {
 
         let builder = TransactionBuilder::new(
             TxVersion::T0,
+            0, // chain_id: 0 for tests
             alice.keypair.get_public_key().compress(),
             None,
             data,
@@ -1433,6 +1445,11 @@ impl<'a> BlockchainVerificationState<'a, TestError> for ChainState {
         let module = self.contracts.get(contract).ok_or(TestError(()))?;
         Ok((module, &self.env))
     }
+
+    fn get_network(&self) -> crate::network::Network {
+        // Use Mainnet for tests (chain_id = 0)
+        crate::network::Network::Mainnet
+    }
 }
 
 impl FeeHelper for AccountStateImpl {
@@ -1525,6 +1542,7 @@ fn create_transfer_tx(
 
     let builder = TransactionBuilder::new(
         TxVersion::T0,
+        0, // chain_id: 0 for tests
         sender.keypair.get_public_key().compress(),
         None,
         data,
@@ -1549,6 +1567,7 @@ fn create_burn_tx(sender: &Account, amount: u64, asset: Hash) -> Arc<Transaction
 
     let builder = TransactionBuilder::new(
         TxVersion::T0,
+        0, // chain_id: 0 for tests
         sender.keypair.get_public_key().compress(),
         None,
         data,
@@ -1984,6 +2003,7 @@ async fn test_p04_multiple_transfers() {
 
     let builder = TransactionBuilder::new(
         TxVersion::T0,
+        0, // chain_id: 0 for tests
         alice.keypair.get_public_key().compress(),
         None,
         data,

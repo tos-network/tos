@@ -35,6 +35,7 @@ fn create_transfer_transaction(
 
     let builder = TransactionBuilder::new(
         TxVersion::T0,
+        0, // chain_id: 0 for tests
         sender.get_public_key().compress(),
         None,
         tx_type,
@@ -546,6 +547,7 @@ async fn test_invalid_energy_fee_on_burn_transaction() {
 
     let builder = TransactionBuilder::new(
         TxVersion::T0,
+        0, // chain_id: 0 for tests
         alice.get_public_key().compress(),
         None,
         tx_type,
@@ -585,6 +587,7 @@ async fn test_invalid_energy_fee_for_new_address() {
 
     let builder = TransactionBuilder::new(
         TxVersion::T0,
+        0, // chain_id: 0 for tests
         alice.get_public_key().compress(),
         None,
         tx_type,
@@ -1096,6 +1099,7 @@ fn test_freeze_tos_integration() {
 
     let builder = tos_common::transaction::builder::TransactionBuilder::new(
         tos_common::transaction::TxVersion::T0,
+        0, // chain_id: 0 for tests
         alice.get_public_key().compress(),
         None,
         tx_type,
@@ -1251,6 +1255,7 @@ fn test_freeze_tos_sigma_proofs_verification() {
 
         let builder = tos_common::transaction::builder::TransactionBuilder::new(
             tos_common::transaction::TxVersion::T0,
+            0, // chain_id: 0 for tests
             alice.get_public_key().compress(),
             None,
             tx_type,
@@ -1404,6 +1409,7 @@ fn test_unfreeze_tos_sigma_proofs_verification() {
 
         let builder = tos_common::transaction::builder::TransactionBuilder::new(
             tos_common::transaction::TxVersion::T0,
+            0, // chain_id: 0 for tests
             alice.get_public_key().compress(),
             None,
             tx_type,
@@ -1573,6 +1579,7 @@ fn test_unfreeze_tos_integration() {
 
     let builder = tos_common::transaction::builder::TransactionBuilder::new(
         tos_common::transaction::TxVersion::T0,
+        0, // chain_id: 0 for tests
         alice.get_public_key().compress(),
         None,
         tx_type,
@@ -1638,6 +1645,7 @@ fn test_unfreeze_tos_integration() {
 
     let builder = tos_common::transaction::builder::TransactionBuilder::new(
         tos_common::transaction::TxVersion::T0,
+        0, // chain_id: 0 for tests
         alice.get_public_key().compress(),
         None,
         tx_type,
@@ -1725,6 +1733,7 @@ fn test_unfreeze_tos_edge_cases() {
 
         let builder = tos_common::transaction::builder::TransactionBuilder::new(
             tos_common::transaction::TxVersion::T0,
+            0, // chain_id: 0 for tests
             alice.get_public_key().compress(),
             None,
             tx_type,
@@ -1753,6 +1762,7 @@ fn test_unfreeze_tos_edge_cases() {
 
         let builder = tos_common::transaction::builder::TransactionBuilder::new(
             tos_common::transaction::TxVersion::T0,
+            0, // chain_id: 0 for tests
             alice.get_public_key().compress(),
             None,
             tx_type,
@@ -1800,6 +1810,7 @@ fn test_unfreeze_tos_edge_cases() {
 
         let builder = tos_common::transaction::builder::TransactionBuilder::new(
             tos_common::transaction::TxVersion::T0,
+            0, // chain_id: 0 for tests
             alice.get_public_key().compress(),
             None,
             tx_type,
@@ -1831,6 +1842,7 @@ fn test_unfreeze_tos_edge_cases() {
 
         let builder = tos_common::transaction::builder::TransactionBuilder::new(
             tos_common::transaction::TxVersion::T0,
+            0, // chain_id: 0 for tests
             alice.get_public_key().compress(),
             None,
             tx_type,
@@ -2681,6 +2693,7 @@ fn create_bind_referrer_transaction(
 
     let builder = TransactionBuilder::new(
         TxVersion::T0,
+        0, // chain_id: 0 for tests
         sender.get_public_key().compress(),
         None,
         tx_type,

@@ -439,6 +439,7 @@ async fn build_transaction(context: &Context, body: Value) -> Result<Value, Inte
     } else {
         let builder = TransactionBuilder::new(
             version,
+            wallet.get_network().chain_id() as u8,
             wallet.get_public_key().clone(),
             Some(params.signers.len() as u8),
             params.tx_type,
@@ -528,6 +529,7 @@ async fn build_transaction_offline(
     } else {
         let builder = TransactionBuilder::new(
             version,
+            wallet.get_network().chain_id() as u8,
             wallet.get_public_key().clone(),
             Some(params.signers.len() as u8),
             params.tx_type,
@@ -603,6 +605,7 @@ async fn build_unsigned_transaction(
     // Generate the TX
     let builder = TransactionBuilder::new(
         version,
+        wallet.get_network().chain_id() as u8,
         wallet.get_public_key().clone(),
         threshold,
         params.tx_type,

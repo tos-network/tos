@@ -1921,6 +1921,7 @@ async fn transfer(manager: &CommandManager, mut args: ArgumentManager) -> Result
     // Create transaction builder with fee type
     let mut builder = tos_common::transaction::builder::TransactionBuilder::new(
         tx_version,
+        wallet.get_network().chain_id() as u8,
         wallet.get_public_key().clone(),
         multisig_threshold,
         tx_type,
@@ -2154,6 +2155,7 @@ async fn transfer_all(
         // Create transaction builder with fee type
         let mut builder = tos_common::transaction::builder::TransactionBuilder::new(
             tx_version,
+            wallet.get_network().chain_id() as u8,
             wallet.get_public_key().clone(),
             threshold,
             tx_type,

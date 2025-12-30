@@ -15,6 +15,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct UnsignedTransaction {
     version: TxVersion,
+    /// Chain ID for cross-network replay protection (T1+)
+    chain_id: u8,
     source: CompressedPublicKey,
     data: TransactionType,
     fee: u64,
@@ -27,6 +29,7 @@ pub struct UnsignedTransaction {
 impl UnsignedTransaction {
     pub fn new(
         version: TxVersion,
+        chain_id: u8,
         source: CompressedPublicKey,
         data: TransactionType,
         fee: u64,
@@ -35,6 +38,7 @@ impl UnsignedTransaction {
     ) -> Self {
         Self {
             version,
+            chain_id,
             source,
             data,
             fee,
@@ -46,6 +50,7 @@ impl UnsignedTransaction {
     }
     pub fn new_with_fee_type(
         version: TxVersion,
+        chain_id: u8,
         source: CompressedPublicKey,
         data: TransactionType,
         fee: u64,
@@ -55,6 +60,7 @@ impl UnsignedTransaction {
     ) -> Self {
         Self {
             version,
+            chain_id,
             source,
             data,
             fee,
@@ -89,10 +95,15 @@ impl UnsignedTransaction {
     // Get the bytes that need to be signed for the multi-signature
     fn write_no_signature(&self, writer: &mut Writer) {
         self.version.write(writer);
+
+        // T1+: include chain_id for cross-network replay protection
+        if self.version >= TxVersion::T1 {
+            self.chain_id.write(writer);
+        }
+
         self.source.write(writer);
         self.data.write(writer);
         self.fee.write(writer);
-        // Always include fee_type for T0
         self.fee_type.write(writer);
         self.nonce.write(writer);
         self.reference.write(writer);
@@ -113,6 +124,12 @@ impl UnsignedTransaction {
         let mut buffer = Vec::new();
         let mut writer = Writer::new(&mut buffer);
         self.version.write(&mut writer);
+
+        // T1+: include chain_id for cross-network replay protection
+        if self.version >= TxVersion::T1 {
+            self.chain_id.write(&mut writer);
+        }
+
         self.source.write(&mut writer);
         self.data.write(&mut writer);
         self.fee.write(&mut writer);
@@ -125,6 +142,7 @@ impl UnsignedTransaction {
 
         Transaction::new(
             self.version,
+            self.chain_id,
             self.source,
             self.data,
             self.fee,
@@ -140,6 +158,12 @@ impl UnsignedTransaction {
 impl Serializer for UnsignedTransaction {
     fn write(&self, writer: &mut Writer) {
         self.version.write(writer);
+
+        // T1+: include chain_id for cross-network replay protection
+        if self.version >= TxVersion::T1 {
+            self.chain_id.write(writer);
+        }
+
         self.source.write(writer);
         self.data.write(writer);
         self.fee.write(writer);
@@ -150,6 +174,14 @@ impl Serializer for UnsignedTransaction {
 
     fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
         let version = TxVersion::read(reader)?;
+
+        // T1+: read chain_id, T0: default to 0
+        let chain_id = if version >= TxVersion::T1 {
+            reader.read_u8()?
+        } else {
+            0
+        };
+
         let source = CompressedPublicKey::read(reader)?;
         let data = TransactionType::read(reader)?;
         let fee = reader.read_u64()?;
@@ -159,6 +191,7 @@ impl Serializer for UnsignedTransaction {
 
         Ok(Self {
             version,
+            chain_id,
             source,
             data,
             fee,
@@ -170,12 +203,19 @@ impl Serializer for UnsignedTransaction {
     }
 
     fn size(&self) -> usize {
-        self.version.size()
+        let mut size = self.version.size()
             + self.source.size()
             + self.data.size()
             + self.fee.size()
             + self.fee_type.size()
             + self.nonce.size()
-            + self.reference.size()
+            + self.reference.size();
+
+        // T1+: add chain_id byte
+        if self.version >= TxVersion::T1 {
+            size += 1;
+        }
+
+        size
     }
 }

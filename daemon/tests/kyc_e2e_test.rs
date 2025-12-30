@@ -370,6 +370,10 @@ impl<'a> BlockchainVerificationState<'a, TestError> for KycTestChainState {
     ) -> Result<(&Module, &Environment), TestError> {
         Err(TestError::Unsupported)
     }
+
+    fn get_network(&self) -> Network {
+        Network::Devnet
+    }
 }
 
 // ============================================================================
@@ -398,10 +402,6 @@ impl<'a> BlockchainApplyState<'a, DummyContractProvider, TestError> for KycTestC
 
     fn is_mainnet(&self) -> bool {
         false
-    }
-
-    fn get_network(&self) -> Network {
-        Network::Devnet
     }
 
     async fn set_contract_outputs(

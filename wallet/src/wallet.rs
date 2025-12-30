@@ -1012,6 +1012,7 @@ impl Wallet {
         // Create the transaction builder
         let builder = TransactionBuilder::new(
             tx_version,
+            self.network.chain_id() as u8,
             self.get_public_key().clone(),
             threshold,
             transaction_type,
@@ -1047,6 +1048,7 @@ impl Wallet {
         trace!("create unsigned transaction");
         let builder = TransactionBuilder::new(
             tx_version,
+            self.network.chain_id() as u8,
             self.get_public_key().clone(),
             threshold,
             transaction_type,
@@ -1141,6 +1143,7 @@ impl Wallet {
 
         let builder = TransactionBuilder::new(
             version,
+            self.network.chain_id() as u8,
             self.get_public_key().clone(),
             threshold,
             tx_type,
