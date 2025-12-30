@@ -52,6 +52,16 @@ pub enum TransactionType {
     AIMining(AIMiningPayload),
     BindReferrer(BindReferrerPayload),
     BatchReferralReward(BatchReferralRewardPayload),
+    // KYC transaction types (native KYC infrastructure)
+    SetKyc(SetKycPayload),
+    RevokeKyc(RevokeKycPayload),
+    RenewKyc(RenewKycPayload),
+    TransferKyc(TransferKycPayload),
+    AppealKyc(AppealKycPayload),
+    BootstrapCommittee(BootstrapCommitteePayload),
+    RegisterCommittee(RegisterCommitteePayload),
+    UpdateCommittee(UpdateCommitteePayload),
+    EmergencySuspend(EmergencySuspendPayload),
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -359,6 +369,43 @@ impl Serializer for TransactionType {
                 writer.write_u8(8);
                 payload.write(writer);
             }
+            // KYC transaction types (9-15)
+            TransactionType::SetKyc(payload) => {
+                writer.write_u8(9);
+                payload.write(writer);
+            }
+            TransactionType::RevokeKyc(payload) => {
+                writer.write_u8(10);
+                payload.write(writer);
+            }
+            TransactionType::RenewKyc(payload) => {
+                writer.write_u8(11);
+                payload.write(writer);
+            }
+            TransactionType::TransferKyc(payload) => {
+                writer.write_u8(16);
+                payload.write(writer);
+            }
+            TransactionType::AppealKyc(payload) => {
+                writer.write_u8(17);
+                payload.write(writer);
+            }
+            TransactionType::BootstrapCommittee(payload) => {
+                writer.write_u8(12);
+                payload.write(writer);
+            }
+            TransactionType::RegisterCommittee(payload) => {
+                writer.write_u8(13);
+                payload.write(writer);
+            }
+            TransactionType::UpdateCommittee(payload) => {
+                writer.write_u8(14);
+                payload.write(writer);
+            }
+            TransactionType::EmergencySuspend(payload) => {
+                writer.write_u8(15);
+                payload.write(writer);
+            }
         };
     }
 
@@ -387,6 +434,16 @@ impl Serializer for TransactionType {
             6 => TransactionType::AIMining(AIMiningPayload::read(reader)?),
             7 => TransactionType::BindReferrer(BindReferrerPayload::read(reader)?),
             8 => TransactionType::BatchReferralReward(BatchReferralRewardPayload::read(reader)?),
+            // KYC transaction types (9-16)
+            9 => TransactionType::SetKyc(SetKycPayload::read(reader)?),
+            10 => TransactionType::RevokeKyc(RevokeKycPayload::read(reader)?),
+            11 => TransactionType::RenewKyc(RenewKycPayload::read(reader)?),
+            12 => TransactionType::BootstrapCommittee(BootstrapCommitteePayload::read(reader)?),
+            13 => TransactionType::RegisterCommittee(RegisterCommitteePayload::read(reader)?),
+            14 => TransactionType::UpdateCommittee(UpdateCommitteePayload::read(reader)?),
+            15 => TransactionType::EmergencySuspend(EmergencySuspendPayload::read(reader)?),
+            16 => TransactionType::TransferKyc(TransferKycPayload::read(reader)?),
+            17 => TransactionType::AppealKyc(AppealKycPayload::read(reader)?),
             _ => return Err(ReaderError::InvalidValue),
         })
     }
@@ -412,6 +469,16 @@ impl Serializer for TransactionType {
             TransactionType::AIMining(payload) => payload.size(),
             TransactionType::BindReferrer(payload) => payload.size(),
             TransactionType::BatchReferralReward(payload) => payload.size(),
+            // KYC transaction types
+            TransactionType::SetKyc(payload) => payload.size(),
+            TransactionType::RevokeKyc(payload) => payload.size(),
+            TransactionType::RenewKyc(payload) => payload.size(),
+            TransactionType::TransferKyc(payload) => payload.size(),
+            TransactionType::AppealKyc(payload) => payload.size(),
+            TransactionType::BootstrapCommittee(payload) => payload.size(),
+            TransactionType::RegisterCommittee(payload) => payload.size(),
+            TransactionType::UpdateCommittee(payload) => payload.size(),
+            TransactionType::EmergencySuspend(payload) => payload.size(),
         }
     }
 }

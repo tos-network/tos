@@ -3,6 +3,7 @@ mod error;
 mod executor;
 mod executor_adapter;
 mod feature_set;
+mod kyc;
 mod loader;
 pub mod precompile_cost;
 mod precompile_verifier;
@@ -45,6 +46,7 @@ pub use error::TakoExecutionError;
 pub use executor::{ExecutionResult, TakoExecutor};
 pub use executor_adapter::TakoContractExecutor;
 pub use feature_set::SVMFeatureSet;
+pub use kyc::TosKycAdapter;
 pub use loader::TosContractLoaderAdapter;
 pub use precompile_cost::{
     costs, estimate_single_precompile_cost, estimate_transaction_precompile_cost,

@@ -1385,6 +1385,14 @@ impl<'a> BlockchainVerificationState<'a, TestError> for ChainState {
         BlockVersion::Nobunaga
     }
 
+    fn get_verification_timestamp(&self) -> u64 {
+        // Use current system time for tests
+        std::time::SystemTime::now()
+            .duration_since(std::time::SystemTime::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0)
+    }
+
     async fn set_multisig_state(
         &mut self,
         account: &'a PublicKey,

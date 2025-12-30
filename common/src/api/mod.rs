@@ -17,10 +17,12 @@ use crate::{
     crypto::{Address, Hash, Signature},
     serializer::Serializer,
     transaction::{
-        extra_data::UnknownExtraDataFormat, multisig::MultiSig, BatchReferralRewardPayload,
-        BindReferrerPayload, BurnPayload, DeployContractPayload, EnergyPayload, FeeType,
-        InvokeContractPayload, MultiSigPayload, Reference, Transaction, TransactionType,
-        TransferPayload, TxVersion,
+        extra_data::UnknownExtraDataFormat, multisig::MultiSig, AppealKycPayload,
+        BatchReferralRewardPayload, BindReferrerPayload, BootstrapCommitteePayload, BurnPayload,
+        DeployContractPayload, EmergencySuspendPayload, EnergyPayload, FeeType,
+        InvokeContractPayload, MultiSigPayload, Reference, RegisterCommitteePayload,
+        RenewKycPayload, RevokeKycPayload, SetKycPayload, Transaction, TransactionType,
+        TransferKycPayload, TransferPayload, TxVersion, UpdateCommitteePayload,
     },
 };
 pub use data::*;
@@ -75,6 +77,16 @@ pub enum RPCTransactionType<'a> {
     AIMining(Cow<'a, crate::ai_mining::AIMiningPayload>),
     BindReferrer(Cow<'a, BindReferrerPayload>),
     BatchReferralReward(Cow<'a, BatchReferralRewardPayload>),
+    // KYC transaction types
+    SetKyc(Cow<'a, SetKycPayload>),
+    RevokeKyc(Cow<'a, RevokeKycPayload>),
+    RenewKyc(Cow<'a, RenewKycPayload>),
+    TransferKyc(Cow<'a, TransferKycPayload>),
+    AppealKyc(Cow<'a, AppealKycPayload>),
+    BootstrapCommittee(Cow<'a, BootstrapCommitteePayload>),
+    RegisterCommittee(Cow<'a, RegisterCommitteePayload>),
+    UpdateCommittee(Cow<'a, UpdateCommitteePayload>),
+    EmergencySuspend(Cow<'a, EmergencySuspendPayload>),
 }
 
 impl<'a> RPCTransactionType<'a> {
@@ -105,6 +117,24 @@ impl<'a> RPCTransactionType<'a> {
             TransactionType::BindReferrer(payload) => Self::BindReferrer(Cow::Borrowed(payload)),
             TransactionType::BatchReferralReward(payload) => {
                 Self::BatchReferralReward(Cow::Borrowed(payload))
+            }
+            // KYC transaction types
+            TransactionType::SetKyc(payload) => Self::SetKyc(Cow::Borrowed(payload)),
+            TransactionType::RevokeKyc(payload) => Self::RevokeKyc(Cow::Borrowed(payload)),
+            TransactionType::RenewKyc(payload) => Self::RenewKyc(Cow::Borrowed(payload)),
+            TransactionType::TransferKyc(payload) => Self::TransferKyc(Cow::Borrowed(payload)),
+            TransactionType::AppealKyc(payload) => Self::AppealKyc(Cow::Borrowed(payload)),
+            TransactionType::BootstrapCommittee(payload) => {
+                Self::BootstrapCommittee(Cow::Borrowed(payload))
+            }
+            TransactionType::RegisterCommittee(payload) => {
+                Self::RegisterCommittee(Cow::Borrowed(payload))
+            }
+            TransactionType::UpdateCommittee(payload) => {
+                Self::UpdateCommittee(Cow::Borrowed(payload))
+            }
+            TransactionType::EmergencySuspend(payload) => {
+                Self::EmergencySuspend(Cow::Borrowed(payload))
             }
         }
     }
@@ -138,6 +168,32 @@ impl From<RPCTransactionType<'_>> for TransactionType {
             }
             RPCTransactionType::BatchReferralReward(payload) => {
                 TransactionType::BatchReferralReward(payload.into_owned())
+            }
+            // KYC transaction types
+            RPCTransactionType::SetKyc(payload) => TransactionType::SetKyc(payload.into_owned()),
+            RPCTransactionType::RevokeKyc(payload) => {
+                TransactionType::RevokeKyc(payload.into_owned())
+            }
+            RPCTransactionType::RenewKyc(payload) => {
+                TransactionType::RenewKyc(payload.into_owned())
+            }
+            RPCTransactionType::TransferKyc(payload) => {
+                TransactionType::TransferKyc(payload.into_owned())
+            }
+            RPCTransactionType::AppealKyc(payload) => {
+                TransactionType::AppealKyc(payload.into_owned())
+            }
+            RPCTransactionType::BootstrapCommittee(payload) => {
+                TransactionType::BootstrapCommittee(payload.into_owned())
+            }
+            RPCTransactionType::RegisterCommittee(payload) => {
+                TransactionType::RegisterCommittee(payload.into_owned())
+            }
+            RPCTransactionType::UpdateCommittee(payload) => {
+                TransactionType::UpdateCommittee(payload.into_owned())
+            }
+            RPCTransactionType::EmergencySuspend(payload) => {
+                TransactionType::EmergencySuspend(payload.into_owned())
             }
         }
     }

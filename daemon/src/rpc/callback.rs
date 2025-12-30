@@ -274,10 +274,12 @@ pub fn send_payment_expired_callback(
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_callback_service_creation() {
+    #[tokio::test]
+    async fn test_callback_service_creation() {
         let service = CallbackService::new();
-        assert!(service.webhook_secrets.try_read().is_ok());
+        // Verify we can read the webhook secrets (should be empty initially)
+        let secrets = service.webhook_secrets.read().await;
+        assert!(secrets.is_empty());
     }
 
     #[tokio::test]

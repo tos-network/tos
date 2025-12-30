@@ -1,5 +1,6 @@
 mod contract;
 mod error;
+mod kyc;
 mod state;
 mod zkp_cache;
 
@@ -55,7 +56,17 @@ impl Transaction {
                     | TransactionType::Energy(_)
                     | TransactionType::AIMining(_)
                     | TransactionType::BindReferrer(_)
-                    | TransactionType::BatchReferralReward(_) => true,
+                    | TransactionType::BatchReferralReward(_)
+                    // KYC transaction types
+                    | TransactionType::SetKyc(_)
+                    | TransactionType::RevokeKyc(_)
+                    | TransactionType::RenewKyc(_)
+                    | TransactionType::TransferKyc(_)
+                    | TransactionType::AppealKyc(_)
+                    | TransactionType::BootstrapCommittee(_)
+                    | TransactionType::RegisterCommittee(_)
+                    | TransactionType::UpdateCommittee(_)
+                    | TransactionType::EmergencySuspend(_) => true,
                 }
             }
         }
@@ -297,6 +308,45 @@ impl Transaction {
                     )));
                 }
             }
+            // KYC transaction types - structural validation (dynamic parts)
+            // Uses state.get_verification_timestamp() for deterministic consensus validation
+            // Block validation uses block timestamp; mempool uses system time
+            TransactionType::SetKyc(payload) => {
+                let current_time = state.get_verification_timestamp();
+                kyc::verify_set_kyc(payload, current_time)?;
+            }
+            TransactionType::RevokeKyc(payload) => {
+                let current_time = state.get_verification_timestamp();
+                kyc::verify_revoke_kyc(payload, current_time)?;
+            }
+            TransactionType::RenewKyc(payload) => {
+                let current_time = state.get_verification_timestamp();
+                kyc::verify_renew_kyc(payload, current_time)?;
+            }
+            TransactionType::TransferKyc(payload) => {
+                let current_time = state.get_verification_timestamp();
+                kyc::verify_transfer_kyc(payload, current_time)?;
+            }
+            TransactionType::BootstrapCommittee(payload) => {
+                // SECURITY FIX (Issue #33): Pass sender to verify only BOOTSTRAP_ADDRESS can bootstrap
+                kyc::verify_bootstrap_committee(payload, &self.source)?;
+            }
+            TransactionType::RegisterCommittee(payload) => {
+                let current_time = state.get_verification_timestamp();
+                kyc::verify_register_committee(payload, current_time)?;
+            }
+            TransactionType::UpdateCommittee(payload) => {
+                let current_time = state.get_verification_timestamp();
+                kyc::verify_update_committee(payload, current_time)?;
+            }
+            TransactionType::EmergencySuspend(payload) => {
+                let current_time = state.get_verification_timestamp();
+                kyc::verify_emergency_suspend(payload, current_time)?;
+            }
+            TransactionType::AppealKyc(payload) => {
+                let current_time = state.get_verification_timestamp();
+                kyc::verify_appeal_kyc(payload, current_time)?;
+            }
         };
 
         // SECURITY FIX: Verify sender has sufficient balance for all spending
@@ -378,7 +428,17 @@ impl Transaction {
             }
             TransactionType::MultiSig(_)
             | TransactionType::AIMining(_)
-            | TransactionType::BindReferrer(_) => {
+            | TransactionType::BindReferrer(_)
+            // KYC transactions don't spend assets directly (only fee)
+            | TransactionType::SetKyc(_)
+            | TransactionType::RevokeKyc(_)
+            | TransactionType::RenewKyc(_)
+            | TransactionType::TransferKyc(_)
+            | TransactionType::AppealKyc(_)
+            | TransactionType::BootstrapCommittee(_)
+            | TransactionType::RegisterCommittee(_)
+            | TransactionType::UpdateCommittee(_)
+            | TransactionType::EmergencySuspend(_) => {
                 // No asset spending for these types
             }
             TransactionType::BatchReferralReward(payload) => {
@@ -672,6 +732,44 @@ impl Transaction {
                     )));
                 }
             }
+            // KYC transaction types - structural validation (pre-verify)
+            // Uses state.get_verification_timestamp() for deterministic consensus validation
+            TransactionType::SetKyc(payload) => {
+                let current_time = state.get_verification_timestamp();
+                kyc::verify_set_kyc(payload, current_time)?;
+            }
+            TransactionType::RevokeKyc(payload) => {
+                let current_time = state.get_verification_timestamp();
+                kyc::verify_revoke_kyc(payload, current_time)?;
+            }
+            TransactionType::RenewKyc(payload) => {
+                let current_time = state.get_verification_timestamp();
+                kyc::verify_renew_kyc(payload, current_time)?;
+            }
+            TransactionType::TransferKyc(payload) => {
+                let current_time = state.get_verification_timestamp();
+                kyc::verify_transfer_kyc(payload, current_time)?;
+            }
+            TransactionType::AppealKyc(payload) => {
+                let current_time = state.get_verification_timestamp();
+                kyc::verify_appeal_kyc(payload, current_time)?;
+            }
+            TransactionType::BootstrapCommittee(payload) => {
+                // SECURITY FIX (Issue #33): Pass sender to verify only BOOTSTRAP_ADDRESS can bootstrap
+                kyc::verify_bootstrap_committee(payload, &self.source)?;
+            }
+            TransactionType::RegisterCommittee(payload) => {
+                let current_time = state.get_verification_timestamp();
+                kyc::verify_register_committee(payload, current_time)?;
+            }
+            TransactionType::UpdateCommittee(payload) => {
+                let current_time = state.get_verification_timestamp();
+                kyc::verify_update_committee(payload, current_time)?;
+            }
+            TransactionType::EmergencySuspend(payload) => {
+                let current_time = state.get_verification_timestamp();
+                kyc::verify_emergency_suspend(payload, current_time)?;
+            }
         };
 
         let source_decompressed = self
@@ -836,6 +934,18 @@ impl Transaction {
                     );
                 }
             }
+            // KYC transaction types
+            TransactionType::SetKyc(_)
+            | TransactionType::RevokeKyc(_)
+            | TransactionType::RenewKyc(_)
+            | TransactionType::TransferKyc(_)
+            | TransactionType::AppealKyc(_)
+            | TransactionType::BootstrapCommittee(_)
+            | TransactionType::RegisterCommittee(_)
+            | TransactionType::UpdateCommittee(_)
+            | TransactionType::EmergencySuspend(_) => {
+                // KYC transactions are logged at execution time
+            }
         }
 
         // With plaintext balances, we don't need Bulletproofs range proofs
@@ -918,7 +1028,17 @@ impl Transaction {
             }
             TransactionType::MultiSig(_)
             | TransactionType::AIMining(_)
-            | TransactionType::BindReferrer(_) => {
+            | TransactionType::BindReferrer(_)
+            // KYC transactions don't spend assets directly (only fee)
+            | TransactionType::SetKyc(_)
+            | TransactionType::RevokeKyc(_)
+            | TransactionType::RenewKyc(_)
+            | TransactionType::TransferKyc(_)
+            | TransactionType::AppealKyc(_)
+            | TransactionType::BootstrapCommittee(_)
+            | TransactionType::RegisterCommittee(_)
+            | TransactionType::UpdateCommittee(_)
+            | TransactionType::EmergencySuspend(_) => {
                 // No asset spending for these types
             }
             TransactionType::BatchReferralReward(payload) => {
@@ -1138,7 +1258,17 @@ impl Transaction {
             }
             TransactionType::MultiSig(_)
             | TransactionType::AIMining(_)
-            | TransactionType::BindReferrer(_) => {
+            | TransactionType::BindReferrer(_)
+            // KYC transactions don't spend assets directly (only fee)
+            | TransactionType::SetKyc(_)
+            | TransactionType::RevokeKyc(_)
+            | TransactionType::RenewKyc(_)
+            | TransactionType::TransferKyc(_)
+            | TransactionType::AppealKyc(_)
+            | TransactionType::BootstrapCommittee(_)
+            | TransactionType::RegisterCommittee(_)
+            | TransactionType::UpdateCommittee(_)
+            | TransactionType::EmergencySuspend(_) => {
                 // No asset spending for these types
             }
             TransactionType::BatchReferralReward(payload) => {
@@ -1515,6 +1645,727 @@ impl Transaction {
                     );
                 }
             }
+            // KYC transaction types - execution handled by BlockchainApplyState
+            // SECURITY: All KYC operations require approval verification
+            TransactionType::SetKyc(payload) => {
+                // SECURITY: Check if user already has KYC from a different committee
+                // If so, they must use TransferKyc to change committees, not SetKyc
+                // This prevents cross-committee hijacking of users
+                if let Some(existing_committee) = state
+                    .get_verifying_committee(payload.get_account())
+                    .await
+                    .map_err(VerificationError::State)?
+                {
+                    if &existing_committee != payload.get_committee_id() {
+                        return Err(VerificationError::AnyError(anyhow::anyhow!(
+                            "SetKyc: user already has KYC from committee {}. Use TransferKyc to change committees.",
+                            existing_committee
+                        )));
+                    }
+                }
+
+                // Get the committee and verify approvals
+                let committee = state
+                    .get_committee(payload.get_committee_id())
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| {
+                        VerificationError::AnyError(anyhow::anyhow!(
+                            "Committee not found: {}",
+                            payload.get_committee_id()
+                        ))
+                    })?;
+
+                // Verify approvals (signatures, membership, threshold)
+                // SECURITY FIX (Issue #34): Pass verified_at to bind approval signatures to timestamp
+                // SECURITY FIX (Issue #44): Pass network for cross-network replay protection
+                let current_time = state.get_verification_timestamp();
+                let network = state.get_network();
+                crate::kyc::verify_set_kyc_approvals(
+                    &network,
+                    &committee,
+                    payload.get_approvals(),
+                    payload.get_account(),
+                    payload.get_level(),
+                    payload.get_data_hash(),
+                    payload.get_verified_at(),
+                    current_time,
+                )
+                .map_err(|e| VerificationError::AnyError(anyhow::anyhow!("{}", e)))?;
+
+                state
+                    .set_kyc(
+                        payload.get_account(),
+                        payload.get_level(),
+                        payload.get_verified_at(),
+                        payload.get_data_hash(),
+                        payload.get_committee_id(),
+                        tx_hash,
+                    )
+                    .await
+                    .map_err(VerificationError::State)?;
+
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "SetKyc applied - account: {:?}, level: {}",
+                        payload.get_account(),
+                        payload.get_level()
+                    );
+                }
+            }
+            TransactionType::RevokeKyc(payload) => {
+                // SECURITY: Verify that the committee is the user's verifying committee
+                // This prevents unauthorized committees from revoking KYC they didn't issue
+                let user_verifying_committee = state
+                    .get_verifying_committee(payload.get_account())
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| {
+                        VerificationError::AnyError(anyhow::anyhow!(
+                            "User has no KYC record to revoke"
+                        ))
+                    })?;
+
+                if &user_verifying_committee != payload.get_committee_id() {
+                    return Err(VerificationError::AnyError(anyhow::anyhow!(
+                        "RevokeKyc: committee {} is not the user's verifying committee {}",
+                        payload.get_committee_id(),
+                        user_verifying_committee
+                    )));
+                }
+
+                // Get the committee and verify approvals
+                let committee = state
+                    .get_committee(payload.get_committee_id())
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| {
+                        VerificationError::AnyError(anyhow::anyhow!(
+                            "Committee not found: {}",
+                            payload.get_committee_id()
+                        ))
+                    })?;
+
+                // Verify approvals (signatures, membership, threshold)
+                // SECURITY FIX (Issue #44): Pass network for cross-network replay protection
+                let current_time = state.get_verification_timestamp();
+                let network = state.get_network();
+                crate::kyc::verify_revoke_kyc_approvals(
+                    &network,
+                    &committee,
+                    payload.get_approvals(),
+                    payload.get_account(),
+                    payload.get_reason_hash(),
+                    current_time,
+                )
+                .map_err(|e| VerificationError::AnyError(anyhow::anyhow!("{}", e)))?;
+
+                state
+                    .revoke_kyc(payload.get_account(), payload.get_reason_hash(), tx_hash)
+                    .await
+                    .map_err(VerificationError::State)?;
+
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("RevokeKyc applied - account: {:?}", payload.get_account());
+                }
+            }
+            TransactionType::RenewKyc(payload) => {
+                // SECURITY: Verify that the committee is the user's verifying committee
+                // This prevents unauthorized committees from renewing KYC they didn't issue
+                let user_verifying_committee = state
+                    .get_verifying_committee(payload.get_account())
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| {
+                        VerificationError::AnyError(anyhow::anyhow!(
+                            "User has no KYC record to renew"
+                        ))
+                    })?;
+
+                if &user_verifying_committee != payload.get_committee_id() {
+                    return Err(VerificationError::AnyError(anyhow::anyhow!(
+                        "RenewKyc: committee {} is not the user's verifying committee {}",
+                        payload.get_committee_id(),
+                        user_verifying_committee
+                    )));
+                }
+
+                // Get the committee and verify approvals
+                let committee = state
+                    .get_committee(payload.get_committee_id())
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| {
+                        VerificationError::AnyError(anyhow::anyhow!(
+                            "Committee not found: {}",
+                            payload.get_committee_id()
+                        ))
+                    })?;
+
+                // Verify approvals (signatures, membership, threshold)
+                // SECURITY FIX (Issue #34): Pass verified_at to bind approval signatures to timestamp
+                // SECURITY FIX (Issue #44): Pass network for cross-network replay protection
+                let current_time = state.get_verification_timestamp();
+                let network = state.get_network();
+                crate::kyc::verify_renew_kyc_approvals(
+                    &network,
+                    &committee,
+                    payload.get_approvals(),
+                    payload.get_account(),
+                    payload.get_data_hash(),
+                    payload.get_verified_at(),
+                    current_time,
+                )
+                .map_err(|e| VerificationError::AnyError(anyhow::anyhow!("{}", e)))?;
+
+                state
+                    .renew_kyc(
+                        payload.get_account(),
+                        payload.get_verified_at(),
+                        payload.get_data_hash(),
+                        tx_hash,
+                    )
+                    .await
+                    .map_err(VerificationError::State)?;
+
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("RenewKyc applied - account: {:?}", payload.get_account());
+                }
+            }
+            TransactionType::TransferKyc(payload) => {
+                let current_time = state.get_verification_timestamp();
+
+                // SECURITY: Verify that the user is currently bound to the source committee
+                // This prevents unauthorized committees from transferring users they don't manage
+                let user_verifying_committee = state
+                    .get_verifying_committee(payload.get_account())
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| {
+                        VerificationError::AnyError(anyhow::anyhow!(
+                            "User has no KYC record to transfer"
+                        ))
+                    })?;
+
+                if &user_verifying_committee != payload.get_source_committee_id() {
+                    return Err(VerificationError::AnyError(anyhow::anyhow!(
+                        "TransferKyc: source committee {} does not match user's verifying committee {}",
+                        payload.get_source_committee_id(),
+                        user_verifying_committee
+                    )));
+                }
+
+                // SECURITY FIX (Issue #45): Get current KYC level to bind source approval
+                let current_level = state
+                    .get_kyc_level(payload.get_account())
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| {
+                        VerificationError::AnyError(anyhow::anyhow!(
+                            "User has no KYC level to transfer"
+                        ))
+                    })?;
+
+                // Get and verify source committee approvals
+                let source_committee = state
+                    .get_committee(payload.get_source_committee_id())
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| {
+                        VerificationError::AnyError(anyhow::anyhow!(
+                            "Source committee not found: {}",
+                            payload.get_source_committee_id()
+                        ))
+                    })?;
+
+                // SECURITY FIX (Issue #34): Pass transferred_at to bind approval signatures to timestamp
+                // SECURITY FIX (Issue #39): Pass new_data_hash so source committee approves the exact data
+                // SECURITY FIX (Issue #44): Pass network for cross-network replay protection
+                // SECURITY FIX (Issue #45): Pass current_level to bind approval to user's KYC level
+                let network = state.get_network();
+                crate::kyc::verify_transfer_kyc_source_approvals(
+                    &network,
+                    &source_committee,
+                    payload.get_source_approvals(),
+                    payload.get_dest_committee_id(),
+                    payload.get_account(),
+                    current_level,
+                    payload.get_new_data_hash(),
+                    payload.get_transferred_at(),
+                    current_time,
+                )
+                .map_err(|e| VerificationError::AnyError(anyhow::anyhow!("Source: {}", e)))?;
+
+                // Get and verify destination committee approvals
+                let dest_committee = state
+                    .get_committee(payload.get_dest_committee_id())
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| {
+                        VerificationError::AnyError(anyhow::anyhow!(
+                            "Destination committee not found: {}",
+                            payload.get_dest_committee_id()
+                        ))
+                    })?;
+
+                // SECURITY FIX (Issue #34): Pass transferred_at to bind approval signatures to timestamp
+                // SECURITY FIX (Issue #44): Pass network for cross-network replay protection
+                crate::kyc::verify_transfer_kyc_dest_approvals(
+                    &network,
+                    &dest_committee,
+                    payload.get_dest_approvals(),
+                    payload.get_source_committee_id(),
+                    payload.get_account(),
+                    payload.get_new_data_hash(),
+                    payload.get_transferred_at(),
+                    current_time,
+                )
+                .map_err(|e| VerificationError::AnyError(anyhow::anyhow!("Destination: {}", e)))?;
+
+                // Transfer KYC to destination committee
+                // The max_kyc_level check is done inside transfer_kyc to ensure
+                // user's KYC level doesn't exceed destination committee's max level
+                // SECURITY FIX (Issue #26): Pass current_time (block/verification time) instead
+                // of payload time for suspension expiry check
+                state
+                    .transfer_kyc(
+                        payload.get_account(),
+                        payload.get_source_committee_id(),
+                        payload.get_dest_committee_id(),
+                        payload.get_new_data_hash(),
+                        payload.get_transferred_at(),
+                        tx_hash,
+                        dest_committee.max_kyc_level,
+                        current_time,
+                    )
+                    .await
+                    .map_err(VerificationError::State)?;
+
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "TransferKyc applied - account: {:?}, source: {}, dest: {}",
+                        payload.get_account(),
+                        payload.get_source_committee_id(),
+                        payload.get_dest_committee_id()
+                    );
+                }
+            }
+            TransactionType::AppealKyc(payload) => {
+                // Authorization check: only the account owner can submit their own appeal
+                if self.get_source() != payload.get_account() {
+                    return Err(VerificationError::AnyError(anyhow::anyhow!(
+                        "AppealKyc: sender {:?} does not match appeal account {:?}",
+                        self.get_source(),
+                        payload.get_account()
+                    )));
+                }
+
+                // SECURITY: Verify that the user's verifying committee matches original_committee_id
+                // This prevents appeals against arbitrary committees
+                let user_verifying_committee = state
+                    .get_verifying_committee(payload.get_account())
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| {
+                        VerificationError::AnyError(anyhow::anyhow!(
+                            "AppealKyc: user has no KYC record to appeal"
+                        ))
+                    })?;
+
+                if &user_verifying_committee != payload.get_original_committee_id() {
+                    return Err(VerificationError::AnyError(anyhow::anyhow!(
+                        "AppealKyc: original_committee_id {} does not match user's verifying committee {}",
+                        payload.get_original_committee_id(),
+                        user_verifying_committee
+                    )));
+                }
+
+                // SECURITY: Verify that user has Revoked status (appeals are for revoked KYC)
+                let user_status = state
+                    .get_kyc_status(payload.get_account())
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| {
+                        VerificationError::AnyError(anyhow::anyhow!(
+                            "AppealKyc: user has no KYC record to appeal"
+                        ))
+                    })?;
+
+                if user_status != crate::kyc::KycStatus::Revoked {
+                    return Err(VerificationError::AnyError(anyhow::anyhow!(
+                        "AppealKyc: user KYC status is {:?}, only Revoked status can be appealed",
+                        user_status
+                    )));
+                }
+
+                // Verify original committee exists and is active
+                let original_committee = state
+                    .get_committee(payload.get_original_committee_id())
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| {
+                        VerificationError::AnyError(anyhow::anyhow!(
+                            "Original committee not found: {}",
+                            payload.get_original_committee_id()
+                        ))
+                    })?;
+
+                // SECURITY FIX (Issue #29): Verify original committee is Active
+                // Appeals should only be accepted against active committees
+                if original_committee.status != crate::kyc::CommitteeStatus::Active {
+                    return Err(VerificationError::AnyError(anyhow::anyhow!(
+                        "AppealKyc: original committee {} is not active (status: {:?})",
+                        payload.get_original_committee_id(),
+                        original_committee.status
+                    )));
+                }
+
+                // Verify parent committee exists
+                let parent_committee = state
+                    .get_committee(payload.get_parent_committee_id())
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| {
+                        VerificationError::AnyError(anyhow::anyhow!(
+                            "Parent committee not found: {}",
+                            payload.get_parent_committee_id()
+                        ))
+                    })?;
+
+                // SECURITY FIX (Issue #29): Verify parent committee is Active
+                // Appeals must be submitted to active parent committees that can review them
+                if parent_committee.status != crate::kyc::CommitteeStatus::Active {
+                    return Err(VerificationError::AnyError(anyhow::anyhow!(
+                        "AppealKyc: parent committee {} is not active (status: {:?})",
+                        payload.get_parent_committee_id(),
+                        parent_committee.status
+                    )));
+                }
+
+                // Verify the original committee's parent matches the claimed parent
+                if let Some(ref actual_parent_id) = original_committee.parent_id {
+                    if actual_parent_id != &parent_committee.id {
+                        return Err(VerificationError::AnyError(anyhow::anyhow!(
+                            "AppealKyc: claimed parent {} does not match original committee's actual parent {}",
+                            payload.get_parent_committee_id(),
+                            actual_parent_id
+                        )));
+                    }
+                } else {
+                    // Original committee is the global committee (no parent)
+                    return Err(VerificationError::AnyError(anyhow::anyhow!(
+                        "AppealKyc: cannot appeal to parent - original committee {} is the global committee",
+                        payload.get_original_committee_id()
+                    )));
+                }
+
+                state
+                    .submit_kyc_appeal(
+                        payload.get_account(),
+                        payload.get_original_committee_id(),
+                        payload.get_parent_committee_id(),
+                        payload.get_reason_hash(),
+                        payload.get_documents_hash(),
+                        payload.get_submitted_at(),
+                        tx_hash,
+                    )
+                    .await
+                    .map_err(VerificationError::State)?;
+
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "AppealKyc submitted - account: {:?}, original: {}, parent: {}",
+                        payload.get_account(),
+                        payload.get_original_committee_id(),
+                        payload.get_parent_committee_id()
+                    );
+                }
+            }
+            TransactionType::BootstrapCommittee(payload) => {
+                // Convert CommitteeMemberInit to CommitteeMemberInfo
+                let members: Vec<crate::kyc::CommitteeMemberInfo> = payload
+                    .get_members()
+                    .iter()
+                    .map(|m| {
+                        crate::kyc::CommitteeMemberInfo::new(
+                            m.public_key.clone(),
+                            m.name.clone(),
+                            m.role,
+                        )
+                    })
+                    .collect();
+
+                let committee_id = state
+                    .bootstrap_global_committee(
+                        payload.get_name().to_string(),
+                        members,
+                        payload.get_threshold(),
+                        payload.get_kyc_threshold(),
+                        payload.get_max_kyc_level(),
+                        tx_hash,
+                    )
+                    .await
+                    .map_err(VerificationError::State)?;
+
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "BootstrapCommittee applied - name: {}, id: {}",
+                        payload.get_name(),
+                        committee_id
+                    );
+                }
+            }
+            TransactionType::RegisterCommittee(payload) => {
+                // Get parent committee and verify approvals
+                let parent_committee = state
+                    .get_committee(payload.get_parent_id())
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| {
+                        VerificationError::AnyError(anyhow::anyhow!(
+                            "Parent committee not found: {}",
+                            payload.get_parent_id()
+                        ))
+                    })?;
+
+                // SECURITY: Verify parent committee can manage the requested region
+                // Global committees can manage any region; regional committees can only
+                // manage their own region. This prevents unauthorized cross-region registration.
+                if !parent_committee.can_manage_region(&payload.get_region()) {
+                    return Err(VerificationError::AnyError(anyhow::anyhow!(
+                        "Parent committee {} (region: {}) cannot register committees in region {}",
+                        payload.get_parent_id(),
+                        parent_committee.region,
+                        payload.get_region()
+                    )));
+                }
+
+                // Compute config hash from payload to bind signatures to full configuration
+                let members: Vec<_> = payload
+                    .get_members()
+                    .iter()
+                    .map(|m| (m.public_key.clone(), m.name.clone(), m.role))
+                    .collect();
+                let config_hash = crate::kyc::CommitteeApproval::compute_register_config_hash(
+                    &members,
+                    payload.get_threshold(),
+                    payload.get_kyc_threshold(),
+                    payload.get_max_kyc_level(),
+                );
+
+                // Verify parent committee approvals with config binding
+                // SECURITY FIX (Issue #44): Pass network for cross-network replay protection
+                let current_time = state.get_verification_timestamp();
+                let network = state.get_network();
+                crate::kyc::verify_register_committee_approvals(
+                    &network,
+                    &parent_committee,
+                    payload.get_approvals(),
+                    payload.get_name(),
+                    payload.get_region(),
+                    &config_hash,
+                    current_time,
+                )
+                .map_err(|e| VerificationError::AnyError(anyhow::anyhow!("{}", e)))?;
+
+                // Convert NewCommitteeMember to CommitteeMemberInfo
+                let members: Vec<crate::kyc::CommitteeMemberInfo> = payload
+                    .get_members()
+                    .iter()
+                    .map(|m| {
+                        crate::kyc::CommitteeMemberInfo::new(
+                            m.public_key.clone(),
+                            m.name.clone(),
+                            m.role,
+                        )
+                    })
+                    .collect();
+
+                let committee_id = state
+                    .register_committee(
+                        payload.get_name().to_string(),
+                        payload.get_region(),
+                        members,
+                        payload.get_threshold(),
+                        payload.get_kyc_threshold(),
+                        payload.get_max_kyc_level(),
+                        payload.get_parent_id(),
+                        tx_hash,
+                    )
+                    .await
+                    .map_err(VerificationError::State)?;
+
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "RegisterCommittee applied - name: {}, region: {:?}, id: {}",
+                        payload.get_name(),
+                        payload.get_region(),
+                        committee_id
+                    );
+                }
+            }
+            TransactionType::UpdateCommittee(payload) => {
+                // Get committee and verify approvals
+                let committee = state
+                    .get_committee(payload.get_committee_id())
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| {
+                        VerificationError::AnyError(anyhow::anyhow!(
+                            "Committee not found: {}",
+                            payload.get_committee_id()
+                        ))
+                    })?;
+
+                // Validate governance constraints using committee state
+                // SECURITY FIX (Issue #36, #37): Include approver_count and kyc_threshold
+                // to properly validate threshold changes and role updates
+                let (target_is_active, target_can_approve) = match payload.get_update() {
+                    crate::transaction::CommitteeUpdateData::RemoveMember { public_key }
+                    | crate::transaction::CommitteeUpdateData::UpdateMemberRole {
+                        public_key,
+                        ..
+                    }
+                    | crate::transaction::CommitteeUpdateData::UpdateMemberStatus {
+                        public_key,
+                        ..
+                    } => committee.get_member(public_key).map(|member| {
+                        (
+                            member.status == crate::kyc::MemberStatus::Active,
+                            member.role.can_approve(),
+                        )
+                    }),
+                    _ => None,
+                }
+                .unwrap_or((true, true));
+
+                let committee_info = kyc::CommitteeGovernanceInfo {
+                    member_count: committee.active_member_count(),
+                    approver_count: committee.active_approver_count(),
+                    total_member_count: committee.total_member_count(),
+                    threshold: committee.threshold,
+                    kyc_threshold: committee.kyc_threshold,
+                    target_is_active: Some(target_is_active),
+                    target_can_approve: Some(target_can_approve),
+                };
+                let current_time = state.get_verification_timestamp();
+                kyc::verify_update_committee_with_state(payload, &committee_info, current_time)?;
+
+                // Compute hash of update data for signature verification
+                let update_data_hash = {
+                    use crate::serializer::Serializer;
+                    let mut buffer = Vec::new();
+                    let mut writer = crate::serializer::Writer::new(&mut buffer);
+                    payload.get_update().write(&mut writer);
+                    crate::crypto::Hash::new(blake3::hash(&buffer).into())
+                };
+
+                // Get update type for message building
+                let update_type = match payload.get_update() {
+                    crate::transaction::CommitteeUpdateData::AddMember { .. } => 0u8,
+                    crate::transaction::CommitteeUpdateData::RemoveMember { .. } => 1u8,
+                    crate::transaction::CommitteeUpdateData::UpdateMemberRole { .. } => 2u8,
+                    crate::transaction::CommitteeUpdateData::UpdateMemberStatus { .. } => 3u8,
+                    crate::transaction::CommitteeUpdateData::UpdateThreshold { .. } => 4u8,
+                    crate::transaction::CommitteeUpdateData::UpdateKycThreshold { .. } => 5u8,
+                    crate::transaction::CommitteeUpdateData::UpdateName { .. } => 6u8,
+                    crate::transaction::CommitteeUpdateData::SuspendCommittee => 7u8,
+                    crate::transaction::CommitteeUpdateData::ActivateCommittee => 8u8,
+                };
+
+                // Verify committee approvals
+                // SECURITY FIX (Issue #44): Pass network for cross-network replay protection
+                let network = state.get_network();
+                crate::kyc::verify_update_committee_approvals(
+                    &network,
+                    &committee,
+                    payload.get_approvals(),
+                    update_type,
+                    &update_data_hash,
+                    current_time,
+                )
+                .map_err(|e| VerificationError::AnyError(anyhow::anyhow!("{}", e)))?;
+
+                state
+                    .update_committee(payload.get_committee_id(), payload.get_update())
+                    .await
+                    .map_err(VerificationError::State)?;
+
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "UpdateCommittee applied - committee: {}, update: {:?}",
+                        payload.get_committee_id(),
+                        payload.get_update()
+                    );
+                }
+            }
+            TransactionType::EmergencySuspend(payload) => {
+                // SECURITY: Verify that the committee is the user's verifying committee
+                // This prevents cross-committee denial-of-service attacks where any committee
+                // could suspend arbitrary users for 24 hours
+                let user_verifying_committee = state
+                    .get_verifying_committee(payload.get_account())
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| {
+                        VerificationError::AnyError(anyhow::anyhow!(
+                            "EmergencySuspend: user has no KYC record to suspend"
+                        ))
+                    })?;
+
+                if &user_verifying_committee != payload.get_committee_id() {
+                    return Err(VerificationError::AnyError(anyhow::anyhow!(
+                        "EmergencySuspend: committee {} is not the user's verifying committee {}",
+                        payload.get_committee_id(),
+                        user_verifying_committee
+                    )));
+                }
+
+                // Get committee and verify approvals
+                let committee = state
+                    .get_committee(payload.get_committee_id())
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| {
+                        VerificationError::AnyError(anyhow::anyhow!(
+                            "Committee not found: {}",
+                            payload.get_committee_id()
+                        ))
+                    })?;
+
+                // Verify emergency suspend approvals (requires 2 members)
+                // SECURITY FIX (Issue #44): Pass network for cross-network replay protection
+                let current_time = state.get_verification_timestamp();
+                let network = state.get_network();
+                crate::kyc::verify_emergency_suspend_approvals(
+                    &network,
+                    &committee,
+                    payload.get_approvals(),
+                    payload.get_account(),
+                    payload.get_reason_hash(),
+                    payload.get_expires_at(),
+                    current_time,
+                )
+                .map_err(|e| VerificationError::AnyError(anyhow::anyhow!("{}", e)))?;
+
+                state
+                    .emergency_suspend_kyc(
+                        payload.get_account(),
+                        payload.get_reason_hash(),
+                        payload.get_expires_at(),
+                        tx_hash,
+                    )
+                    .await
+                    .map_err(VerificationError::State)?;
+
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "EmergencySuspend applied - account: {:?}, expires_at: {}",
+                        payload.get_account(),
+                        payload.get_expires_at()
+                    );
+                }
+            }
         }
 
         Ok(())
@@ -1626,7 +2477,17 @@ impl Transaction {
             }
             TransactionType::MultiSig(_)
             | TransactionType::AIMining(_)
-            | TransactionType::BindReferrer(_) => {
+            | TransactionType::BindReferrer(_)
+            // KYC transactions don't spend assets directly (only fee)
+            | TransactionType::SetKyc(_)
+            | TransactionType::RevokeKyc(_)
+            | TransactionType::RenewKyc(_)
+            | TransactionType::TransferKyc(_)
+            | TransactionType::AppealKyc(_)
+            | TransactionType::BootstrapCommittee(_)
+            | TransactionType::RegisterCommittee(_)
+            | TransactionType::UpdateCommittee(_)
+            | TransactionType::EmergencySuspend(_) => {
                 // No asset spending for these types
             }
             TransactionType::BatchReferralReward(payload) => {

@@ -74,6 +74,15 @@ pub trait BlockchainVerificationState<'a, E> {
     /// Get the block version in which TX is executed
     fn get_block_version(&self) -> BlockVersion;
 
+    /// Get the timestamp to use for verification
+    ///
+    /// For block validation (consensus): returns the block timestamp
+    /// For mempool verification: returns current system time
+    ///
+    /// This ensures deterministic consensus validation while allowing
+    /// flexibility for mempool operations.
+    fn get_verification_timestamp(&self) -> u64;
+
     /// Set the multisig state for an account
     async fn set_multisig_state(
         &mut self,
@@ -203,6 +212,224 @@ pub trait BlockchainApplyState<'a, P: ContractProvider, E>:
         events: Vec<crate::contract::ContractEvent>,
         contract: &Hash,
         tx_hash: &'a Hash,
+    ) -> Result<(), E>;
+
+    // ===== KYC System Operations =====
+
+    /// Get a committee by ID
+    ///
+    /// # Arguments
+    /// * `committee_id` - The committee ID to look up
+    ///
+    /// # Returns
+    /// The committee if found, None otherwise
+    async fn get_committee(
+        &self,
+        committee_id: &'a Hash,
+    ) -> Result<Option<crate::kyc::SecurityCommittee>, E>;
+
+    /// Get the committee ID that verified a user's KYC
+    ///
+    /// # Arguments
+    /// * `user` - The user's public key
+    ///
+    /// # Returns
+    /// The committee ID if the user has KYC, None otherwise
+    async fn get_verifying_committee(
+        &self,
+        user: &'a CompressedPublicKey,
+    ) -> Result<Option<Hash>, E>;
+
+    /// Get the KYC status for a user
+    ///
+    /// # Arguments
+    /// * `user` - The user's public key
+    ///
+    /// # Returns
+    /// The KYC status if the user has KYC, None otherwise
+    async fn get_kyc_status(
+        &self,
+        user: &'a CompressedPublicKey,
+    ) -> Result<Option<crate::kyc::KycStatus>, E>;
+
+    /// Get the KYC level for a user
+    ///
+    /// SECURITY FIX (Issue #45): Added to support binding TransferKyc approvals to current level
+    ///
+    /// # Arguments
+    /// * `user` - The user's public key
+    ///
+    /// # Returns
+    /// The KYC level if the user has KYC, None otherwise
+    async fn get_kyc_level(&self, user: &'a CompressedPublicKey) -> Result<Option<u16>, E>;
+
+    /// Check if the global committee has been bootstrapped
+    async fn is_global_committee_bootstrapped(&self) -> Result<bool, E>;
+
+    /// Set KYC data for a user
+    ///
+    /// # Arguments
+    /// * `user` - The user's public key
+    /// * `level` - The KYC level bitmask
+    /// * `verified_at` - The verification timestamp
+    /// * `data_hash` - SHA256 hash of full off-chain KycOffChainData
+    /// * `committee_id` - The committee that verified this KYC
+    /// * `tx_hash` - The transaction hash
+    async fn set_kyc(
+        &mut self,
+        user: &'a CompressedPublicKey,
+        level: u16,
+        verified_at: u64,
+        data_hash: &'a Hash,
+        committee_id: &'a Hash,
+        tx_hash: &'a Hash,
+    ) -> Result<(), E>;
+
+    /// Revoke KYC for a user
+    ///
+    /// # Arguments
+    /// * `user` - The user's public key
+    /// * `reason_hash` - Hash of revocation reason (stored off-chain)
+    /// * `tx_hash` - The transaction hash
+    async fn revoke_kyc(
+        &mut self,
+        user: &'a CompressedPublicKey,
+        reason_hash: &'a Hash,
+        tx_hash: &'a Hash,
+    ) -> Result<(), E>;
+
+    /// Renew KYC for a user
+    ///
+    /// # Arguments
+    /// * `user` - The user's public key
+    /// * `verified_at` - The new verification timestamp
+    /// * `data_hash` - The new off-chain data hash
+    /// * `tx_hash` - The transaction hash
+    async fn renew_kyc(
+        &mut self,
+        user: &'a CompressedPublicKey,
+        verified_at: u64,
+        data_hash: &'a Hash,
+        tx_hash: &'a Hash,
+    ) -> Result<(), E>;
+
+    /// Transfer KYC across regions (dual committee approval)
+    ///
+    /// # Arguments
+    /// * `user` - The user's public key
+    /// * `source_committee_id` - The source committee ID (releasing)
+    /// * `dest_committee_id` - The destination committee ID (accepting)
+    /// * `new_data_hash` - New off-chain data hash from destination committee
+    /// * `transferred_at` - Transfer timestamp (used as new verified_at)
+    /// * `tx_hash` - The transaction hash
+    /// * `dest_max_kyc_level` - Destination committee's max KYC level (for validation)
+    /// * `verification_timestamp` - Block/verification time for checking suspension expiry
+    async fn transfer_kyc(
+        &mut self,
+        user: &'a CompressedPublicKey,
+        source_committee_id: &'a Hash,
+        dest_committee_id: &'a Hash,
+        new_data_hash: &'a Hash,
+        transferred_at: u64,
+        tx_hash: &'a Hash,
+        dest_max_kyc_level: u16,
+        verification_timestamp: u64,
+    ) -> Result<(), E>;
+
+    /// Submit a KYC appeal to parent committee
+    ///
+    /// # Arguments
+    /// * `user` - The user's public key (appellant)
+    /// * `original_committee_id` - The committee that rejected/revoked KYC
+    /// * `parent_committee_id` - The parent committee (arbiter)
+    /// * `reason_hash` - Hash of appeal reason (full reason stored off-chain)
+    /// * `documents_hash` - Hash of supporting documents
+    /// * `submitted_at` - Appeal submission timestamp
+    /// * `tx_hash` - The transaction hash
+    async fn submit_kyc_appeal(
+        &mut self,
+        user: &'a CompressedPublicKey,
+        original_committee_id: &'a Hash,
+        parent_committee_id: &'a Hash,
+        reason_hash: &'a Hash,
+        documents_hash: &'a Hash,
+        submitted_at: u64,
+        tx_hash: &'a Hash,
+    ) -> Result<(), E>;
+
+    /// Emergency suspend a user's KYC
+    ///
+    /// # Arguments
+    /// * `user` - The user's public key
+    /// * `reason_hash` - Hash of suspension reason
+    /// * `expires_at` - When the emergency suspension expires
+    /// * `tx_hash` - The transaction hash
+    async fn emergency_suspend_kyc(
+        &mut self,
+        user: &'a CompressedPublicKey,
+        reason_hash: &'a Hash,
+        expires_at: u64,
+        tx_hash: &'a Hash,
+    ) -> Result<(), E>;
+
+    /// Bootstrap the Global Committee (one-time operation)
+    ///
+    /// # Arguments
+    /// * `name` - Committee name
+    /// * `members` - Initial members
+    /// * `threshold` - Governance threshold
+    /// * `kyc_threshold` - KYC approval threshold
+    /// * `max_kyc_level` - Maximum KYC level this committee can approve
+    /// * `tx_hash` - The transaction hash
+    ///
+    /// # Returns
+    /// The committee ID
+    async fn bootstrap_global_committee(
+        &mut self,
+        name: String,
+        members: Vec<crate::kyc::CommitteeMemberInfo>,
+        threshold: u8,
+        kyc_threshold: u8,
+        max_kyc_level: u16,
+        tx_hash: &'a Hash,
+    ) -> Result<Hash, E>;
+
+    /// Register a new regional committee
+    ///
+    /// # Arguments
+    /// * `name` - Committee name
+    /// * `region` - The region this committee covers
+    /// * `members` - Initial members
+    /// * `threshold` - Governance threshold
+    /// * `kyc_threshold` - KYC approval threshold
+    /// * `max_kyc_level` - Maximum KYC level
+    /// * `parent_id` - Parent committee ID
+    /// * `tx_hash` - The transaction hash
+    ///
+    /// # Returns
+    /// The committee ID
+    #[allow(clippy::too_many_arguments)]
+    async fn register_committee(
+        &mut self,
+        name: String,
+        region: crate::kyc::KycRegion,
+        members: Vec<crate::kyc::CommitteeMemberInfo>,
+        threshold: u8,
+        kyc_threshold: u8,
+        max_kyc_level: u16,
+        parent_id: &'a Hash,
+        tx_hash: &'a Hash,
+    ) -> Result<Hash, E>;
+
+    /// Update committee configuration
+    ///
+    /// # Arguments
+    /// * `committee_id` - The committee ID
+    /// * `update` - The update to apply
+    async fn update_committee(
+        &mut self,
+        committee_id: &'a Hash,
+        update: &crate::transaction::CommitteeUpdateData,
     ) -> Result<(), E>;
 
     // ===== Referral System Operations =====
