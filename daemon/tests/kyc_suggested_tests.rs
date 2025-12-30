@@ -69,7 +69,7 @@ fn create_members_with_roles(keypairs: &[KeyPair], roles: &[MemberRole]) -> Vec<
             CommitteeMember::new(
                 kp.get_public_key().compress(),
                 Some(format!("Member {}", i)),
-                role.clone(),
+                *role,
                 1000,
             )
         })
@@ -121,8 +121,8 @@ fn current_timestamp() -> u64 {
 
 /// Calculate minimum threshold for 2/3 governance rule
 fn calculate_min_threshold(approver_count: usize) -> usize {
-    // ceil(2/3 * approver_count) = (2 * approver_count + 2) / 3
-    (2 * approver_count + 2) / 3
+    // ceil(2/3 * approver_count)
+    (2 * approver_count).div_ceil(3)
 }
 
 // ============================================================================
