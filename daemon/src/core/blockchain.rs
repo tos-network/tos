@@ -36,7 +36,7 @@ use serde_json::{json, Value};
 use std::{
     borrow::Cow,
     collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
-    net::SocketAddr,
+    net::{IpAddr, SocketAddr},
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
@@ -375,6 +375,25 @@ impl<S: Storage> Blockchain<S> {
                     None
                 };
 
+            // Extract priority node IPs (without port) for incoming connection detection
+            let mut priority_node_ips: Vec<IpAddr> = Vec::new();
+            for addr_str in &config.priority_nodes {
+                for origin in addr_str.split(",") {
+                    let origin = origin.trim();
+                    // Try to parse as SocketAddr first
+                    if let Ok(addr) = origin.parse::<SocketAddr>() {
+                        priority_node_ips.push(addr.ip());
+                    } else {
+                        // Try DNS resolution
+                        if let Ok(it) = lookup_host(&origin).await {
+                            for addr in it {
+                                priority_node_ips.push(addr.ip());
+                            }
+                        }
+                    }
+                }
+            }
+
             match P2pServer::new(
                 config.concurrency_task_count_limit,
                 dir_path,
@@ -383,6 +402,7 @@ impl<S: Storage> Blockchain<S> {
                 config.bind_address,
                 Arc::clone(&arc),
                 exclusive_nodes,
+                priority_node_ips,
                 config.allow_fast_sync,
                 config.allow_boost_sync,
                 config.allow_priority_blocks,
