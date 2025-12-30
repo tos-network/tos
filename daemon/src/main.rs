@@ -508,9 +508,12 @@ async fn run_prompt<S: Storage>(
         let (peers, median, syncing_rate) = match &p2p {
             Some(p2p) => {
                 let peer_list = p2p.get_peer_list();
+                let priority_only = p2p.is_sync_from_priority_only();
                 (
                     peer_list.size().await,
-                    peer_list.get_median_topoheight(Some(topoheight)).await,
+                    peer_list
+                        .get_median_topoheight(Some(topoheight), priority_only)
+                        .await,
                     p2p.get_syncing_rate_bps(),
                 )
             }
