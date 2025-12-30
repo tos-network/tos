@@ -17,10 +17,10 @@ use config::{DEV_PUBLIC_KEY, STABLE_LIMIT};
 use core::{
     blockchain::{get_block_reward, Blockchain, BroadcastOption},
     blockdag,
-    config::{Config as InnerConfig, StorageBackend},
+    config::Config as InnerConfig,
     hard_fork::{get_block_time_target_for_version, get_version_at_height},
     state::ChainState,
-    storage::{RocksStorage, SledStorage, Storage},
+    storage::{RocksStorage, Storage},
 };
 use human_bytes::human_bytes;
 use humantime::{format_duration, Duration as HumanDuration};
@@ -240,31 +240,9 @@ async fn main() -> Result<()> {
         );
     }
 
-    // Application-level LRU cache size (shared config for both storage backends)
-    let use_cache = if blockchain_config.sled.cache_size > 0 {
-        Some(blockchain_config.sled.cache_size)
-    } else {
-        None
-    };
+    let storage = RocksStorage::new(&dir_path, config.network, &blockchain_config.rocksdb);
 
-    match blockchain_config.use_db_backend {
-        StorageBackend::Sled => {
-            let storage = SledStorage::new(
-                dir_path.to_owned(),
-                use_cache,
-                config.network,
-                blockchain_config.sled.internal_cache_size,
-                blockchain_config.sled.internal_db_mode,
-            )?;
-
-            start_chain(prompt, storage, config).await
-        }
-        StorageBackend::RocksDB => {
-            let storage = RocksStorage::new(&dir_path, config.network, &blockchain_config.rocksdb);
-
-            start_chain(prompt, storage, config).await
-        }
-    }
+    start_chain(prompt, storage, config).await
 }
 
 async fn start_chain<S: Storage>(

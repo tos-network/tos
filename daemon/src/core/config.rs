@@ -1,6 +1,5 @@
 use crate::{
     config::*,
-    core::storage::sled::StorageMode,
     p2p::diffie_hellman::{KeyVerificationAction, WrappedSecret},
 };
 use humantime::Duration as HumanDuration;
@@ -32,10 +31,6 @@ fn default_rpc_bind_address() -> String {
 
 fn default_prometheus_route() -> String {
     "/metrics".to_owned()
-}
-
-const fn default_cache_size() -> usize {
-    DEFAULT_CACHE_SIZE
 }
 
 const fn default_p2p_concurrency_task_count_limit() -> usize {
@@ -389,8 +384,6 @@ pub struct P2pConfig {
 
 #[derive(Debug, Clone, Copy, clap::ValueEnum, Serialize, Deserialize)]
 pub enum StorageBackend {
-    #[serde(rename = "sled")]
-    Sled,
     #[serde(rename = "rocksdb")]
     #[clap(name = "rocksdb")]
     RocksDB,
@@ -400,22 +393,6 @@ impl Default for StorageBackend {
     fn default() -> Self {
         Self::RocksDB
     }
-}
-
-#[derive(Debug, Clone, clap::Args, Serialize, Deserialize)]
-pub struct SledConfig {
-    /// Set LRUCache size (0 = disabled).
-    #[clap(name = "sled-cache-size", long, default_value_t = default_cache_size())]
-    #[serde(default = "default_cache_size")]
-    pub cache_size: usize,
-    /// DB cache size in bytes
-    #[clap(name = "sled-internal-cache-size", long, default_value_t = default_db_cache_size())]
-    #[serde(default = "default_db_cache_size")]
-    pub internal_cache_size: u64,
-    /// Internal DB mode to use
-    #[clap(name = "sled-internal-db-mode", long, value_enum, default_value_t = StorageMode::LowSpace)]
-    #[serde(default)]
-    pub internal_db_mode: StorageMode,
 }
 
 #[derive(Debug, Clone, clap::Args, Serialize, Deserialize)]
@@ -500,9 +477,6 @@ pub struct Config {
     /// P2P configuration
     #[clap(flatten)]
     pub p2p: P2pConfig,
-    /// Sled DB Backend if enabled
-    #[clap(flatten)]
-    pub sled: SledConfig,
     /// RocksDB Backend if enabled
     #[clap(flatten)]
     pub rocksdb: RocksDBConfig,

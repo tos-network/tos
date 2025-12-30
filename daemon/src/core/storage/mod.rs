@@ -1,10 +1,9 @@
-mod cache;
+mod constants;
 mod providers;
 
 pub mod rocksdb;
-pub mod sled;
 
-pub use self::{providers::*, rocksdb::RocksStorage, sled::SledStorage};
+pub use self::{providers::*, rocksdb::RocksStorage};
 
 use crate::{config::PRUNE_SAFETY_LIMIT, core::error::BlockchainError};
 use async_trait::async_trait;

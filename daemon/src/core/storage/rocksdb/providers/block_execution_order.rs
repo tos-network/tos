@@ -1,8 +1,8 @@
 use crate::core::{
     error::BlockchainError,
     storage::{
+        constants::BLOCKS_EXECUTION_ORDER_COUNT,
         rocksdb::{Column, IteratorMode},
-        sled::BLOCKS_EXECUTION_ORDER_COUNT,
         BlockExecutionOrderProvider, RocksStorage,
     },
 };

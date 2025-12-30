@@ -1,8 +1,8 @@
 use crate::core::{
     error::BlockchainError,
     storage::{
+        constants::{BLOCKS_COUNT, TXS_COUNT},
         rocksdb::{BlockDifficulty, Column},
-        sled::{BLOCKS_COUNT, TXS_COUNT},
         BlockProvider, BlocksAtHeightProvider, DifficultyProvider, RocksStorage,
         TransactionProvider,
     },
