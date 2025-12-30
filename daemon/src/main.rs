@@ -233,6 +233,12 @@ async fn main() -> Result<()> {
     info!("----------------------------------------------");
 
     let dir_path = blockchain_config.dir_path.as_deref().unwrap_or_default();
+    if !matches!(blockchain_config.use_db_backend, StorageBackend::RocksDB) {
+        warn!(
+            "use_db_backend is set to {:?}, but only rocksdb is supported; continuing with RocksDB",
+            blockchain_config.use_db_backend
+        );
+    }
 
     // Application-level LRU cache size (shared config for both storage backends)
     let use_cache = if blockchain_config.sled.cache_size > 0 {

@@ -474,6 +474,24 @@ pub struct RocksDBConfig {
     pub write_buffer_shared: bool,
 }
 
+impl Default for RocksDBConfig {
+    fn default() -> Self {
+        Self {
+            parallelism: detect_available_parallelism(),
+            max_background_jobs: detect_available_parallelism(),
+            max_subcompaction_jobs: detect_available_parallelism(),
+            low_priority_background_threads: detect_available_parallelism(),
+            max_open_files: default_max_open_files(),
+            keep_max_log_files: default_keep_max_log_files(),
+            compression_mode: CompressionMode::default(),
+            cache_mode: CacheMode::default(),
+            cache_size: default_db_cache_size(),
+            write_buffer_size: default_db_cache_size(),
+            write_buffer_shared: false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, clap::Args, Serialize, Deserialize)]
 pub struct Config {
     /// RPC configuration

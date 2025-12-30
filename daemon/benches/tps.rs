@@ -34,6 +34,7 @@ use tos_common::{
         elgamal::{CompressedPublicKey, KeyPair},
         Hash, Hashable,
     },
+    network::Network,
     transaction::{
         builder::{
             AccountState, FeeBuilder, FeeHelper, TransactionBuilder, TransactionTypeBuilder,
@@ -398,6 +399,10 @@ impl<'a> tos_common::transaction::verify::BlockchainVerificationState<'a, ()>
         let module = self.contracts.get(hash).ok_or(())?;
         Ok((module, &self.env))
     }
+
+    fn get_network(&self) -> Network {
+        Network::Mainnet
+    }
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -441,6 +446,7 @@ fn generate_block(tx_count: usize, amount: u64, fee: u64) -> GeneratedBlock {
 
         let tx = TransactionBuilder::new(
             TxVersion::T0,
+            0, // chain_id: 0 for Mainnet (benchmarks use T0 legacy format)
             sender.keypair.get_public_key().compress(),
             None,
             TransactionTypeBuilder::Transfers(vec![transfer]),
