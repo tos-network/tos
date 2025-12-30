@@ -128,6 +128,9 @@ pub struct P2pServer<S: Storage> {
     // Configured exclusive nodes
     // If not empty, no other peer than those listed can connect to this node
     exclusive_nodes: IndexSet<SocketAddr>,
+    // Configured priority node IPs (without port)
+    // Used to detect incoming connections from priority nodes
+    priority_node_ips: IndexSet<IpAddr>,
     // Are we allowing others nodes to share us as a potential peer ?
     // Also if we allows to be listed in get_peers RPC API
     shareable: bool,
@@ -190,6 +193,7 @@ impl<S: Storage> P2pServer<S> {
         bind_address: String,
         blockchain: Arc<Blockchain<S>>,
         exclusive_nodes: Vec<SocketAddr>,
+        priority_node_ips: Vec<IpAddr>,
         allow_fast_sync_mode: bool,
         allow_boost_sync_mode: bool,
         allow_priority_blocks: bool,
@@ -284,6 +288,7 @@ impl<S: Storage> P2pServer<S> {
             allow_boost_sync_mode,
             max_chain_response_size,
             exclusive_nodes: IndexSet::from_iter(exclusive_nodes.into_iter()),
+            priority_node_ips: IndexSet::from_iter(priority_node_ips.into_iter()),
             shareable,
             disable_fast_sync_support,
             allow_priority_blocks,
@@ -480,11 +485,13 @@ impl<S: Storage> P2pServer<S> {
             return Ok(());
         }
 
+        // Check if the incoming connection is from a priority node (by IP only, not port)
+        let is_priority = self.priority_node_ips.contains(&addr.ip());
         let connection = Connection::new(stream, addr, false);
         let zelf = Arc::clone(&self);
         thread_pool.execute(async move {
             let mut buffer = [0; 512];
-            match zelf.create_verified_peer(&mut buffer, connection, false).await {
+            match zelf.create_verified_peer(&mut buffer, connection, is_priority).await {
                 Ok((peer, rx)) => {
                     if let Err(e) = zelf.peer_sender.send((peer, rx)).await {
                         if log::log_enabled!(log::Level::Error) {
