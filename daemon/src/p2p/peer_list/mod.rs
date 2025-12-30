@@ -357,10 +357,15 @@ impl PeerList {
     }
 
     // Returns the highest topoheight of all peers
-    pub async fn get_best_topoheight(&self) -> TopoHeight {
+    // If priority_only is true, only consider priority nodes
+    pub async fn get_best_topoheight(&self, priority_only: bool) -> TopoHeight {
         let mut best_height = 0;
         let peers = self.peers.read().await;
         for (_, peer) in peers.iter() {
+            // Skip non-priority nodes if priority_only is enabled
+            if priority_only && !peer.is_priority() {
+                continue;
+            }
             let height = peer.get_topoheight();
             if height > best_height {
                 best_height = height;
@@ -370,12 +375,18 @@ impl PeerList {
     }
 
     // Returns the median topoheight of all peers
-    pub async fn get_median_topoheight(&self, our_topoheight: Option<TopoHeight>) -> TopoHeight {
+    // If priority_only is true, only consider priority nodes
+    pub async fn get_median_topoheight(
+        &self,
+        our_topoheight: Option<TopoHeight>,
+        priority_only: bool,
+    ) -> TopoHeight {
         let peers = self.peers.read().await;
-        let mut values = peers
+        let mut values: Vec<TopoHeight> = peers
             .values()
+            .filter(|peer| !priority_only || peer.is_priority())
             .map(|peer| peer.get_topoheight())
-            .collect::<Vec<TopoHeight>>();
+            .collect();
         if let Some(our_topoheight) = our_topoheight {
             values.push(our_topoheight);
         }
