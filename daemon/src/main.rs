@@ -17,7 +17,7 @@ use config::{DEV_PUBLIC_KEY, STABLE_LIMIT};
 use core::{
     blockchain::{get_block_reward, Blockchain, BroadcastOption},
     blockdag,
-    config::Config as InnerConfig,
+    config::{Config as InnerConfig, StorageBackend},
     hard_fork::{get_block_time_target_for_version, get_version_at_height},
     state::ChainState,
     storage::{RocksStorage, Storage},
