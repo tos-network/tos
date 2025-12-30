@@ -626,7 +626,7 @@ pub struct ValidationSummary {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use curve25519_dalek::ristretto::CompressedRistretto;
+    use tos_crypto::curve25519_dalek::ristretto::CompressedRistretto;
 
     fn create_test_pubkey(bytes: [u8; 32]) -> CompressedPublicKey {
         CompressedPublicKey::new(CompressedRistretto::from_slice(&bytes).unwrap())

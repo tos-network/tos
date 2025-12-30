@@ -7,7 +7,10 @@ use crate::{
         AssetChanges, ChainState, ContractCache, ContractEventTracker, ContractOutput,
         ContractProvider,
     },
-    crypto::{elgamal::CompressedPublicKey, Hash},
+    crypto::{
+        elgamal::{Ciphertext, CompressedPublicKey},
+        Hash,
+    },
     transaction::{ContractDeposit, MultiSigPayload, Reference, Transaction},
 };
 use async_trait::async_trait;
@@ -49,6 +52,31 @@ pub trait BlockchainVerificationState<'a, E> {
         account: &'a CompressedPublicKey,
         asset: &'a Hash,
         output: u64,
+    ) -> Result<(), E>;
+
+    // ===== UNO (Privacy Balance) Methods =====
+
+    /// Get the UNO (encrypted) balance for a receiver account
+    async fn get_receiver_uno_balance<'b>(
+        &'b mut self,
+        account: Cow<'a, CompressedPublicKey>,
+        asset: Cow<'a, Hash>,
+    ) -> Result<&'b mut Ciphertext, E>;
+
+    /// Get the UNO (encrypted) balance used for verification of funds for the sender account
+    async fn get_sender_uno_balance<'b>(
+        &'b mut self,
+        account: &'a CompressedPublicKey,
+        asset: &'a Hash,
+        reference: &Reference,
+    ) -> Result<&'b mut Ciphertext, E>;
+
+    /// Apply new output ciphertext to a sender's UNO account
+    async fn add_sender_uno_output(
+        &mut self,
+        account: &'a CompressedPublicKey,
+        asset: &'a Hash,
+        output: Ciphertext,
     ) -> Result<(), E>;
 
     /// Get the nonce of an account

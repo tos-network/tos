@@ -1207,6 +1207,9 @@ fn is_valid_fee_type_combination(tx_type: &TransactionType, fee_type: &FeeType) 
         (TransactionType::TransferKyc(_), FeeType::Energy) => false,
         (TransactionType::AppealKyc(_), FeeType::TOS) => true,
         (TransactionType::AppealKyc(_), FeeType::Energy) => false,
+        // UNO (privacy transfers) - use TOS fee type only
+        (TransactionType::UnoTransfers(_), FeeType::TOS) => true,
+        (TransactionType::UnoTransfers(_), FeeType::Energy) => false,
     }
 }
 

@@ -6,6 +6,7 @@ mod kyc;
 mod multisig;
 mod referral;
 mod transfer;
+mod uno_transfer;
 
 pub use burn::*;
 pub use contract::*;
@@ -14,4 +15,5 @@ pub use kyc::*;
 pub use multisig::*;
 pub use referral::*;
 pub use transfer::*;
+pub use uno_transfer::*;
 // pub use ai_mining::*; // Re-exported through ai_mining module

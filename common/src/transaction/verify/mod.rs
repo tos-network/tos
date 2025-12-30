@@ -13,7 +13,7 @@ use indexmap::IndexMap;
 use log::{debug, trace};
 use tos_kernel::ModuleValidator;
 
-use super::{payload::EnergyPayload, ContractDeposit, Transaction, TransactionType};
+use super::{payload::EnergyPayload, ContractDeposit, Role, Transaction, TransactionType};
 use crate::{
     account::EnergyResource,
     config::{BURN_PER_CONTRACT, MAX_GAS_USAGE_PER_TX, TOS_ASSET},
@@ -67,7 +67,8 @@ impl Transaction {
                     | TransactionType::BootstrapCommittee(_)
                     | TransactionType::RegisterCommittee(_)
                     | TransactionType::UpdateCommittee(_)
-                    | TransactionType::EmergencySuspend(_) => true,
+                    | TransactionType::EmergencySuspend(_)
+                    | TransactionType::UnoTransfers(_) => true,
                 }
             }
         }
@@ -348,6 +349,32 @@ impl Transaction {
                 let current_time = state.get_verification_timestamp();
                 kyc::verify_appeal_kyc(payload, current_time)?;
             }
+            TransactionType::UnoTransfers(transfers) => {
+                // UNO transfers: privacy-preserving transfers with ZKP proofs
+                // Validation of extra data size and destination checks
+                if transfers.is_empty() || transfers.len() > MAX_TRANSFER_COUNT {
+                    return Err(VerificationError::TransferCount);
+                }
+
+                let mut extra_data_size = 0;
+                for transfer in transfers {
+                    if *transfer.get_destination() == self.source {
+                        return Err(VerificationError::SenderIsReceiver);
+                    }
+
+                    if let Some(extra_data) = transfer.get_extra_data() {
+                        let size = extra_data.size();
+                        if size > EXTRA_DATA_LIMIT_SIZE {
+                            return Err(VerificationError::TransferExtraDataSize);
+                        }
+                        extra_data_size += size;
+                    }
+                }
+
+                if extra_data_size > EXTRA_DATA_LIMIT_SUM_SIZE {
+                    return Err(VerificationError::TransactionExtraDataSize);
+                }
+            }
         };
 
         // SECURITY FIX: Verify sender has sufficient balance for all spending
@@ -448,6 +475,11 @@ impl Transaction {
                 *current = current
                     .checked_add(payload.get_total_amount())
                     .ok_or(VerificationError::Overflow)?;
+            }
+            TransactionType::UnoTransfers(_) => {
+                // UNO transfers spend from encrypted balances
+                // Spending verification is done through ZKP proofs (CommitmentEqProof)
+                // No plaintext spending to verify here
             }
         };
 
@@ -771,6 +803,37 @@ impl Transaction {
                 let current_time = state.get_verification_timestamp();
                 kyc::verify_emergency_suspend(payload, current_time)?;
             }
+            TransactionType::UnoTransfers(transfers) => {
+                // UNO transfers: privacy-preserving transfers with ZKP proofs
+                if transfers.len() > MAX_TRANSFER_COUNT || transfers.is_empty() {
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("incorrect UNO transfers size: {}", transfers.len());
+                    }
+                    return Err(VerificationError::TransferCount);
+                }
+
+                let mut extra_data_size = 0;
+                for transfer in transfers.iter() {
+                    if *transfer.get_destination() == self.source {
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("sender cannot be the receiver in the same TX");
+                        }
+                        return Err(VerificationError::SenderIsReceiver);
+                    }
+
+                    if let Some(extra_data) = transfer.get_extra_data() {
+                        let size = extra_data.size();
+                        if size > EXTRA_DATA_LIMIT_SIZE {
+                            return Err(VerificationError::TransferExtraDataSize);
+                        }
+                        extra_data_size += size;
+                    }
+                }
+
+                if extra_data_size > EXTRA_DATA_LIMIT_SUM_SIZE {
+                    return Err(VerificationError::TransactionExtraDataSize);
+                }
+            }
         };
 
         let source_decompressed = self
@@ -964,6 +1027,10 @@ impl Transaction {
             | TransactionType::EmergencySuspend(_) => {
                 // KYC transactions are logged at execution time
             }
+            TransactionType::UnoTransfers(_) => {
+                // UNO transfers are verified through ZKP proofs
+                // Logging handled during apply phase
+            }
         }
 
         // With plaintext balances, we don't need Bulletproofs range proofs
@@ -1065,6 +1132,11 @@ impl Transaction {
                 *current = current
                     .checked_add(payload.get_total_amount())
                     .ok_or(VerificationError::Overflow)?;
+            }
+            TransactionType::UnoTransfers(_) => {
+                // UNO transfers spend from encrypted balances
+                // Spending verification is done through ZKP proofs (CommitmentEqProof)
+                // No plaintext spending to verify here
             }
         };
 
@@ -1295,6 +1367,11 @@ impl Transaction {
                 *current = current
                     .checked_add(payload.get_total_amount())
                     .ok_or(VerificationError::Overflow)?;
+            }
+            TransactionType::UnoTransfers(_) => {
+                // UNO transfers spend from encrypted balances
+                // Spending verification is done through ZKP proofs (CommitmentEqProof)
+                // No plaintext spending to verify here
             }
         };
 
@@ -2384,6 +2461,35 @@ impl Transaction {
                     );
                 }
             }
+            TransactionType::UnoTransfers(transfers) => {
+                // UNO transfers: privacy-preserving transfers
+                // Update receiver balances with encrypted ciphertexts
+                for transfer in transfers {
+                    let receiver_ct = transfer
+                        .get_ciphertext(Role::Receiver)
+                        .decompress()
+                        .map_err(ProofVerificationError::from)?;
+
+                    // Get receiver's UNO balance and add the ciphertext
+                    let current_balance = state
+                        .get_receiver_uno_balance(
+                            Cow::Borrowed(transfer.get_destination()),
+                            Cow::Borrowed(transfer.get_asset()),
+                        )
+                        .await
+                        .map_err(VerificationError::State)?;
+
+                    *current_balance += receiver_ct;
+
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!(
+                            "UNO transfer applied - receiver: {:?}, asset: {:?}",
+                            transfer.get_destination(),
+                            transfer.get_asset()
+                        );
+                    }
+                }
+            }
         }
 
         Ok(())
@@ -2514,6 +2620,11 @@ impl Transaction {
                 *current = current
                     .checked_add(payload.get_total_amount())
                     .ok_or(VerificationError::Overflow)?;
+            }
+            TransactionType::UnoTransfers(_) => {
+                // UNO transfers spend from encrypted balances
+                // Spending verification is done through ZKP proofs (CommitmentEqProof)
+                // No plaintext spending to verify here
             }
         };
 

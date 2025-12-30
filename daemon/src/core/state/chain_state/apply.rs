@@ -22,7 +22,10 @@ use tos_common::{
         AssetChanges, ChainState as ContractChainState, ContractCache, ContractEventTracker,
         ContractOutput, ScheduledExecution,
     },
-    crypto::{elgamal::CompressedPublicKey, Hash, PublicKey},
+    crypto::{
+        elgamal::{Ciphertext, CompressedPublicKey},
+        Hash, PublicKey,
+    },
     transaction::{
         verify::{BlockchainApplyState, BlockchainVerificationState, ContractEnvironment},
         ContractDeposit, MultiSigPayload, Reference,
@@ -96,6 +99,42 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError>
         output: u64,
     ) -> Result<(), BlockchainError> {
         self.inner.add_sender_output(account, asset, output).await
+    }
+
+    // ===== UNO (Privacy Balance) Methods =====
+    // TODO: Implement proper UNO balance storage and retrieval
+
+    /// Get the UNO (encrypted) balance for a receiver account
+    async fn get_receiver_uno_balance<'b>(
+        &'b mut self,
+        account: Cow<'a, PublicKey>,
+        asset: Cow<'a, Hash>,
+    ) -> Result<&'b mut Ciphertext, BlockchainError> {
+        self.inner.get_receiver_uno_balance(account, asset).await
+    }
+
+    /// Get the UNO (encrypted) balance used for verification of funds for the sender account
+    async fn get_sender_uno_balance<'b>(
+        &'b mut self,
+        account: &'a PublicKey,
+        asset: &'a Hash,
+        reference: &Reference,
+    ) -> Result<&'b mut Ciphertext, BlockchainError> {
+        self.inner
+            .get_sender_uno_balance(account, asset, reference)
+            .await
+    }
+
+    /// Apply new output ciphertext to a sender's UNO account
+    async fn add_sender_uno_output(
+        &mut self,
+        account: &'a PublicKey,
+        asset: &'a Hash,
+        output: Ciphertext,
+    ) -> Result<(), BlockchainError> {
+        self.inner
+            .add_sender_uno_output(account, asset, output)
+            .await
     }
 
     /// Get the nonce of an account

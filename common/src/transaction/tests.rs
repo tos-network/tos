@@ -6,7 +6,7 @@ use crate::{
     block::BlockVersion,
     config::{BURN_PER_CONTRACT, COIN_VALUE, TOS_ASSET},
     crypto::{
-        elgamal::{CompressedPublicKey, PedersenOpening},
+        elgamal::{Ciphertext, CompressedPublicKey, PedersenOpening},
         Address, Hash, Hashable, KeyPair, PublicKey,
     },
     serializer::Serializer,
@@ -1353,6 +1353,35 @@ impl<'a> BlockchainVerificationState<'a, TestError> for ChainState {
         _: u64,
     ) -> Result<(), TestError> {
         Ok(())
+    }
+
+    // ===== UNO (Privacy Balance) Methods =====
+    // Stub implementations for testing
+
+    async fn get_receiver_uno_balance<'b>(
+        &'b mut self,
+        _account: Cow<'a, PublicKey>,
+        _asset: Cow<'a, Hash>,
+    ) -> Result<&'b mut Ciphertext, TestError> {
+        Err(TestError(()))
+    }
+
+    async fn get_sender_uno_balance<'b>(
+        &'b mut self,
+        _account: &'a PublicKey,
+        _asset: &'a Hash,
+        _reference: &Reference,
+    ) -> Result<&'b mut Ciphertext, TestError> {
+        Err(TestError(()))
+    }
+
+    async fn add_sender_uno_output(
+        &mut self,
+        _account: &'a PublicKey,
+        _asset: &'a Hash,
+        _output: Ciphertext,
+    ) -> Result<(), TestError> {
+        Err(TestError(()))
     }
 
     /// Get the nonce of an account

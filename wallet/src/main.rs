@@ -2701,6 +2701,20 @@ async fn transaction(
                 manager.message(format!("  Reason Hash: {}", payload.get_reason_hash()));
                 manager.message(format!("  Submitted At: {}", payload.get_submitted_at()));
             }
+            TransactionType::UnoTransfers(transfers) => {
+                manager.message("Type: UNO Transfers (Privacy-Preserving)");
+                manager.message(format!("  Transfer Count: {}", transfers.len()));
+                for (i, transfer) in transfers.iter().enumerate() {
+                    manager.message(format!(
+                        "  Transfer #{}: to {}",
+                        i + 1,
+                        transfer
+                            .get_destination()
+                            .as_address(wallet.get_network().is_mainnet())
+                    ));
+                    manager.message(format!("    Asset: {}", transfer.get_asset()));
+                }
+            }
         }
     }
 

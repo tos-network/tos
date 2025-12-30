@@ -12,7 +12,10 @@ use tos_common::{
     account::{Nonce, VersionedBalance, VersionedNonce},
     block::{BlockVersion, TopoHeight},
     config::TOS_ASSET,
-    crypto::{elgamal::CompressedPublicKey, Hash, PublicKey},
+    crypto::{
+        elgamal::{Ciphertext, CompressedPublicKey},
+        Hash, PublicKey,
+    },
     transaction::{verify::BlockchainVerificationState, MultiSigPayload, Reference, Transaction},
     utils::format_tos,
     versioned_type::VersionedState,
@@ -702,6 +705,39 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for ChainS
     ) -> Result<(), BlockchainError> {
         self.internal_update_sender_echange(account, asset, output)
             .await
+    }
+
+    // ===== UNO (Privacy Balance) Methods =====
+    // TODO: Implement proper UNO balance storage and retrieval
+    // These are stub implementations that return errors until UNO storage is implemented
+
+    /// Get the UNO (encrypted) balance for a receiver account
+    async fn get_receiver_uno_balance<'b>(
+        &'b mut self,
+        _account: Cow<'a, PublicKey>,
+        _asset: Cow<'a, Hash>,
+    ) -> Result<&'b mut Ciphertext, BlockchainError> {
+        Err(BlockchainError::UnoNotImplemented)
+    }
+
+    /// Get the UNO (encrypted) balance used for verification of funds for the sender account
+    async fn get_sender_uno_balance<'b>(
+        &'b mut self,
+        _account: &'a PublicKey,
+        _asset: &'a Hash,
+        _reference: &Reference,
+    ) -> Result<&'b mut Ciphertext, BlockchainError> {
+        Err(BlockchainError::UnoNotImplemented)
+    }
+
+    /// Apply new output ciphertext to a sender's UNO account
+    async fn add_sender_uno_output(
+        &mut self,
+        _account: &'a PublicKey,
+        _asset: &'a Hash,
+        _output: Ciphertext,
+    ) -> Result<(), BlockchainError> {
+        Err(BlockchainError::UnoNotImplemented)
     }
 
     /// Get the nonce of an account

@@ -1,14 +1,10 @@
 use std::hash;
 
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 use crate::{
+    crypto::{elgamal::CompressedCommitment, proofs::CommitmentEqProof, Hash},
     serializer::*,
-    crypto::{
-        elgamal::CompressedCommitment,
-        Hash,
-        proofs::CommitmentEqProof
-    }
 };
 
 // SourceCommitment is a structure that holds the commitment and the equality proof
@@ -36,7 +32,7 @@ impl SourceCommitment {
         SourceCommitment {
             commitment,
             proof,
-            asset
+            asset,
         }
     }
 
@@ -74,7 +70,7 @@ impl Serializer for SourceCommitment {
         Ok(SourceCommitment {
             commitment,
             proof,
-            asset
+            asset,
         })
     }
 

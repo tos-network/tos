@@ -22,7 +22,7 @@ use crate::{
         DeployContractPayload, EmergencySuspendPayload, EnergyPayload, FeeType,
         InvokeContractPayload, MultiSigPayload, Reference, RegisterCommitteePayload,
         RenewKycPayload, RevokeKycPayload, SetKycPayload, Transaction, TransactionType,
-        TransferKycPayload, TransferPayload, TxVersion, UpdateCommitteePayload,
+        TransferKycPayload, TransferPayload, TxVersion, UnoTransferPayload, UpdateCommitteePayload,
     },
 };
 pub use data::*;
@@ -87,6 +87,8 @@ pub enum RPCTransactionType<'a> {
     RegisterCommittee(Cow<'a, RegisterCommitteePayload>),
     UpdateCommittee(Cow<'a, UpdateCommitteePayload>),
     EmergencySuspend(Cow<'a, EmergencySuspendPayload>),
+    // UNO (Privacy Balance) transaction types
+    UnoTransfers(Cow<'a, Vec<UnoTransferPayload>>),
 }
 
 impl<'a> RPCTransactionType<'a> {
@@ -135,6 +137,9 @@ impl<'a> RPCTransactionType<'a> {
             }
             TransactionType::EmergencySuspend(payload) => {
                 Self::EmergencySuspend(Cow::Borrowed(payload))
+            }
+            TransactionType::UnoTransfers(transfers) => {
+                Self::UnoTransfers(Cow::Borrowed(transfers))
             }
         }
     }
@@ -194,6 +199,9 @@ impl From<RPCTransactionType<'_>> for TransactionType {
             }
             RPCTransactionType::EmergencySuspend(payload) => {
                 TransactionType::EmergencySuspend(payload.into_owned())
+            }
+            RPCTransactionType::UnoTransfers(transfers) => {
+                TransactionType::UnoTransfers(transfers.into_owned())
             }
         }
     }

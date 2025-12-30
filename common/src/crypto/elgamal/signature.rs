@@ -3,7 +3,7 @@ use crate::{
     crypto::proofs::H,
     serializer::{Reader, ReaderError, Serializer, Writer},
 };
-use curve25519_dalek::{RistrettoPoint, Scalar};
+use tos_crypto::curve25519_dalek::{RistrettoPoint, Scalar};
 use serde::{de::Error, Serialize};
 use sha3::{Digest, Sha3_512};
 
@@ -134,7 +134,7 @@ impl Serializer for Signature {
         let s_bytes = reader.read_bytes::<[u8; SCALAR_SIZE]>(SCALAR_SIZE)?;
         let e_bytes = reader.read_bytes::<[u8; SCALAR_SIZE]>(SCALAR_SIZE)?;
 
-        use curve25519_dalek::scalar::Scalar;
+        use tos_crypto::curve25519_dalek::scalar::Scalar;
         let s = Scalar::from_canonical_bytes(s_bytes)
             .into_option()
             .ok_or(ReaderError::InvalidValue)?;

@@ -2292,6 +2292,11 @@ async fn get_account_history<S: Storage>(
                     // KYC transactions don't affect account history for now
                     // This could be extended to track KYC activities
                 }
+                // UNO (Privacy Balance) transaction types
+                TransactionType::UnoTransfers(_) => {
+                    // UNO transfers are privacy-preserving and don't reveal amounts in history
+                    // This could be extended to track encrypted transfer activities
+                }
             }
         }
 
@@ -4467,7 +4472,7 @@ async fn get_uplines<S: Storage>(
     let uplines: Vec<Address> = result
         .uplines
         .iter()
-        .map(|key| key.to_address(network.is_mainnet()))
+        .map(|key| key.as_address(network.is_mainnet()))
         .collect();
 
     Ok(json!(GetUplinesResult {
@@ -4505,7 +4510,7 @@ async fn get_direct_referrals<S: Storage>(
     let referrals: Vec<Address> = result
         .referrals
         .iter()
-        .map(|key| key.to_address(network.is_mainnet()))
+        .map(|key| key.as_address(network.is_mainnet()))
         .collect();
 
     Ok(json!(GetDirectReferralsResult {
@@ -5039,7 +5044,7 @@ fn convert_committee_to_rpc(
         .members
         .iter()
         .map(|m| CommitteeMemberRpc {
-            public_key: m.public_key.to_address(is_mainnet),
+            public_key: m.public_key.as_address(is_mainnet),
             name: m.name.clone(),
             role: m.role.as_str().to_string(),
             status: m.status.as_str().to_string(),

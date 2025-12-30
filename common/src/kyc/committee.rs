@@ -1092,8 +1092,8 @@ impl CommitteeMemberInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use curve25519_dalek::ristretto::CompressedRistretto;
-    use curve25519_dalek::scalar::Scalar;
+    use tos_crypto::curve25519_dalek::ristretto::CompressedRistretto;
+    use tos_crypto::curve25519_dalek::scalar::Scalar;
 
     fn create_test_pubkey(seed: u8) -> PublicKey {
         let mut bytes = [0u8; 32];

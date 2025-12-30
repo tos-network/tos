@@ -854,7 +854,7 @@ mod tests {
         let _ = TransactionBuilder::new(
             TxVersion::T0,
             0, // chain_id: 0 for tests
-            CompressedPublicKey::new(curve25519_dalek::ristretto::CompressedRistretto::default()),
+            CompressedPublicKey::new(tos_crypto::curve25519_dalek::ristretto::CompressedRistretto::default()),
             None,
             transfer_builder,
             FeeBuilder::Value(0),
@@ -871,7 +871,7 @@ mod tests {
         let _builder = TransactionBuilder::new(
             TxVersion::T0,
             0, // chain_id: 0 for tests
-            CompressedPublicKey::new(curve25519_dalek::ristretto::CompressedRistretto::default()),
+            CompressedPublicKey::new(tos_crypto::curve25519_dalek::ristretto::CompressedRistretto::default()),
             None,
             burn_builder.clone(),
             FeeBuilder::Value(0),
@@ -909,7 +909,7 @@ mod tests {
         let _builder = TransactionBuilder::new(
             TxVersion::T0,
             0, // chain_id: 0 for tests
-            CompressedPublicKey::new(curve25519_dalek::ristretto::CompressedRistretto::default()),
+            CompressedPublicKey::new(tos_crypto::curve25519_dalek::ristretto::CompressedRistretto::default()),
             None,
             transfer_to_new_address.clone(),
             FeeBuilder::Value(0),

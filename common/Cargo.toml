@@ -14,18 +14,11 @@ build = "build.rs"
 [dependencies]
 tos-hash = { git = "https://github.com/tos-network/tos-hash", rev = "b661e5a" }
 # TOS Kernel - Simplified re-export crate in TAKO
-tos-kernel = { git = "https://github.com/tos-network/tako", rev = "fa4d4fb" }
-# TOS Crypto - Extracted cryptographic primitives to avoid circular dependencies
-# Pinned to specific rev for reproducible builds
-tos-crypto = { git = "https://github.com/tos-network/tos-crypto", rev = "e487d8d" }
-# Balance simplification: bulletproofs removed (no longer needed with plaintext balances)
-# bulletproofs = { git = "https://github.com/tos-network/bulletproofs", tag = "v5.0.2" }
-# Pinned to specific commit SHA for 100% reproducible builds (tag v4.2.0 = 0ca0e1a1...)
-# Must match tos-crypto's curve25519-dalek version to avoid type conflicts
-curve25519-dalek = { features = ["digest", "group", "rand_core", "serde", "ecdlp"], git = "https://github.com/tos-network/curve25519-dalek", rev = "0ca0e1a1cab7c08733e35cfedc33fc68db2058be" }
+tos-kernel = { git = "https://github.com/tos-network/tako", rev = "f864dea" }
+# TOS Crypto - Unified cryptographic primitives (curve25519-dalek, bulletproofs, merlin)
+# Features: uno = ecdlp (balance decryption) + zk-proofs (bulletproofs + merlin)
+tos-crypto = { git = "https://github.com/tos-network/tos-crypto", rev = "971e01c", features = ["uno"] }
 blake3 = "1.5.1"
-# Balance simplification: merlin removed (Transcript no longer needed for proofs)
-# merlin = "3.0.0"
 zeroize = { version = "1.7.0", features = ["derive"] }
 sha3 = "0.10.8"
 # HMAC-SHA256 for callback signature (TIP-QR-PAYMENT)
