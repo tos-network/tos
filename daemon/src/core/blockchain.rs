@@ -400,6 +400,8 @@ impl<S: Storage> Blockchain<S> {
                 config.handle_peer_packets_in_dedicated_task,
                 config.disable_fast_sync_support,
                 proxy,
+                config.sync_from_priority_only,
+                config.reorg_from_priority_only,
             ) {
                 Ok(p2p) => {
                     *arc.p2p.write().await = Some(p2p.clone());
