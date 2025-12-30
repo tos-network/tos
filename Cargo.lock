@@ -4713,7 +4713,7 @@ dependencies = [
 [[package]]
 name = "tako-sdk"
 version = "0.2.1"
-source = "git+https://github.com/tos-network/tako?rev=f864dea#f864dea8b42445efe8932180a4503b8dec9fb3cc"
+source = "git+https://github.com/tos-network/tako?rev=c52af76#c52af7643f456d0f6fefe47c57e99dadd4518c9b"
 
 [[package]]
 name = "tap"
@@ -5110,7 +5110,7 @@ dependencies = [
 [[package]]
 name = "tos-builder"
 version = "0.1.0"
-source = "git+https://github.com/tos-network/tako?rev=f864dea#f864dea8b42445efe8932180a4503b8dec9fb3cc"
+source = "git+https://github.com/tos-network/tako?rev=c52af76#c52af7643f456d0f6fefe47c57e99dadd4518c9b"
 dependencies = [
  "anyhow",
  "log",
@@ -5122,7 +5122,7 @@ dependencies = [
 [[package]]
 name = "tos-bytecode"
 version = "0.1.0"
-source = "git+https://github.com/tos-network/tako?rev=f864dea#f864dea8b42445efe8932180a4503b8dec9fb3cc"
+source = "git+https://github.com/tos-network/tako?rev=c52af76#c52af7643f456d0f6fefe47c57e99dadd4518c9b"
 dependencies = [
  "indexmap 2.10.0",
  "serde",
@@ -5168,7 +5168,7 @@ dependencies = [
 [[package]]
 name = "tos-environment"
 version = "0.1.0"
-source = "git+https://github.com/tos-network/tako?rev=f864dea#f864dea8b42445efe8932180a4503b8dec9fb3cc"
+source = "git+https://github.com/tos-network/tako?rev=c52af76#c52af7643f456d0f6fefe47c57e99dadd4518c9b"
 dependencies = [
  "anyhow",
  "better_any",
@@ -5194,7 +5194,7 @@ dependencies = [
 [[package]]
 name = "tos-kernel"
 version = "0.1.0"
-source = "git+https://github.com/tos-network/tako?rev=f864dea#f864dea8b42445efe8932180a4503b8dec9fb3cc"
+source = "git+https://github.com/tos-network/tako?rev=c52af76#c52af7643f456d0f6fefe47c57e99dadd4518c9b"
 dependencies = [
  "indexmap 2.10.0",
  "log",
@@ -5208,7 +5208,7 @@ dependencies = [
 [[package]]
 name = "tos-poseidon"
 version = "0.1.0"
-source = "git+https://github.com/tos-network/tako?rev=f864dea#f864dea8b42445efe8932180a4503b8dec9fb3cc"
+source = "git+https://github.com/tos-network/tako?rev=c52af76#c52af7643f456d0f6fefe47c57e99dadd4518c9b"
 dependencies = [
  "ark-bn254",
  "ark-ff",
@@ -5219,7 +5219,7 @@ dependencies = [
 [[package]]
 name = "tos-precompiles"
 version = "0.2.1"
-source = "git+https://github.com/tos-network/tako?rev=f864dea#f864dea8b42445efe8932180a4503b8dec9fb3cc"
+source = "git+https://github.com/tos-network/tako?rev=c52af76#c52af7643f456d0f6fefe47c57e99dadd4518c9b"
 dependencies = [
  "bincode",
  "blst",
@@ -5237,7 +5237,7 @@ dependencies = [
 [[package]]
 name = "tos-program-runtime"
 version = "0.2.1"
-source = "git+https://github.com/tos-network/tako?rev=f864dea#f864dea8b42445efe8932180a4503b8dec9fb3cc"
+source = "git+https://github.com/tos-network/tako?rev=c52af76#c52af7643f456d0f6fefe47c57e99dadd4518c9b"
 dependencies = [
  "anyhow",
  "bincode",
@@ -5252,7 +5252,7 @@ dependencies = [
 [[package]]
 name = "tos-syscalls"
 version = "0.2.1"
-source = "git+https://github.com/tos-network/tako?rev=f864dea#f864dea8b42445efe8932180a4503b8dec9fb3cc"
+source = "git+https://github.com/tos-network/tako?rev=c52af76#c52af7643f456d0f6fefe47c57e99dadd4518c9b"
 dependencies = [
  "ark-bn254",
  "ark-ec",
@@ -5328,7 +5328,7 @@ dependencies = [
 [[package]]
 name = "tos-types"
 version = "0.1.0"
-source = "git+https://github.com/tos-network/tako?rev=f864dea#f864dea8b42445efe8932180a4503b8dec9fb3cc"
+source = "git+https://github.com/tos-network/tako?rev=c52af76#c52af7643f456d0f6fefe47c57e99dadd4518c9b"
 dependencies = [
  "anyhow",
  "indexmap 2.10.0",
