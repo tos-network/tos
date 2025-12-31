@@ -753,18 +753,44 @@ impl Serializer for Transaction {
         let nonce = Nonce::read(reader)?;
 
         // UNO fields: source_commitments and range_proof
-        // Only read for UNO transactions
-        let (source_commitments, range_proof) = if matches!(data, TransactionType::UnoTransfers(_))
-        {
-            let sc_count = reader.read_u8()?;
-            let mut scs = Vec::with_capacity(sc_count as usize);
-            for _ in 0..sc_count {
-                scs.push(SourceCommitment::read(reader)?);
+        // Read for UNO transactions (including Shield/Unshield)
+        let (source_commitments, range_proof) = match &data {
+            TransactionType::UnoTransfers(_) => {
+                // UNO transfers always have source_commitments and range_proof
+                let sc_count = reader.read_u8()?;
+                let mut scs = Vec::with_capacity(sc_count as usize);
+                for _ in 0..sc_count {
+                    scs.push(SourceCommitment::read(reader)?);
+                }
+                let rp = RangeProof::read(reader)?;
+                (scs, Some(rp))
             }
-            let rp = RangeProof::read(reader)?;
-            (scs, Some(rp))
-        } else {
-            (Vec::new(), None)
+            TransactionType::ShieldTransfers(_) => {
+                // Shield transfers have source_commitments count (should be 0) but no range_proof
+                let sc_count = reader.read_u8()?;
+                let mut scs = Vec::with_capacity(sc_count as usize);
+                for _ in 0..sc_count {
+                    scs.push(SourceCommitment::read(reader)?);
+                }
+                // Shield doesn't require range proof (amount is public)
+                (scs, None)
+            }
+            TransactionType::UnshieldTransfers(_) => {
+                // Unshield transfers have source_commitments and range_proof
+                let sc_count = reader.read_u8()?;
+                let mut scs = Vec::with_capacity(sc_count as usize);
+                for _ in 0..sc_count {
+                    scs.push(SourceCommitment::read(reader)?);
+                }
+                // Unshield requires range proof for remaining balance
+                let rp = if sc_count > 0 {
+                    Some(RangeProof::read(reader)?)
+                } else {
+                    None
+                };
+                (scs, rp)
+            }
+            _ => (Vec::new(), None),
         };
 
         let reference = Reference::read(reader)?;
