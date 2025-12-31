@@ -8,20 +8,21 @@ mod state;
 mod unsigned;
 
 pub use fee::{FeeBuilder, FeeHelper};
-pub use payload::{ShieldTransferBuilder, TransferBuilder, UnshieldTransferBuilder, UnoTransferBuilder};
+pub use payload::{
+    ShieldTransferBuilder, TransferBuilder, UnoTransferBuilder, UnshieldTransferBuilder,
+};
 pub use state::{AccountState, UnoAccountState};
 pub use unsigned::UnsignedTransaction;
 
 use super::{
     extra_data::{ExtraDataType, PlaintextData, UnknownExtraDataFormat},
-    payload::{ShieldTransferPayload, UnshieldTransferPayload, UnoTransferPayload},
+    payload::{ShieldTransferPayload, UnoTransferPayload, UnshieldTransferPayload},
     BatchReferralRewardPayload, BindReferrerPayload, BurnPayload, ContractDeposit,
     DeployContractPayload, EnergyPayload, FeeType, InvokeConstructorPayload, InvokeContractPayload,
     MultiSigPayload, Role, SourceCommitment, Transaction, TransactionType, TransferPayload,
     TxVersion, EXTRA_DATA_LIMIT_SIZE, EXTRA_DATA_LIMIT_SUM_SIZE, MAX_MULTISIG_PARTICIPANTS,
     MAX_TRANSFER_COUNT,
 };
-use tos_crypto::merlin::Transcript;
 use crate::ai_mining::AIMiningPayload;
 use crate::{
     config::{BURN_PER_CONTRACT, MAX_GAS_USAGE_PER_TX, TOS_ASSET, UNO_ASSET},
@@ -60,6 +61,8 @@ pub enum GenerationError<T> {
     MissingContractKey,
     #[error("Invalid contract key (decompression failed)")]
     InvalidContractKey,
+    #[error("Invalid destination public key (decompression failed)")]
+    InvalidDestinationKey,
     #[error("Proof generation error: {0}")]
     Proof(#[from] ProofGenerationError),
     #[error("Empty transfers")]
@@ -366,6 +369,15 @@ impl TransactionBuilder {
             }
             TransactionTypeBuilder::UnshieldTransfers(transfers) => {
                 // Unshield transfers: UNO (encrypted) -> TOS (plaintext)
+                // Similar to UnoTransfers, includes source_commitments and range_proof
+
+                // Source commitments: one for UNO_ASSET
+                // Each: commitment + asset hash + CommitmentEqProof
+                size += 1; // commitments count byte
+                size += RISTRETTO_COMPRESSED_SIZE
+                    + HASH_SIZE
+                    + (RISTRETTO_COMPRESSED_SIZE * 3 + SCALAR_SIZE * 3);
+
                 // Transfers count byte
                 size += 1;
                 for transfer in transfers {
@@ -386,6 +398,20 @@ impl TransactionBuilder {
                         size += ExtraDataType::estimate_size(extra_data, false);
                     }
                 }
+
+                // Range proof size estimation (1 source commitment + transfers)
+                let n_commitments = transfers.len() + 1;
+                let lg_n = (BULLET_PROOF_SIZE * n_commitments)
+                    .next_power_of_two()
+                    .trailing_zeros() as usize;
+                // Fixed range proof size
+                size += RISTRETTO_COMPRESSED_SIZE * 4 + SCALAR_SIZE * 3;
+                // u16 bytes length
+                size += 2;
+                // Inner Product Proof scalars
+                size += SCALAR_SIZE * 2;
+                // G_vec len
+                size += 2 * RISTRETTO_COMPRESSED_SIZE * lg_n;
             }
         };
 
@@ -440,9 +466,12 @@ impl TransactionBuilder {
                         // Use energy fee calculation for transfer transactions
                         calculate_energy_fee(size, transfers, new_addresses)
                     } else {
-                        // Use regular fee calculation (TOS or UNO)
+                        // Use regular fee calculation (TOS or UNO/Unshield)
+                        // UNO and Unshield transfers have ZK proofs and need higher fees
                         let fee_calc =
-                            if matches!(self.data, TransactionTypeBuilder::UnoTransfers(_)) {
+                            if matches!(self.data, TransactionTypeBuilder::UnoTransfers(_))
+                                || matches!(self.data, TransactionTypeBuilder::UnshieldTransfers(_))
+                            {
                                 calculate_uno_tx_fee
                             } else {
                                 calculate_tx_fee
@@ -455,8 +484,11 @@ impl TransactionBuilder {
                         )
                     }
                 } else {
-                    // Default to TOS fees (or UNO for UNO transfers)
-                    let fee_calc = if matches!(self.data, TransactionTypeBuilder::UnoTransfers(_)) {
+                    // Default to TOS fees (or UNO fees for UNO/Unshield transfers)
+                    // UNO and Unshield transfers have ZK proofs and need higher fees
+                    let fee_calc = if matches!(self.data, TransactionTypeBuilder::UnoTransfers(_))
+                        || matches!(self.data, TransactionTypeBuilder::UnshieldTransfers(_))
+                    {
                         calculate_uno_tx_fee
                     } else {
                         calculate_tx_fee
@@ -1305,7 +1337,7 @@ impl TransactionBuilder {
                 let destination_compressed = transfer.destination.clone().to_public_key();
                 let destination_pubkey = destination_compressed
                     .decompress()
-                    .expect("Valid public key from address");
+                    .map_err(|_| GenerationError::InvalidDestinationKey)?;
                 let receiver_handle = destination_pubkey.decrypt_handle(&opening);
 
                 // Handle extra data
@@ -1315,16 +1347,16 @@ impl TransactionBuilder {
                         ExtraDataType::Public(PlaintextData(bytes)).into()
                     });
 
-                ShieldTransferPayload::new(
+                Ok(ShieldTransferPayload::new(
                     transfer.asset.clone(),
                     destination_compressed,
                     transfer.amount,
                     extra_data,
                     commitment.compress(),
                     receiver_handle.compress(),
-                )
+                ))
             })
-            .collect();
+            .collect::<Result<Vec<_>, GenerationError<B::Error>>>()?;
 
         let data = TransactionType::ShieldTransfers(transfer_payloads);
         let fee_type = FeeType::TOS;
@@ -1380,11 +1412,12 @@ impl TransactionBuilder {
         // Get reference
         let reference = state.get_reference();
 
-        // Calculate total unshield amount (for future use in balance verification)
-        let _total_amount: u64 = unshield_transfers.iter().map(|t| t.amount).sum();
+        // Calculate total unshield amount
+        let total_amount: u64 = unshield_transfers.iter().map(|t| t.amount).sum();
 
         // Fees are paid from TOS balance (plaintext)
         let fee = self.estimate_fees(state)?;
+        let fee_type = FeeType::TOS;
 
         // Check TOS balance for fees
         let current_tos_balance = state
@@ -1399,19 +1432,64 @@ impl TransactionBuilder {
             .update_account_balance(&TOS_ASSET, new_tos_balance)
             .map_err(GenerationError::State)?;
 
-        // Build unshield transfer payloads with ZK proofs
-        let mut transcript = Transcript::new(b"unshield_transfer");
+        // Check UNO balance and create source commitment with range proof
+        // This is critical to prevent spending more UNO than available
+        let current_uno_balance = state
+            .get_uno_balance(&UNO_ASSET)
+            .map_err(GenerationError::State)?;
+
+        let new_uno_balance = current_uno_balance
+            .checked_sub(total_amount)
+            .ok_or_else(|| {
+                GenerationError::InsufficientFunds(UNO_ASSET, total_amount, current_uno_balance)
+            })?;
+
+        // Get current UNO ciphertext for source commitment
+        let source_current_ciphertext = state
+            .get_uno_ciphertext(&UNO_ASSET)
+            .map_err(GenerationError::State)?
+            .take_ciphertext()
+            .map_err(|err| GenerationError::Proof(err.into()))?;
+
+        let source_ct_compressed = source_current_ciphertext.compress();
+
+        // Prepare transcript for proofs
+        let mut transcript =
+            Transaction::prepare_transcript(self.version, &self.source, fee, &fee_type, nonce);
+
+        // Generate opening for the new source commitment
+        let new_source_opening = PedersenOpening::generate_new();
+        let commitment =
+            PedersenCommitment::new_with_opening(new_uno_balance, &new_source_opening).compress();
+
+        // Build unshield transfer payloads with ZK proofs and track ciphertexts for subtraction
+        let mut transfer_ciphertexts: Vec<Ciphertext> =
+            Vec::with_capacity(unshield_transfers.len());
+        let mut range_proof_values: Vec<u64> = vec![new_uno_balance];
+        let mut range_proof_openings: Vec<Scalar> = vec![new_source_opening.as_scalar()];
+
         let transfer_payloads: Vec<UnshieldTransferPayload> = unshield_transfers
             .iter()
             .map(|transfer| {
                 // Generate commitment and sender handle for the proof
                 let opening = PedersenOpening::generate_new();
-                let commitment = PedersenCommitment::new_with_opening(transfer.amount, &opening);
+                let transfer_commitment =
+                    PedersenCommitment::new_with_opening(transfer.amount, &opening);
                 let sender_handle = source_keypair.get_public_key().decrypt_handle(&opening);
                 let destination_compressed = transfer.destination.clone().to_public_key();
                 let destination_pubkey = destination_compressed
                     .decompress()
-                    .expect("Valid public key from address");
+                    .map_err(|_| GenerationError::InvalidDestinationKey)?;
+
+                // Track this transfer's ciphertext for later subtraction from source
+                let transfer_ct =
+                    Ciphertext::new(transfer_commitment.clone(), sender_handle.clone());
+                transfer_ciphertexts.push(transfer_ct);
+
+                transcript.transfer_proof_domain_separator();
+                transcript.append_public_key(b"dest_pubkey", &destination_compressed);
+                transcript.append_commitment(b"amount_commitment", &transfer_commitment.compress());
+                transcript.append_handle(b"amount_sender_handle", &sender_handle.compress());
 
                 // Generate ciphertext validity proof
                 let ct_validity_proof = CiphertextValidityProof::new(
@@ -1422,6 +1500,10 @@ impl TransactionBuilder {
                     &mut transcript,
                 );
 
+                // Add transfer amount to range proof values
+                range_proof_values.push(transfer.amount);
+                range_proof_openings.push(opening.as_scalar());
+
                 // Handle extra data
                 let extra_data: Option<UnknownExtraDataFormat> =
                     transfer.extra_data.as_ref().map(|data| {
@@ -1429,26 +1511,72 @@ impl TransactionBuilder {
                         ExtraDataType::Public(PlaintextData(bytes)).into()
                     });
 
-                UnshieldTransferPayload::new(
+                Ok(UnshieldTransferPayload::new(
                     transfer.asset.clone(),
                     destination_compressed,
                     transfer.amount,
                     extra_data,
-                    commitment.compress(),
+                    transfer_commitment.compress(),
                     sender_handle.compress(),
                     ct_validity_proof,
-                )
+                ))
             })
-            .collect();
+            .collect::<Result<Vec<_>, GenerationError<B::Error>>>()?;
 
-        // Note: Actual UNO balance verification and deduction happens during
-        // chain state application. The transaction verification will check
-        // that sufficient encrypted balance exists.
+        // Compute new source ciphertext by subtracting all transfer ciphertexts
+        let mut new_source_ciphertext = source_current_ciphertext;
+        for transfer_ct in &transfer_ciphertexts {
+            new_source_ciphertext -= transfer_ct.clone();
+        }
+
+        // Generate CommitmentEqProof for source commitment
+        transcript.new_commitment_eq_proof_domain_separator();
+        transcript.append_hash(b"new_source_commitment_asset", &UNO_ASSET);
+        transcript.append_commitment(b"new_source_commitment", &commitment);
+
+        if self.version >= TxVersion::T0 {
+            transcript.append_ciphertext(b"source_ct", &source_ct_compressed);
+        }
+
+        let eq_proof = CommitmentEqProof::new(
+            source_keypair,
+            &new_source_ciphertext,
+            &new_source_opening,
+            new_uno_balance,
+            &mut transcript,
+        );
+
+        // Update state with new UNO balance
+        state
+            .update_uno_balance(&UNO_ASSET, new_uno_balance, new_source_ciphertext)
+            .map_err(GenerationError::State)?;
+
+        let source_commitment = SourceCommitment::new(commitment, eq_proof, UNO_ASSET.clone());
+        let source_commitments = vec![source_commitment];
+
+        // Generate aggregated range proof for remaining balance and all transfer amounts
+        let n_commitments = range_proof_values.len();
+        let n_dud_commitments = n_commitments
+            .checked_next_power_of_two()
+            .ok_or(ProofGenerationError::Format)?
+            - n_commitments;
+
+        range_proof_values.extend(iter::repeat_n(0u64, n_dud_commitments));
+        range_proof_openings.extend(iter::repeat_n(Scalar::ZERO, n_dud_commitments));
+
+        let (range_proof, _commitments) = RangeProof::prove_multiple(
+            &BP_GENS,
+            &PC_GENS,
+            &mut transcript,
+            &range_proof_values,
+            &range_proof_openings,
+            BULLET_PROOF_SIZE,
+        )
+        .map_err(ProofGenerationError::from)?;
 
         let data = TransactionType::UnshieldTransfers(transfer_payloads);
-        let fee_type = FeeType::TOS;
 
-        let unsigned_tx = UnsignedTransaction::new_with_fee_type(
+        let unsigned_tx = UnsignedTransaction::new_with_uno(
             self.version,
             self.chain_id,
             self.source,
@@ -1457,6 +1585,8 @@ impl TransactionBuilder {
             fee_type,
             nonce,
             reference,
+            source_commitments,
+            range_proof,
         );
 
         Ok(unsigned_tx)

@@ -30,8 +30,9 @@ use crate::{
     serializer::Serializer,
     tokio::spawn_blocking_safe,
     transaction::{
-        payload::UnoTransferPayload, TxVersion, EXTRA_DATA_LIMIT_SIZE, EXTRA_DATA_LIMIT_SUM_SIZE,
-        MAX_DEPOSIT_PER_INVOKE_CALL, MAX_MULTISIG_PARTICIPANTS, MAX_TRANSFER_COUNT,
+        payload::{UnoTransferPayload, UnshieldTransferPayload},
+        TxVersion, EXTRA_DATA_LIMIT_SIZE, EXTRA_DATA_LIMIT_SUM_SIZE, MAX_DEPOSIT_PER_INVOKE_CALL,
+        MAX_MULTISIG_PARTICIPANTS, MAX_TRANSFER_COUNT,
     },
 };
 use contract::InvokeContract;
@@ -71,6 +72,26 @@ impl DecompressedUnoTransferCt {
             Role::Sender => self.sender_handle.clone(),
         };
         Ciphertext::new(self.commitment.clone(), handle)
+    }
+}
+
+// Decompressed Unshield transfer ciphertext
+// Unshield transfers have commitment and sender_handle (no receiver_handle since receiver gets plaintext)
+struct DecompressedUnshieldTransferCt {
+    commitment: PedersenCommitment,
+    sender_handle: DecryptHandle,
+}
+
+impl DecompressedUnshieldTransferCt {
+    fn decompress(transfer: &UnshieldTransferPayload) -> Result<Self, DecompressionError> {
+        Ok(Self {
+            commitment: transfer.get_commitment().decompress()?,
+            sender_handle: transfer.get_sender_handle().decompress()?,
+        })
+    }
+
+    fn get_sender_ciphertext(&self) -> Ciphertext {
+        Ciphertext::new(self.commitment.clone(), self.sender_handle.clone())
     }
 }
 
@@ -174,6 +195,59 @@ impl Transaction {
         // All UNO transfers must use UNO_ASSET only
         // This enforces UNO as a single dedicated privacy asset
         if let TransactionType::UnoTransfers(transfers) = &self.data {
+            return transfers
+                .iter()
+                .all(|transfer| *transfer.get_asset() == UNO_ASSET);
+        }
+
+        true
+    }
+
+    /// Get the total sender output ciphertext for Unshield transfers
+    /// This is used to calculate the total spending from encrypted balance
+    fn get_unshield_sender_output_ct(
+        &self,
+        decompressed_transfers: &[DecompressedUnshieldTransferCt],
+    ) -> Ciphertext {
+        let mut output = Ciphertext::zero();
+
+        // Sum up all Unshield transfers (all use UNO_ASSET)
+        if let TransactionType::UnshieldTransfers(transfers) = &self.data {
+            for (_, d) in transfers.iter().zip(decompressed_transfers.iter()) {
+                output += d.get_sender_ciphertext();
+            }
+        }
+
+        output
+    }
+
+    /// Verify that source commitment assets match the Unshield transfer assets
+    /// Unshield transfers always use UNO_ASSET (converting UNO -> TOS)
+    fn verify_unshield_commitment_assets(&self) -> bool {
+        let has_commitment_for_asset = |asset: &Hash| {
+            self.source_commitments
+                .iter()
+                .any(|c| c.get_asset() == asset)
+        };
+
+        // UNO_ASSET is required for unshield (deducting from encrypted balance)
+        if !has_commitment_for_asset(&UNO_ASSET) {
+            return false;
+        }
+
+        // Check for duplicates in source commitments
+        if self.source_commitments.iter().enumerate().any(|(i, c)| {
+            self.source_commitments
+                .iter()
+                .enumerate()
+                .any(|(i2, c2)| i != i2 && c.get_asset() == c2.get_asset())
+        }) {
+            return false;
+        }
+
+        // All Unshield transfers must use UNO_ASSET
+        // Unshield converts encrypted UNO to plaintext TOS
+        if let TransactionType::UnshieldTransfers(transfers) = &self.data {
             return transfers
                 .iter()
                 .all(|transfer| *transfer.get_asset() == UNO_ASSET);
@@ -687,6 +761,47 @@ impl Transaction {
                 .ok_or(VerificationError::Overflow)?;
         }
 
+        // Deduct sender UNO balance for UnshieldTransfers
+        // Similar to pre_verify_uno but without CommitmentEqProof (amount is plaintext)
+        if let TransactionType::UnshieldTransfers(transfers) = &self.data {
+            if log::log_enabled!(log::Level::Trace) {
+                trace!(
+                    "verify_dynamic_parts: Processing UnshieldTransfers for source {:?}",
+                    self.source
+                );
+            }
+            for transfer in transfers {
+                // Create sender ciphertext from commitment and sender handle
+                let commitment = transfer
+                    .get_commitment()
+                    .decompress()
+                    .map_err(|_| VerificationError::InvalidFormat)?;
+                let sender_handle = transfer
+                    .get_sender_handle()
+                    .decompress()
+                    .map_err(|_| VerificationError::InvalidFormat)?;
+                let sender_ct = Ciphertext::new(commitment, sender_handle);
+
+                // Get sender's UNO balance and deduct
+                let sender_uno_balance = state
+                    .get_sender_uno_balance(&self.source, &UNO_ASSET, &self.reference)
+                    .await
+                    .map_err(VerificationError::State)?;
+
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!("verify_dynamic_parts: UnshieldTransfer deducting from UNO balance for source {:?}", self.source);
+                }
+
+                *sender_uno_balance -= sender_ct.clone();
+
+                // Track sender output for final balance calculation
+                state
+                    .add_sender_uno_output(&self.source, &UNO_ASSET, sender_ct)
+                    .await
+                    .map_err(VerificationError::State)?;
+            }
+        }
+
         Ok(())
     }
 
@@ -944,6 +1059,285 @@ impl Transaction {
                 *decompressed.commitment.as_point(),
                 *transfer.get_commitment().as_point(),
             ));
+        }
+
+        // 3. Prepare commitments for range proof verification
+        // Count total commitments (source + transfer)
+        let n_commitments = self.source_commitments.len() + value_commitments.len();
+        let n_dud_commitments = n_commitments
+            .checked_next_power_of_two()
+            .ok_or(ProofVerificationError::Format)?
+            - n_commitments;
+
+        // Combine source and transfer commitments
+        let final_commitments = self
+            .source_commitments
+            .iter()
+            .zip(new_source_commitments_decompressed)
+            .map(|(commitment, new_source_commitment)| {
+                (
+                    new_source_commitment.to_point(),
+                    *commitment.get_commitment().as_point(),
+                )
+            })
+            .chain(value_commitments)
+            .chain(iter::repeat_n(
+                (RistrettoPoint::identity(), CompressedRistretto::identity()),
+                n_dud_commitments,
+            ))
+            .collect();
+
+        Ok((transcript, final_commitments))
+    }
+
+    /// Pre-verify an Unshield transaction (UNO -> TOS)
+    /// Returns the transcript and commitments needed for range proof batch verification
+    async fn pre_verify_unshield<'a, E, B: BlockchainVerificationState<'a, E>>(
+        &'a self,
+        tx_hash: &'a Hash,
+        state: &mut B,
+        sigma_batch_collector: &mut BatchCollector,
+    ) -> Result<(Transcript, Vec<(RistrettoPoint, CompressedRistretto)>), VerificationError<E>>
+    {
+        trace!("Pre-verifying Unshield transaction");
+
+        if !self.has_valid_version_format() {
+            return Err(VerificationError::InvalidFormat);
+        }
+
+        // Unshield transactions must have source commitments and range proof
+        if self.source_commitments.is_empty() {
+            return Err(VerificationError::Commitments);
+        }
+
+        let Some(ref _range_proof) = self.range_proof else {
+            return Err(VerificationError::Proof(ProofVerificationError::Format));
+        };
+
+        // Verify source commitment assets match Unshield transfer assets
+        if !self.verify_unshield_commitment_assets() {
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Invalid Unshield commitment assets");
+            }
+            return Err(VerificationError::Commitments);
+        }
+
+        // Pre-verify on state (nonce check, etc.)
+        state
+            .pre_verify_tx(self)
+            .await
+            .map_err(VerificationError::State)?;
+
+        // Atomically check and update nonce
+        let success = state
+            .compare_and_swap_nonce(&self.source, self.nonce, self.nonce + 1)
+            .await
+            .map_err(VerificationError::State)?;
+
+        if !success {
+            let current = state
+                .get_account_nonce(&self.source)
+                .await
+                .map_err(VerificationError::State)?;
+            return Err(VerificationError::InvalidNonce(
+                tx_hash.clone(),
+                self.nonce,
+                current,
+            ));
+        }
+
+        // Decompress Unshield transfers
+        let TransactionType::UnshieldTransfers(transfers) = &self.data else {
+            return Err(VerificationError::InvalidFormat);
+        };
+
+        if transfers.len() > MAX_TRANSFER_COUNT || transfers.is_empty() {
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("incorrect Unshield transfers size: {}", transfers.len());
+            }
+            return Err(VerificationError::TransferCount);
+        }
+
+        // Validate extra data and decompress transfers
+        // Note: For Unshield, sender == receiver is valid (unshielding to own address)
+        let mut extra_data_size = 0;
+        let mut transfers_decompressed = Vec::with_capacity(transfers.len());
+
+        for transfer in transfers.iter() {
+            if let Some(extra_data) = transfer.get_extra_data() {
+                let size = extra_data.size();
+                if size > EXTRA_DATA_LIMIT_SIZE {
+                    return Err(VerificationError::TransferExtraDataSize);
+                }
+                extra_data_size += size;
+            }
+
+            let decompressed = DecompressedUnshieldTransferCt::decompress(transfer)
+                .map_err(ProofVerificationError::from)?;
+            transfers_decompressed.push(decompressed);
+        }
+
+        if extra_data_size > EXTRA_DATA_LIMIT_SUM_SIZE {
+            return Err(VerificationError::TransactionExtraDataSize);
+        }
+
+        // Decompress source commitments
+        let new_source_commitments_decompressed = self
+            .source_commitments
+            .iter()
+            .map(|c| c.get_commitment().decompress())
+            .collect::<Result<Vec<_>, DecompressionError>>()
+            .map_err(ProofVerificationError::from)?;
+
+        let source_decompressed = self
+            .source
+            .decompress()
+            .map_err(|err| VerificationError::Proof(err.into()))?;
+
+        // Prepare transcript for proof verification
+        let mut transcript = Self::prepare_transcript(
+            self.version,
+            &self.source,
+            self.fee,
+            &self.fee_type,
+            self.nonce,
+        );
+
+        // Verify signature
+        let bytes = self.get_signing_bytes();
+        if !self.signature.verify(&bytes, &source_decompressed) {
+            debug!("transaction signature is invalid");
+            return Err(VerificationError::InvalidSignature);
+        }
+
+        // Verify multisig if configured
+        if let Some(config) = state
+            .get_multisig_state(&self.source)
+            .await
+            .map_err(VerificationError::State)?
+        {
+            let Some(multisig) = self.get_multisig() else {
+                return Err(VerificationError::MultiSigNotFound);
+            };
+
+            if (config.threshold as usize) != multisig.len()
+                || multisig.len() > MAX_MULTISIG_PARTICIPANTS
+            {
+                return Err(VerificationError::MultiSigParticipants);
+            }
+
+            let multisig_bytes = self.get_multisig_signing_bytes();
+            let hash_val = hash(&multisig_bytes);
+            for sig in multisig.get_signatures() {
+                let index = sig.id as usize;
+                let Some(key) = config.participants.get_index(index) else {
+                    return Err(VerificationError::MultiSigParticipants);
+                };
+
+                let decompressed = key.decompress().map_err(ProofVerificationError::from)?;
+                if !sig.signature.verify(hash_val.as_bytes(), &decompressed) {
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("Multisig signature verification failed for participant {index}");
+                    }
+                    return Err(VerificationError::InvalidSignature);
+                }
+            }
+        } else if self.get_multisig().is_some() {
+            return Err(VerificationError::MultiSigNotConfigured);
+        }
+
+        // IMPORTANT: Proof verification order MUST match proof generation order in build_unshield_unsigned!
+        // Generation order: 1) CiphertextValidityProofs for transfers, 2) CommitmentEqProof for source
+        // The transcript state must be identical between generation and verification.
+
+        // 1. Verify CiphertextValidityProofs for transfers (FIRST - matches generation order)
+        trace!("verifying Unshield transfer ciphertext validity proofs");
+
+        let mut value_commitments: Vec<(RistrettoPoint, CompressedRistretto)> = Vec::new();
+
+        for (transfer, decompressed) in transfers.iter().zip(&transfers_decompressed) {
+            // For Unshield, the destination receives plaintext TOS, not encrypted UNO
+            // So we don't update receiver's UNO balance here
+
+            // Prepare transcript for CiphertextValidityProof
+            transcript.transfer_proof_domain_separator();
+            transcript.append_public_key(b"dest_pubkey", transfer.get_destination());
+            transcript.append_commitment(b"amount_commitment", transfer.get_commitment());
+            transcript.append_handle(b"amount_sender_handle", transfer.get_sender_handle());
+
+            // For Unshield, we verify the sender handle proves the commitment matches the amount
+            // The receiver is a plaintext recipient (no receiver handle needed)
+            let dest_pubkey = transfer
+                .get_destination()
+                .decompress()
+                .map_err(ProofVerificationError::from)?;
+
+            // Pre-verify the validity proof (adds to batch collector)
+            // Use sender handle for both since receiver gets plaintext
+            transfer.get_proof().pre_verify(
+                &decompressed.commitment,
+                &source_decompressed,
+                &dest_pubkey,
+                &decompressed.sender_handle,
+                &decompressed.sender_handle,
+                self.version >= TxVersion::T0,
+                &mut transcript,
+                sigma_batch_collector,
+            )?;
+
+            // Collect commitment for range proof
+            value_commitments.push((
+                *decompressed.commitment.as_point(),
+                *transfer.get_commitment().as_point(),
+            ));
+        }
+
+        // 2. Verify CommitmentEqProofs for source balances (SECOND - matches generation order)
+        trace!("verifying Unshield commitments eq proofs");
+
+        for (commitment, new_source_commitment) in self
+            .source_commitments
+            .iter()
+            .zip(&new_source_commitments_decompressed)
+        {
+            // Calculate output ciphertext (total spending for this asset)
+            let output = self.get_unshield_sender_output_ct(&transfers_decompressed);
+
+            // Get sender's UNO balance ciphertext
+            let source_verification_ciphertext = state
+                .get_sender_uno_balance(&self.source, commitment.get_asset(), &self.reference)
+                .await
+                .map_err(VerificationError::State)?;
+
+            let source_ct_compressed = source_verification_ciphertext.compress();
+
+            // Compute new balance: old_balance - output
+            *source_verification_ciphertext -= &output;
+
+            // Prepare transcript for CommitmentEqProof
+            transcript.new_commitment_eq_proof_domain_separator();
+            transcript.append_hash(b"new_source_commitment_asset", commitment.get_asset());
+            transcript.append_commitment(b"new_source_commitment", commitment.get_commitment());
+
+            // Only append source_ct for version >= T0 (matches generation)
+            if self.version >= TxVersion::T0 {
+                transcript.append_ciphertext(b"source_ct", &source_ct_compressed);
+            }
+
+            // Pre-verify the equality proof (adds to batch collector)
+            commitment.get_proof().pre_verify(
+                &source_decompressed,
+                source_verification_ciphertext,
+                new_source_commitment,
+                &mut transcript,
+                sigma_batch_collector,
+            )?;
+
+            // Track sender output for final balance
+            state
+                .add_sender_uno_output(&self.source, commitment.get_asset(), output)
+                .await
+                .map_err(VerificationError::State)?;
         }
 
         // 3. Prepare commitments for range proof verification
@@ -1729,8 +2123,9 @@ impl Transaction {
                 .await
                 .map_err(VerificationError::State)?;
 
-            // Check if this is a UNO transaction
+            // Check if this is a UNO or Unshield transaction (both require ZKP verification)
             let is_uno = matches!(tx.data, TransactionType::UnoTransfers(_));
+            let is_unshield = matches!(tx.data, TransactionType::UnshieldTransfers(_));
 
             if dynamic_parts_only {
                 if log::log_enabled!(log::Level::Debug) {
@@ -1741,6 +2136,12 @@ impl Transaction {
                 // UNO transactions require ZKP verification
                 let (transcript, commitments) = tx
                     .pre_verify_uno(hash, state, &mut sigma_batch_collector)
+                    .await?;
+                uno_prepared.push((tx.clone(), transcript, commitments));
+            } else if is_unshield {
+                // Unshield transactions require ZKP verification (UNO -> TOS)
+                let (transcript, commitments) = tx
+                    .pre_verify_unshield(hash, state, &mut sigma_batch_collector)
                     .await?;
                 uno_prepared.push((tx.clone(), transcript, commitments));
             } else {
@@ -1799,8 +2200,9 @@ impl Transaction {
             .await
             .map_err(VerificationError::State)?;
 
-        // Check if this is a UNO transaction
+        // Check if this is a UNO or Unshield transaction (both require ZKP verification)
         let is_uno = matches!(self.data, TransactionType::UnoTransfers(_));
+        let is_unshield = matches!(self.data, TransactionType::UnshieldTransfers(_));
 
         if dynamic_parts_only {
             if log::log_enabled!(log::Level::Debug) {
@@ -1823,6 +2225,38 @@ impl Transaction {
                     .map_err(|_| ProofVerificationError::GenericProof)?;
 
                 trace!("Verifying UNO range proof");
+                let range_proof = tx_clone
+                    .range_proof
+                    .as_ref()
+                    .ok_or(ProofVerificationError::MissingRangeProof)?;
+                RangeProof::verify_multiple(
+                    range_proof,
+                    &BP_GENS,
+                    &PC_GENS,
+                    &mut transcript,
+                    &commitments,
+                    BULLET_PROOF_SIZE,
+                )
+                .map_err(ProofVerificationError::from)
+            })
+            .await
+            .context("spawning blocking thread for ZK verification")??;
+        } else if is_unshield {
+            // Unshield transactions require full ZKP verification (UNO -> TOS)
+            let mut sigma_batch_collector = BatchCollector::default();
+            let (mut transcript, commitments) = self
+                .pre_verify_unshield(tx_hash, state, &mut sigma_batch_collector)
+                .await?;
+
+            // Verify ZK proofs synchronously for single transaction
+            let tx_clone = Arc::clone(self);
+            spawn_blocking_safe(move || {
+                trace!("Verifying Unshield sigma proofs");
+                sigma_batch_collector
+                    .verify()
+                    .map_err(|_| ProofVerificationError::GenericProof)?;
+
+                trace!("Verifying Unshield range proof");
                 let range_proof = tx_clone
                     .range_proof
                     .as_ref()
@@ -2015,6 +2449,74 @@ impl Transaction {
             // Track the spending in output_sum for final balance calculation
             state
                 .add_sender_output(&self.source, asset_hash, *total_spending)
+                .await
+                .map_err(VerificationError::State)?;
+        }
+
+        // Handle UNO (encrypted) balance spending for UnshieldTransfers
+        // This is separate from plaintext spending because it uses homomorphic ciphertext operations
+        if let TransactionType::UnshieldTransfers(transfers) = &self.data {
+            if log::log_enabled!(log::Level::Trace) {
+                trace!(
+                    "apply: Processing UnshieldTransfers UNO spending for source {:?}",
+                    self.source
+                );
+            }
+
+            // Decompress transfer ciphertexts to compute total spending
+            let mut output = Ciphertext::zero();
+            for transfer in transfers.iter() {
+                let decompressed = DecompressedUnshieldTransferCt::decompress(transfer)
+                    .map_err(ProofVerificationError::from)?;
+                output += decompressed.get_sender_ciphertext();
+            }
+
+            // Get sender's UNO balance and deduct spending
+            let source_uno_balance = state
+                .get_sender_uno_balance(&self.source, &UNO_ASSET, &self.reference)
+                .await
+                .map_err(VerificationError::State)?;
+
+            // Subtract output from UNO balance (homomorphic subtraction)
+            *source_uno_balance -= &output;
+
+            // Track the spending for final balance calculation
+            state
+                .add_sender_uno_output(&self.source, &UNO_ASSET, output)
+                .await
+                .map_err(VerificationError::State)?;
+        }
+
+        // Handle UNO (encrypted) balance spending for UnoTransfers
+        // This is separate from plaintext spending because it uses homomorphic ciphertext operations
+        if let TransactionType::UnoTransfers(transfers) = &self.data {
+            if log::log_enabled!(log::Level::Trace) {
+                trace!(
+                    "apply: Processing UnoTransfers UNO spending for source {:?}",
+                    self.source
+                );
+            }
+
+            // Decompress transfer ciphertexts to compute total spending
+            let mut output = Ciphertext::zero();
+            for transfer in transfers.iter() {
+                let decompressed = DecompressedUnoTransferCt::decompress(transfer)
+                    .map_err(ProofVerificationError::from)?;
+                output += decompressed.get_ciphertext(Role::Sender);
+            }
+
+            // Get sender's UNO balance and deduct spending
+            let source_uno_balance = state
+                .get_sender_uno_balance(&self.source, &UNO_ASSET, &self.reference)
+                .await
+                .map_err(VerificationError::State)?;
+
+            // Subtract output from UNO balance (homomorphic subtraction)
+            *source_uno_balance -= &output;
+
+            // Track the spending for final balance calculation
+            state
+                .add_sender_uno_output(&self.source, &UNO_ASSET, output)
                 .await
                 .map_err(VerificationError::State)?;
         }
@@ -3100,15 +3602,69 @@ impl Transaction {
                     }
                 }
             }
-            TransactionType::ShieldTransfers(_transfers) => {
+            TransactionType::ShieldTransfers(transfers) => {
                 // Shield transfers: TOS -> UNO
-                // Balance updates handled in ChainState apply
-                // TODO: Implement Shield balance updates
+                // TOS is deducted via spending_per_asset (plaintext deduction)
+                // Add encrypted UNO balance to receiver
+                for transfer in transfers {
+                    // Create ciphertext from commitment and receiver handle
+                    // Ciphertext = (Commitment, ReceiverHandle)
+                    let commitment = transfer
+                        .get_commitment()
+                        .decompress()
+                        .map_err(|_| VerificationError::InvalidFormat)?;
+                    let receiver_handle = transfer
+                        .get_receiver_handle()
+                        .decompress()
+                        .map_err(|_| VerificationError::InvalidFormat)?;
+                    let receiver_ct = Ciphertext::new(commitment, receiver_handle);
+
+                    // Get receiver's UNO balance and add the ciphertext
+                    let current_balance = state
+                        .get_receiver_uno_balance(
+                            Cow::Borrowed(transfer.get_destination()),
+                            Cow::Borrowed(&UNO_ASSET),
+                        )
+                        .await
+                        .map_err(VerificationError::State)?;
+
+                    *current_balance += receiver_ct;
+
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!(
+                            "Shield transfer applied - receiver: {:?}, amount: {}",
+                            transfer.get_destination(),
+                            transfer.get_amount()
+                        );
+                    }
+                }
             }
-            TransactionType::UnshieldTransfers(_transfers) => {
+            TransactionType::UnshieldTransfers(transfers) => {
                 // Unshield transfers: UNO -> TOS
-                // Balance updates handled in ChainState apply
-                // TODO: Implement Unshield balance updates
+                // Sender UNO balance is deducted in verify_dynamic_parts
+                // Here we only add plaintext TOS balance to receiver
+                for transfer in transfers {
+                    // Add plaintext amount to receiver's TOS balance
+                    let current_balance = state
+                        .get_receiver_balance(
+                            Cow::Borrowed(transfer.get_destination()),
+                            Cow::Borrowed(&TOS_ASSET),
+                        )
+                        .await
+                        .map_err(VerificationError::State)?;
+
+                    *current_balance = current_balance
+                        .checked_add(transfer.get_amount())
+                        .ok_or(VerificationError::Overflow)?;
+
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!(
+                            "Unshield transfer applied - receiver: {:?}, amount: {}",
+                            transfer.get_destination(),
+                            transfer.get_amount()
+                        );
+                    }
+                }
             }
         }
 

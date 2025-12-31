@@ -22,8 +22,8 @@ use crate::{
         DeployContractPayload, EmergencySuspendPayload, EnergyPayload, FeeType,
         InvokeContractPayload, MultiSigPayload, Reference, RegisterCommitteePayload,
         RenewKycPayload, RevokeKycPayload, SetKycPayload, ShieldTransferPayload, Transaction,
-        TransactionType, TransferKycPayload, TransferPayload, TxVersion, UnshieldTransferPayload,
-        UnoTransferPayload, UpdateCommitteePayload,
+        TransactionType, TransferKycPayload, TransferPayload, TxVersion, UnoTransferPayload,
+        UnshieldTransferPayload, UpdateCommitteePayload,
     },
 };
 pub use data::*;

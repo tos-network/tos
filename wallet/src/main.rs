@@ -2914,9 +2914,7 @@ async fn unshield_transfer(
         .get_api()
         .get_balance(&wallet_address, &TOS_ASSET)
         .await
-        .map_err(|e| {
-            CommandError::InvalidArgument(format!("Failed to get TOS balance: {}", e))
-        })?
+        .map_err(|e| CommandError::InvalidArgument(format!("Failed to get TOS balance: {}", e)))?
         .balance;
 
     let estimated_fee = 1000u64; // Base fee estimate
@@ -2939,7 +2937,10 @@ async fn unshield_transfer(
     state.add_balance(TOS_ASSET, Balance::new(tos_balance));
     state.add_uno_balance(
         UNO_ASSET,
-        UnoBalance::new(CiphertextCache::Decompressed(ciphertext), decrypted_uno_balance),
+        UnoBalance::new(
+            CiphertextCache::Decompressed(ciphertext),
+            decrypted_uno_balance,
+        ),
     );
 
     // Create Unshield transfer builder

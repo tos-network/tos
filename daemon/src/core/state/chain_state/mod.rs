@@ -624,20 +624,41 @@ impl<'a, S: Storage> ChainState<'a, S> {
                 reference.topoheight
             );
         }
+        // First check if this account has received UNO in this block (receiver_uno_balances)
+        // This handles the case where Shield and Unshield are in the same block template
+        let receiver_uno = self
+            .receiver_uno_balances
+            .get(key)
+            .and_then(|assets| assets.get(asset))
+            .map(|v| v.clone());
+
         match self.accounts.entry(key) {
             Entry::Occupied(o) => {
                 let account = o.into_mut();
                 match account.uno_assets.entry(asset) {
                     Entry::Occupied(o) => o.into_mut().get_balance(),
                     Entry::Vacant(e) => {
-                        let echange = Self::create_sender_uno_echange(
-                            &self.storage,
-                            key,
-                            asset,
-                            self.topoheight,
-                            reference,
-                        )
-                        .await?;
+                        // Check receiver_uno_balances first, then storage
+                        let echange = if let Some(receiver_version) = receiver_uno {
+                            if log::log_enabled!(log::Level::Trace) {
+                                trace!(
+                                    "Using receiver UNO balance for sender {} (same block Shield/Unshield)",
+                                    key.as_address(self.storage.is_mainnet())
+                                );
+                            }
+                            // Create UnoEchange from receiver balance
+                            let allow_output_balance = reference.topoheight < self.topoheight;
+                            UnoEchange::new(allow_output_balance, false, receiver_version)
+                        } else {
+                            Self::create_sender_uno_echange(
+                                &self.storage,
+                                key,
+                                asset,
+                                self.topoheight,
+                                reference,
+                            )
+                            .await?
+                        };
                         e.insert(echange).get_balance()
                     }
                 }
@@ -652,15 +673,27 @@ impl<'a, S: Storage> ChainState<'a, S> {
                 )
                 .await?;
 
-                // Create a new UNO echange for the asset
-                let echange = Self::create_sender_uno_echange(
-                    &self.storage,
-                    key,
-                    asset,
-                    self.topoheight,
-                    reference,
-                )
-                .await?;
+                // Check receiver_uno_balances first, then storage
+                let echange = if let Some(receiver_version) = receiver_uno {
+                    if log::log_enabled!(log::Level::Trace) {
+                        trace!(
+                            "Using receiver UNO balance for new sender account {} (same block Shield/Unshield)",
+                            key.as_address(self.storage.is_mainnet())
+                        );
+                    }
+                    // Create UnoEchange from receiver balance
+                    let allow_output_balance = reference.topoheight < self.topoheight;
+                    UnoEchange::new(allow_output_balance, false, receiver_version)
+                } else {
+                    Self::create_sender_uno_echange(
+                        &self.storage,
+                        key,
+                        asset,
+                        self.topoheight,
+                        reference,
+                    )
+                    .await?
+                };
 
                 e.insert(account)
                     .uno_assets
