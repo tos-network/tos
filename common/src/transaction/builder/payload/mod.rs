@@ -389,4 +389,137 @@ mod tests {
             );
         }
     }
+
+    // UnoTransferBuilder tests
+
+    use crate::crypto::{elgamal::KeyPair, Address, AddressType};
+
+    fn create_test_address() -> Address {
+        let keypair = KeyPair::new();
+        Address::new(
+            false,
+            AddressType::Normal,
+            keypair.get_public_key().compress(),
+        )
+    }
+
+    #[test]
+    fn test_uno_transfer_builder_creation() {
+        use crate::config::UNO_ASSET;
+
+        let builder = UnoTransferBuilder {
+            asset: UNO_ASSET,
+            amount: 1000,
+            destination: create_test_address(),
+            extra_data: None,
+            encrypt_extra_data: false,
+        };
+
+        assert_eq!(builder.asset, UNO_ASSET);
+        assert_eq!(builder.amount, 1000);
+        assert!(!builder.encrypt_extra_data);
+        assert!(builder.extra_data.is_none());
+    }
+
+    #[test]
+    fn test_uno_transfer_builder_with_extra_data() {
+        use crate::api::DataValue;
+        use crate::config::UNO_ASSET;
+
+        let memo = DataElement::Value(DataValue::Blob(vec![1, 2, 3, 4]));
+        let builder = UnoTransferBuilder {
+            asset: UNO_ASSET,
+            amount: 5000,
+            destination: create_test_address(),
+            extra_data: Some(memo.clone()),
+            encrypt_extra_data: false,
+        };
+
+        assert_eq!(builder.amount, 5000);
+        assert!(builder.extra_data.is_some());
+        assert!(!builder.encrypt_extra_data);
+    }
+
+    #[test]
+    fn test_uno_transfer_builder_serialization() {
+        use crate::config::UNO_ASSET;
+
+        let builder = UnoTransferBuilder {
+            asset: UNO_ASSET,
+            amount: 12345,
+            destination: create_test_address(),
+            extra_data: None,
+            encrypt_extra_data: true,
+        };
+
+        // Test serde serialization roundtrip
+        let json = serde_json::to_string(&builder).unwrap();
+        let restored: UnoTransferBuilder = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(builder.asset, restored.asset);
+        assert_eq!(builder.amount, restored.amount);
+        assert_eq!(builder.destination, restored.destination);
+        assert_eq!(builder.encrypt_extra_data, restored.encrypt_extra_data);
+    }
+
+    #[test]
+    fn test_uno_transfer_builder_different_from_transfer() {
+        use crate::config::{TOS_ASSET, UNO_ASSET};
+
+        let dest = create_test_address();
+
+        // UnoTransferBuilder for privacy transfers
+        let uno_builder = UnoTransferBuilder {
+            asset: UNO_ASSET,
+            amount: 1000,
+            destination: dest.clone(),
+            extra_data: None,
+            encrypt_extra_data: false,
+        };
+
+        // Regular TransferBuilder for plaintext transfers
+        let transfer_builder = TransferBuilder {
+            asset: TOS_ASSET,
+            amount: 1000,
+            destination: dest,
+            extra_data: None,
+        };
+
+        // Different asset types
+        assert_ne!(uno_builder.asset, transfer_builder.asset);
+        assert_eq!(uno_builder.asset, UNO_ASSET);
+        assert_eq!(transfer_builder.asset, TOS_ASSET);
+    }
+
+    #[test]
+    fn test_uno_transfer_builder_zero_amount() {
+        use crate::config::UNO_ASSET;
+
+        // Zero amount transfer - allowed at builder level, rejected at verification
+        let builder = UnoTransferBuilder {
+            asset: UNO_ASSET,
+            amount: 0,
+            destination: create_test_address(),
+            extra_data: None,
+            encrypt_extra_data: false,
+        };
+
+        assert_eq!(builder.amount, 0);
+    }
+
+    #[test]
+    fn test_uno_transfer_builder_max_amount() {
+        use crate::config::UNO_ASSET;
+
+        // Maximum amount transfer
+        let builder = UnoTransferBuilder {
+            asset: UNO_ASSET,
+            amount: u64::MAX,
+            destination: create_test_address(),
+            extra_data: None,
+            encrypt_extra_data: false,
+        };
+
+        assert_eq!(builder.amount, u64::MAX);
+    }
 }
