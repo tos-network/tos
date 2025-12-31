@@ -5471,6 +5471,7 @@ dependencies = [
  "thiserror 2.0.12",
  "tokio",
  "tokio-socks",
+ "tos-crypto 0.2.0",
  "tos-environment",
  "tos-kernel",
  "tos-program-runtime",

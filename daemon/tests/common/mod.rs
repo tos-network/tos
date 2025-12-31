@@ -10,7 +10,7 @@ use tos_common::{
     asset::{AssetData, VersionedAssetData},
     block::{Block, BlockHeader, BlockVersion, EXTRA_NONCE_SIZE},
     config::{COIN_DECIMALS, TOS_ASSET},
-    crypto::{elgamal::CompressedPublicKey, Hash, Hashable, PublicKey},
+    crypto::{elgamal::CompressedPublicKey, Hash, Hashable},
     immutable::Immutable,
     network::Network,
     serializer::{Reader, Serializer, Writer},
@@ -19,10 +19,8 @@ use tos_common::{
 use tos_daemon::core::{
     config::RocksDBConfig,
     error::BlockchainError,
-    state::parallel_chain_state::ParallelChainState,
-    storage::{AssetProvider, BalanceProvider, NonceProvider, RocksStorage},
+    storage::{AccountProvider, AssetProvider, BalanceProvider, NonceProvider, RocksStorage},
 };
-use tos_environment::Environment;
 
 /// Create a test storage instance with TOS asset registered
 pub async fn create_test_storage() -> Arc<tokio::sync::RwLock<RocksStorage>> {
@@ -63,13 +61,14 @@ pub fn create_dummy_block() -> (Block, Hash) {
     let mut reader = Reader::new(data);
     let miner = CompressedPublicKey::read(&mut reader).expect("Failed to create test pubkey");
 
-    let header = BlockHeader::new_simple(
+    let header = BlockHeader::new(
         BlockVersion::Nobunaga,
-        vec![],
-        0,
+        0,                              // height
+        0,                              // timestamp
+        indexmap::IndexSet::new(),      // tips
         [0u8; EXTRA_NONCE_SIZE],
         miner,
-        Hash::zero(),
+        indexmap::IndexSet::new(),      // txs_hashes
     );
 
     let block = Block::new(Immutable::Owned(header), vec![]);
@@ -119,6 +118,7 @@ pub async fn setup_account_safe(
 ///
 /// RocksDB handles flushing more reliably than Sled.
 /// This function is kept for API compatibility but the delays are reduced.
+#[allow(dead_code)]
 pub async fn flush_storage_and_wait(storage: &Arc<tokio::sync::RwLock<RocksStorage>>) {
     {
         let _storage_read = storage.read().await;
