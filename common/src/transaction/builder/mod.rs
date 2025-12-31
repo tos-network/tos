@@ -23,7 +23,7 @@ use super::{
 };
 use crate::ai_mining::AIMiningPayload;
 use crate::{
-    config::{BURN_PER_CONTRACT, MAX_GAS_USAGE_PER_TX, TOS_ASSET},
+    config::{BURN_PER_CONTRACT, MAX_GAS_USAGE_PER_TX, TOS_ASSET, UNO_ASSET},
     crypto::{
         elgamal::{
             Ciphertext, CompressedPublicKey, DecryptHandle, KeyPair, PedersenCommitment,
@@ -1141,24 +1141,29 @@ impl TransactionTypeBuilder {
     pub fn used_assets(&self) -> HashSet<&Hash> {
         let mut consumed = HashSet::new();
 
-        // Native asset is always used. (fees)
-        consumed.insert(&TOS_ASSET);
-
         match &self {
             TransactionTypeBuilder::Transfers(transfers) => {
+                // Plaintext transfers use TOS_ASSET for fees
+                consumed.insert(&TOS_ASSET);
                 for transfer in transfers {
                     consumed.insert(&transfer.asset);
                 }
             }
             TransactionTypeBuilder::UnoTransfers(transfers) => {
+                // UNO transfers use UNO_ASSET for fees (paid from encrypted balance)
+                consumed.insert(&UNO_ASSET);
                 for transfer in transfers {
                     consumed.insert(&transfer.asset);
                 }
             }
             TransactionTypeBuilder::Burn(payload) => {
+                // Burn uses TOS_ASSET for fees
+                consumed.insert(&TOS_ASSET);
                 consumed.insert(&payload.asset);
             }
             TransactionTypeBuilder::InvokeContract(payload) => {
+                // Contract invocation uses TOS_ASSET for fees
+                consumed.insert(&TOS_ASSET);
                 consumed.extend(payload.deposits.keys());
             }
             TransactionTypeBuilder::AIMining(
@@ -1166,11 +1171,17 @@ impl TransactionTypeBuilder {
                 | crate::ai_mining::AIMiningPayload::SubmitAnswer { .. }
                 | crate::ai_mining::AIMiningPayload::PublishTask { .. },
             ) => {
-                // AI Mining operations consume TOS asset
+                // AI Mining operations consume TOS asset for fees
                 consumed.insert(&TOS_ASSET);
             }
-            TransactionTypeBuilder::AIMining(_) => {}
-            _ => {}
+            TransactionTypeBuilder::AIMining(_) => {
+                // Other AI mining payloads still need TOS for fees
+                consumed.insert(&TOS_ASSET);
+            }
+            _ => {
+                // Default: use TOS_ASSET for fees
+                consumed.insert(&TOS_ASSET);
+            }
         }
 
         consumed

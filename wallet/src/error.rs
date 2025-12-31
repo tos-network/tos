@@ -89,6 +89,8 @@ pub enum WalletError {
     NetworkError(#[from] NetworkError),
     #[error("Balance for asset {} was not found", _0)]
     BalanceNotFound(Hash),
+    #[error("UNO balance for asset {} was not found", _0)]
+    UnoBalanceNotFound(Hash),
     #[error("No result found for ciphertext")]
     CiphertextDecode,
     #[error(transparent)]

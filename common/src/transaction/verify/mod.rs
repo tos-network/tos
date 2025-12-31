@@ -19,7 +19,7 @@ use tos_kernel::ModuleValidator;
 use super::{payload::EnergyPayload, ContractDeposit, Role, Transaction, TransactionType};
 use crate::{
     account::EnergyResource,
-    config::{BURN_PER_CONTRACT, MAX_GAS_USAGE_PER_TX, TOS_ASSET},
+    config::{BURN_PER_CONTRACT, MAX_GAS_USAGE_PER_TX, TOS_ASSET, UNO_ASSET},
     contract::ContractProvider,
     crypto::{
         elgamal::{Ciphertext, DecompressionError, DecryptHandle, PedersenCommitment, PublicKey},
@@ -145,6 +145,7 @@ impl Transaction {
     }
 
     /// Verify that source commitment assets match the UNO transfer assets
+    /// UNO is a single dedicated asset - all transfers must use UNO_ASSET only
     fn verify_uno_commitment_assets(&self) -> bool {
         let has_commitment_for_asset = |asset: &Hash| {
             self.source_commitments
@@ -152,8 +153,9 @@ impl Transaction {
                 .any(|c| c.get_asset() == asset)
         };
 
-        // TOS_ASSET is always required for fees
-        if !has_commitment_for_asset(&TOS_ASSET) {
+        // UNO_ASSET is required for fees (paid from encrypted balance)
+        // Since UNO is a single dedicated asset, we only need UNO_ASSET
+        if !has_commitment_for_asset(&UNO_ASSET) {
             return false;
         }
 
@@ -167,11 +169,12 @@ impl Transaction {
             return false;
         }
 
-        // Every UNO transfer asset must have a corresponding source commitment
+        // All UNO transfers must use UNO_ASSET only
+        // This enforces UNO as a single dedicated privacy asset
         if let TransactionType::UnoTransfers(transfers) = &self.data {
             return transfers
                 .iter()
-                .all(|transfer| has_commitment_for_asset(transfer.get_asset()));
+                .all(|transfer| *transfer.get_asset() == UNO_ASSET);
         }
 
         true
