@@ -1446,7 +1446,7 @@ async fn create_wallet(
 
     // Display the seed (batch mode only)
     {
-        let seed = wallet.get_seed(0)?; // TODO language index
+        let seed = wallet.get_seed(0)?; // 0 = English (default language)
         manager.message(format!("Seed: {}", seed));
         manager.message("IMPORTANT: Please save this seed phrase in a secure location.");
     }

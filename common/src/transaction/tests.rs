@@ -421,8 +421,7 @@ async fn test_tx_verify_with_zkp_cache() {
         .is_ok());
 }
 
-// TODO: Balance simplification - Proof system needs reimplementation for plain u64 balances
-// Balance simplification: Test updated to work with plain u64 balances
+// Test updated to work with plain u64 balances (balance simplification completed)
 #[tokio::test]
 async fn test_burn_tx_verify() {
     let mut alice = Account::new();
