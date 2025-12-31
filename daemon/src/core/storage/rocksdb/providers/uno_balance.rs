@@ -185,7 +185,8 @@ impl UnoBalanceProvider for RocksStorage {
         let topoheight = self.load_from_disk(Column::UnoBalances, &key)?;
 
         let versioned_key = Self::get_versioned_uno_balance_key(account_id, topoheight);
-        let versioned_balance = self.load_from_disk(Column::VersionedUnoBalances, &versioned_key)?;
+        let versioned_balance =
+            self.load_from_disk(Column::VersionedUnoBalances, &versioned_key)?;
 
         Ok((topoheight, versioned_balance))
     }
@@ -223,8 +224,8 @@ impl UnoBalanceProvider for RocksStorage {
         let account_id = self.get_account_id(key)?;
 
         let versioned_key = Self::get_versioned_uno_balance_key(account_id, maximum_topoheight);
-        let Some(pointer) =
-            self.load_optional_from_disk::<_, TopoHeight>(Column::UnoBalances, &versioned_key[8..])?
+        let Some(pointer) = self
+            .load_optional_from_disk::<_, TopoHeight>(Column::UnoBalances, &versioned_key[8..])?
         else {
             if log::log_enabled!(log::Level::Trace) {
                 trace!("no uno balance pointer found");

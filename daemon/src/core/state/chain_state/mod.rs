@@ -560,7 +560,10 @@ impl<'a, S: Storage> ChainState<'a, S> {
         {
             Entry::Occupied(o) => {
                 // Decompress for computation
-                o.into_mut().get_mut_balance().computable().map_err(BlockchainError::from)
+                o.into_mut()
+                    .get_mut_balance()
+                    .computable()
+                    .map_err(BlockchainError::from)
             }
             Entry::Vacant(e) => {
                 let (version, _) = self
@@ -568,7 +571,10 @@ impl<'a, S: Storage> ChainState<'a, S> {
                     .get_new_versioned_uno_balance(&key, self.topoheight)
                     .await?;
                 // Decompress for computation
-                e.insert(version).get_mut_balance().computable().map_err(BlockchainError::from)
+                e.insert(version)
+                    .get_mut_balance()
+                    .computable()
+                    .map_err(BlockchainError::from)
             }
         }
     }
@@ -585,7 +591,9 @@ impl<'a, S: Storage> ChainState<'a, S> {
         let allow_output_balance = reference.topoheight < topoheight;
 
         // Get the versioned UNO balance from storage
-        let (version, new_version) = storage.get_new_versioned_uno_balance(key, topoheight).await?;
+        let (version, new_version) = storage
+            .get_new_versioned_uno_balance(key, topoheight)
+            .await?;
 
         if log::log_enabled!(log::Level::Trace) {
             trace!(
@@ -671,7 +679,10 @@ impl<'a, S: Storage> ChainState<'a, S> {
         output_ct: Ciphertext,
     ) -> Result<(), BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
-            trace!("update sender UNO echange for {}", key.as_address(self.storage.is_mainnet()));
+            trace!(
+                "update sender UNO echange for {}",
+                key.as_address(self.storage.is_mainnet())
+            );
         }
         let change = self
             .accounts

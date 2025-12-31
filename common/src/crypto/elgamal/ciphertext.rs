@@ -4,8 +4,8 @@ use super::{
     pedersen::{DecryptHandle, PedersenCommitment},
     CompressedCiphertext, CompressedCommitment, CompressedHandle,
 };
-use tos_crypto::curve25519_dalek::{traits::Identity, RistrettoPoint, Scalar};
 use serde::{Deserialize, Deserializer, Serialize};
+use tos_crypto::curve25519_dalek::{traits::Identity, RistrettoPoint, Scalar};
 
 // Represents a twisted ElGamal Ciphertext
 // One part is a Pedersen commitment to be bulletproofs compatible

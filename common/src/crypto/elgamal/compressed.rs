@@ -4,9 +4,9 @@ use crate::{
     crypto::{Address, AddressType},
     serializer::{Reader, ReaderError, Serializer, Writer},
 };
-use tos_crypto::curve25519_dalek::{ristretto::CompressedRistretto, Scalar};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use tos_crypto::curve25519_dalek::{ristretto::CompressedRistretto, Scalar};
 
 // Compressed point size in bytes
 pub const RISTRETTO_COMPRESSED_SIZE: usize = 32;

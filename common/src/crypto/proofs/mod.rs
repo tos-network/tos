@@ -14,14 +14,14 @@ mod range_proof;
 
 use super::{elgamal::DecompressionError, TranscriptError};
 use crate::transaction::MAX_TRANSFER_COUNT;
+use lazy_static::lazy_static;
+use std::iter;
+use thiserror::Error;
 use tos_crypto::bulletproofs::{BulletproofGens, PedersenGens};
 use tos_crypto::curve25519_dalek::{
     traits::{IsIdentity, VartimeMultiscalarMul},
     RistrettoPoint, Scalar,
 };
-use lazy_static::lazy_static;
-use std::iter;
-use thiserror::Error;
 
 // Exports
 pub use balance::BalanceProof;
@@ -71,6 +71,8 @@ pub enum ProofVerificationError {
     GenericProof,
     #[error("range proof verification failed: {0}")]
     RangeProof(#[from] tos_crypto::bulletproofs::ProofError),
+    #[error("missing range proof in UNO transaction")]
+    MissingRangeProof,
     #[error("transcript error: {0}")]
     Transcript(#[from] TranscriptError),
     #[error("invalid format")]

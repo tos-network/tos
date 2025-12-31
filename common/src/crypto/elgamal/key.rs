@@ -10,14 +10,14 @@ use crate::{
     crypto::{proofs::H, Address, AddressType, Hash},
     serializer::{Reader, ReaderError, Serializer, Writer},
 };
+use rand::rngs::OsRng;
+use serde::{Deserialize, Deserializer, Serialize};
+use sha3::Sha3_512;
 use tos_crypto::curve25519_dalek::{
     ecdlp::{self, ECDLPArguments, ECDLPTablesFileView},
     ristretto::RistrettoPoint,
     Scalar,
 };
-use rand::rngs::OsRng;
-use serde::{Deserialize, Deserializer, Serialize};
-use sha3::Sha3_512;
 use zeroize::Zeroize;
 
 #[derive(Clone, PartialEq, Eq)]

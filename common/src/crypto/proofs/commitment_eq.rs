@@ -9,13 +9,13 @@ use crate::{
     },
     serializer::{Reader, ReaderError, Serializer, Writer},
 };
+use rand::rngs::OsRng;
 use tos_crypto::curve25519_dalek::{
     ristretto::CompressedRistretto,
     traits::{IsIdentity, MultiscalarMul, VartimeMultiscalarMul},
     RistrettoPoint, Scalar,
 };
 use tos_crypto::merlin::Transcript;
-use rand::rngs::OsRng;
 use zeroize::Zeroize;
 
 /// Proof that a commitment and ciphertext are equal.

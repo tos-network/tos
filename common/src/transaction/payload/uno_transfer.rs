@@ -196,7 +196,8 @@ mod tests {
         let opening = PedersenOpening::generate_new();
 
         // Create commitment and handles
-        let commitment = crate::crypto::elgamal::PedersenCommitment::new_with_opening(amount, &opening);
+        let commitment =
+            crate::crypto::elgamal::PedersenCommitment::new_with_opening(amount, &opening);
         let sender_handle = sender_keypair.get_public_key().decrypt_handle(&opening);
         let receiver_handle = receiver_keypair.get_public_key().decrypt_handle(&opening);
 
@@ -243,7 +244,10 @@ mod tests {
         assert_eq!(payload.get_destination(), restored.get_destination());
         assert_eq!(payload.get_commitment(), restored.get_commitment());
         assert_eq!(payload.get_sender_handle(), restored.get_sender_handle());
-        assert_eq!(payload.get_receiver_handle(), restored.get_receiver_handle());
+        assert_eq!(
+            payload.get_receiver_handle(),
+            restored.get_receiver_handle()
+        );
     }
 
     #[test]

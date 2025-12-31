@@ -1,7 +1,7 @@
 use std::ops::{Add, AddAssign, Sub, SubAssign};
 
-use tos_crypto::curve25519_dalek::{RistrettoPoint, Scalar};
 use rand::rngs::OsRng;
+use tos_crypto::curve25519_dalek::{RistrettoPoint, Scalar};
 
 use crate::crypto::proofs::{G, PC_GENS};
 

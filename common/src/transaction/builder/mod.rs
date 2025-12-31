@@ -37,13 +37,13 @@ use crate::{
     serializer::Serializer,
     utils::{calculate_energy_fee, calculate_tx_fee},
 };
-use std::iter;
-use tos_crypto::bulletproofs::RangeProof;
-use tos_crypto::curve25519_dalek::Scalar;
 use indexmap::{IndexMap, IndexSet};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
+use std::iter;
 use thiserror::Error;
+use tos_crypto::bulletproofs::RangeProof;
+use tos_crypto::curve25519_dalek::Scalar;
 use tos_kernel::Module;
 
 pub use payload::*;
@@ -224,7 +224,8 @@ impl TransactionBuilder {
                 // Each: commitment + asset hash + CommitmentEqProof
                 size += 1; // commitments count byte
                 size += assets_used
-                    * (RISTRETTO_COMPRESSED_SIZE + HASH_SIZE
+                    * (RISTRETTO_COMPRESSED_SIZE
+                        + HASH_SIZE
                         + (RISTRETTO_COMPRESSED_SIZE * 3 + SCALAR_SIZE * 3));
 
                 // Transfers count byte
@@ -246,7 +247,8 @@ impl TransactionBuilder {
                         .as_ref()
                         .or(transfer.destination.get_extra_data())
                     {
-                        size += ExtraDataType::estimate_size(extra_data, transfer.encrypt_extra_data);
+                        size +=
+                            ExtraDataType::estimate_size(extra_data, transfer.encrypt_extra_data);
                     }
                 }
 
@@ -904,8 +906,9 @@ impl TransactionBuilder {
                     let amount_opening = PedersenOpening::generate_new();
                     let commitment =
                         PedersenCommitment::new_with_opening(transfer.amount, &amount_opening);
-                    let sender_handle =
-                        source_keypair.get_public_key().decrypt_handle(&amount_opening);
+                    let sender_handle = source_keypair
+                        .get_public_key()
+                        .decrypt_handle(&amount_opening);
                     let receiver_handle = destination.decrypt_handle(&amount_opening);
 
                     Ok(UnoTransferWithCommitment {
@@ -922,11 +925,10 @@ impl TransactionBuilder {
         };
 
         // Prepare range proof values for source commitments
-        let mut range_proof_openings: Vec<_> = iter::repeat_with(|| {
-            PedersenOpening::generate_new().as_scalar()
-        })
-        .take(used_assets.len())
-        .collect();
+        let mut range_proof_openings: Vec<_> =
+            iter::repeat_with(|| PedersenOpening::generate_new().as_scalar())
+                .take(used_assets.len())
+                .collect();
 
         let mut range_proof_values: Vec<u64> = Vec::with_capacity(used_assets.len());
         for asset in &used_assets {
@@ -942,13 +944,8 @@ impl TransactionBuilder {
         }
 
         // Prepare transcript for proofs
-        let mut transcript = Transaction::prepare_transcript(
-            self.version,
-            &self.source,
-            fee,
-            &fee_type,
-            nonce,
-        );
+        let mut transcript =
+            Transaction::prepare_transcript(self.version, &self.source, fee, &fee_type, nonce);
 
         // Build source commitments with CommitmentEqProof
         let source_commitments: Vec<SourceCommitment> = used_assets
@@ -1020,10 +1017,8 @@ impl TransactionBuilder {
                 let receiver_handle = transfer.receiver_handle.compress();
 
                 transcript.transfer_proof_domain_separator();
-                transcript.append_public_key(
-                    b"dest_pubkey",
-                    transfer.inner.destination.get_public_key(),
-                );
+                transcript
+                    .append_public_key(b"dest_pubkey", transfer.inner.destination.get_public_key());
                 transcript.append_commitment(b"amount_commitment", &commitment);
                 transcript.append_handle(b"amount_sender_handle", &sender_handle);
                 transcript.append_handle(b"amount_receiver_handle", &receiver_handle);
@@ -1281,7 +1276,9 @@ mod tests {
         let _ = TransactionBuilder::new(
             TxVersion::T0,
             0, // chain_id: 0 for tests
-            CompressedPublicKey::new(tos_crypto::curve25519_dalek::ristretto::CompressedRistretto::default()),
+            CompressedPublicKey::new(
+                tos_crypto::curve25519_dalek::ristretto::CompressedRistretto::default(),
+            ),
             None,
             transfer_builder,
             FeeBuilder::Value(0),
@@ -1298,7 +1295,9 @@ mod tests {
         let _builder = TransactionBuilder::new(
             TxVersion::T0,
             0, // chain_id: 0 for tests
-            CompressedPublicKey::new(tos_crypto::curve25519_dalek::ristretto::CompressedRistretto::default()),
+            CompressedPublicKey::new(
+                tos_crypto::curve25519_dalek::ristretto::CompressedRistretto::default(),
+            ),
             None,
             burn_builder.clone(),
             FeeBuilder::Value(0),
@@ -1336,7 +1335,9 @@ mod tests {
         let _builder = TransactionBuilder::new(
             TxVersion::T0,
             0, // chain_id: 0 for tests
-            CompressedPublicKey::new(tos_crypto::curve25519_dalek::ristretto::CompressedRistretto::default()),
+            CompressedPublicKey::new(
+                tos_crypto::curve25519_dalek::ristretto::CompressedRistretto::default(),
+            ),
             None,
             transfer_to_new_address.clone(),
             FeeBuilder::Value(0),

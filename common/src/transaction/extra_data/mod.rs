@@ -14,9 +14,9 @@ use chacha20poly1305::{
     aead::{Aead, AeadInOut, Payload},
     ChaCha20Poly1305, KeyInit,
 };
-use tos_crypto::curve25519_dalek::ristretto::CompressedRistretto;
 use sha3::Digest;
 use thiserror::Error;
+use tos_crypto::curve25519_dalek::ristretto::CompressedRistretto;
 use zeroize::Zeroize;
 
 use crate::{

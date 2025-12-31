@@ -1347,7 +1347,10 @@ async fn get_uno_balance<S: Storage>(
         .get_last_uno_balance(params.address.get_public_key())
         .await
         .context("Error while retrieving UNO balance")?;
-    Ok(json!(GetUnoBalanceResult { version, topoheight }))
+    Ok(json!(GetUnoBalanceResult {
+        version,
+        topoheight
+    }))
 }
 
 async fn has_uno_balance<S: Storage>(

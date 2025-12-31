@@ -1,10 +1,10 @@
+use rand::rngs::OsRng;
 use tos_crypto::curve25519_dalek::{
     ristretto::CompressedRistretto,
     traits::{IsIdentity, VartimeMultiscalarMul},
     RistrettoPoint, Scalar,
 };
 use tos_crypto::merlin::Transcript;
-use rand::rngs::OsRng;
 use zeroize::Zeroize;
 
 use super::{BatchCollector, ProofVerificationError, G, H, PC_GENS};

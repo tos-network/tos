@@ -1,6 +1,8 @@
-use tos_crypto::curve25519_dalek::{ristretto::CompressedRistretto, scalar::Scalar, traits::IsIdentity};
-use tos_crypto::merlin::Transcript;
 use thiserror::Error;
+use tos_crypto::curve25519_dalek::{
+    ristretto::CompressedRistretto, scalar::Scalar, traits::IsIdentity,
+};
+use tos_crypto::merlin::Transcript;
 
 use super::{
     elgamal::{CompressedCiphertext, CompressedCommitment, CompressedHandle, CompressedPublicKey},

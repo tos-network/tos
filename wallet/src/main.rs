@@ -2379,9 +2379,13 @@ async fn uno_balance(
     let address = wallet.get_address();
 
     // Check if account has UNO balance
-    let has_uno = handler.get_api().has_uno_balance(&address).await.map_err(|e| {
-        CommandError::InvalidArgument(format!("Failed to check UNO balance: {}", e))
-    })?;
+    let has_uno = handler
+        .get_api()
+        .has_uno_balance(&address)
+        .await
+        .map_err(|e| {
+            CommandError::InvalidArgument(format!("Failed to check UNO balance: {}", e))
+        })?;
 
     if !has_uno {
         manager.message("No UNO balance found for this address.");
@@ -2390,13 +2394,18 @@ async fn uno_balance(
     }
 
     // Get the UNO balance
-    let result = handler.get_api().get_uno_balance(&address).await.map_err(|e| {
-        CommandError::InvalidArgument(format!("Failed to get UNO balance: {}", e))
-    })?;
+    let result = handler
+        .get_api()
+        .get_uno_balance(&address)
+        .await
+        .map_err(|e| CommandError::InvalidArgument(format!("Failed to get UNO balance: {}", e)))?;
 
     manager.message("UNO (Encrypted) Balance:");
     manager.message(format!("  Topoheight: {}", result.topoheight));
-    manager.message(format!("  Balance Type: {:?}", result.version.get_balance_type()));
+    manager.message(format!(
+        "  Balance Type: {:?}",
+        result.version.get_balance_type()
+    ));
     manager.message("  (Encrypted balance - decrypt with your private key to see amount)");
 
     Ok(())

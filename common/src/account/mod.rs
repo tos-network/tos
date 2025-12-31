@@ -9,9 +9,9 @@ use std::{
 };
 
 pub use balance::{AccountSummary, Balance, BalanceType, VersionedBalance};
-pub use uno_balance::{UnoAccountSummary, UnoBalance, VersionedUnoBalance};
 pub use energy::{EnergyLease, EnergyResource, FreezeDuration, FreezeRecord};
 pub use nonce::{Nonce, VersionedNonce};
+pub use uno_balance::{UnoAccountSummary, UnoBalance, VersionedUnoBalance};
 
 use crate::{
     crypto::elgamal::{

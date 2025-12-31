@@ -3,9 +3,9 @@ use crate::{
     crypto::proofs::H,
     serializer::{Reader, ReaderError, Serializer, Writer},
 };
-use tos_crypto::curve25519_dalek::{RistrettoPoint, Scalar};
 use serde::{de::Error, Serialize};
 use sha3::{Digest, Sha3_512};
+use tos_crypto::curve25519_dalek::{RistrettoPoint, Scalar};
 
 // SCALAR_SIZE moved to parent module
 const SCALAR_SIZE: usize = 32;

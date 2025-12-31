@@ -22,7 +22,7 @@ use crate::{
     config::{BURN_PER_CONTRACT, MAX_GAS_USAGE_PER_TX, TOS_ASSET},
     contract::ContractProvider,
     crypto::{
-        elgamal::{Ciphertext, DecryptHandle, DecompressionError, PedersenCommitment, PublicKey},
+        elgamal::{Ciphertext, DecompressionError, DecryptHandle, PedersenCommitment, PublicKey},
         hash,
         proofs::{BatchCollector, ProofVerificationError, BP_GENS, BULLET_PROOF_SIZE, PC_GENS},
         Hash, ProtocolTranscript,
@@ -41,7 +41,11 @@ pub use state::*;
 pub use zkp_cache::*;
 
 /// Prepared UNO transaction data for batch range proof verification
-type UnoPreparedData = (Arc<Transaction>, Transcript, Vec<(RistrettoPoint, CompressedRistretto)>);
+type UnoPreparedData = (
+    Arc<Transaction>,
+    Transcript,
+    Vec<(RistrettoPoint, CompressedRistretto)>,
+);
 
 // Decompressed UNO transfer ciphertext
 // UNO transfers are stored in a compressed format for efficiency
@@ -154,17 +158,12 @@ impl Transaction {
         }
 
         // Check for duplicates in source commitments
-        if self
-            .source_commitments
-            .iter()
-            .enumerate()
-            .any(|(i, c)| {
-                self.source_commitments
-                    .iter()
-                    .enumerate()
-                    .any(|(i2, c2)| i != i2 && c.get_asset() == c2.get_asset())
-            })
-        {
+        if self.source_commitments.iter().enumerate().any(|(i, c)| {
+            self.source_commitments
+                .iter()
+                .enumerate()
+                .any(|(i2, c2)| i != i2 && c.get_asset() == c2.get_asset())
+        }) {
             return false;
         }
 
@@ -624,7 +623,8 @@ impl Transaction {
         tx_hash: &'a Hash,
         state: &mut B,
         sigma_batch_collector: &mut BatchCollector,
-    ) -> Result<(Transcript, Vec<(RistrettoPoint, CompressedRistretto)>), VerificationError<E>> {
+    ) -> Result<(Transcript, Vec<(RistrettoPoint, CompressedRistretto)>), VerificationError<E>>
+    {
         trace!("Pre-verifying UNO transaction");
 
         if !self.has_valid_version_format() {
@@ -704,8 +704,8 @@ impl Transaction {
                 extra_data_size += size;
             }
 
-            let decompressed =
-                DecompressedUnoTransferCt::decompress(transfer).map_err(ProofVerificationError::from)?;
+            let decompressed = DecompressedUnoTransferCt::decompress(transfer)
+                .map_err(ProofVerificationError::from)?;
             transfers_decompressed.push(decompressed);
         }
 
@@ -727,8 +727,13 @@ impl Transaction {
             .map_err(|err| VerificationError::Proof(err.into()))?;
 
         // Prepare transcript for proof verification
-        let mut transcript =
-            Self::prepare_transcript(self.version, &self.source, self.fee, &self.fee_type, self.nonce);
+        let mut transcript = Self::prepare_transcript(
+            self.version,
+            &self.source,
+            self.fee,
+            &self.fee_type,
+            self.nonce,
+        );
 
         // Verify signature
         let bytes = self.get_signing_bytes();
@@ -782,7 +787,8 @@ impl Transaction {
             .zip(&new_source_commitments_decompressed)
         {
             // Calculate output ciphertext (total spending for this asset)
-            let output = self.get_uno_sender_output_ct(commitment.get_asset(), &transfers_decompressed);
+            let output =
+                self.get_uno_sender_output_ct(commitment.get_asset(), &transfers_decompressed);
 
             // Get sender's UNO balance ciphertext
             let source_verification_ciphertext = state
@@ -1611,17 +1617,21 @@ impl Transaction {
                     .map_err(|_| ProofVerificationError::GenericProof)?;
 
                 // Verify range proofs in batch
-                RangeProof::verify_batch(
-                    uno_prepared.iter_mut().map(|(tx, transcript, commitments)| {
+                // First collect all verification views, checking for missing proofs
+                let verification_views: Vec<_> = uno_prepared
+                    .iter_mut()
+                    .map(|(tx, transcript, commitments)| {
                         tx.range_proof
                             .as_ref()
-                            .expect("UNO transaction must have range proof")
-                            .verification_view(transcript, commitments, BULLET_PROOF_SIZE)
-                    }),
-                    &BP_GENS,
-                    &PC_GENS,
-                )
-                .map_err(ProofVerificationError::from)
+                            .ok_or(ProofVerificationError::MissingRangeProof)
+                            .map(|proof| {
+                                proof.verification_view(transcript, commitments, BULLET_PROOF_SIZE)
+                            })
+                    })
+                    .collect::<Result<_, _>>()?;
+
+                RangeProof::verify_batch(verification_views.into_iter(), &BP_GENS, &PC_GENS)
+                    .map_err(ProofVerificationError::from)
             })
             .await
             .context("spawning blocking thread for ZK verification")??;
@@ -1670,11 +1680,12 @@ impl Transaction {
                     .map_err(|_| ProofVerificationError::GenericProof)?;
 
                 trace!("Verifying UNO range proof");
+                let range_proof = tx_clone
+                    .range_proof
+                    .as_ref()
+                    .ok_or(ProofVerificationError::MissingRangeProof)?;
                 RangeProof::verify_multiple(
-                    tx_clone
-                        .range_proof
-                        .as_ref()
-                        .expect("UNO transaction must have range proof"),
+                    range_proof,
                     &BP_GENS,
                     &PC_GENS,
                     &mut transcript,

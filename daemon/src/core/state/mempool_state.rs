@@ -378,7 +378,13 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Mempoo
         let acc = match self.accounts.entry(account) {
             Entry::Occupied(o) => o.into_mut(),
             Entry::Vacant(e) => {
-                let acc = Self::create_sender_account(self.mempool, self.storage, account, self.topoheight).await?;
+                let acc = Self::create_sender_account(
+                    self.mempool,
+                    self.storage,
+                    account,
+                    self.topoheight,
+                )
+                .await?;
                 e.insert(acc)
             }
         };
