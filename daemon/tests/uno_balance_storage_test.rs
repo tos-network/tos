@@ -23,6 +23,7 @@ use tos_daemon::tako_integration::TakoContractExecutor;
 use tos_environment::Environment;
 
 #[tokio::test]
+#[allow(clippy::result_large_err)]
 async fn test_uno_balance_persistence() -> Result<(), BlockchainError> {
     let storage = create_test_storage().await;
 

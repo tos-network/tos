@@ -802,6 +802,34 @@ async fn setup_wallet_command_manager(
         vec![],
         CommandHandler::Async(async_handler!(uno_transfer)),
     ))?;
+    command_manager.add_command(Command::with_arguments(
+        "shield_transfer",
+        "Shield TOS to UNO (plaintext to encrypted privacy balance)",
+        vec![
+            Arg::new("address", ArgType::String, "Destination wallet address"),
+            Arg::new(
+                "amount",
+                ArgType::String,
+                "Amount to shield (in atomic units)",
+            ),
+        ],
+        vec![],
+        CommandHandler::Async(async_handler!(shield_transfer)),
+    ))?;
+    command_manager.add_command(Command::with_arguments(
+        "unshield_transfer",
+        "Unshield UNO to TOS (encrypted privacy balance to plaintext)",
+        vec![
+            Arg::new("address", ArgType::String, "Destination wallet address"),
+            Arg::new(
+                "amount",
+                ArgType::String,
+                "Amount to unshield (in atomic units)",
+            ),
+        ],
+        vec![],
+        CommandHandler::Async(async_handler!(unshield_transfer)),
+    ))?;
     command_manager.add_command(Command::with_optional_arguments(
         "history",
         "Show all your transactions",
@@ -2629,6 +2657,323 @@ async fn uno_transfer(
     manager.message("UNO transfer transaction created successfully!");
 
     // Release the lock before broadcasting
+    drop(storage);
+    drop(network_handler);
+
+    broadcast_tx(wallet, manager, tx).await;
+    Ok(())
+}
+
+/// Shield transfer: TOS (plaintext) -> UNO (encrypted privacy balance)
+async fn shield_transfer(
+    manager: &CommandManager,
+    mut args: ArgumentManager,
+) -> Result<(), CommandError> {
+    use tos_common::config::TOS_ASSET;
+    use tos_common::transaction::builder::ShieldTransferBuilder;
+    use tos_wallet::transaction_builder::TransactionBuilderState;
+
+    manager.validate_batch_params("shield_transfer", &args)?;
+
+    let context = manager.get_context().lock()?;
+    let wallet: &Arc<Wallet> = context.get()?;
+
+    // Parse address
+    let str_address = args.get_value("address")?.to_string_value()?;
+    let address = Address::from_string(&str_address).context("Invalid address")?;
+
+    // Parse amount
+    let amount_str = args.get_value("amount")?.to_string_value()?;
+    let amount =
+        from_coin(amount_str, tos_common::config::COIN_DECIMALS).context("Invalid amount")?;
+
+    if amount == 0 {
+        manager.error("Amount must be greater than 0");
+        return Ok(());
+    }
+
+    manager.message(format!(
+        "Shielding {} TOS to {}",
+        format_coin(amount, tos_common::config::COIN_DECIMALS),
+        address
+    ));
+
+    // Get network handler
+    let network_handler = wallet.get_network_handler().lock().await;
+    let handler = network_handler.as_ref().ok_or_else(|| {
+        CommandError::InvalidArgument("Wallet not connected to daemon".to_string())
+    })?;
+    let wallet_address = wallet.get_address();
+
+    // Query nonce and reference from daemon
+    let light_api = wallet
+        .get_light_api()
+        .await
+        .map_err(|e| CommandError::InvalidArgument(format!("Failed to get light API: {}", e)))?;
+
+    let nonce = light_api
+        .get_next_nonce(&wallet_address)
+        .await
+        .map_err(|e| CommandError::InvalidArgument(format!("Failed to query nonce: {}", e)))?;
+
+    let reference = light_api
+        .get_reference_block()
+        .await
+        .map_err(|e| CommandError::InvalidArgument(format!("Failed to query reference: {}", e)))?;
+
+    // Check TOS balance
+    let balance = handler
+        .get_api()
+        .get_balance(&wallet_address, &TOS_ASSET)
+        .await
+        .map_err(|e| CommandError::InvalidArgument(format!("Failed to get balance: {}", e)))?
+        .balance;
+
+    // Estimate fee
+    let estimated_fee = 1000u64; // Base fee estimate
+    if balance < amount + estimated_fee {
+        manager.error(format!(
+            "Insufficient TOS balance. Have: {}, Need: {} (amount) + fees",
+            format_coin(balance, tos_common::config::COIN_DECIMALS),
+            format_coin(amount, tos_common::config::COIN_DECIMALS)
+        ));
+        return Ok(());
+    }
+
+    // Create transaction state
+    let storage = wallet.get_storage().read().await;
+    let mut state =
+        TransactionBuilderState::new(wallet.get_network().is_mainnet(), reference, nonce);
+
+    // Add TOS balance to state
+    use tos_wallet::transaction_builder::Balance;
+    state.add_balance(TOS_ASSET, Balance::new(balance));
+
+    // Create Shield transfer builder
+    let shield_transfer = ShieldTransferBuilder::new(TOS_ASSET, amount, address);
+    let tx_type = TransactionTypeBuilder::ShieldTransfers(vec![shield_transfer]);
+
+    // Get TX version
+    let tx_version = storage
+        .get_tx_version()
+        .await
+        .context("Error while getting tx version")?;
+
+    // Create transaction builder
+    let builder = tos_common::transaction::builder::TransactionBuilder::new(
+        tx_version,
+        wallet.get_network().chain_id() as u8,
+        wallet.get_public_key().clone(),
+        None,
+        tx_type,
+        FeeBuilder::default(),
+    );
+
+    // Build the Shield transaction
+    let tx = match builder.build_shield_unsigned(&mut state, wallet.get_keypair()) {
+        Ok(unsigned_tx) => unsigned_tx.finalize(wallet.get_keypair()),
+        Err(e) => {
+            manager.error(format!("Error while creating Shield transaction: {}", e));
+            return Ok(());
+        }
+    };
+
+    manager.message("Shield transaction created successfully!");
+
+    // Release locks before broadcasting
+    drop(storage);
+    drop(network_handler);
+
+    broadcast_tx(wallet, manager, tx).await;
+    Ok(())
+}
+
+/// Unshield transfer: UNO (encrypted privacy balance) -> TOS (plaintext)
+async fn unshield_transfer(
+    manager: &CommandManager,
+    mut args: ArgumentManager,
+) -> Result<(), CommandError> {
+    use tos_common::account::CiphertextCache;
+    use tos_common::config::{TOS_ASSET, UNO_ASSET};
+    use tos_common::transaction::builder::UnshieldTransferBuilder;
+    use tos_wallet::transaction_builder::{TransactionBuilderState, UnoBalance};
+
+    manager.validate_batch_params("unshield_transfer", &args)?;
+
+    let context = manager.get_context().lock()?;
+    let wallet: &Arc<Wallet> = context.get()?;
+
+    // Parse address
+    let str_address = args.get_value("address")?.to_string_value()?;
+    let address = Address::from_string(&str_address).context("Invalid address")?;
+
+    // Parse amount
+    let amount_str = args.get_value("amount")?.to_string_value()?;
+    let amount =
+        from_coin(amount_str, tos_common::config::COIN_DECIMALS).context("Invalid amount")?;
+
+    if amount == 0 {
+        manager.error("Amount must be greater than 0");
+        return Ok(());
+    }
+
+    // Get network handler
+    let network_handler = wallet.get_network_handler().lock().await;
+    let handler = network_handler.as_ref().ok_or_else(|| {
+        CommandError::InvalidArgument("Wallet not connected to daemon".to_string())
+    })?;
+    let wallet_address = wallet.get_address();
+
+    // Check if account has UNO balance
+    let has_uno = handler
+        .get_api()
+        .has_uno_balance(&wallet_address)
+        .await
+        .map_err(|e| {
+            CommandError::InvalidArgument(format!("Failed to check UNO balance: {}", e))
+        })?;
+
+    if !has_uno {
+        manager.error("No UNO balance found for this address.");
+        manager.message("Use 'shield_transfer' first to convert TOS to UNO.");
+        return Ok(());
+    }
+
+    // Get and decrypt UNO balance
+    let uno_result = handler
+        .get_api()
+        .get_uno_balance(&wallet_address)
+        .await
+        .map_err(|e| CommandError::InvalidArgument(format!("Failed to get UNO balance: {}", e)))?;
+
+    manager.message("Decrypting UNO balance...");
+    let mut versioned_balance = uno_result.version;
+    let ciphertext = versioned_balance
+        .get_mut_balance()
+        .decompressed()
+        .map_err(|e| {
+            CommandError::InvalidArgument(format!("Failed to decompress ciphertext: {}", e))
+        })?
+        .clone();
+
+    // Decrypt using ECDLP tables
+    let precomputed_tables = wallet.get_precomputed_tables();
+    let tables_guard = precomputed_tables.read().map_err(|e| {
+        CommandError::InvalidArgument(format!("Failed to acquire ECDLP tables lock: {}", e))
+    })?;
+    let tables_view = tables_guard.view();
+    let decrypted_uno_balance = wallet
+        .get_keypair()
+        .decrypt(&tables_view, &ciphertext)
+        .ok_or_else(|| {
+            CommandError::InvalidArgument(
+                "Failed to decrypt UNO balance (value too large or corrupted)".to_string(),
+            )
+        })?;
+    drop(tables_guard);
+
+    manager.message(format!(
+        "Current UNO balance: {} UNO",
+        format_coin(decrypted_uno_balance, tos_common::config::COIN_DECIMALS)
+    ));
+
+    // Check sufficient UNO balance
+    if decrypted_uno_balance < amount {
+        manager.error(format!(
+            "Insufficient UNO balance. Have: {}, Need: {}",
+            format_coin(decrypted_uno_balance, tos_common::config::COIN_DECIMALS),
+            format_coin(amount, tos_common::config::COIN_DECIMALS)
+        ));
+        return Ok(());
+    }
+
+    manager.message(format!(
+        "Unshielding {} UNO to {} as TOS",
+        format_coin(amount, tos_common::config::COIN_DECIMALS),
+        address
+    ));
+
+    // Query nonce and reference
+    let light_api = wallet
+        .get_light_api()
+        .await
+        .map_err(|e| CommandError::InvalidArgument(format!("Failed to get light API: {}", e)))?;
+
+    let nonce = light_api
+        .get_next_nonce(&wallet_address)
+        .await
+        .map_err(|e| CommandError::InvalidArgument(format!("Failed to query nonce: {}", e)))?;
+
+    let reference = light_api
+        .get_reference_block()
+        .await
+        .map_err(|e| CommandError::InvalidArgument(format!("Failed to query reference: {}", e)))?;
+
+    // Check TOS balance for fees
+    let tos_balance = handler
+        .get_api()
+        .get_balance(&wallet_address, &TOS_ASSET)
+        .await
+        .map_err(|e| {
+            CommandError::InvalidArgument(format!("Failed to get TOS balance: {}", e))
+        })?
+        .balance;
+
+    let estimated_fee = 1000u64; // Base fee estimate
+    if tos_balance < estimated_fee {
+        manager.error(format!(
+            "Insufficient TOS balance for fees. Have: {}, Need: ~{}",
+            format_coin(tos_balance, tos_common::config::COIN_DECIMALS),
+            format_coin(estimated_fee, tos_common::config::COIN_DECIMALS)
+        ));
+        return Ok(());
+    }
+
+    // Create transaction state
+    let storage = wallet.get_storage().read().await;
+    let mut state =
+        TransactionBuilderState::new(wallet.get_network().is_mainnet(), reference, nonce);
+
+    // Add balances to state
+    use tos_wallet::transaction_builder::Balance;
+    state.add_balance(TOS_ASSET, Balance::new(tos_balance));
+    state.add_uno_balance(
+        UNO_ASSET,
+        UnoBalance::new(CiphertextCache::Decompressed(ciphertext), decrypted_uno_balance),
+    );
+
+    // Create Unshield transfer builder
+    let unshield_transfer = UnshieldTransferBuilder::new(UNO_ASSET, amount, address);
+    let tx_type = TransactionTypeBuilder::UnshieldTransfers(vec![unshield_transfer]);
+
+    // Get TX version
+    let tx_version = storage
+        .get_tx_version()
+        .await
+        .context("Error while getting tx version")?;
+
+    // Create transaction builder
+    let builder = tos_common::transaction::builder::TransactionBuilder::new(
+        tx_version,
+        wallet.get_network().chain_id() as u8,
+        wallet.get_public_key().clone(),
+        None,
+        tx_type,
+        FeeBuilder::default(),
+    );
+
+    // Build the Unshield transaction
+    let tx = match builder.build_unshield_unsigned(&mut state, wallet.get_keypair()) {
+        Ok(unsigned_tx) => unsigned_tx.finalize(wallet.get_keypair()),
+        Err(e) => {
+            manager.error(format!("Error while creating Unshield transaction: {}", e));
+            return Ok(());
+        }
+    };
+
+    manager.message("Unshield transaction created successfully!");
+
+    // Release locks before broadcasting
     drop(storage);
     drop(network_handler);
 

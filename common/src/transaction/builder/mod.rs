@@ -8,19 +8,20 @@ mod state;
 mod unsigned;
 
 pub use fee::{FeeBuilder, FeeHelper};
-pub use payload::{TransferBuilder, UnoTransferBuilder};
+pub use payload::{ShieldTransferBuilder, TransferBuilder, UnshieldTransferBuilder, UnoTransferBuilder};
 pub use state::{AccountState, UnoAccountState};
 pub use unsigned::UnsignedTransaction;
 
 use super::{
     extra_data::{ExtraDataType, PlaintextData, UnknownExtraDataFormat},
-    payload::UnoTransferPayload,
+    payload::{ShieldTransferPayload, UnshieldTransferPayload, UnoTransferPayload},
     BatchReferralRewardPayload, BindReferrerPayload, BurnPayload, ContractDeposit,
     DeployContractPayload, EnergyPayload, FeeType, InvokeConstructorPayload, InvokeContractPayload,
     MultiSigPayload, Role, SourceCommitment, Transaction, TransactionType, TransferPayload,
     TxVersion, EXTRA_DATA_LIMIT_SIZE, EXTRA_DATA_LIMIT_SUM_SIZE, MAX_MULTISIG_PARTICIPANTS,
     MAX_TRANSFER_COUNT,
 };
+use tos_crypto::merlin::Transcript;
 use crate::ai_mining::AIMiningPayload;
 use crate::{
     config::{BURN_PER_CONTRACT, MAX_GAS_USAGE_PER_TX, TOS_ASSET, UNO_ASSET},
@@ -105,6 +106,10 @@ pub enum TransactionTypeBuilder {
     Transfers(Vec<TransferBuilder>),
     /// UNO (privacy-preserving) transfers with encrypted amounts
     UnoTransfers(Vec<UnoTransferBuilder>),
+    /// Shield transfers: TOS (plaintext) -> UNO (encrypted)
+    ShieldTransfers(Vec<ShieldTransferBuilder>),
+    /// Unshield transfers: UNO (encrypted) -> TOS (plaintext)
+    UnshieldTransfers(Vec<UnshieldTransferBuilder>),
     // We can use the same as final transaction
     Burn(BurnPayload),
     MultiSig(MultiSigBuilder),
@@ -338,6 +343,50 @@ impl TransactionBuilder {
                 // BatchReferralReward payload size
                 size += payload.size();
             }
+            TransactionTypeBuilder::ShieldTransfers(transfers) => {
+                // Shield transfers: TOS (plaintext) -> UNO (encrypted)
+                // Transfers count byte
+                size += 1;
+                for transfer in transfers {
+                    size += transfer.asset.size()
+                        + transfer.destination.get_public_key().size()
+                        // Plaintext amount (u64)
+                        + 8
+                        // Extra data flag byte
+                        + 1
+                        // Commitment (Ristretto point)
+                        + RISTRETTO_COMPRESSED_SIZE
+                        // Receiver handle (Ristretto point)
+                        + RISTRETTO_COMPRESSED_SIZE;
+
+                    if let Some(extra_data) = transfer.extra_data.as_ref() {
+                        size += ExtraDataType::estimate_size(extra_data, false);
+                    }
+                }
+            }
+            TransactionTypeBuilder::UnshieldTransfers(transfers) => {
+                // Unshield transfers: UNO (encrypted) -> TOS (plaintext)
+                // Transfers count byte
+                size += 1;
+                for transfer in transfers {
+                    size += transfer.asset.size()
+                        + transfer.destination.get_public_key().size()
+                        // Plaintext amount (u64)
+                        + 8
+                        // Extra data flag byte
+                        + 1
+                        // Commitment (Ristretto point)
+                        + RISTRETTO_COMPRESSED_SIZE
+                        // Sender handle (Ristretto point)
+                        + RISTRETTO_COMPRESSED_SIZE
+                        // CiphertextValidityProof: Y_0, Y_1, Y_2, z_r, z_x
+                        + (RISTRETTO_COMPRESSED_SIZE * 3 + SCALAR_SIZE * 2);
+
+                    if let Some(extra_data) = transfer.extra_data.as_ref() {
+                        size += ExtraDataType::estimate_size(extra_data, false);
+                    }
+                }
+            }
         };
 
         size
@@ -541,6 +590,22 @@ impl TransactionBuilder {
             TransactionTypeBuilder::BindReferrer(_) => {}
             // BatchReferralReward - asset costs are handled during distribution
             TransactionTypeBuilder::BatchReferralReward(_) => {}
+            // Shield transfers consume TOS (plaintext) amount
+            TransactionTypeBuilder::ShieldTransfers(transfers) => {
+                for transfer in transfers {
+                    if &transfer.asset == asset {
+                        cost += transfer.amount;
+                    }
+                }
+            }
+            // Unshield transfers consume UNO (encrypted) amount
+            TransactionTypeBuilder::UnshieldTransfers(transfers) => {
+                for transfer in transfers {
+                    if &transfer.asset == asset {
+                        cost += transfer.amount;
+                    }
+                }
+            }
         }
 
         cost
@@ -824,6 +889,22 @@ impl TransactionBuilder {
                 // This is a placeholder - full implementation requires build_uno_unsigned method
                 return Err(GenerationError::State(
                     "UNO transfers require UnoAccountState. Use build_uno_unsigned instead.".into(),
+                ));
+            }
+            TransactionTypeBuilder::ShieldTransfers(_) => {
+                // Shield transfers require special handling with commitment generation
+                // Use build_shield_unsigned instead
+                return Err(GenerationError::State(
+                    "Shield transfers require special handling. Use build_shield_unsigned instead."
+                        .into(),
+                ));
+            }
+            TransactionTypeBuilder::UnshieldTransfers(_) => {
+                // Unshield transfers require UnoAccountState for encrypted balance access
+                // Use build_unshield_unsigned instead
+                return Err(GenerationError::State(
+                    "Unshield transfers require UnoAccountState. Use build_unshield_unsigned instead."
+                        .into(),
                 ));
             }
         };
@@ -1156,6 +1237,230 @@ impl TransactionBuilder {
 
         Ok(unsigned_tx)
     }
+
+    /// Build an unsigned Shield transaction (TOS -> UNO)
+    /// This converts plaintext TOS balance to encrypted UNO balance
+    pub fn build_shield_unsigned<B: AccountState>(
+        self,
+        state: &mut B,
+        _source_keypair: &KeyPair,
+    ) -> Result<UnsignedTransaction, GenerationError<B::Error>>
+    where
+        <B as FeeHelper>::Error: for<'a> std::convert::From<&'a str>,
+    {
+        // Verify we have Shield transfers
+        let shield_transfers = match self.data {
+            TransactionTypeBuilder::ShieldTransfers(ref transfers) => transfers,
+            _ => {
+                return Err(GenerationError::State(
+                    "build_shield_unsigned requires ShieldTransfers".into(),
+                ));
+            }
+        };
+
+        if shield_transfers.is_empty() {
+            return Err(GenerationError::EmptyTransfers);
+        }
+
+        if shield_transfers.len() > MAX_TRANSFER_COUNT {
+            return Err(GenerationError::MaxTransferCountReached);
+        }
+
+        // Get the nonce
+        let nonce = state.get_nonce().map_err(GenerationError::State)?;
+        state
+            .update_nonce(nonce + 1)
+            .map_err(GenerationError::State)?;
+
+        // Get reference
+        let reference = state.get_reference();
+
+        // Calculate total cost (amount + fees)
+        let fee = self.estimate_fees(state)?;
+        let total_amount: u64 = shield_transfers.iter().map(|t| t.amount).sum();
+        let total_cost = total_amount
+            .checked_add(fee)
+            .ok_or_else(|| GenerationError::State("Overflow in shield transfer cost".into()))?;
+
+        // Check and deduct TOS balance
+        let current_balance = state
+            .get_account_balance(&TOS_ASSET)
+            .map_err(GenerationError::State)?;
+
+        let new_balance = current_balance.checked_sub(total_cost).ok_or_else(|| {
+            GenerationError::InsufficientFunds(TOS_ASSET, total_cost, current_balance)
+        })?;
+
+        state
+            .update_account_balance(&TOS_ASSET, new_balance)
+            .map_err(GenerationError::State)?;
+
+        // Build shield transfer payloads
+        let transfer_payloads: Vec<ShieldTransferPayload> = shield_transfers
+            .iter()
+            .map(|transfer| {
+                // Generate commitment and handle for the destination
+                let opening = PedersenOpening::generate_new();
+                let commitment = PedersenCommitment::new_with_opening(transfer.amount, &opening);
+                let destination_compressed = transfer.destination.clone().to_public_key();
+                let destination_pubkey = destination_compressed
+                    .decompress()
+                    .expect("Valid public key from address");
+                let receiver_handle = destination_pubkey.decrypt_handle(&opening);
+
+                // Handle extra data
+                let extra_data: Option<UnknownExtraDataFormat> =
+                    transfer.extra_data.as_ref().map(|data| {
+                        let bytes = data.to_bytes();
+                        ExtraDataType::Public(PlaintextData(bytes)).into()
+                    });
+
+                ShieldTransferPayload::new(
+                    transfer.asset.clone(),
+                    destination_compressed,
+                    transfer.amount,
+                    extra_data,
+                    commitment.compress(),
+                    receiver_handle.compress(),
+                )
+            })
+            .collect();
+
+        let data = TransactionType::ShieldTransfers(transfer_payloads);
+        let fee_type = FeeType::TOS;
+
+        let unsigned_tx = UnsignedTransaction::new_with_fee_type(
+            self.version,
+            self.chain_id,
+            self.source,
+            data,
+            fee,
+            fee_type,
+            nonce,
+            reference,
+        );
+
+        Ok(unsigned_tx)
+    }
+
+    /// Build an unsigned Unshield transaction (UNO -> TOS)
+    /// This converts encrypted UNO balance back to plaintext TOS balance
+    pub fn build_unshield_unsigned<B: UnoAccountState>(
+        self,
+        state: &mut B,
+        source_keypair: &KeyPair,
+    ) -> Result<UnsignedTransaction, GenerationError<B::Error>>
+    where
+        <B as FeeHelper>::Error: for<'a> std::convert::From<&'a str>,
+    {
+        // Verify we have Unshield transfers
+        let unshield_transfers = match self.data {
+            TransactionTypeBuilder::UnshieldTransfers(ref transfers) => transfers,
+            _ => {
+                return Err(GenerationError::State(
+                    "build_unshield_unsigned requires UnshieldTransfers".into(),
+                ));
+            }
+        };
+
+        if unshield_transfers.is_empty() {
+            return Err(GenerationError::EmptyTransfers);
+        }
+
+        if unshield_transfers.len() > MAX_TRANSFER_COUNT {
+            return Err(GenerationError::MaxTransferCountReached);
+        }
+
+        // Get the nonce
+        let nonce = state.get_nonce().map_err(GenerationError::State)?;
+        state
+            .update_nonce(nonce + 1)
+            .map_err(GenerationError::State)?;
+
+        // Get reference
+        let reference = state.get_reference();
+
+        // Calculate total unshield amount (for future use in balance verification)
+        let _total_amount: u64 = unshield_transfers.iter().map(|t| t.amount).sum();
+
+        // Fees are paid from TOS balance (plaintext)
+        let fee = self.estimate_fees(state)?;
+
+        // Check TOS balance for fees
+        let current_tos_balance = state
+            .get_account_balance(&TOS_ASSET)
+            .map_err(GenerationError::State)?;
+
+        let new_tos_balance = current_tos_balance.checked_sub(fee).ok_or_else(|| {
+            GenerationError::InsufficientFunds(TOS_ASSET, fee, current_tos_balance)
+        })?;
+
+        state
+            .update_account_balance(&TOS_ASSET, new_tos_balance)
+            .map_err(GenerationError::State)?;
+
+        // Build unshield transfer payloads with ZK proofs
+        let mut transcript = Transcript::new(b"unshield_transfer");
+        let transfer_payloads: Vec<UnshieldTransferPayload> = unshield_transfers
+            .iter()
+            .map(|transfer| {
+                // Generate commitment and sender handle for the proof
+                let opening = PedersenOpening::generate_new();
+                let commitment = PedersenCommitment::new_with_opening(transfer.amount, &opening);
+                let sender_handle = source_keypair.get_public_key().decrypt_handle(&opening);
+                let destination_compressed = transfer.destination.clone().to_public_key();
+                let destination_pubkey = destination_compressed
+                    .decompress()
+                    .expect("Valid public key from address");
+
+                // Generate ciphertext validity proof
+                let ct_validity_proof = CiphertextValidityProof::new(
+                    source_keypair.get_public_key(),
+                    Some(&destination_pubkey),
+                    transfer.amount,
+                    &opening,
+                    &mut transcript,
+                );
+
+                // Handle extra data
+                let extra_data: Option<UnknownExtraDataFormat> =
+                    transfer.extra_data.as_ref().map(|data| {
+                        let bytes = data.to_bytes();
+                        ExtraDataType::Public(PlaintextData(bytes)).into()
+                    });
+
+                UnshieldTransferPayload::new(
+                    transfer.asset.clone(),
+                    destination_compressed,
+                    transfer.amount,
+                    extra_data,
+                    commitment.compress(),
+                    sender_handle.compress(),
+                    ct_validity_proof,
+                )
+            })
+            .collect();
+
+        // Note: Actual UNO balance verification and deduction happens during
+        // chain state application. The transaction verification will check
+        // that sufficient encrypted balance exists.
+
+        let data = TransactionType::UnshieldTransfers(transfer_payloads);
+        let fee_type = FeeType::TOS;
+
+        let unsigned_tx = UnsignedTransaction::new_with_fee_type(
+            self.version,
+            self.chain_id,
+            self.source,
+            data,
+            fee,
+            fee_type,
+            nonce,
+            reference,
+        );
+
+        Ok(unsigned_tx)
+    }
 }
 
 impl TransactionTypeBuilder {
@@ -1173,6 +1478,21 @@ impl TransactionTypeBuilder {
             }
             TransactionTypeBuilder::UnoTransfers(transfers) => {
                 // UNO transfers use UNO_ASSET for fees (paid from encrypted balance)
+                consumed.insert(&UNO_ASSET);
+                for transfer in transfers {
+                    consumed.insert(&transfer.asset);
+                }
+            }
+            TransactionTypeBuilder::ShieldTransfers(transfers) => {
+                // Shield transfers use TOS_ASSET (plaintext) for both amount and fees
+                consumed.insert(&TOS_ASSET);
+                for transfer in transfers {
+                    consumed.insert(&transfer.asset);
+                }
+            }
+            TransactionTypeBuilder::UnshieldTransfers(transfers) => {
+                // Unshield transfers deduct from UNO balance (encrypted)
+                // Fees are paid from TOS_ASSET (destination receives plaintext TOS)
                 consumed.insert(&UNO_ASSET);
                 for transfer in transfers {
                     consumed.insert(&transfer.asset);
@@ -1220,6 +1540,16 @@ impl TransactionTypeBuilder {
                 }
             }
             TransactionTypeBuilder::UnoTransfers(transfers) => {
+                for transfer in transfers {
+                    used_keys.insert(transfer.destination.get_public_key());
+                }
+            }
+            TransactionTypeBuilder::ShieldTransfers(transfers) => {
+                for transfer in transfers {
+                    used_keys.insert(transfer.destination.get_public_key());
+                }
+            }
+            TransactionTypeBuilder::UnshieldTransfers(transfers) => {
                 for transfer in transfers {
                     used_keys.insert(transfer.destination.get_public_key());
                 }
