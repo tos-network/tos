@@ -3,10 +3,7 @@ use log::trace;
 use std::collections::{HashMap, HashSet};
 use tos_common::{
     account::CiphertextCache,
-    crypto::{
-        elgamal::Ciphertext,
-        Hash, Hashable, PublicKey,
-    },
+    crypto::{elgamal::Ciphertext, Hash, Hashable, PublicKey},
     transaction::{
         builder::{AccountState, FeeHelper, UnoAccountState},
         Reference, Transaction,

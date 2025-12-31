@@ -8,18 +8,23 @@ use async_trait::async_trait;
 use tos_common::{
     account::{UnoAccountSummary, UnoBalance, VersionedUnoBalance},
     block::TopoHeight,
-    crypto::PublicKey,
+    crypto::{Hash, PublicKey},
 };
 
 #[async_trait]
 pub trait UnoBalanceProvider: AccountProvider + NetworkProvider {
     /// Check if a UNO balance exists for the given key
-    async fn has_uno_balance_for(&self, key: &PublicKey) -> Result<bool, BlockchainError>;
+    async fn has_uno_balance_for(
+        &self,
+        key: &PublicKey,
+        asset: &Hash,
+    ) -> Result<bool, BlockchainError>;
 
     /// Check if a UNO balance exists at a specific topoheight
     async fn has_uno_balance_at_exact_topoheight(
         &self,
         key: &PublicKey,
+        asset: &Hash,
         topoheight: TopoHeight,
     ) -> Result<bool, BlockchainError>;
 
@@ -27,6 +32,7 @@ pub trait UnoBalanceProvider: AccountProvider + NetworkProvider {
     async fn get_uno_balance_at_exact_topoheight(
         &self,
         key: &PublicKey,
+        asset: &Hash,
         topoheight: TopoHeight,
     ) -> Result<VersionedUnoBalance, BlockchainError>;
 
@@ -34,6 +40,7 @@ pub trait UnoBalanceProvider: AccountProvider + NetworkProvider {
     async fn get_uno_balance_at_maximum_topoheight(
         &self,
         key: &PublicKey,
+        asset: &Hash,
         topoheight: TopoHeight,
     ) -> Result<Option<(TopoHeight, VersionedUnoBalance)>, BlockchainError>;
 
@@ -41,6 +48,7 @@ pub trait UnoBalanceProvider: AccountProvider + NetworkProvider {
     async fn get_last_topoheight_for_uno_balance(
         &self,
         key: &PublicKey,
+        asset: &Hash,
     ) -> Result<TopoHeight, BlockchainError>;
 
     /// Get a new versioned UNO balance for the account
@@ -48,6 +56,7 @@ pub trait UnoBalanceProvider: AccountProvider + NetworkProvider {
     async fn get_new_versioned_uno_balance(
         &self,
         key: &PublicKey,
+        asset: &Hash,
         topoheight: TopoHeight,
     ) -> Result<(VersionedUnoBalance, bool), BlockchainError>;
 
@@ -55,12 +64,14 @@ pub trait UnoBalanceProvider: AccountProvider + NetworkProvider {
     async fn get_last_uno_balance(
         &self,
         key: &PublicKey,
+        asset: &Hash,
     ) -> Result<(TopoHeight, VersionedUnoBalance), BlockchainError>;
 
     /// Search for the highest balance where we have an outgoing transaction
     async fn get_uno_output_balance_at_maximum_topoheight(
         &self,
         key: &PublicKey,
+        asset: &Hash,
         topoheight: TopoHeight,
     ) -> Result<Option<(TopoHeight, VersionedUnoBalance)>, BlockchainError>;
 
@@ -68,6 +79,7 @@ pub trait UnoBalanceProvider: AccountProvider + NetworkProvider {
     async fn get_uno_output_balance_in_range(
         &self,
         key: &PublicKey,
+        asset: &Hash,
         min_topoheight: TopoHeight,
         max_topoheight: TopoHeight,
     ) -> Result<Option<(TopoHeight, VersionedUnoBalance)>, BlockchainError>;
@@ -76,6 +88,7 @@ pub trait UnoBalanceProvider: AccountProvider + NetworkProvider {
     fn set_last_topoheight_for_uno_balance(
         &mut self,
         key: &PublicKey,
+        asset: &Hash,
         topoheight: TopoHeight,
     ) -> Result<(), BlockchainError>;
 
@@ -83,6 +96,7 @@ pub trait UnoBalanceProvider: AccountProvider + NetworkProvider {
     async fn set_last_uno_balance_to(
         &mut self,
         key: &PublicKey,
+        asset: &Hash,
         topoheight: TopoHeight,
         version: &VersionedUnoBalance,
     ) -> Result<(), BlockchainError>;
@@ -92,6 +106,7 @@ pub trait UnoBalanceProvider: AccountProvider + NetworkProvider {
         &mut self,
         topoheight: TopoHeight,
         key: &PublicKey,
+        asset: &Hash,
         balance: &VersionedUnoBalance,
     ) -> Result<(), BlockchainError>;
 
@@ -99,6 +114,7 @@ pub trait UnoBalanceProvider: AccountProvider + NetworkProvider {
     async fn get_uno_account_summary_for(
         &self,
         key: &PublicKey,
+        asset: &Hash,
         min_topoheight: TopoHeight,
         max_topoheight: TopoHeight,
     ) -> Result<Option<UnoAccountSummary>, BlockchainError>;
@@ -107,6 +123,7 @@ pub trait UnoBalanceProvider: AccountProvider + NetworkProvider {
     async fn get_spendable_uno_balances_for(
         &self,
         key: &PublicKey,
+        asset: &Hash,
         min_topoheight: TopoHeight,
         max_topoheight: TopoHeight,
         maximum: usize,
@@ -116,6 +133,7 @@ pub trait UnoBalanceProvider: AccountProvider + NetworkProvider {
     async fn delete_uno_balance_at_topoheight(
         &mut self,
         key: &PublicKey,
+        asset: &Hash,
         topoheight: TopoHeight,
     ) -> Result<(), BlockchainError>;
 }

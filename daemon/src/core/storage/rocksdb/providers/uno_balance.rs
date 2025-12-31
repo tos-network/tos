@@ -3,7 +3,7 @@
 use crate::core::{
     error::BlockchainError,
     storage::{
-        rocksdb::{AccountId, Column},
+        rocksdb::{AccountId, AssetId, Column},
         NetworkProvider, RocksStorage, UnoBalanceProvider,
     },
 };
@@ -12,23 +12,29 @@ use log::trace;
 use tos_common::{
     account::{BalanceType, UnoAccountSummary, UnoBalance, VersionedUnoBalance},
     block::TopoHeight,
-    crypto::PublicKey,
+    crypto::{Hash, PublicKey},
 };
 
 #[async_trait]
 impl UnoBalanceProvider for RocksStorage {
-    async fn has_uno_balance_for(&self, key: &PublicKey) -> Result<bool, BlockchainError> {
+    async fn has_uno_balance_for(
+        &self,
+        key: &PublicKey,
+        asset: &Hash,
+    ) -> Result<bool, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("has uno balance for {}", key.as_address(self.is_mainnet()));
         }
         let account_id = self.get_account_id(key)?;
-        let key = Self::get_uno_balance_key(account_id);
+        let asset_id = self.get_asset_id(asset)?;
+        let key = Self::get_uno_balance_key(account_id, asset_id);
         self.contains_data(Column::UnoBalances, &key)
     }
 
     async fn has_uno_balance_at_exact_topoheight(
         &self,
         key: &PublicKey,
+        asset: &Hash,
         topoheight: TopoHeight,
     ) -> Result<bool, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
@@ -39,13 +45,15 @@ impl UnoBalanceProvider for RocksStorage {
             );
         }
         let account_id = self.get_account_id(key)?;
-        let key = Self::get_versioned_uno_balance_key(account_id, topoheight);
+        let asset_id = self.get_asset_id(asset)?;
+        let key = Self::get_versioned_uno_balance_key(account_id, asset_id, topoheight);
         self.contains_data(Column::VersionedUnoBalances, &key)
     }
 
     async fn get_uno_balance_at_exact_topoheight(
         &self,
         key: &PublicKey,
+        asset: &Hash,
         topoheight: TopoHeight,
     ) -> Result<VersionedUnoBalance, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
@@ -56,13 +64,15 @@ impl UnoBalanceProvider for RocksStorage {
             );
         }
         let account_id = self.get_account_id(key)?;
-        let key = Self::get_versioned_uno_balance_key(account_id, topoheight);
+        let asset_id = self.get_asset_id(asset)?;
+        let key = Self::get_versioned_uno_balance_key(account_id, asset_id, topoheight);
         self.load_from_disk(Column::VersionedUnoBalances, &key)
     }
 
     async fn get_uno_balance_at_maximum_topoheight(
         &self,
         key: &PublicKey,
+        asset: &Hash,
         maximum_topoheight: TopoHeight,
     ) -> Result<Option<(TopoHeight, VersionedUnoBalance)>, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
@@ -78,8 +88,10 @@ impl UnoBalanceProvider for RocksStorage {
             }
             return Ok(None);
         };
+        let asset_id = self.get_asset_id(asset)?;
 
-        let versioned_key = Self::get_versioned_uno_balance_key(account_id, maximum_topoheight);
+        let versioned_key =
+            Self::get_versioned_uno_balance_key(account_id, asset_id, maximum_topoheight);
         // Check if we have a balance at exact topoheight
         let mut topo = if self.contains_data(Column::VersionedUnoBalances, &versioned_key)? {
             if log::log_enabled!(log::Level::Trace) {
@@ -91,12 +103,13 @@ impl UnoBalanceProvider for RocksStorage {
                 trace!("load latest version available");
             }
             // Skip the topoheight prefix (8 bytes), load the pointer
-            self.load_optional_from_disk(Column::UnoBalances, &versioned_key[8..16])?
+            self.load_optional_from_disk(Column::UnoBalances, &versioned_key[8..24])?
         };
 
         // Iterate over our linked list of versions
         while let Some(topoheight) = topo {
-            let versioned_key = Self::get_versioned_uno_balance_key(account_id, topoheight);
+            let versioned_key =
+                Self::get_versioned_uno_balance_key(account_id, asset_id, topoheight);
             if topoheight <= maximum_topoheight {
                 if log::log_enabled!(log::Level::Trace) {
                     trace!(
@@ -118,6 +131,7 @@ impl UnoBalanceProvider for RocksStorage {
     async fn get_last_topoheight_for_uno_balance(
         &self,
         key: &PublicKey,
+        asset: &Hash,
     ) -> Result<TopoHeight, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!(
@@ -126,13 +140,15 @@ impl UnoBalanceProvider for RocksStorage {
             );
         }
         let account_id = self.get_account_id(key)?;
-        let key = Self::get_uno_balance_key(account_id);
+        let asset_id = self.get_asset_id(asset)?;
+        let key = Self::get_uno_balance_key(account_id, asset_id);
         self.load_from_disk(Column::UnoBalances, &key)
     }
 
     async fn get_new_versioned_uno_balance(
         &self,
         key: &PublicKey,
+        asset: &Hash,
         topoheight: TopoHeight,
     ) -> Result<(VersionedUnoBalance, bool), BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
@@ -143,7 +159,7 @@ impl UnoBalanceProvider for RocksStorage {
             );
         }
         match self
-            .get_uno_balance_at_maximum_topoheight(key, topoheight)
+            .get_uno_balance_at_maximum_topoheight(key, asset, topoheight)
             .await?
         {
             Some((topo, mut version)) => {
@@ -172,6 +188,7 @@ impl UnoBalanceProvider for RocksStorage {
     async fn get_last_uno_balance(
         &self,
         key: &PublicKey,
+        asset: &Hash,
     ) -> Result<(TopoHeight, VersionedUnoBalance), BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!(
@@ -180,11 +197,12 @@ impl UnoBalanceProvider for RocksStorage {
             );
         }
         let account_id = self.get_account_id(key)?;
+        let asset_id = self.get_asset_id(asset)?;
 
-        let key = Self::get_uno_balance_key(account_id);
+        let key = Self::get_uno_balance_key(account_id, asset_id);
         let topoheight = self.load_from_disk(Column::UnoBalances, &key)?;
 
-        let versioned_key = Self::get_versioned_uno_balance_key(account_id, topoheight);
+        let versioned_key = Self::get_versioned_uno_balance_key(account_id, asset_id, topoheight);
         let versioned_balance =
             self.load_from_disk(Column::VersionedUnoBalances, &versioned_key)?;
 
@@ -194,6 +212,7 @@ impl UnoBalanceProvider for RocksStorage {
     async fn get_uno_output_balance_at_maximum_topoheight(
         &self,
         key: &PublicKey,
+        asset: &Hash,
         maximum_topoheight: TopoHeight,
     ) -> Result<Option<(TopoHeight, VersionedUnoBalance)>, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
@@ -203,13 +222,14 @@ impl UnoBalanceProvider for RocksStorage {
                 key.as_address(self.is_mainnet())
             );
         }
-        self.get_uno_output_balance_in_range(key, 0, maximum_topoheight)
+        self.get_uno_output_balance_in_range(key, asset, 0, maximum_topoheight)
             .await
     }
 
     async fn get_uno_output_balance_in_range(
         &self,
         key: &PublicKey,
+        asset: &Hash,
         minimum_topoheight: TopoHeight,
         maximum_topoheight: TopoHeight,
     ) -> Result<Option<(TopoHeight, VersionedUnoBalance)>, BlockchainError> {
@@ -222,10 +242,12 @@ impl UnoBalanceProvider for RocksStorage {
             );
         }
         let account_id = self.get_account_id(key)?;
+        let asset_id = self.get_asset_id(asset)?;
 
-        let versioned_key = Self::get_versioned_uno_balance_key(account_id, maximum_topoheight);
+        let versioned_key =
+            Self::get_versioned_uno_balance_key(account_id, asset_id, maximum_topoheight);
         let Some(pointer) = self
-            .load_optional_from_disk::<_, TopoHeight>(Column::UnoBalances, &versioned_key[8..])?
+            .load_optional_from_disk::<_, TopoHeight>(Column::UnoBalances, &versioned_key[8..24])?
         else {
             if log::log_enabled!(log::Level::Trace) {
                 trace!("no uno balance pointer found");
@@ -266,7 +288,8 @@ impl UnoBalanceProvider for RocksStorage {
                 break;
             }
 
-            let versioned_key = Self::get_versioned_uno_balance_key(account_id, topoheight);
+            let versioned_key =
+                Self::get_versioned_uno_balance_key(account_id, asset_id, topoheight);
             let (prev_topo, balance_type): (Option<u64>, BalanceType) =
                 self.load_from_disk(Column::VersionedUnoBalances, &versioned_key)?;
 
@@ -291,6 +314,7 @@ impl UnoBalanceProvider for RocksStorage {
     fn set_last_topoheight_for_uno_balance(
         &mut self,
         key: &PublicKey,
+        asset: &Hash,
         topoheight: TopoHeight,
     ) -> Result<(), BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
@@ -301,13 +325,15 @@ impl UnoBalanceProvider for RocksStorage {
             );
         }
         let account_id = self.get_account_id(key)?;
-        let key = Self::get_uno_balance_key(account_id);
+        let asset_id = self.get_asset_id(asset)?;
+        let key = Self::get_uno_balance_key(account_id, asset_id);
         self.insert_into_disk(Column::UnoBalances, &key, &topoheight.to_be_bytes())
     }
 
     async fn set_last_uno_balance_to(
         &mut self,
         key: &PublicKey,
+        asset: &Hash,
         topoheight: TopoHeight,
         version: &VersionedUnoBalance,
     ) -> Result<(), BlockchainError> {
@@ -319,8 +345,9 @@ impl UnoBalanceProvider for RocksStorage {
             );
         }
         let account_id = self.get_account_id(key)?;
+        let asset_id = self.get_asset_id(asset)?;
 
-        let versioned_key = Self::get_versioned_uno_balance_key(account_id, topoheight);
+        let versioned_key = Self::get_versioned_uno_balance_key(account_id, asset_id, topoheight);
         self.insert_into_disk(
             Column::UnoBalances,
             &versioned_key[8..],
@@ -333,6 +360,7 @@ impl UnoBalanceProvider for RocksStorage {
         &mut self,
         topoheight: TopoHeight,
         key: &PublicKey,
+        asset: &Hash,
         balance: &VersionedUnoBalance,
     ) -> Result<(), BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
@@ -343,14 +371,16 @@ impl UnoBalanceProvider for RocksStorage {
             );
         }
         let account_id = self.get_account_id(key)?;
+        let asset_id = self.get_asset_id(asset)?;
 
-        let versioned_key = Self::get_versioned_uno_balance_key(account_id, topoheight);
+        let versioned_key = Self::get_versioned_uno_balance_key(account_id, asset_id, topoheight);
         self.insert_into_disk(Column::VersionedUnoBalances, &versioned_key, balance)
     }
 
     async fn get_uno_account_summary_for(
         &self,
         key: &PublicKey,
+        asset: &Hash,
         min_topoheight: TopoHeight,
         max_topoheight: TopoHeight,
     ) -> Result<Option<UnoAccountSummary>, BlockchainError> {
@@ -363,7 +393,7 @@ impl UnoBalanceProvider for RocksStorage {
             );
         }
         if let Some((topo, version)) = self
-            .get_uno_balance_at_maximum_topoheight(key, max_topoheight)
+            .get_uno_balance_at_maximum_topoheight(key, asset, max_topoheight)
             .await?
         {
             if topo < min_topoheight {
@@ -394,10 +424,11 @@ impl UnoBalanceProvider for RocksStorage {
             }
 
             let account_id = self.get_account_id(key)?;
+            let asset_id = self.get_asset_id(asset)?;
 
             let mut previous = version.get_previous_topoheight();
             while let Some(topo) = previous {
-                let versioned_key = Self::get_versioned_uno_balance_key(account_id, topo);
+                let versioned_key = Self::get_versioned_uno_balance_key(account_id, asset_id, topo);
                 let (previous_topo, balance_type): (Option<u64>, BalanceType) =
                     self.load_from_disk(Column::VersionedUnoBalances, &versioned_key)?;
                 if balance_type.contains_output() {
@@ -424,6 +455,7 @@ impl UnoBalanceProvider for RocksStorage {
     async fn get_spendable_uno_balances_for(
         &self,
         key: &PublicKey,
+        asset: &Hash,
         min_topoheight: TopoHeight,
         max_topoheight: TopoHeight,
         maximum: usize,
@@ -437,6 +469,7 @@ impl UnoBalanceProvider for RocksStorage {
             );
         }
         let account_id = self.get_account_id(key)?;
+        let asset_id = self.get_asset_id(asset)?;
 
         let mut balances = Vec::new();
         let mut next_topo = Some(max_topoheight);
@@ -445,7 +478,7 @@ impl UnoBalanceProvider for RocksStorage {
             .take()
             .filter(|&t| t >= min_topoheight && balances.len() < maximum)
         {
-            let versioned_key = Self::get_versioned_uno_balance_key(account_id, topo);
+            let versioned_key = Self::get_versioned_uno_balance_key(account_id, asset_id, topo);
             let version = self.load_from_disk::<_, VersionedUnoBalance>(
                 Column::VersionedUnoBalances,
                 &versioned_key,
@@ -475,6 +508,7 @@ impl UnoBalanceProvider for RocksStorage {
     async fn delete_uno_balance_at_topoheight(
         &mut self,
         key: &PublicKey,
+        asset: &Hash,
         topoheight: TopoHeight,
     ) -> Result<(), BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
@@ -485,24 +519,33 @@ impl UnoBalanceProvider for RocksStorage {
             );
         }
         let account_id = self.get_account_id(key)?;
-        let versioned_key = Self::get_versioned_uno_balance_key(account_id, topoheight);
+        let asset_id = self.get_asset_id(asset)?;
+        let versioned_key = Self::get_versioned_uno_balance_key(account_id, asset_id, topoheight);
         self.remove_from_disk(Column::VersionedUnoBalances, &versioned_key)
     }
 }
 
 impl RocksStorage {
     /// Get the key for UNO balance pointer
-    /// Format: {account_id} (8 bytes)
-    pub fn get_uno_balance_key(account: AccountId) -> [u8; 8] {
-        account.to_be_bytes()
+    /// Format: {account_id}{asset_id} (16 bytes)
+    pub fn get_uno_balance_key(account: AccountId, asset: AssetId) -> [u8; 16] {
+        let mut buffer = [0; 16];
+        buffer[0..8].copy_from_slice(&account.to_be_bytes());
+        buffer[8..16].copy_from_slice(&asset.to_be_bytes());
+        buffer
     }
 
     /// Get the key for versioned UNO balance
-    /// Format: {topoheight}{account_id} (16 bytes)
-    pub fn get_versioned_uno_balance_key(account: AccountId, topoheight: TopoHeight) -> [u8; 16] {
-        let mut buffer = [0; 16];
+    /// Format: {topoheight}{account_id}{asset_id} (24 bytes)
+    pub fn get_versioned_uno_balance_key(
+        account: AccountId,
+        asset: AssetId,
+        topoheight: TopoHeight,
+    ) -> [u8; 24] {
+        let mut buffer = [0; 24];
         buffer[0..8].copy_from_slice(&topoheight.to_be_bytes());
         buffer[8..16].copy_from_slice(&account.to_be_bytes());
+        buffer[16..24].copy_from_slice(&asset.to_be_bytes());
         buffer
     }
 }

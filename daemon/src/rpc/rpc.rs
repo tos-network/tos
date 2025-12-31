@@ -184,7 +184,7 @@ use tos_common::{
     asset::RPCAssetData,
     async_handler,
     block::{Block, BlockHeader, MinerWork, TopoHeight},
-    config::{MAXIMUM_SUPPLY, MAX_TRANSACTION_SIZE, TOS_ASSET, VERSION},
+    config::{MAXIMUM_SUPPLY, MAX_TRANSACTION_SIZE, TOS_ASSET, UNO_ASSET, VERSION},
     context::Context,
     contract::ScheduledExecution,
     crypto::{elgamal::CompressedPublicKey, Address, AddressType, Hash},
@@ -594,6 +594,10 @@ pub fn register_methods<S: Storage>(
 
     // UNO (encrypted) balance methods
     handler.register_method("get_uno_balance", async_handler!(get_uno_balance::<S>));
+    handler.register_method(
+        "get_uno_balance_at_topoheight",
+        async_handler!(get_uno_balance_at_topoheight::<S>),
+    );
     handler.register_method("has_uno_balance", async_handler!(has_uno_balance::<S>));
 
     handler.register_method("get_nonce", async_handler!(get_nonce::<S>));
@@ -1341,16 +1345,50 @@ async fn get_uno_balance<S: Storage>(
             BlockchainError::InvalidNetwork.into(),
         ));
     }
+    if params.asset.as_ref() != &UNO_ASSET {
+        return Err(InternalRpcError::InvalidParamsAny(anyhow::anyhow!(
+            "UNO asset must be UNO_ASSET"
+        )));
+    }
 
     let storage = blockchain.get_storage().read().await;
     let (topoheight, version) = storage
-        .get_last_uno_balance(params.address.get_public_key())
+        .get_last_uno_balance(params.address.get_public_key(), &params.asset)
         .await
         .context("Error while retrieving UNO balance")?;
     Ok(json!(GetUnoBalanceResult {
         version,
         topoheight
     }))
+}
+
+async fn get_uno_balance_at_topoheight<S: Storage>(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    let params: GetBalanceAtTopoHeightParams = parse_params(body)?;
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    if params.address.is_mainnet() != blockchain.get_network().is_mainnet() {
+        return Err(InternalRpcError::InvalidParamsAny(
+            BlockchainError::InvalidNetwork.into(),
+        ));
+    }
+    if params.asset.as_ref() != &UNO_ASSET {
+        return Err(InternalRpcError::InvalidParamsAny(anyhow::anyhow!(
+            "UNO asset must be UNO_ASSET"
+        )));
+    }
+
+    let storage = blockchain.get_storage().read().await;
+    let balance = storage
+        .get_uno_balance_at_exact_topoheight(
+            params.address.get_public_key(),
+            &params.asset,
+            params.topoheight,
+        )
+        .await
+        .context("Error while retrieving UNO balance at topoheight")?;
+    Ok(json!(balance))
 }
 
 async fn has_uno_balance<S: Storage>(
@@ -1364,12 +1402,28 @@ async fn has_uno_balance<S: Storage>(
             BlockchainError::InvalidNetwork.into(),
         ));
     }
+    if params.asset.as_ref() != &UNO_ASSET {
+        return Err(InternalRpcError::InvalidParamsAny(anyhow::anyhow!(
+            "UNO asset must be UNO_ASSET"
+        )));
+    }
 
     let storage = blockchain.get_storage().read().await;
-    let exist = storage
-        .has_uno_balance_for(params.address.get_public_key())
-        .await
-        .context("Error while checking UNO balance")?;
+    let exist = if let Some(topoheight) = params.topoheight {
+        storage
+            .has_uno_balance_at_exact_topoheight(
+                params.address.get_public_key(),
+                &params.asset,
+                topoheight,
+            )
+            .await
+            .context("Error while checking UNO balance at topo")?
+    } else {
+        storage
+            .has_uno_balance_for(params.address.get_public_key(), &params.asset)
+            .await
+            .context("Error while checking UNO balance")?
+    };
     Ok(json!(HasUnoBalanceResult { exist }))
 }
 

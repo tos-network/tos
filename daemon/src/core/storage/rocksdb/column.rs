@@ -75,10 +75,10 @@ pub enum Column {
     VersionedBalances,
 
     // UNO (privacy) balance pointer
-    // {account_id} => {topoheight}
+    // {account_id}{asset_id} => {topoheight}
     UnoBalances,
     // Versioned UNO balances
-    // {topoheight}{account_id} => {VersionedUnoBalance}
+    // {topoheight}{account_id}{asset_id} => {VersionedUnoBalance}
     VersionedUnoBalances,
 
     // Contains the contract module per hash

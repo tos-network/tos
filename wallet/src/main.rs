@@ -777,9 +777,14 @@ async fn setup_wallet_command_manager(
         )],
         CommandHandler::Async(async_handler!(balance)),
     ))?;
-    command_manager.add_command(Command::new(
+    command_manager.add_command(Command::with_optional_arguments(
         "uno_balance",
         "Show your UNO (encrypted) balance from daemon",
+        vec![Arg::new(
+            "topoheight",
+            ArgType::Number,
+            "Optional topoheight for historical UNO balance",
+        )],
         CommandHandler::Async(async_handler!(uno_balance)),
     ))?;
     command_manager.add_command(Command::with_optional_arguments(
@@ -2366,7 +2371,7 @@ async fn balance(
 // Show UNO (encrypted) balance from daemon
 async fn uno_balance(
     manager: &CommandManager,
-    _arguments: ArgumentManager,
+    mut arguments: ArgumentManager,
 ) -> Result<(), CommandError> {
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
@@ -2393,12 +2398,32 @@ async fn uno_balance(
         return Ok(());
     }
 
-    // Get the UNO balance
-    let result = handler
-        .get_api()
-        .get_uno_balance(&address)
-        .await
-        .map_err(|e| CommandError::InvalidArgument(format!("Failed to get UNO balance: {}", e)))?;
+    // Get the UNO balance (optionally at a topoheight)
+    let result = if arguments.has_argument("topoheight") {
+        let topoheight = arguments.get_value("topoheight")?.to_number()?;
+        let version = handler
+            .get_api()
+            .get_uno_balance_at_topoheight(&address, topoheight as u64)
+            .await
+            .map_err(|e| {
+                CommandError::InvalidArgument(format!(
+                    "Failed to get UNO balance at topoheight: {}",
+                    e
+                ))
+            })?;
+        tos_common::api::daemon::GetUnoBalanceResult {
+            version,
+            topoheight: topoheight as u64,
+        }
+    } else {
+        handler
+            .get_api()
+            .get_uno_balance(&address)
+            .await
+            .map_err(|e| {
+                CommandError::InvalidArgument(format!("Failed to get UNO balance: {}", e))
+            })?
+    };
 
     manager.message("UNO (Encrypted) Balance:");
     manager.message(format!("  Topoheight: {}", result.topoheight));

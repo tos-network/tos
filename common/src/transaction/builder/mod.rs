@@ -95,6 +95,8 @@ pub enum GenerationError<T> {
     InvalidEnergyFeeType,
     #[error("Energy fee type cannot be used for transfers to new addresses")]
     InvalidEnergyFeeForNewAddress,
+    #[error("UNO transfers must use UNO_ASSET")]
+    InvalidUnoAsset,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -434,8 +436,14 @@ impl TransactionBuilder {
             true
         };
 
-        if *asset == TOS_ASSET && should_apply_fees {
-            // Fees are applied to the native blockchain asset only.
+        let fee_asset = if matches!(self.data, TransactionTypeBuilder::UnoTransfers(_)) {
+            &UNO_ASSET
+        } else {
+            &TOS_ASSET
+        };
+
+        if *asset == *fee_asset && should_apply_fees {
+            // Fees are applied to the fee asset (TOS or UNO).
             cost += fee;
         }
 
@@ -858,6 +866,9 @@ impl TransactionBuilder {
             }
             if state.is_mainnet() != transfer.destination.is_mainnet() {
                 return Err(GenerationError::InvalidNetwork);
+            }
+            if transfer.asset != UNO_ASSET {
+                return Err(GenerationError::InvalidUnoAsset);
             }
             if transfer.extra_data.is_some() && !transfer.destination.is_normal() {
                 return Err(GenerationError::ExtraDataAndIntegratedAddress);

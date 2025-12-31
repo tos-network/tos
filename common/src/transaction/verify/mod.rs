@@ -127,8 +127,8 @@ impl Transaction {
     ) -> Ciphertext {
         let mut output = Ciphertext::zero();
 
-        // Fees are applied to the native blockchain asset only
-        if *asset == TOS_ASSET {
+        // Fees are applied to the UNO asset for privacy-preserving transfers
+        if *asset == UNO_ASSET {
             output += tos_crypto::curve25519_dalek::Scalar::from(self.fee);
         }
 

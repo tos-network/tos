@@ -348,7 +348,7 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Mempoo
                 // Try to get from storage
                 let balance = if let Some((_, version)) = self
                     .storage
-                    .get_uno_balance_at_maximum_topoheight(&account, self.topoheight)
+                    .get_uno_balance_at_maximum_topoheight(&account, &asset, self.topoheight)
                     .await?
                 {
                     // Decompress for computation
@@ -396,7 +396,7 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Mempoo
                 // Try to get from storage
                 let balance = if let Some((_, version)) = self
                     .storage
-                    .get_uno_balance_at_maximum_topoheight(account, self.topoheight)
+                    .get_uno_balance_at_maximum_topoheight(account, asset, self.topoheight)
                     .await?
                 {
                     // Decompress for computation

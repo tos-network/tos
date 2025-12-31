@@ -289,6 +289,10 @@ pub struct GetUnoBalanceResult {
     pub topoheight: TopoHeight,
 }
 
+// Response type for get_uno_balance_at_topoheight RPC endpoint
+// Returns the full VersionedUnoBalance structure at a specific topoheight
+pub type GetUnoBalanceAtTopoHeightResult = VersionedUnoBalance;
+
 // Response type for has_uno_balance RPC endpoint
 #[derive(Serialize, Deserialize)]
 pub struct HasUnoBalanceResult {

@@ -306,7 +306,7 @@ impl DaemonAPI {
                 "get_uno_balance",
                 &GetBalanceParams {
                     address: Cow::Borrowed(address),
-                    asset: Cow::Borrowed(&tos_common::config::TOS_ASSET),
+                    asset: Cow::Borrowed(&tos_common::config::UNO_ASSET),
                 },
             )
             .await?;
@@ -322,12 +322,33 @@ impl DaemonAPI {
                 "has_uno_balance",
                 &HasBalanceParams {
                     address: Cow::Borrowed(address),
-                    asset: Cow::Borrowed(&tos_common::config::TOS_ASSET),
+                    asset: Cow::Borrowed(&tos_common::config::UNO_ASSET),
                     topoheight: None,
                 },
             )
             .await?;
         Ok(result.exist)
+    }
+
+    /// Get UNO (encrypted) balance at a specific topoheight
+    pub async fn get_uno_balance_at_topoheight(
+        &self,
+        address: &Address,
+        topoheight: u64,
+    ) -> Result<tos_common::account::VersionedUnoBalance> {
+        trace!("get_uno_balance_at_topoheight");
+        let balance = self
+            .client
+            .call_with(
+                "get_uno_balance_at_topoheight",
+                &GetBalanceAtTopoHeightParams {
+                    topoheight,
+                    asset: Cow::Borrowed(&tos_common::config::UNO_ASSET),
+                    address: Cow::Borrowed(address),
+                },
+            )
+            .await?;
+        Ok(balance)
     }
 
     pub async fn get_block_at_topoheight(&self, topoheight: u64) -> Result<BlockResponse> {

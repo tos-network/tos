@@ -568,7 +568,7 @@ impl<'a, S: Storage> ChainState<'a, S> {
             Entry::Vacant(e) => {
                 let (version, _) = self
                     .storage
-                    .get_new_versioned_uno_balance(&key, self.topoheight)
+                    .get_new_versioned_uno_balance(&key, &asset, self.topoheight)
                     .await?;
                 // Decompress for computation
                 e.insert(version)
@@ -592,7 +592,7 @@ impl<'a, S: Storage> ChainState<'a, S> {
 
         // Get the versioned UNO balance from storage
         let (version, new_version) = storage
-            .get_new_versioned_uno_balance(key, topoheight)
+            .get_new_versioned_uno_balance(key, asset, topoheight)
             .await?;
 
         if log::log_enabled!(log::Level::Trace) {

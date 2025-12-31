@@ -26,11 +26,7 @@ use tos_daemon::core::{
 pub async fn create_test_storage() -> Arc<tokio::sync::RwLock<RocksStorage>> {
     let temp_dir = TempDir::new("tos_parallel_test").unwrap();
     let config = RocksDBConfig::default();
-    let storage = RocksStorage::new(
-        &temp_dir.path().to_string_lossy(),
-        Network::Devnet,
-        &config,
-    );
+    let storage = RocksStorage::new(&temp_dir.path().to_string_lossy(), Network::Devnet, &config);
 
     let storage_arc = Arc::new(tokio::sync::RwLock::new(storage));
 
@@ -45,7 +41,10 @@ pub async fn create_test_storage() -> Arc<tokio::sync::RwLock<RocksStorage>> {
             None,
         );
         let versioned: VersionedAssetData = Versioned::new(asset_data, Some(0));
-        storage_write.add_asset(&TOS_ASSET, 0, versioned).await.unwrap();
+        storage_write
+            .add_asset(&TOS_ASSET, 0, versioned)
+            .await
+            .unwrap();
     }
 
     storage_arc
@@ -63,12 +62,12 @@ pub fn create_dummy_block() -> (Block, Hash) {
 
     let header = BlockHeader::new(
         BlockVersion::Nobunaga,
-        0,                              // height
-        0,                              // timestamp
-        indexmap::IndexSet::new(),      // tips
+        0,                         // height
+        0,                         // timestamp
+        indexmap::IndexSet::new(), // tips
         [0u8; EXTRA_NONCE_SIZE],
         miner,
-        indexmap::IndexSet::new(),      // txs_hashes
+        indexmap::IndexSet::new(), // txs_hashes
     );
 
     let block = Block::new(Immutable::Owned(header), vec![]);
@@ -90,11 +89,7 @@ pub async fn setup_account_safe(
         let mut storage_write = storage.write().await;
 
         storage_write
-            .set_last_nonce_to(
-                account,
-                0,
-                &VersionedNonce::new(nonce, Some(0)),
-            )
+            .set_last_nonce_to(account, 0, &VersionedNonce::new(nonce, Some(0)))
             .await?;
 
         storage_write
@@ -142,11 +137,7 @@ pub async fn setup_account_in_storage_legacy(
     let mut storage_write = storage.write().await;
 
     storage_write
-        .set_last_nonce_to(
-            account,
-            0,
-            &VersionedNonce::new(nonce, Some(0)),
-        )
+        .set_last_nonce_to(account, 0, &VersionedNonce::new(nonce, Some(0)))
         .await?;
 
     storage_write

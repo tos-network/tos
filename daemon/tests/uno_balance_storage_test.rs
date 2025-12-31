@@ -9,14 +9,11 @@ use tos_common::{
     asset::{AssetData, VersionedAssetData},
     block::BlockVersion,
     config::{COIN_DECIMALS, UNO_ASSET},
-    crypto::{
-        elgamal::KeyPair,
-        proofs::G,
-        Hash,
-    },
+    crypto::{elgamal::KeyPair, proofs::G, Hash},
     transaction::{verify::BlockchainVerificationState, Reference},
     versioned_type::Versioned,
 };
+use tos_crypto::curve25519_dalek::Scalar;
 use tos_daemon::core::{
     error::BlockchainError,
     state::ApplicableChainState,
@@ -24,7 +21,6 @@ use tos_daemon::core::{
 };
 use tos_daemon::tako_integration::TakoContractExecutor;
 use tos_environment::Environment;
-use tos_crypto::curve25519_dalek::Scalar;
 
 #[tokio::test]
 async fn test_uno_balance_persistence() -> Result<(), BlockchainError> {
@@ -109,10 +105,7 @@ async fn test_uno_balance_persistence() -> Result<(), BlockchainError> {
         .get_last_uno_balance(&sender_pub, &UNO_ASSET)
         .await?;
     assert_eq!(sender_topo, 1);
-    let sender_ct = sender_version
-        .get_mut_balance()
-        .decompressed()?
-        .clone();
+    let sender_ct = sender_version.get_mut_balance().decompressed()?.clone();
     let sender_point = sender.get_private_key().decrypt_to_point(&sender_ct);
     assert_eq!(sender_point, Scalar::from(75u64) * *G);
 
@@ -120,10 +113,7 @@ async fn test_uno_balance_persistence() -> Result<(), BlockchainError> {
     let mut receiver_version = storage_write
         .get_uno_balance_at_exact_topoheight(&receiver_pub, &UNO_ASSET, 1)
         .await?;
-    let receiver_ct = receiver_version
-        .get_mut_balance()
-        .decompressed()?
-        .clone();
+    let receiver_ct = receiver_version.get_mut_balance().decompressed()?.clone();
     let receiver_point = receiver.get_private_key().decrypt_to_point(&receiver_ct);
     assert_eq!(receiver_point, Scalar::from(25u64) * *G);
 

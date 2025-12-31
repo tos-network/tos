@@ -102,7 +102,7 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError>
     }
 
     // ===== UNO (Privacy Balance) Methods =====
-    // TODO: Implement proper UNO balance storage and retrieval
+    // UNO balance storage implemented in apply_changes() method
 
     /// Get the UNO (encrypted) balance for a receiver account
     async fn get_receiver_uno_balance<'b>(
@@ -1196,7 +1196,7 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
                             let (mut new_version, _) = self
                                 .inner
                                 .storage
-                                .get_new_versioned_uno_balance(key, self.inner.topoheight)
+                                .get_new_versioned_uno_balance(key, asset, self.inner.topoheight)
                                 .await?;
                             // Subtract output_sum (homomorphic subtraction)
                             new_version.sub_ciphertext_from_balance(&output_sum)?;
@@ -1486,7 +1486,7 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
             }
 
             // UNO is a single asset, but we iterate to support the data structure
-            for (_asset, version) in uno_balances {
+            for (asset, version) in uno_balances {
                 if log::log_enabled!(log::Level::Trace) {
                     trace!(
                         "Saving versioned UNO balance for {} at topoheight {}",
@@ -1496,7 +1496,7 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
                 }
                 self.inner
                     .storage
-                    .set_last_uno_balance_to(&account, self.inner.topoheight, &version)
+                    .set_last_uno_balance_to(&account, &asset, self.inner.topoheight, &version)
                     .await?;
             }
         }
