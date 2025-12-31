@@ -8,6 +8,7 @@ mod state;
 mod unsigned;
 
 pub use fee::{FeeBuilder, FeeHelper};
+pub use payload::{TransferBuilder, UnoTransferBuilder};
 pub use state::{AccountState, UnoAccountState};
 pub use unsigned::UnsignedTransaction;
 
