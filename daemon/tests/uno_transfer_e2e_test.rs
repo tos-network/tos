@@ -10,7 +10,7 @@
 #![allow(clippy::disallowed_methods)]
 
 use tos_common::{
-    config::TOS_ASSET,
+    config::{TOS_ASSET, UNO_ASSET},
     context::Context,
     crypto::{
         elgamal::{KeyPair, PedersenCommitment, PedersenOpening},
@@ -66,10 +66,10 @@ fn test_uno_transfer_payload_serialization() {
     let sender = KeyPair::new();
     let receiver = KeyPair::new();
 
-    let payload = create_test_uno_payload(&sender, &receiver, TOS_ASSET, 100);
+    let payload = create_test_uno_payload(&sender, &receiver, UNO_ASSET, 100);
 
     // Verify basic properties
-    assert_eq!(payload.get_asset(), &TOS_ASSET);
+    assert_eq!(payload.get_asset(), &UNO_ASSET);
     assert_eq!(
         payload.get_destination(),
         &receiver.get_public_key().compress()
@@ -98,7 +98,7 @@ fn test_uno_transfers_transaction_type() {
     let sender = KeyPair::new();
     let receiver = KeyPair::new();
 
-    let payload = create_test_uno_payload(&sender, &receiver, TOS_ASSET, 1000);
+    let payload = create_test_uno_payload(&sender, &receiver, UNO_ASSET, 1000);
     let tx_type = TransactionType::UnoTransfers(vec![payload]);
 
     // Serialize
@@ -114,7 +114,7 @@ fn test_uno_transfers_transaction_type() {
     match restored {
         TransactionType::UnoTransfers(transfers) => {
             assert_eq!(transfers.len(), 1);
-            assert_eq!(transfers[0].get_asset(), &TOS_ASSET);
+            assert_eq!(transfers[0].get_asset(), &UNO_ASSET);
         }
         _ => panic!("Expected UnoTransfers variant"),
     }
@@ -129,7 +129,7 @@ fn test_multiple_uno_transfers() {
     let mut payloads = Vec::new();
     for (i, receiver) in receivers.iter().enumerate() {
         let amount = (100 * (i + 1)) as u64;
-        let payload = create_test_uno_payload(&sender, receiver, TOS_ASSET, amount);
+        let payload = create_test_uno_payload(&sender, receiver, UNO_ASSET, amount);
         payloads.push(payload);
     }
 
@@ -156,7 +156,7 @@ fn test_uno_transfer_dual_ciphertext() {
     let sender = KeyPair::new();
     let receiver = KeyPair::new();
 
-    let payload = create_test_uno_payload(&sender, &receiver, TOS_ASSET, 250);
+    let payload = create_test_uno_payload(&sender, &receiver, UNO_ASSET, 250);
 
     // Get ciphertext for sender (uses sender_handle)
     let sender_ct = payload.get_ciphertext(Role::Sender);
@@ -202,7 +202,7 @@ fn test_transaction_with_uno_transfers_hashable() {
     let sender = KeyPair::new();
     let receiver = KeyPair::new();
 
-    let payload = create_test_uno_payload(&sender, &receiver, TOS_ASSET, 100);
+    let payload = create_test_uno_payload(&sender, &receiver, UNO_ASSET, 100);
     let tx_type = TransactionType::UnoTransfers(vec![payload]);
 
     let reference = Reference {
@@ -258,7 +258,7 @@ fn test_source_commitment_serialization() {
     let eq_proof = CommitmentEqProof::new(&keypair, &ciphertext, &opening, amount, &mut transcript);
 
     // Create SourceCommitment
-    let source_commitment = SourceCommitment::new(commitment.compress(), eq_proof, TOS_ASSET);
+    let source_commitment = SourceCommitment::new(commitment.compress(), eq_proof, UNO_ASSET);
 
     // Verify serialization roundtrip
     let bytes = source_commitment.to_bytes();
@@ -317,11 +317,23 @@ fn test_uno_transfer_payload_size() {
     let sender = KeyPair::new();
     let receiver = KeyPair::new();
 
-    let payload = create_test_uno_payload(&sender, &receiver, TOS_ASSET, 100);
+    let payload = create_test_uno_payload(&sender, &receiver, UNO_ASSET, 100);
 
     // Verify size() matches actual serialized bytes
     let bytes = payload.to_bytes();
     assert_eq!(payload.size(), bytes.len());
+}
+
+/// Test that UNO_ASSET is distinct from TOS_ASSET
+#[test]
+fn test_uno_asset_is_distinct() {
+    // UNO_ASSET must be different from TOS_ASSET (zero hash)
+    assert_ne!(UNO_ASSET, TOS_ASSET);
+    assert_ne!(UNO_ASSET, Hash::zero());
+
+    // UNO_ASSET should be 0x01 (last byte)
+    let bytes = UNO_ASSET.as_bytes();
+    assert_eq!(bytes[31], 0x01);
 }
 
 /// Test UnoTransferPayload consume method
@@ -330,7 +342,7 @@ fn test_uno_transfer_payload_consume() {
     let sender = KeyPair::new();
     let receiver = KeyPair::new();
 
-    let payload = create_test_uno_payload(&sender, &receiver, TOS_ASSET, 100);
+    let payload = create_test_uno_payload(&sender, &receiver, UNO_ASSET, 100);
 
     // Clone before consume
     let original_asset = payload.get_asset().clone();
