@@ -21,6 +21,8 @@ struct Account<'a> {
     nonce: u64,
     // Assets ready as source for any transfer/transaction
     assets: HashMap<&'a Hash, u64>,
+    // UNO (encrypted) assets for privacy-preserving transactions
+    uno_assets: HashMap<&'a Hash, Ciphertext>,
     // Multisig configured
     // This is used to verify the validity of the multisig setup
     multisig: Option<MultiSigPayload>,
@@ -37,6 +39,8 @@ pub struct MempoolState<'a, S: Storage> {
     environment: &'a Environment,
     // Receiver balances
     receiver_balances: HashMap<Cow<'a, PublicKey>, HashMap<Cow<'a, Hash>, u64>>,
+    // UNO (encrypted) receiver balances
+    receiver_uno_balances: HashMap<Cow<'a, PublicKey>, HashMap<Cow<'a, Hash>, Ciphertext>>,
     // Sender accounts
     // This is used to verify ZK Proofs and store/update nonces
     accounts: HashMap<&'a PublicKey, Account<'a>>,
@@ -66,6 +70,7 @@ impl<'a, S: Storage> MempoolState<'a, S> {
             storage,
             environment,
             receiver_balances: HashMap::new(),
+            receiver_uno_balances: HashMap::new(),
             accounts: HashMap::new(),
             contracts: HashMap::new(),
             stable_topoheight,
@@ -169,6 +174,7 @@ impl<'a, S: Storage> MempoolState<'a, S> {
         Ok(Account {
             nonce,
             assets: HashMap::new(),
+            uno_assets: HashMap::new(),
             multisig,
         })
     }
@@ -323,26 +329,84 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Mempoo
     }
 
     // ===== UNO (Privacy Balance) Methods =====
-    // TODO: Implement proper UNO balance storage and retrieval
-    // These are stub implementations that return errors until UNO storage is implemented
 
     /// Get the UNO (encrypted) balance for a receiver account
     async fn get_receiver_uno_balance<'b>(
         &'b mut self,
-        _account: Cow<'a, PublicKey>,
-        _asset: Cow<'a, Hash>,
+        account: Cow<'a, PublicKey>,
+        asset: Cow<'a, Hash>,
     ) -> Result<&'b mut Ciphertext, BlockchainError> {
-        Err(BlockchainError::UnoNotImplemented)
+        // Check if we already have this balance in our internal cache
+        match self
+            .receiver_uno_balances
+            .entry(account.clone())
+            .or_insert_with(HashMap::new)
+            .entry(asset.clone())
+        {
+            Entry::Occupied(o) => Ok(o.into_mut()),
+            Entry::Vacant(e) => {
+                // Try to get from storage
+                let balance = if let Some((_, version)) = self
+                    .storage
+                    .get_uno_balance_at_maximum_topoheight(&account, self.topoheight)
+                    .await?
+                {
+                    // Decompress for computation
+                    let mut version = version;
+                    version
+                        .get_mut_balance()
+                        .computable()
+                        .map_err(BlockchainError::from)?
+                        .clone()
+                } else {
+                    // Default to zero ciphertext
+                    Ciphertext::zero()
+                };
+                Ok(e.insert(balance))
+            }
+        }
     }
 
     /// Get the UNO (encrypted) balance used for verification of funds for the sender account
     async fn get_sender_uno_balance<'b>(
         &'b mut self,
-        _account: &'a PublicKey,
-        _asset: &'a Hash,
+        account: &'a PublicKey,
+        asset: &'a Hash,
         _reference: &Reference,
     ) -> Result<&'b mut Ciphertext, BlockchainError> {
-        Err(BlockchainError::UnoNotImplemented)
+        // Get or create account
+        let acc = match self.accounts.entry(account) {
+            Entry::Occupied(o) => o.into_mut(),
+            Entry::Vacant(e) => {
+                let acc = Self::create_sender_account(self.mempool, self.storage, account, self.topoheight).await?;
+                e.insert(acc)
+            }
+        };
+
+        // Check if we already have this UNO asset balance
+        match acc.uno_assets.entry(asset) {
+            Entry::Occupied(o) => Ok(o.into_mut()),
+            Entry::Vacant(e) => {
+                // Try to get from storage
+                let balance = if let Some((_, version)) = self
+                    .storage
+                    .get_uno_balance_at_maximum_topoheight(account, self.topoheight)
+                    .await?
+                {
+                    // Decompress for computation
+                    let mut version = version;
+                    version
+                        .get_mut_balance()
+                        .computable()
+                        .map_err(BlockchainError::from)?
+                        .clone()
+                } else {
+                    // Default to zero ciphertext
+                    Ciphertext::zero()
+                };
+                Ok(e.insert(balance))
+            }
+        }
     }
 
     /// Apply new output ciphertext to a sender's UNO account
@@ -352,7 +416,9 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Mempoo
         _asset: &'a Hash,
         _output: Ciphertext,
     ) -> Result<(), BlockchainError> {
-        Err(BlockchainError::UnoNotImplemented)
+        // In mempool state, we don't need to track outputs since
+        // balances are already verified - this is a no-op
+        Ok(())
     }
 
     /// Get the nonce of an account

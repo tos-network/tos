@@ -1,9 +1,13 @@
 use serde::{Deserialize, Serialize};
+use tos_crypto::merlin::Transcript;
 
 use crate::{
     account::Nonce,
     ai_mining::AIMiningPayload,
-    crypto::{elgamal::CompressedPublicKey, proofs::RangeProof, Hash, Hashable, Signature},
+    crypto::{
+        elgamal::CompressedPublicKey, proofs::RangeProof, Hash, Hashable, ProtocolTranscript,
+        Signature,
+    },
     serializer::*,
 };
 
@@ -202,6 +206,30 @@ impl Transaction {
             multisig,
             signature,
         }
+    }
+
+    /// Prepare a transcript for ZK proof generation/verification
+    /// This establishes the common reference string for all proofs in the transaction
+    pub fn prepare_transcript(
+        version: TxVersion,
+        source_pubkey: &CompressedPublicKey,
+        fee: u64,
+        fee_type: &FeeType,
+        nonce: Nonce,
+    ) -> Transcript {
+        let mut transcript = Transcript::new(b"transaction-proof");
+        transcript.append_u64(b"version", version.into());
+        transcript.append_public_key(b"source_pubkey", source_pubkey);
+        transcript.append_u64(b"fee", fee);
+        transcript.append_u64(
+            b"fee_type",
+            match fee_type {
+                FeeType::TOS => 0u64,
+                FeeType::Energy => 1u64,
+            },
+        );
+        transcript.append_u64(b"nonce", nonce);
+        transcript
     }
 
     // Get the transaction version

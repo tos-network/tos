@@ -777,6 +777,11 @@ async fn setup_wallet_command_manager(
         )],
         CommandHandler::Async(async_handler!(balance)),
     ))?;
+    command_manager.add_command(Command::new(
+        "uno_balance",
+        "Show your UNO (encrypted) balance from daemon",
+        CommandHandler::Async(async_handler!(uno_balance)),
+    ))?;
     command_manager.add_command(Command::with_optional_arguments(
         "history",
         "Show all your transactions",
@@ -2355,6 +2360,45 @@ async fn balance(
         asset,
         format_coin(balance, data.inner.get_decimals())
     ));
+    Ok(())
+}
+
+// Show UNO (encrypted) balance from daemon
+async fn uno_balance(
+    manager: &CommandManager,
+    _arguments: ArgumentManager,
+) -> Result<(), CommandError> {
+    let context = manager.get_context().lock()?;
+    let wallet: &Arc<Wallet> = context.get()?;
+
+    // Query UNO balance from daemon API
+    let network_handler = wallet.get_network_handler().lock().await;
+    let handler = network_handler.as_ref().ok_or_else(|| {
+        CommandError::InvalidArgument("Wallet not connected to daemon".to_string())
+    })?;
+    let address = wallet.get_address();
+
+    // Check if account has UNO balance
+    let has_uno = handler.get_api().has_uno_balance(&address).await.map_err(|e| {
+        CommandError::InvalidArgument(format!("Failed to check UNO balance: {}", e))
+    })?;
+
+    if !has_uno {
+        manager.message("No UNO balance found for this address.");
+        manager.message("Use 'shield' command to convert plaintext TOS to encrypted UNO balance.");
+        return Ok(());
+    }
+
+    // Get the UNO balance
+    let result = handler.get_api().get_uno_balance(&address).await.map_err(|e| {
+        CommandError::InvalidArgument(format!("Failed to get UNO balance: {}", e))
+    })?;
+
+    manager.message("UNO (Encrypted) Balance:");
+    manager.message(format!("  Topoheight: {}", result.topoheight));
+    manager.message(format!("  Balance Type: {:?}", result.version.get_balance_type()));
+    manager.message("  (Encrypted balance - decrypt with your private key to see amount)");
+
     Ok(())
 }
 

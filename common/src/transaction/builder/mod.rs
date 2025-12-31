@@ -8,27 +8,38 @@ mod state;
 mod unsigned;
 
 pub use fee::{FeeBuilder, FeeHelper};
-pub use state::AccountState;
+pub use state::{AccountState, UnoAccountState};
 pub use unsigned::UnsignedTransaction;
 
 use super::{
     extra_data::{ExtraDataType, PlaintextData, UnknownExtraDataFormat},
+    payload::UnoTransferPayload,
     BatchReferralRewardPayload, BindReferrerPayload, BurnPayload, ContractDeposit,
     DeployContractPayload, EnergyPayload, FeeType, InvokeConstructorPayload, InvokeContractPayload,
-    MultiSigPayload, Transaction, TransactionType, TransferPayload, TxVersion,
-    EXTRA_DATA_LIMIT_SIZE, EXTRA_DATA_LIMIT_SUM_SIZE, MAX_MULTISIG_PARTICIPANTS,
+    MultiSigPayload, Role, SourceCommitment, Transaction, TransactionType, TransferPayload,
+    TxVersion, EXTRA_DATA_LIMIT_SIZE, EXTRA_DATA_LIMIT_SUM_SIZE, MAX_MULTISIG_PARTICIPANTS,
     MAX_TRANSFER_COUNT,
 };
 use crate::ai_mining::AIMiningPayload;
 use crate::{
     config::{BURN_PER_CONTRACT, MAX_GAS_USAGE_PER_TX, TOS_ASSET},
     crypto::{
-        elgamal::{CompressedPublicKey, KeyPair, RISTRETTO_COMPRESSED_SIZE},
-        Hash, HASH_SIZE, SIGNATURE_SIZE,
+        elgamal::{
+            Ciphertext, CompressedPublicKey, DecryptHandle, KeyPair, PedersenCommitment,
+            PedersenOpening, PublicKey, RISTRETTO_COMPRESSED_SIZE, SCALAR_SIZE,
+        },
+        proofs::{
+            CiphertextValidityProof, CommitmentEqProof, ProofGenerationError, BP_GENS,
+            BULLET_PROOF_SIZE, PC_GENS,
+        },
+        Hash, ProtocolTranscript, HASH_SIZE, SIGNATURE_SIZE,
     },
     serializer::Serializer,
     utils::{calculate_energy_fee, calculate_tx_fee},
 };
+use std::iter;
+use tos_crypto::bulletproofs::RangeProof;
+use tos_crypto::curve25519_dalek::Scalar;
 use indexmap::{IndexMap, IndexSet};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -47,6 +58,8 @@ pub enum GenerationError<T> {
     MissingContractKey,
     #[error("Invalid contract key (decompression failed)")]
     InvalidContractKey,
+    #[error("Proof generation error: {0}")]
+    Proof(#[from] ProofGenerationError),
     #[error("Empty transfers")]
     EmptyTransfers,
     #[error("Max transfer count reached")]
@@ -87,6 +100,8 @@ pub enum GenerationError<T> {
 #[serde(rename_all = "snake_case")]
 pub enum TransactionTypeBuilder {
     Transfers(Vec<TransferBuilder>),
+    /// UNO (privacy-preserving) transfers with encrypted amounts
+    UnoTransfers(Vec<UnoTransferBuilder>),
     // We can use the same as final transaction
     Burn(BurnPayload),
     MultiSig(MultiSigBuilder),
@@ -200,6 +215,54 @@ impl TransactionBuilder {
                         size += ExtraDataType::estimate_size(extra_data, false);
                     }
                 }
+            }
+            TransactionTypeBuilder::UnoTransfers(transfers) => {
+                // UNO transfers have encrypted amounts with ZK proofs
+                let assets_used = self.data.used_assets().len();
+
+                // Source commitments: one per asset used
+                // Each: commitment + asset hash + CommitmentEqProof
+                size += 1; // commitments count byte
+                size += assets_used
+                    * (RISTRETTO_COMPRESSED_SIZE + HASH_SIZE
+                        + (RISTRETTO_COMPRESSED_SIZE * 3 + SCALAR_SIZE * 3));
+
+                // Transfers count byte
+                size += 1;
+                for transfer in transfers {
+                    size += transfer.asset.size()
+                        + transfer.destination.get_public_key().size()
+                        // Commitment, sender handle, receiver handle
+                        + (RISTRETTO_COMPRESSED_SIZE * 3)
+                        // CiphertextValidityProof: Y_0, Y_1, z_r, z_x
+                        + (RISTRETTO_COMPRESSED_SIZE * 2 + SCALAR_SIZE * 2)
+                        // Y_2 for T0+ (always include)
+                        + RISTRETTO_COMPRESSED_SIZE
+                        // Extra data byte flag
+                        + 1;
+
+                    if let Some(extra_data) = transfer
+                        .extra_data
+                        .as_ref()
+                        .or(transfer.destination.get_extra_data())
+                    {
+                        size += ExtraDataType::estimate_size(extra_data, transfer.encrypt_extra_data);
+                    }
+                }
+
+                // Range proof size estimation
+                let n_commitments = transfers.len() + assets_used;
+                let lg_n = (BULLET_PROOF_SIZE * n_commitments)
+                    .next_power_of_two()
+                    .trailing_zeros() as usize;
+                // Fixed range proof size
+                size += RISTRETTO_COMPRESSED_SIZE * 4 + SCALAR_SIZE * 3;
+                // u16 bytes length
+                size += 2;
+                // Inner Product Proof scalars
+                size += SCALAR_SIZE * 2;
+                // G_vec len
+                size += 2 * RISTRETTO_COMPRESSED_SIZE * lg_n;
             }
             TransactionTypeBuilder::Burn(payload) => {
                 // Payload size
@@ -375,6 +438,14 @@ impl TransactionBuilder {
 
         match &self.data {
             TransactionTypeBuilder::Transfers(transfers) => {
+                for transfer in transfers {
+                    if &transfer.asset == asset {
+                        cost += transfer.amount;
+                    }
+                }
+            }
+            TransactionTypeBuilder::UnoTransfers(transfers) => {
+                // UNO transfers also consume the plaintext amount (for cost calculation)
                 for transfer in transfers {
                     if &transfer.asset == asset {
                         cost += transfer.amount;
@@ -726,6 +797,13 @@ impl TransactionBuilder {
             TransactionTypeBuilder::BatchReferralReward(ref payload) => {
                 TransactionType::BatchReferralReward(payload.clone())
             }
+            TransactionTypeBuilder::UnoTransfers(_) => {
+                // UNO transfers require UnoAccountState which provides ciphertext access
+                // This is a placeholder - full implementation requires build_uno_unsigned method
+                return Err(GenerationError::State(
+                    "UNO transfers require UnoAccountState. Use build_uno_unsigned instead.".into(),
+                ));
+            }
         };
 
         let unsigned_tx = UnsignedTransaction::new_with_fee_type(
@@ -737,6 +815,325 @@ impl TransactionBuilder {
             fee_type,
             nonce,
             reference,
+        );
+
+        Ok(unsigned_tx)
+    }
+
+    /// Build an unsigned UNO (privacy-preserving) transaction
+    /// This method requires UnoAccountState which provides access to encrypted balances
+    pub fn build_uno_unsigned<B: UnoAccountState>(
+        mut self,
+        state: &mut B,
+        source_keypair: &KeyPair,
+    ) -> Result<UnsignedTransaction, GenerationError<B::Error>>
+    where
+        <B as FeeHelper>::Error: for<'a> std::convert::From<&'a str>,
+    {
+        // Verify we have UNO transfers
+        let transfers = match &mut self.data {
+            TransactionTypeBuilder::UnoTransfers(ref mut t) => t,
+            _ => {
+                return Err(GenerationError::State(
+                    "build_uno_unsigned requires UnoTransfers".into(),
+                ))
+            }
+        };
+
+        if transfers.is_empty() {
+            return Err(GenerationError::EmptyTransfers);
+        }
+        if transfers.len() > MAX_TRANSFER_COUNT {
+            return Err(GenerationError::MaxTransferCountReached);
+        }
+
+        // Validate transfers
+        let mut extra_data_size = 0;
+        for transfer in transfers.iter_mut() {
+            if *transfer.destination.get_public_key() == self.source {
+                return Err(GenerationError::SenderIsReceiver);
+            }
+            if state.is_mainnet() != transfer.destination.is_mainnet() {
+                return Err(GenerationError::InvalidNetwork);
+            }
+            if transfer.extra_data.is_some() && !transfer.destination.is_normal() {
+                return Err(GenerationError::ExtraDataAndIntegratedAddress);
+            }
+
+            // Extract integrated address data
+            if let Some(extra_data) = transfer.destination.extract_data_only() {
+                transfer.extra_data = Some(extra_data);
+            }
+
+            if let Some(extra_data) = &transfer.extra_data {
+                let size = extra_data.size();
+                if size > EXTRA_DATA_LIMIT_SIZE {
+                    return Err(GenerationError::ExtraDataTooLarge);
+                }
+                extra_data_size += size;
+            }
+        }
+        if extra_data_size > EXTRA_DATA_LIMIT_SUM_SIZE {
+            return Err(GenerationError::ExtraDataTooLarge);
+        }
+
+        // Compute fees
+        let fee = self.estimate_fees(state)?;
+
+        // Get nonce
+        let nonce = state.get_nonce().map_err(GenerationError::State)?;
+        state
+            .update_nonce(nonce + 1)
+            .map_err(GenerationError::State)?;
+
+        let reference = state.get_reference();
+        let used_assets = self.data.used_assets();
+        let fee_type = self.fee_type.clone().unwrap_or(FeeType::TOS);
+
+        // Create transfer commitments
+        let transfers_commitments: Vec<UnoTransferWithCommitment> = match &self.data {
+            TransactionTypeBuilder::UnoTransfers(transfers) => transfers
+                .iter()
+                .map(|transfer| {
+                    let destination = transfer
+                        .destination
+                        .get_public_key()
+                        .decompress()
+                        .map_err(|err| GenerationError::Proof(err.into()))?;
+
+                    let amount_opening = PedersenOpening::generate_new();
+                    let commitment =
+                        PedersenCommitment::new_with_opening(transfer.amount, &amount_opening);
+                    let sender_handle =
+                        source_keypair.get_public_key().decrypt_handle(&amount_opening);
+                    let receiver_handle = destination.decrypt_handle(&amount_opening);
+
+                    Ok(UnoTransferWithCommitment {
+                        inner: transfer.clone(),
+                        commitment,
+                        sender_handle,
+                        receiver_handle,
+                        destination,
+                        amount_opening,
+                    })
+                })
+                .collect::<Result<Vec<_>, GenerationError<B::Error>>>()?,
+            _ => Vec::new(),
+        };
+
+        // Prepare range proof values for source commitments
+        let mut range_proof_openings: Vec<_> = iter::repeat_with(|| {
+            PedersenOpening::generate_new().as_scalar()
+        })
+        .take(used_assets.len())
+        .collect();
+
+        let mut range_proof_values: Vec<u64> = Vec::with_capacity(used_assets.len());
+        for asset in &used_assets {
+            let cost = self.get_transaction_cost(fee, asset);
+            let current_balance = state
+                .get_uno_balance(asset)
+                .map_err(GenerationError::State)?;
+
+            let new_balance = current_balance.checked_sub(cost).ok_or_else(|| {
+                GenerationError::InsufficientFunds((*asset).clone(), cost, current_balance)
+            })?;
+            range_proof_values.push(new_balance);
+        }
+
+        // Prepare transcript for proofs
+        let mut transcript = Transaction::prepare_transcript(
+            self.version,
+            &self.source,
+            fee,
+            &fee_type,
+            nonce,
+        );
+
+        // Build source commitments with CommitmentEqProof
+        let source_commitments: Vec<SourceCommitment> = used_assets
+            .iter()
+            .zip(&range_proof_openings)
+            .zip(&range_proof_values)
+            .map(|((asset, new_source_opening), &source_new_balance)| {
+                let new_source_opening = PedersenOpening::from_scalar(*new_source_opening);
+
+                let source_current_ciphertext = state
+                    .get_uno_ciphertext(asset)
+                    .map_err(GenerationError::State)?
+                    .take_ciphertext()
+                    .map_err(|err| GenerationError::Proof(err.into()))?;
+
+                let source_ct_compressed = source_current_ciphertext.compress();
+
+                let commitment =
+                    PedersenCommitment::new_with_opening(source_new_balance, &new_source_opening)
+                        .compress();
+
+                // Compute new source ciphertext by subtracting transfers
+                let mut new_source_ciphertext = source_current_ciphertext;
+                if **asset == TOS_ASSET {
+                    new_source_ciphertext -= Scalar::from(fee);
+                }
+                for transfer in &transfers_commitments {
+                    if &transfer.inner.asset == *asset {
+                        new_source_ciphertext -= transfer.get_ciphertext(Role::Sender);
+                    }
+                }
+
+                // Generate CommitmentEqProof
+                transcript.new_commitment_eq_proof_domain_separator();
+                transcript.append_hash(b"new_source_commitment_asset", asset);
+                transcript.append_commitment(b"new_source_commitment", &commitment);
+
+                if self.version >= TxVersion::T0 {
+                    transcript.append_ciphertext(b"source_ct", &source_ct_compressed);
+                }
+
+                let proof = CommitmentEqProof::new(
+                    source_keypair,
+                    &new_source_ciphertext,
+                    &new_source_opening,
+                    source_new_balance,
+                    &mut transcript,
+                );
+
+                // Update state with new UNO balance
+                state
+                    .update_uno_balance(asset, source_new_balance, new_source_ciphertext)
+                    .map_err(GenerationError::State)?;
+
+                Ok(SourceCommitment::new(commitment, proof, (*asset).clone()))
+            })
+            .collect::<Result<Vec<_>, GenerationError<B::Error>>>()?;
+
+        // Build transfer payloads with CiphertextValidityProof
+        range_proof_values.reserve(transfers_commitments.len());
+        range_proof_openings.reserve(transfers_commitments.len());
+
+        let mut total_cipher_size = 0;
+        let transfer_payloads: Vec<UnoTransferPayload> = transfers_commitments
+            .into_iter()
+            .map(|transfer| {
+                let commitment = transfer.commitment.compress();
+                let sender_handle = transfer.sender_handle.compress();
+                let receiver_handle = transfer.receiver_handle.compress();
+
+                transcript.transfer_proof_domain_separator();
+                transcript.append_public_key(
+                    b"dest_pubkey",
+                    transfer.inner.destination.get_public_key(),
+                );
+                transcript.append_commitment(b"amount_commitment", &commitment);
+                transcript.append_handle(b"amount_sender_handle", &sender_handle);
+                transcript.append_handle(b"amount_receiver_handle", &receiver_handle);
+
+                let source_pubkey = if self.version >= TxVersion::T0 {
+                    Some(source_keypair.get_public_key())
+                } else {
+                    None
+                };
+
+                let ct_validity_proof = CiphertextValidityProof::new(
+                    &transfer.destination,
+                    source_pubkey,
+                    transfer.inner.amount,
+                    &transfer.amount_opening,
+                    &mut transcript,
+                );
+
+                range_proof_values.push(transfer.inner.amount);
+                range_proof_openings.push(transfer.amount_opening.as_scalar());
+
+                // Handle extra data
+                let extra_data: Option<UnknownExtraDataFormat> =
+                    if let Some(extra_data) = transfer.inner.extra_data {
+                        let bytes = extra_data.to_bytes();
+                        let cipher: UnknownExtraDataFormat = if self.version >= TxVersion::T0 {
+                            if transfer.inner.encrypt_extra_data {
+                                ExtraDataType::Private(super::extra_data::ExtraData::new(
+                                    PlaintextData(bytes),
+                                    source_keypair.get_public_key(),
+                                    &transfer.destination,
+                                ))
+                            } else {
+                                ExtraDataType::Public(PlaintextData(bytes))
+                            }
+                            .into()
+                        } else {
+                            super::extra_data::ExtraData::new(
+                                PlaintextData(bytes),
+                                source_keypair.get_public_key(),
+                                &transfer.destination,
+                            )
+                            .into()
+                        };
+
+                        let cipher_size = cipher.size();
+                        if cipher_size > EXTRA_DATA_LIMIT_SIZE {
+                            return Err(GenerationError::EncryptedExtraDataTooLarge(
+                                cipher_size,
+                                EXTRA_DATA_LIMIT_SIZE,
+                            ));
+                        }
+                        total_cipher_size += cipher_size;
+                        Some(cipher)
+                    } else {
+                        None
+                    };
+
+                Ok(UnoTransferPayload::new(
+                    transfer.inner.asset,
+                    transfer.inner.destination.to_public_key(),
+                    extra_data,
+                    commitment,
+                    sender_handle,
+                    receiver_handle,
+                    ct_validity_proof,
+                ))
+            })
+            .collect::<Result<Vec<_>, GenerationError<B::Error>>>()?;
+
+        if total_cipher_size > EXTRA_DATA_LIMIT_SUM_SIZE {
+            return Err(GenerationError::EncryptedExtraDataTooLarge(
+                total_cipher_size,
+                EXTRA_DATA_LIMIT_SUM_SIZE,
+            ));
+        }
+
+        // Generate aggregated range proof
+        let n_commitments = range_proof_values.len();
+        let n_dud_commitments = n_commitments
+            .checked_next_power_of_two()
+            .ok_or(ProofGenerationError::Format)?
+            - n_commitments;
+
+        range_proof_values.extend(iter::repeat_n(0u64, n_dud_commitments));
+        range_proof_openings.extend(iter::repeat_n(Scalar::ZERO, n_dud_commitments));
+
+        let (range_proof, _commitments) = RangeProof::prove_multiple(
+            &BP_GENS,
+            &PC_GENS,
+            &mut transcript,
+            &range_proof_values,
+            &range_proof_openings,
+            BULLET_PROOF_SIZE,
+        )
+        .map_err(ProofGenerationError::from)?;
+
+        let data = TransactionType::UnoTransfers(transfer_payloads);
+
+        let unsigned_tx = UnsignedTransaction::new_with_uno(
+            self.version,
+            self.chain_id,
+            self.source,
+            data,
+            fee,
+            fee_type,
+            nonce,
+            reference,
+            source_commitments,
+            range_proof,
         );
 
         Ok(unsigned_tx)
@@ -753,6 +1150,11 @@ impl TransactionTypeBuilder {
 
         match &self {
             TransactionTypeBuilder::Transfers(transfers) => {
+                for transfer in transfers {
+                    consumed.insert(&transfer.asset);
+                }
+            }
+            TransactionTypeBuilder::UnoTransfers(transfers) => {
                 for transfer in transfers {
                     consumed.insert(&transfer.asset);
                 }
@@ -788,6 +1190,11 @@ impl TransactionTypeBuilder {
                     used_keys.insert(transfer.destination.get_public_key());
                 }
             }
+            TransactionTypeBuilder::UnoTransfers(transfers) => {
+                for transfer in transfers {
+                    used_keys.insert(transfer.destination.get_public_key());
+                }
+            }
             TransactionTypeBuilder::AIMining(
                 crate::ai_mining::AIMiningPayload::RegisterMiner { miner_address, .. },
             ) => {
@@ -802,6 +1209,26 @@ impl TransactionTypeBuilder {
         }
 
         used_keys
+    }
+}
+
+// Internal struct for building UNO transfers with commitments
+struct UnoTransferWithCommitment {
+    inner: UnoTransferBuilder,
+    commitment: PedersenCommitment,
+    sender_handle: DecryptHandle,
+    receiver_handle: DecryptHandle,
+    destination: PublicKey,
+    amount_opening: PedersenOpening,
+}
+
+impl UnoTransferWithCommitment {
+    fn get_ciphertext(&self, role: Role) -> Ciphertext {
+        let handle = match role {
+            Role::Receiver => self.receiver_handle.clone(),
+            Role::Sender => self.sender_handle.clone(),
+        };
+        Ciphertext::new(self.commitment.clone(), handle)
     }
 }
 

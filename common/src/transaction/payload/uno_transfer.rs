@@ -178,3 +178,110 @@ impl Serializer for UnoTransferPayload {
             + self.ct_validity_proof.size()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::crypto::elgamal::{KeyPair, PedersenOpening};
+    use tos_crypto::merlin::Transcript;
+
+    fn create_test_payload() -> UnoTransferPayload {
+        let sender_keypair = KeyPair::new();
+        let receiver_keypair = KeyPair::new();
+        let destination = receiver_keypair.get_public_key().compress();
+        let asset = Hash::zero();
+
+        // Create a proper ciphertext with opening for proof generation
+        let amount = 100u64;
+        let opening = PedersenOpening::generate_new();
+
+        // Create commitment and handles
+        let commitment = crate::crypto::elgamal::PedersenCommitment::new_with_opening(amount, &opening);
+        let sender_handle = sender_keypair.get_public_key().decrypt_handle(&opening);
+        let receiver_handle = receiver_keypair.get_public_key().decrypt_handle(&opening);
+
+        // Create a valid proof
+        let mut transcript = Transcript::new(b"test_uno_transfer");
+        let proof = CiphertextValidityProof::new(
+            receiver_keypair.get_public_key(),
+            Some(sender_keypair.get_public_key()),
+            amount,
+            &opening,
+            &mut transcript,
+        );
+
+        UnoTransferPayload::new(
+            asset,
+            destination,
+            None,
+            commitment.compress(),
+            sender_handle.compress(),
+            receiver_handle.compress(),
+            proof,
+        )
+    }
+
+    #[test]
+    fn test_uno_transfer_payload_serialization() {
+        use crate::context::Context;
+        use crate::serializer::Reader;
+        use crate::transaction::TxVersion;
+
+        let payload = create_test_payload();
+
+        // Serialize
+        let bytes = payload.to_bytes();
+
+        // Deserialize with context containing TxVersion (required by CiphertextValidityProof)
+        let mut context = Context::new();
+        context.store(TxVersion::T0);
+        let mut reader = Reader::with_context(&bytes, context);
+        let restored = UnoTransferPayload::read(&mut reader).unwrap();
+
+        // Verify fields match
+        assert_eq!(payload.get_asset(), restored.get_asset());
+        assert_eq!(payload.get_destination(), restored.get_destination());
+        assert_eq!(payload.get_commitment(), restored.get_commitment());
+        assert_eq!(payload.get_sender_handle(), restored.get_sender_handle());
+        assert_eq!(payload.get_receiver_handle(), restored.get_receiver_handle());
+    }
+
+    #[test]
+    fn test_uno_transfer_payload_size() {
+        let payload = create_test_payload();
+
+        // Verify size() matches actual serialized bytes
+        let bytes = payload.to_bytes();
+        assert_eq!(payload.size(), bytes.len());
+    }
+
+    #[test]
+    fn test_uno_transfer_payload_get_ciphertext() {
+        let payload = create_test_payload();
+
+        // Get ciphertext for sender
+        let sender_ct = payload.get_ciphertext(Role::Sender);
+        assert_eq!(sender_ct.commitment(), payload.get_commitment());
+        assert_eq!(sender_ct.handle(), payload.get_sender_handle());
+
+        // Get ciphertext for receiver
+        let receiver_ct = payload.get_ciphertext(Role::Receiver);
+        assert_eq!(receiver_ct.commitment(), payload.get_commitment());
+        assert_eq!(receiver_ct.handle(), payload.get_receiver_handle());
+    }
+
+    #[test]
+    fn test_uno_transfer_payload_consume() {
+        let payload = create_test_payload();
+
+        let asset = payload.get_asset().clone();
+        let destination = payload.get_destination().clone();
+        let commitment = payload.get_commitment().clone();
+
+        let (consumed_asset, consumed_dest, _, consumed_commitment, _, _) = payload.consume();
+
+        assert_eq!(asset, consumed_asset);
+        assert_eq!(destination, consumed_dest);
+        assert_eq!(commitment, consumed_commitment);
+    }
+}

@@ -2,7 +2,7 @@ mod direction;
 
 use super::{default_true_value, DataElement, RPCContractOutput, RPCTransaction};
 use crate::{
-    account::{Nonce, VersionedBalance, VersionedNonce},
+    account::{Nonce, VersionedBalance, VersionedNonce, VersionedUnoBalance},
     block::{Algorithm, BlockVersion, TopoHeight, EXTRA_NONCE_SIZE},
     crypto::{Address, Hash},
     difficulty::{CumulativeDifficulty, Difficulty},
@@ -280,6 +280,20 @@ pub struct GetBalanceResult {
 // Response type for get_balance_at_topoheight RPC endpoint
 // Returns the full VersionedBalance structure with version history and output balance tracking
 pub type GetBalanceAtTopoHeightResult = VersionedBalance;
+
+// Response type for get_uno_balance RPC endpoint
+// Returns the encrypted UNO balance with topoheight
+#[derive(Serialize, Deserialize)]
+pub struct GetUnoBalanceResult {
+    pub version: VersionedUnoBalance,
+    pub topoheight: TopoHeight,
+}
+
+// Response type for has_uno_balance RPC endpoint
+#[derive(Serialize, Deserialize)]
+pub struct HasUnoBalanceResult {
+    pub exist: bool,
+}
 
 #[derive(Serialize, Deserialize)]
 pub struct GetStableBalanceResult {

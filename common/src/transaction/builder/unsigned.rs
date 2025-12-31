@@ -4,10 +4,11 @@ use crate::{
     serializer::{Reader, ReaderError, Serializer, Writer},
     transaction::{
         multisig::{MultiSig, SignatureId},
-        FeeType, Reference, Transaction, TransactionType, TxVersion,
+        FeeType, Reference, SourceCommitment, Transaction, TransactionType, TxVersion,
     },
 };
 use serde::{Deserialize, Serialize};
+use tos_crypto::bulletproofs::RangeProof;
 
 // Used to build the final transaction
 // It can include the multi-signature logic
@@ -24,6 +25,12 @@ pub struct UnsignedTransaction {
     nonce: Nonce,
     reference: Reference,
     multisig: Option<MultiSig>,
+    /// UNO: Source balance commitments with equality proofs
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    source_commitments: Vec<SourceCommitment>,
+    /// UNO: Aggregated range proof for all commitments
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    range_proof: Option<RangeProof>,
 }
 
 impl UnsignedTransaction {
@@ -46,6 +53,8 @@ impl UnsignedTransaction {
             nonce,
             reference,
             multisig: None,
+            source_commitments: Vec::new(),
+            range_proof: None,
         }
     }
     pub fn new_with_fee_type(
@@ -68,6 +77,36 @@ impl UnsignedTransaction {
             nonce,
             reference,
             multisig: None,
+            source_commitments: Vec::new(),
+            range_proof: None,
+        }
+    }
+
+    /// Create a new unsigned UNO transaction with privacy proofs
+    pub fn new_with_uno(
+        version: TxVersion,
+        chain_id: u8,
+        source: CompressedPublicKey,
+        data: TransactionType,
+        fee: u64,
+        fee_type: FeeType,
+        nonce: Nonce,
+        reference: Reference,
+        source_commitments: Vec<SourceCommitment>,
+        range_proof: RangeProof,
+    ) -> Self {
+        Self {
+            version,
+            chain_id,
+            source,
+            data,
+            fee,
+            fee_type,
+            nonce,
+            reference,
+            multisig: None,
+            source_commitments,
+            range_proof: Some(range_proof),
         }
     }
 
@@ -140,18 +179,36 @@ impl UnsignedTransaction {
 
         let signature = keypair.sign(&buffer);
 
-        Transaction::new(
-            self.version,
-            self.chain_id,
-            self.source,
-            self.data,
-            self.fee,
-            self.fee_type,
-            self.nonce,
-            self.reference,
-            self.multisig,
-            signature,
-        )
+        // Use new_with_uno if we have UNO proofs
+        if let Some(range_proof) = self.range_proof {
+            Transaction::new_with_uno(
+                self.version,
+                self.chain_id,
+                self.source,
+                self.data,
+                self.fee,
+                self.fee_type,
+                self.nonce,
+                self.source_commitments,
+                range_proof,
+                self.reference,
+                self.multisig,
+                signature,
+            )
+        } else {
+            Transaction::new(
+                self.version,
+                self.chain_id,
+                self.source,
+                self.data,
+                self.fee,
+                self.fee_type,
+                self.nonce,
+                self.reference,
+                self.multisig,
+                signature,
+            )
+        }
     }
 }
 
@@ -199,6 +256,8 @@ impl Serializer for UnsignedTransaction {
             nonce,
             reference,
             multisig: None,
+            source_commitments: Vec::new(),
+            range_proof: None,
         })
     }
 

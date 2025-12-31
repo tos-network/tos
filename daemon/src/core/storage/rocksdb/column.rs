@@ -74,6 +74,13 @@ pub enum Column {
     // {topoheight}{account_id}{asset_id} => {version}
     VersionedBalances,
 
+    // UNO (privacy) balance pointer
+    // {account_id} => {topoheight}
+    UnoBalances,
+    // Versioned UNO balances
+    // {topoheight}{account_id} => {VersionedUnoBalance}
+    VersionedUnoBalances,
+
     // Contains the contract module per hash
     // {contract_hash} => {contract}
     Contracts,
@@ -193,6 +200,7 @@ impl Column {
             VersionedAssets
             | VersionedNonces
             | VersionedBalances
+            | VersionedUnoBalances
             | VersionedMultisig
             | VersionedAssetsSupply
             | VersionedContracts
@@ -201,6 +209,8 @@ impl Column {
             | PrefixedRegistrations
             | VersionedEnergyResources
             | VersionedAIMiningStates => Some(PREFIX_TOPOHEIGHT_LEN),
+
+            UnoBalances => Some(PREFIX_ID_LEN),
 
             ContractsBalances => Some(PREFIX_ID_LEN),
             Balances => Some(PREFIX_ID_LEN),

@@ -297,6 +297,39 @@ impl DaemonAPI {
         Ok(balance)
     }
 
+    /// Get UNO (encrypted) balance for an address
+    pub async fn get_uno_balance(&self, address: &Address) -> Result<GetUnoBalanceResult> {
+        trace!("get_uno_balance");
+        let balance = self
+            .client
+            .call_with(
+                "get_uno_balance",
+                &GetBalanceParams {
+                    address: Cow::Borrowed(address),
+                    asset: Cow::Borrowed(&tos_common::config::TOS_ASSET),
+                },
+            )
+            .await?;
+        Ok(balance)
+    }
+
+    /// Check if an address has a UNO (encrypted) balance
+    pub async fn has_uno_balance(&self, address: &Address) -> Result<bool> {
+        trace!("has_uno_balance");
+        let result: HasUnoBalanceResult = self
+            .client
+            .call_with(
+                "has_uno_balance",
+                &HasBalanceParams {
+                    address: Cow::Borrowed(address),
+                    asset: Cow::Borrowed(&tos_common::config::TOS_ASSET),
+                    topoheight: None,
+                },
+            )
+            .await?;
+        Ok(result.exist)
+    }
+
     pub async fn get_block_at_topoheight(&self, topoheight: u64) -> Result<BlockResponse> {
         trace!("get_block_at_topoheight");
         let block = self

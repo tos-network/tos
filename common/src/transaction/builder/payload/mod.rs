@@ -17,6 +17,23 @@ pub struct TransferBuilder {
     pub extra_data: Option<DataElement>,
 }
 
+/// Builder for UNO (privacy-preserving) transfers
+/// Similar to TransferBuilder but builds encrypted transfers with ZK proofs
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct UnoTransferBuilder {
+    /// Asset hash to transfer
+    pub asset: Hash,
+    /// Amount to transfer (will be encrypted in the final transaction)
+    pub amount: u64,
+    /// Destination address (public key will be visible, amount will be hidden)
+    pub destination: Address,
+    /// Optional memo/extra data (plaintext, up to EXTRA_DATA_LIMIT_SIZE bytes)
+    pub extra_data: Option<DataElement>,
+    /// Whether to encrypt the extra data (default: false for UNO transfers)
+    #[serde(default)]
+    pub encrypt_extra_data: bool,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct MultiSigBuilder {
     pub participants: IndexSet<Address>,

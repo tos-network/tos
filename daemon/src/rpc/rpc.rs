@@ -592,6 +592,10 @@ pub fn register_methods<S: Storage>(
         async_handler!(get_balance_at_topoheight::<S>),
     );
 
+    // UNO (encrypted) balance methods
+    handler.register_method("get_uno_balance", async_handler!(get_uno_balance::<S>));
+    handler.register_method("has_uno_balance", async_handler!(has_uno_balance::<S>));
+
     handler.register_method("get_nonce", async_handler!(get_nonce::<S>));
     handler.register_method("has_nonce", async_handler!(has_nonce::<S>));
     handler.register_method(
@@ -1322,6 +1326,48 @@ async fn get_balance_at_topoheight<S: Storage>(
         .await
         .context("Error while retrieving balance at exact topo height")?;
     Ok(json!(balance))
+}
+
+// UNO (encrypted) balance RPC handlers
+
+async fn get_uno_balance<S: Storage>(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    let params: GetBalanceParams = parse_params(body)?;
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    if params.address.is_mainnet() != blockchain.get_network().is_mainnet() {
+        return Err(InternalRpcError::InvalidParamsAny(
+            BlockchainError::InvalidNetwork.into(),
+        ));
+    }
+
+    let storage = blockchain.get_storage().read().await;
+    let (topoheight, version) = storage
+        .get_last_uno_balance(params.address.get_public_key())
+        .await
+        .context("Error while retrieving UNO balance")?;
+    Ok(json!(GetUnoBalanceResult { version, topoheight }))
+}
+
+async fn has_uno_balance<S: Storage>(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    let params: HasBalanceParams = parse_params(body)?;
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    if params.address.is_mainnet() != blockchain.get_network().is_mainnet() {
+        return Err(InternalRpcError::InvalidParamsAny(
+            BlockchainError::InvalidNetwork.into(),
+        ));
+    }
+
+    let storage = blockchain.get_storage().read().await;
+    let exist = storage
+        .has_uno_balance_for(params.address.get_public_key())
+        .await
+        .context("Error while checking UNO balance")?;
+    Ok(json!(HasUnoBalanceResult { exist }))
 }
 
 async fn has_nonce<S: Storage>(context: &Context, body: Value) -> Result<Value, InternalRpcError> {
