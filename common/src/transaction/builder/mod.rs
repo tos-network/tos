@@ -36,7 +36,7 @@ use crate::{
         Hash, ProtocolTranscript, HASH_SIZE, SIGNATURE_SIZE,
     },
     serializer::Serializer,
-    utils::{calculate_energy_fee, calculate_tx_fee},
+    utils::{calculate_energy_fee, calculate_tx_fee, calculate_uno_tx_fee},
 };
 use indexmap::{IndexMap, IndexSet};
 use serde::{Deserialize, Serialize};
@@ -391,8 +391,14 @@ impl TransactionBuilder {
                         // Use energy fee calculation for transfer transactions
                         calculate_energy_fee(size, transfers, new_addresses)
                     } else {
-                        // Use regular TOS fee calculation
-                        calculate_tx_fee(
+                        // Use regular fee calculation (TOS or UNO)
+                        let fee_calc =
+                            if matches!(self.data, TransactionTypeBuilder::UnoTransfers(_)) {
+                                calculate_uno_tx_fee
+                            } else {
+                                calculate_tx_fee
+                            };
+                        fee_calc(
                             size,
                             transfers,
                             new_addresses,
@@ -400,8 +406,13 @@ impl TransactionBuilder {
                         )
                     }
                 } else {
-                    // Default to TOS fees
-                    calculate_tx_fee(
+                    // Default to TOS fees (or UNO for UNO transfers)
+                    let fee_calc = if matches!(self.data, TransactionTypeBuilder::UnoTransfers(_)) {
+                        calculate_uno_tx_fee
+                    } else {
+                        calculate_tx_fee
+                    };
+                    fee_calc(
                         size,
                         transfers,
                         new_addresses,

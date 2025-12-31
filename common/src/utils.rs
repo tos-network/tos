@@ -2,7 +2,10 @@ use log::warn;
 use std::net::SocketAddr;
 
 use crate::{
-    config::{BYTES_PER_KB, COIN_DECIMALS, FEE_PER_ACCOUNT_CREATION, FEE_PER_KB, FEE_PER_TRANSFER},
+    config::{
+        BYTES_PER_KB, COIN_DECIMALS, FEE_PER_ACCOUNT_CREATION, FEE_PER_KB, FEE_PER_TRANSFER,
+        UNO_FEE_PER_ACCOUNT_CREATION, UNO_FEE_PER_KB, UNO_FEE_PER_TRANSFER,
+    },
     difficulty::Difficulty,
     varuint::VarUint,
 };
@@ -120,6 +123,45 @@ pub fn calculate_tx_fee(
     new_addresses: usize,
     multisig: usize,
 ) -> u64 {
+    calculate_fee_with_schedule(
+        tx_size,
+        output_count,
+        new_addresses,
+        multisig,
+        FEE_PER_KB,
+        FEE_PER_TRANSFER,
+        FEE_PER_ACCOUNT_CREATION,
+    )
+}
+
+// return the fee for a UNO transaction based on its size in bytes
+// the fee is calculated in atomic units for UNO
+pub fn calculate_uno_tx_fee(
+    tx_size: usize,
+    output_count: usize,
+    new_addresses: usize,
+    multisig: usize,
+) -> u64 {
+    calculate_fee_with_schedule(
+        tx_size,
+        output_count,
+        new_addresses,
+        multisig,
+        UNO_FEE_PER_KB,
+        UNO_FEE_PER_TRANSFER,
+        UNO_FEE_PER_ACCOUNT_CREATION,
+    )
+}
+
+fn calculate_fee_with_schedule(
+    tx_size: usize,
+    output_count: usize,
+    new_addresses: usize,
+    multisig: usize,
+    fee_per_kb: u64,
+    fee_per_transfer: u64,
+    fee_per_account_creation: u64,
+) -> u64 {
     let mut size_in_kb = tx_size as u64 / BYTES_PER_KB as u64;
 
     // we consume a full kb for fee
@@ -127,10 +169,10 @@ pub fn calculate_tx_fee(
         size_in_kb += 1;
     }
 
-    size_in_kb * FEE_PER_KB
-        + output_count as u64 * FEE_PER_TRANSFER
-        + new_addresses as u64 * FEE_PER_ACCOUNT_CREATION
-        + multisig as u64 * FEE_PER_TRANSFER
+    size_in_kb * fee_per_kb
+        + output_count as u64 * fee_per_transfer
+        + new_addresses as u64 * fee_per_account_creation
+        + multisig as u64 * fee_per_transfer
 }
 
 // Calculate energy fee for a transaction (only transfer supported)

@@ -31,6 +31,12 @@ pub const FEE_PER_ACCOUNT_CREATION: u64 = 100000;
 pub const FEE_PER_TRANSFER: u64 = 5000;
 pub const FEE_PER_MULTISIG_SIGNATURE: u64 = 500;
 
+// UNO-based fee model constants (privacy transfers)
+pub const UNO_FEE_PER_KB: u64 = 10000;
+pub const UNO_FEE_PER_ACCOUNT_CREATION: u64 = 100000;
+pub const UNO_FEE_PER_TRANSFER: u64 = 5000;
+pub const UNO_FEE_PER_MULTISIG_SIGNATURE: u64 = 500;
+
 // Contracts rules
 // 1 TOS per contract deployed
 // Each contract deployed has a overhead of 1 TOS
