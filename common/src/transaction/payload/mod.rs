@@ -5,8 +5,10 @@ mod energy;
 mod kyc;
 mod multisig;
 mod referral;
+mod shield_transfer;
 mod transfer;
 mod uno_transfer;
+mod unshield_transfer;
 
 pub use burn::*;
 pub use contract::*;
@@ -14,6 +16,8 @@ pub use energy::*;
 pub use kyc::*;
 pub use multisig::*;
 pub use referral::*;
+pub use shield_transfer::*;
 pub use transfer::*;
 pub use uno_transfer::*;
+pub use unshield_transfer::*;
 // pub use ai_mining::*; // Re-exported through ai_mining module

@@ -1210,6 +1210,11 @@ fn is_valid_fee_type_combination(tx_type: &TransactionType, fee_type: &FeeType) 
         // UNO (privacy transfers) - use TOS fee type only
         (TransactionType::UnoTransfers(_), FeeType::TOS) => true,
         (TransactionType::UnoTransfers(_), FeeType::Energy) => false,
+        // Shield/Unshield transfers - use TOS fee type only
+        (TransactionType::ShieldTransfers(_), FeeType::TOS) => true,
+        (TransactionType::ShieldTransfers(_), FeeType::Energy) => false,
+        (TransactionType::UnshieldTransfers(_), FeeType::TOS) => true,
+        (TransactionType::UnshieldTransfers(_), FeeType::Energy) => false,
     }
 }
 

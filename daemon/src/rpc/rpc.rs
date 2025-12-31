@@ -2396,9 +2396,11 @@ async fn get_account_history<S: Storage>(
                     // This could be extended to track KYC activities
                 }
                 // UNO (Privacy Balance) transaction types
-                TransactionType::UnoTransfers(_) => {
-                    // UNO transfers are privacy-preserving and don't reveal amounts in history
-                    // This could be extended to track encrypted transfer activities
+                TransactionType::UnoTransfers(_)
+                | TransactionType::ShieldTransfers(_)
+                | TransactionType::UnshieldTransfers(_) => {
+                    // UNO/Shield/Unshield transfers involve encrypted balances
+                    // This could be extended to track privacy transfer activities
                 }
             }
         }

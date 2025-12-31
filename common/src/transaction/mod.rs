@@ -70,6 +70,10 @@ pub enum TransactionType {
     EmergencySuspend(EmergencySuspendPayload),
     /// UNO privacy transfers (encrypted amounts)
     UnoTransfers(Vec<UnoTransferPayload>),
+    /// Shield transfers: TOS (plaintext) -> UNO (encrypted)
+    ShieldTransfers(Vec<ShieldTransferPayload>),
+    /// Unshield transfers: UNO (encrypted) -> TOS (plaintext)
+    UnshieldTransfers(Vec<UnshieldTransferPayload>),
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -292,9 +296,14 @@ impl Transaction {
         self.range_proof.as_ref()
     }
 
-    // Check if this transaction involves UNO transfers
+    // Check if this transaction involves UNO transfers (including Shield/Unshield)
     pub fn has_uno_transfers(&self) -> bool {
-        matches!(self.data, TransactionType::UnoTransfers(_))
+        matches!(
+            self.data,
+            TransactionType::UnoTransfers(_)
+                | TransactionType::ShieldTransfers(_)
+                | TransactionType::UnshieldTransfers(_)
+        )
     }
 
     // Get the burned amount
@@ -321,6 +330,16 @@ impl Transaction {
                 }
             }
             TransactionType::UnoTransfers(transfers) => {
+                for transfer in transfers {
+                    assets.insert(transfer.get_asset());
+                }
+            }
+            TransactionType::ShieldTransfers(transfers) => {
+                for transfer in transfers {
+                    assets.insert(transfer.get_asset());
+                }
+            }
+            TransactionType::UnshieldTransfers(transfers) => {
                 for transfer in transfers {
                     assets.insert(transfer.get_asset());
                 }
@@ -354,6 +373,8 @@ impl Transaction {
         match &self.data {
             TransactionType::Transfers(transfers) => transfers.len(),
             TransactionType::UnoTransfers(transfers) => transfers.len(),
+            TransactionType::ShieldTransfers(transfers) => transfers.len(),
+            TransactionType::UnshieldTransfers(transfers) => transfers.len(),
             TransactionType::InvokeContract(payload) => payload.deposits.len().max(1),
             _ => 1,
         }
@@ -528,6 +549,22 @@ impl Serializer for TransactionType {
                     tx.write(writer);
                 }
             }
+            TransactionType::ShieldTransfers(transfers) => {
+                writer.write_u8(19);
+                let len: u8 = transfers.len() as u8;
+                writer.write_u8(len);
+                for tx in transfers {
+                    tx.write(writer);
+                }
+            }
+            TransactionType::UnshieldTransfers(transfers) => {
+                writer.write_u8(20);
+                let len: u8 = transfers.len() as u8;
+                writer.write_u8(len);
+                for tx in transfers {
+                    tx.write(writer);
+                }
+            }
         };
     }
 
@@ -577,6 +614,28 @@ impl Serializer for TransactionType {
                 }
                 TransactionType::UnoTransfers(txs)
             }
+            19 => {
+                let txs_count = reader.read_u8()?;
+                if txs_count == 0 || txs_count > MAX_TRANSFER_COUNT as u8 {
+                    return Err(ReaderError::InvalidSize);
+                }
+                let mut txs = Vec::with_capacity(txs_count as usize);
+                for _ in 0..txs_count {
+                    txs.push(ShieldTransferPayload::read(reader)?);
+                }
+                TransactionType::ShieldTransfers(txs)
+            }
+            20 => {
+                let txs_count = reader.read_u8()?;
+                if txs_count == 0 || txs_count > MAX_TRANSFER_COUNT as u8 {
+                    return Err(ReaderError::InvalidSize);
+                }
+                let mut txs = Vec::with_capacity(txs_count as usize);
+                for _ in 0..txs_count {
+                    txs.push(UnshieldTransferPayload::read(reader)?);
+                }
+                TransactionType::UnshieldTransfers(txs)
+            }
             _ => return Err(ReaderError::InvalidValue),
         })
     }
@@ -613,6 +672,22 @@ impl Serializer for TransactionType {
             TransactionType::UpdateCommittee(payload) => payload.size(),
             TransactionType::EmergencySuspend(payload) => payload.size(),
             TransactionType::UnoTransfers(txs) => {
+                // 1 byte for count of transfers
+                let mut size = 1;
+                for tx in txs {
+                    size += tx.size();
+                }
+                size
+            }
+            TransactionType::ShieldTransfers(txs) => {
+                // 1 byte for count of transfers
+                let mut size = 1;
+                for tx in txs {
+                    size += tx.size();
+                }
+                size
+            }
+            TransactionType::UnshieldTransfers(txs) => {
                 // 1 byte for count of transfers
                 let mut size = 1;
                 for tx in txs {

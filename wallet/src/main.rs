@@ -2993,6 +2993,34 @@ async fn transaction(
                     manager.message(format!("    Asset: {}", transfer.get_asset()));
                 }
             }
+            TransactionType::ShieldTransfers(transfers) => {
+                manager.message("Type: Shield Transfers (TOS -> UNO)");
+                manager.message(format!("  Transfer Count: {}", transfers.len()));
+                for (i, transfer) in transfers.iter().enumerate() {
+                    manager.message(format!(
+                        "  Shield #{}: {} TOS -> {}",
+                        i + 1,
+                        format_tos(transfer.get_amount()),
+                        transfer
+                            .get_destination()
+                            .as_address(wallet.get_network().is_mainnet())
+                    ));
+                }
+            }
+            TransactionType::UnshieldTransfers(transfers) => {
+                manager.message("Type: Unshield Transfers (UNO -> TOS)");
+                manager.message(format!("  Transfer Count: {}", transfers.len()));
+                for (i, transfer) in transfers.iter().enumerate() {
+                    manager.message(format!(
+                        "  Unshield #{}: {} TOS -> {}",
+                        i + 1,
+                        format_tos(transfer.get_amount()),
+                        transfer
+                            .get_destination()
+                            .as_address(wallet.get_network().is_mainnet())
+                    ));
+                }
+            }
         }
     }
 

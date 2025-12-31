@@ -100,7 +100,9 @@ impl Transaction {
                     | TransactionType::RegisterCommittee(_)
                     | TransactionType::UpdateCommittee(_)
                     | TransactionType::EmergencySuspend(_)
-                    | TransactionType::UnoTransfers(_) => true,
+                    | TransactionType::UnoTransfers(_)
+                    | TransactionType::ShieldTransfers(_)
+                    | TransactionType::UnshieldTransfers(_) => true,
                 }
             }
         }
@@ -463,6 +465,60 @@ impl Transaction {
                     return Err(VerificationError::TransactionExtraDataSize);
                 }
             }
+            TransactionType::ShieldTransfers(transfers) => {
+                // Shield transfers: TOS -> UNO (enter privacy mode)
+                // Amount is public, no ZKP needed for amount validity
+                if transfers.is_empty() || transfers.len() > MAX_TRANSFER_COUNT {
+                    return Err(VerificationError::TransferCount);
+                }
+
+                let mut extra_data_size = 0;
+                for transfer in transfers {
+                    // Validate amount is non-zero
+                    if transfer.get_amount() == 0 {
+                        return Err(VerificationError::InvalidTransferAmount);
+                    }
+
+                    if let Some(extra_data) = transfer.get_extra_data() {
+                        let size = extra_data.size();
+                        if size > EXTRA_DATA_LIMIT_SIZE {
+                            return Err(VerificationError::TransferExtraDataSize);
+                        }
+                        extra_data_size += size;
+                    }
+                }
+
+                if extra_data_size > EXTRA_DATA_LIMIT_SUM_SIZE {
+                    return Err(VerificationError::TransactionExtraDataSize);
+                }
+            }
+            TransactionType::UnshieldTransfers(transfers) => {
+                // Unshield transfers: UNO -> TOS (exit privacy mode)
+                // Amount is revealed, requires CiphertextValidityProof
+                if transfers.is_empty() || transfers.len() > MAX_TRANSFER_COUNT {
+                    return Err(VerificationError::TransferCount);
+                }
+
+                let mut extra_data_size = 0;
+                for transfer in transfers {
+                    // Validate amount is non-zero
+                    if transfer.get_amount() == 0 {
+                        return Err(VerificationError::InvalidTransferAmount);
+                    }
+
+                    if let Some(extra_data) = transfer.get_extra_data() {
+                        let size = extra_data.size();
+                        if size > EXTRA_DATA_LIMIT_SIZE {
+                            return Err(VerificationError::TransferExtraDataSize);
+                        }
+                        extra_data_size += size;
+                    }
+                }
+
+                if extra_data_size > EXTRA_DATA_LIMIT_SUM_SIZE {
+                    return Err(VerificationError::TransactionExtraDataSize);
+                }
+            }
         };
 
         // SECURITY FIX: Verify sender has sufficient balance for all spending
@@ -564,12 +620,27 @@ impl Transaction {
                     .checked_add(payload.get_total_amount())
                     .ok_or(VerificationError::Overflow)?;
             }
-            TransactionType::UnoTransfers(_) => {
-                // UNO transfers spend from encrypted balances
+            TransactionType::UnoTransfers(_)
+            | TransactionType::ShieldTransfers(_)
+            | TransactionType::UnshieldTransfers(_) => {
+                // Privacy transfers spend from encrypted balances
                 // Spending verification is done through ZKP proofs (CommitmentEqProof)
                 // No plaintext spending to verify here
+                // Shield/Unshield: actual balance checks happen in apply()
             }
         };
+
+        // For Shield transfers, add TOS spending (plaintext balance deduction)
+        if let TransactionType::ShieldTransfers(transfers) = &self.data {
+            for transfer in transfers {
+                let asset = transfer.get_asset();
+                let amount = transfer.get_amount();
+                let current = spending_per_asset.entry(asset).or_insert(0);
+                *current = current
+                    .checked_add(amount)
+                    .ok_or(VerificationError::Overflow)?;
+            }
+        }
 
         // Add fee to TOS spending (unless using energy fee)
         if !self.get_fee_type().is_energy() {
@@ -1207,6 +1278,56 @@ impl Transaction {
                     return Err(VerificationError::TransactionExtraDataSize);
                 }
             }
+            TransactionType::ShieldTransfers(transfers) => {
+                // Shield transfers: TOS -> UNO
+                if transfers.len() > MAX_TRANSFER_COUNT || transfers.is_empty() {
+                    return Err(VerificationError::TransferCount);
+                }
+
+                let mut extra_data_size = 0;
+                for transfer in transfers.iter() {
+                    if transfer.get_amount() == 0 {
+                        return Err(VerificationError::InvalidTransferAmount);
+                    }
+
+                    if let Some(extra_data) = transfer.get_extra_data() {
+                        let size = extra_data.size();
+                        if size > EXTRA_DATA_LIMIT_SIZE {
+                            return Err(VerificationError::TransferExtraDataSize);
+                        }
+                        extra_data_size += size;
+                    }
+                }
+
+                if extra_data_size > EXTRA_DATA_LIMIT_SUM_SIZE {
+                    return Err(VerificationError::TransactionExtraDataSize);
+                }
+            }
+            TransactionType::UnshieldTransfers(transfers) => {
+                // Unshield transfers: UNO -> TOS
+                if transfers.len() > MAX_TRANSFER_COUNT || transfers.is_empty() {
+                    return Err(VerificationError::TransferCount);
+                }
+
+                let mut extra_data_size = 0;
+                for transfer in transfers.iter() {
+                    if transfer.get_amount() == 0 {
+                        return Err(VerificationError::InvalidTransferAmount);
+                    }
+
+                    if let Some(extra_data) = transfer.get_extra_data() {
+                        let size = extra_data.size();
+                        if size > EXTRA_DATA_LIMIT_SIZE {
+                            return Err(VerificationError::TransferExtraDataSize);
+                        }
+                        extra_data_size += size;
+                    }
+                }
+
+                if extra_data_size > EXTRA_DATA_LIMIT_SUM_SIZE {
+                    return Err(VerificationError::TransactionExtraDataSize);
+                }
+            }
         };
 
         let source_decompressed = self
@@ -1400,8 +1521,10 @@ impl Transaction {
             | TransactionType::EmergencySuspend(_) => {
                 // KYC transactions are logged at execution time
             }
-            TransactionType::UnoTransfers(_) => {
-                // UNO transfers are verified through ZKP proofs
+            TransactionType::UnoTransfers(_)
+            | TransactionType::ShieldTransfers(_)
+            | TransactionType::UnshieldTransfers(_) => {
+                // UNO/Shield/Unshield transfers are verified through ZKP proofs
                 // Logging handled during apply phase
             }
         }
@@ -1510,6 +1633,23 @@ impl Transaction {
                 // UNO transfers spend from encrypted balances
                 // Spending verification is done through ZKP proofs (CommitmentEqProof)
                 // No plaintext spending to verify here
+            }
+            TransactionType::ShieldTransfers(transfers) => {
+                // Shield transfers spend from plaintext TOS balance
+                // Amount is public and verifiable
+                for transfer in transfers {
+                    let asset = transfer.get_asset();
+                    let amount = transfer.get_amount();
+                    let current = spending_per_asset.entry(asset).or_insert(0);
+                    *current = current
+                        .checked_add(amount)
+                        .ok_or(VerificationError::Overflow)?;
+                }
+            }
+            TransactionType::UnshieldTransfers(_) => {
+                // Unshield transfers spend from encrypted UNO balances
+                // Spending verification is done through ZKP proofs
+                // No plaintext spending to verify here (adds to plaintext balance)
             }
         };
 
@@ -1825,6 +1965,23 @@ impl Transaction {
                 // UNO transfers spend from encrypted balances
                 // Spending verification is done through ZKP proofs (CommitmentEqProof)
                 // No plaintext spending to verify here
+            }
+            TransactionType::ShieldTransfers(transfers) => {
+                // Shield transfers spend from plaintext TOS balance
+                // Amount is public and verifiable
+                for transfer in transfers {
+                    let asset = transfer.get_asset();
+                    let amount = transfer.get_amount();
+                    let current = spending_per_asset.entry(asset).or_insert(0);
+                    *current = current
+                        .checked_add(amount)
+                        .ok_or(VerificationError::Overflow)?;
+                }
+            }
+            TransactionType::UnshieldTransfers(_) => {
+                // Unshield transfers spend from encrypted UNO balances
+                // Spending verification is done through ZKP proofs
+                // No plaintext spending to verify here (adds to plaintext balance)
             }
         };
 
@@ -2943,6 +3100,16 @@ impl Transaction {
                     }
                 }
             }
+            TransactionType::ShieldTransfers(_transfers) => {
+                // Shield transfers: TOS -> UNO
+                // Balance updates handled in ChainState apply
+                // TODO: Implement Shield balance updates
+            }
+            TransactionType::UnshieldTransfers(_transfers) => {
+                // Unshield transfers: UNO -> TOS
+                // Balance updates handled in ChainState apply
+                // TODO: Implement Unshield balance updates
+            }
         }
 
         Ok(())
@@ -3078,6 +3245,23 @@ impl Transaction {
                 // UNO transfers spend from encrypted balances
                 // Spending verification is done through ZKP proofs (CommitmentEqProof)
                 // No plaintext spending to verify here
+            }
+            TransactionType::ShieldTransfers(transfers) => {
+                // Shield transfers spend from plaintext TOS balance
+                // Amount is public and verifiable
+                for transfer in transfers {
+                    let asset = transfer.get_asset();
+                    let amount = transfer.get_amount();
+                    let current = spending_per_asset.entry(asset).or_insert(0);
+                    *current = current
+                        .checked_add(amount)
+                        .ok_or(VerificationError::Overflow)?;
+                }
+            }
+            TransactionType::UnshieldTransfers(_) => {
+                // Unshield transfers spend from encrypted UNO balances
+                // Spending verification is done through ZKP proofs
+                // No plaintext spending to verify here (adds to plaintext balance)
             }
         };
 
