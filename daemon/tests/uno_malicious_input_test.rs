@@ -17,7 +17,7 @@ use tos_common::{
         proofs::{BatchCollector, CiphertextValidityProof},
     },
     serializer::Serializer,
-    transaction::UnoTransferPayload,
+    transaction::{TxVersion, UnoTransferPayload},
 };
 use tos_crypto::curve25519_dalek::ristretto::CompressedRistretto;
 
@@ -37,9 +37,10 @@ fn create_test_uno_payload(
     let mut transcript = tos_common::crypto::new_proof_transcript(b"test_uno_transfer");
     let proof = CiphertextValidityProof::new(
         receiver_keypair.get_public_key(),
-        Some(sender_keypair.get_public_key()),
+        sender_keypair.get_public_key(),
         amount,
         &opening,
+        TxVersion::T1,
         &mut transcript,
     );
 
@@ -71,9 +72,10 @@ fn test_malicious_truncated_proof() {
     let mut transcript = tos_common::crypto::new_proof_transcript(b"truncate_test");
     let valid_proof = CiphertextValidityProof::new(
         receiver.get_public_key(),
-        Some(sender.get_public_key()),
+        sender.get_public_key(),
         amount,
         &opening,
+        TxVersion::T1,
         &mut transcript,
     );
 
@@ -110,9 +112,10 @@ fn test_malicious_extended_proof() {
     let mut transcript = tos_common::crypto::new_proof_transcript(b"extend_test");
     let valid_proof = CiphertextValidityProof::new(
         receiver.get_public_key(),
-        Some(sender.get_public_key()),
+        sender.get_public_key(),
         amount,
         &opening,
+        TxVersion::T1,
         &mut transcript,
     );
 
@@ -328,9 +331,10 @@ fn test_malicious_duplicate_proof_verification() {
     let mut gen_transcript = tos_common::crypto::new_proof_transcript(b"duplicate_verify");
     let proof = CiphertextValidityProof::new(
         receiver.get_public_key(),
-        Some(sender.get_public_key()),
+        sender.get_public_key(),
         amount,
         &opening,
+        TxVersion::T1,
         &mut gen_transcript,
     );
 
@@ -345,7 +349,7 @@ fn test_malicious_duplicate_proof_verification() {
             sender.get_public_key(),
             &receiver_handle,
             &sender_handle,
-            true,
+            TxVersion::T1,
             &mut verify_transcript,
             &mut batch_collector,
         );
@@ -380,9 +384,10 @@ fn test_malicious_replay_proof_different_commitment() {
     let mut gen_transcript1 = tos_common::crypto::new_proof_transcript(b"replay_test");
     let proof1 = CiphertextValidityProof::new(
         receiver.get_public_key(),
-        Some(sender.get_public_key()),
+        sender.get_public_key(),
         amount,
         &opening1,
+        TxVersion::T1,
         &mut gen_transcript1,
     );
 
@@ -401,7 +406,7 @@ fn test_malicious_replay_proof_different_commitment() {
         sender.get_public_key(),
         &receiver_handle1,
         &sender_handle1,
-        true,
+        TxVersion::T1,
         &mut verify_transcript1,
         &mut batch_collector1,
     );
@@ -420,7 +425,7 @@ fn test_malicious_replay_proof_different_commitment() {
         sender.get_public_key(),
         &receiver_handle2,
         &sender_handle2,
-        true,
+        TxVersion::T1,
         &mut verify_transcript2,
         &mut batch_collector2,
     );
@@ -525,9 +530,10 @@ fn test_malicious_structurally_valid_but_corrupted_proof() {
     let mut transcript = tos_common::crypto::new_proof_transcript(b"struct_test");
     let valid_proof = CiphertextValidityProof::new(
         receiver.get_public_key(),
-        Some(sender.get_public_key()),
+        sender.get_public_key(),
         amount,
         &opening,
+        TxVersion::T1,
         &mut transcript,
     );
 

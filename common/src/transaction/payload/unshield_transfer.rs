@@ -178,6 +178,7 @@ impl Serializer for UnshieldTransferPayload {
 mod tests {
     use super::*;
     use crate::crypto::elgamal::{KeyPair, PedersenCommitment, PedersenOpening};
+    use crate::transaction::TxVersion;
     use tos_crypto::merlin::Transcript;
 
     fn create_test_payload() -> UnshieldTransferPayload {
@@ -192,15 +193,14 @@ mod tests {
         let commitment = PedersenCommitment::new_with_opening(amount, &opening);
         let sender_handle = sender_keypair.get_public_key().decrypt_handle(&opening);
 
-        // Create validity proof
-        // Note: For serialization compatibility with TxVersion::T0, we provide both pubkeys
-        // so that Y_2 is included in the proof. The receiver pubkey is the destination.
+        // Create validity proof with T1 version (includes Y_2 for sender authentication)
         let mut transcript = Transcript::new(b"test_unshield_transfer");
         let proof = CiphertextValidityProof::new(
             sender_keypair.get_public_key(),
-            Some(receiver_keypair.get_public_key()), // Include for Y_2 serialization
+            receiver_keypair.get_public_key(),
             amount,
             &opening,
+            TxVersion::T1,
             &mut transcript,
         );
 
@@ -288,9 +288,10 @@ mod tests {
             let mut transcript = Transcript::new(b"test");
             let proof = CiphertextValidityProof::new(
                 sender_keypair.get_public_key(),
-                Some(receiver_keypair.get_public_key()), // Include for serialization
+                receiver_keypair.get_public_key(),
                 amount,
                 &opening,
+                TxVersion::T1,
                 &mut transcript,
             );
 
@@ -323,9 +324,10 @@ mod tests {
         let mut transcript = Transcript::new(b"test");
         let proof = CiphertextValidityProof::new(
             sender_keypair.get_public_key(),
-            Some(receiver_keypair.get_public_key()), // Include for serialization
+            receiver_keypair.get_public_key(),
             amount,
             &opening,
+            TxVersion::T1,
             &mut transcript,
         );
 

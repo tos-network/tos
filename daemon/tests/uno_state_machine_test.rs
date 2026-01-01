@@ -22,7 +22,7 @@ use tos_common::{
         proofs::{BatchCollector, CiphertextValidityProof, G},
         Hash,
     },
-    transaction::{verify::BlockchainVerificationState, Reference},
+    transaction::{verify::BlockchainVerificationState, Reference, TxVersion},
     versioned_type::Versioned,
 };
 use tos_crypto::curve25519_dalek::Scalar;
@@ -654,9 +654,10 @@ fn test_tx_state_valid_proof_verified() {
     let mut gen_transcript = tos_common::crypto::new_proof_transcript(b"tx_verify");
     let proof = CiphertextValidityProof::new(
         receiver.get_public_key(),
-        Some(sender.get_public_key()),
+        sender.get_public_key(),
         amount,
         &opening,
+        TxVersion::T1,
         &mut gen_transcript,
     );
 
@@ -669,7 +670,7 @@ fn test_tx_state_valid_proof_verified() {
         sender.get_public_key(),
         &receiver_handle,
         &sender_handle,
-        true,
+        TxVersion::T1,
         &mut verify_transcript,
         &mut batch_collector,
     );
@@ -699,9 +700,10 @@ fn test_tx_state_invalid_proof_rejected() {
     let mut gen_transcript = tos_common::crypto::new_proof_transcript(b"tx_invalid");
     let proof = CiphertextValidityProof::new(
         receiver.get_public_key(),
-        Some(sender.get_public_key()),
+        sender.get_public_key(),
         wrong_amount, // Different from commitment
         &opening,
+        TxVersion::T1,
         &mut gen_transcript,
     );
 
@@ -714,7 +716,7 @@ fn test_tx_state_invalid_proof_rejected() {
         sender.get_public_key(),
         &receiver_handle,
         &sender_handle,
-        true,
+        TxVersion::T1,
         &mut verify_transcript,
         &mut batch_collector,
     );

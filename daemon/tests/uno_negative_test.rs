@@ -24,7 +24,9 @@ use tos_common::{
         Hash,
     },
     serializer::Serializer,
-    transaction::{verify::BlockchainVerificationState, Reference, Role, UnoTransferPayload},
+    transaction::{
+        verify::BlockchainVerificationState, Reference, Role, TxVersion, UnoTransferPayload,
+    },
     versioned_type::Versioned,
 };
 use tos_crypto::curve25519_dalek::Scalar;
@@ -87,9 +89,10 @@ fn create_test_uno_payload(
     let mut transcript = tos_common::crypto::new_proof_transcript(b"test_uno_transfer");
     let proof = CiphertextValidityProof::new(
         receiver_keypair.get_public_key(),
-        Some(sender_keypair.get_public_key()),
+        sender_keypair.get_public_key(),
         amount,
         &opening,
+        TxVersion::T1,
         &mut transcript,
     );
 
@@ -126,9 +129,10 @@ fn test_negative_wrong_signature() {
     let mut transcript = tos_common::crypto::new_proof_transcript(b"wrong_key_test");
     let mallory_proof = CiphertextValidityProof::new(
         bob.get_public_key(),
-        Some(mallory.get_public_key()), // Mallory's key, not Alice's
+        mallory.get_public_key(), // Mallory's key, not Alice's
         amount,
         &opening,
+        TxVersion::T1,
         &mut transcript,
     );
 
@@ -141,7 +145,7 @@ fn test_negative_wrong_signature() {
         alice.get_public_key(), // Expecting Alice
         &bob_handle,
         &alice_handle,
-        true,
+        TxVersion::T1,
         &mut verify_transcript,
         &mut batch_collector,
     );
@@ -365,9 +369,10 @@ fn test_negative_insufficient_fee() {
     let mut transcript = tos_common::crypto::new_proof_transcript(b"fee_test");
     let proof = CiphertextValidityProof::new(
         receiver.get_public_key(),
-        Some(sender.get_public_key()),
+        sender.get_public_key(),
         amount,
         &opening,
+        TxVersion::T1,
         &mut transcript,
     );
 
@@ -403,9 +408,10 @@ fn test_negative_ct_validity_proof_wrong_amount() {
     let mut transcript = tos_common::crypto::new_proof_transcript(b"wrong_amount");
     let proof = CiphertextValidityProof::new(
         receiver.get_public_key(),
-        Some(sender.get_public_key()),
+        sender.get_public_key(),
         proof_amount, // 100, not 200
         &opening,
+        TxVersion::T1,
         &mut transcript,
     );
 
@@ -418,7 +424,7 @@ fn test_negative_ct_validity_proof_wrong_amount() {
         sender.get_public_key(),
         &receiver_handle,
         &sender_handle,
-        true,
+        TxVersion::T1,
         &mut verify_transcript,
         &mut batch_collector,
     );
@@ -512,9 +518,10 @@ fn test_negative_uno_transfer_wrong_asset() {
     let mut transcript = tos_common::crypto::new_proof_transcript(b"wrong_asset");
     let proof = CiphertextValidityProof::new(
         receiver.get_public_key(),
-        Some(sender.get_public_key()),
+        sender.get_public_key(),
         amount,
         &opening,
+        TxVersion::T1,
         &mut transcript,
     );
 
@@ -609,9 +616,10 @@ fn test_negative_mismatched_handles() {
     let mut transcript = tos_common::crypto::new_proof_transcript(b"mismatch_handles");
     let proof = CiphertextValidityProof::new(
         receiver.get_public_key(),
-        Some(sender.get_public_key()),
+        sender.get_public_key(),
         amount,
         &opening,
+        TxVersion::T1,
         &mut transcript,
     );
 

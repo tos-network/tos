@@ -26,6 +26,9 @@
 //!    - Different assets stored separately
 //!    - Cross-asset isolation
 
+// Allow large error types in test code - BlockchainError is 816 bytes
+#![allow(clippy::result_large_err)]
+
 mod common;
 
 use std::borrow::Cow;
@@ -106,7 +109,9 @@ async fn test_has_uno_balance_for() -> Result<(), BlockchainError> {
     // Initially, no UNO balance exists
     {
         let storage_read = storage.read().await;
-        let has_balance = storage_read.has_uno_balance_for(&pubkey, &UNO_ASSET).await?;
+        let has_balance = storage_read
+            .has_uno_balance_for(&pubkey, &UNO_ASSET)
+            .await?;
         assert!(!has_balance, "Should not have UNO balance initially");
     }
 
@@ -123,7 +128,9 @@ async fn test_has_uno_balance_for() -> Result<(), BlockchainError> {
     // Now balance should exist
     {
         let storage_read = storage.read().await;
-        let has_balance = storage_read.has_uno_balance_for(&pubkey, &UNO_ASSET).await?;
+        let has_balance = storage_read
+            .has_uno_balance_for(&pubkey, &UNO_ASSET)
+            .await?;
         assert!(has_balance, "Should have balance after setting");
     }
 
@@ -260,7 +267,9 @@ async fn test_set_get_last_uno_balance() -> Result<(), BlockchainError> {
     // Get last balance
     {
         let storage_read = storage.read().await;
-        let (topo, mut version) = storage_read.get_last_uno_balance(&pubkey, &UNO_ASSET).await?;
+        let (topo, mut version) = storage_read
+            .get_last_uno_balance(&pubkey, &UNO_ASSET)
+            .await?;
 
         assert_eq!(topo, 10, "Last topoheight should be 10");
 
@@ -479,7 +488,11 @@ async fn test_get_new_versioned_uno_balance_existing_account() -> Result<(), Blo
         let mut version = version;
         let ct = version.get_mut_balance().decompressed()?.clone();
         let point = keypair.get_private_key().decrypt_to_point(&ct);
-        assert_eq!(point, Scalar::from(500u64) * *G, "Should return existing balance");
+        assert_eq!(
+            point,
+            Scalar::from(500u64) * *G,
+            "Should return existing balance"
+        );
     }
 
     Ok(())
@@ -538,7 +551,10 @@ async fn test_get_uno_account_summary_for() -> Result<(), BlockchainError> {
         let summary = result.unwrap();
 
         // Summary should include stable_topoheight
-        assert!(summary.stable_topoheight > 0, "Should have stable_topoheight set");
+        assert!(
+            summary.stable_topoheight > 0,
+            "Should have stable_topoheight set"
+        );
     }
 
     Ok(())
@@ -640,7 +656,9 @@ async fn test_multi_asset_isolation() -> Result<(), BlockchainError> {
         let storage_read = storage.read().await;
 
         // UNO_ASSET balance
-        let (_, mut v1) = storage_read.get_last_uno_balance(&pubkey, &UNO_ASSET).await?;
+        let (_, mut v1) = storage_read
+            .get_last_uno_balance(&pubkey, &UNO_ASSET)
+            .await?;
         let ct1 = v1.get_mut_balance().decompressed()?.clone();
         let p1 = keypair.get_private_key().decrypt_to_point(&ct1);
         assert_eq!(p1, Scalar::from(100u64) * *G, "UNO balance should be 100");
@@ -649,7 +667,11 @@ async fn test_multi_asset_isolation() -> Result<(), BlockchainError> {
         let (_, mut v2) = storage_read.get_last_uno_balance(&pubkey, &asset2).await?;
         let ct2 = v2.get_mut_balance().decompressed()?.clone();
         let p2 = keypair.get_private_key().decrypt_to_point(&ct2);
-        assert_eq!(p2, Scalar::from(200u64) * *G, "Asset2 balance should be 200");
+        assert_eq!(
+            p2,
+            Scalar::from(200u64) * *G,
+            "Asset2 balance should be 200"
+        );
     }
 
     Ok(())
@@ -696,7 +718,11 @@ async fn test_has_balance_asset_specific() -> Result<(), BlockchainError> {
         let storage_read = storage.read().await;
 
         // Should have balance for UNO_ASSET
-        assert!(storage_read.has_uno_balance_for(&pubkey, &UNO_ASSET).await?);
+        assert!(
+            storage_read
+                .has_uno_balance_for(&pubkey, &UNO_ASSET)
+                .await?
+        );
 
         // Should NOT have balance for asset2
         assert!(!storage_read.has_uno_balance_for(&pubkey, &asset2).await?);

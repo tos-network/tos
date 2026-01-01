@@ -43,9 +43,10 @@ fn create_test_uno_payload(
     let mut transcript = tos_common::crypto::new_proof_transcript(b"test_uno_transfer");
     let proof = CiphertextValidityProof::new(
         receiver_keypair.get_public_key(),
-        Some(sender_keypair.get_public_key()),
+        sender_keypair.get_public_key(),
         amount,
         &opening,
+        TxVersion::T1,
         &mut transcript,
     );
 

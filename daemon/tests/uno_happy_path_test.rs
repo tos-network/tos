@@ -24,7 +24,7 @@ use tos_common::{
         Hash,
     },
     transaction::{
-        verify::BlockchainVerificationState, Reference, Role, UnoTransferPayload,
+        verify::BlockchainVerificationState, Reference, Role, TxVersion, UnoTransferPayload,
         UnshieldTransferPayload,
     },
     versioned_type::Versioned,
@@ -88,9 +88,10 @@ fn create_test_uno_payload(
     let mut transcript = tos_common::crypto::new_proof_transcript(b"test_uno_transfer");
     let proof = CiphertextValidityProof::new(
         receiver_keypair.get_public_key(),
-        Some(sender_keypair.get_public_key()),
+        sender_keypair.get_public_key(),
         amount,
         &opening,
+        TxVersion::T1,
         &mut transcript,
     );
 
@@ -737,9 +738,10 @@ fn test_happy_unshield_to_other() {
     let mut transcript = tos_common::crypto::new_proof_transcript(b"unshield_test");
     let ct_proof = CiphertextValidityProof::new(
         sender.get_public_key(),
-        Some(sender.get_public_key()),
+        sender.get_public_key(),
         amount,
         &opening,
+        TxVersion::T1,
         &mut transcript,
     );
 

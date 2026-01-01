@@ -36,9 +36,10 @@ pub struct CiphertextValidityProof {
 impl CiphertextValidityProof {
     pub fn new(
         destination_pubkey: &PublicKey,
-        source_pubkey: Option<&PublicKey>,
+        source_pubkey: &PublicKey,
         amount: u64,
         opening: &PedersenOpening,
+        tx_version: TxVersion,
         transcript: &mut Transcript,
     ) -> Self {
         transcript.ciphertext_validity_proof_domain_separator();
@@ -54,7 +55,12 @@ impl CiphertextValidityProof {
         let Y_0 = PC_GENS.commit(y_x, y_r).compress();
         let Y_1 = (&y_r * P_dest).compress();
 
-        let Y_2 = source_pubkey.map(|P_source| (&y_r * P_source.as_point()).compress());
+        // Y_2 is generated for TxVersion >= T1 (sender authentication)
+        let Y_2 = if tx_version >= TxVersion::T1 {
+            Some((&y_r * source_pubkey.as_point()).compress())
+        } else {
+            None
+        };
 
         transcript.append_point(b"Y_0", &Y_0);
         transcript.append_point(b"Y_1", &Y_1);
@@ -94,7 +100,7 @@ impl CiphertextValidityProof {
         sender_pubkey: &PublicKey,
         dest_handle: &DecryptHandle,
         sender_handle: &DecryptHandle,
-        check_y_2: bool,
+        tx_version: TxVersion,
         transcript: &mut Transcript,
         batch_collector: &mut BatchCollector,
     ) -> Result<(), ProofVerificationError> {
@@ -102,7 +108,13 @@ impl CiphertextValidityProof {
 
         transcript.validate_and_append_point(b"Y_0", &self.Y_0)?;
         transcript.validate_and_append_point(b"Y_1", &self.Y_1)?;
-        if let Some(Y_2) = self.Y_2.as_ref().filter(|_| check_y_2) {
+
+        // Y_2 is mandatory starting T1
+        if self.Y_2.is_some() != (tx_version >= TxVersion::T1) {
+            return Err(ProofVerificationError::CiphertextValidityProof);
+        }
+
+        if let Some(Y_2) = self.Y_2.as_ref() {
             transcript.validate_and_append_point(b"Y_2", Y_2)?;
         }
 
@@ -125,10 +137,6 @@ impl CiphertextValidityProof {
         } else {
             None
         };
-
-        if Y_2.is_some() != check_y_2 {
-            return Err(ProofVerificationError::CiphertextValidityProof);
-        }
 
         let P_dest = dest_pubkey.as_point();
         let P_source = sender_pubkey.as_point();
@@ -183,7 +191,8 @@ impl CiphertextValidityProof {
 
     /// Verify the ciphertext validity proof.
     /// This function checks the validity of the proof against the provided commitment and public keys.
-    /// It directly verifys the proof without collecting data for batch verification.
+    /// It directly verifies the proof without collecting data for batch verification.
+    /// Note: This method requires Y_2 to be present (for current tx version).
     pub fn verify(
         &self,
         commitment: &PedersenCommitment,
@@ -191,7 +200,6 @@ impl CiphertextValidityProof {
         source_pubkey: &PublicKey,
         dest_handle: &DecryptHandle,
         source_handle: &DecryptHandle,
-        check_y_2: bool,
         transcript: &mut Transcript,
     ) -> Result<(), ProofVerificationError> {
         transcript.ciphertext_validity_proof_domain_separator();
@@ -199,9 +207,11 @@ impl CiphertextValidityProof {
         transcript.validate_and_append_point(b"Y_0", &self.Y_0)?;
         transcript.validate_and_append_point(b"Y_1", &self.Y_1)?;
 
-        if let Some(Y_2) = self.Y_2.as_ref().filter(|_| check_y_2) {
-            transcript.validate_and_append_point(b"Y_2", Y_2)?;
-        }
+        let Y_2_compressed = self
+            .Y_2
+            .as_ref()
+            .ok_or(ProofVerificationError::CiphertextValidityProof)?;
+        transcript.validate_and_append_point(b"Y_2", Y_2_compressed)?;
 
         let c = transcript.challenge_scalar(b"c");
 
@@ -218,15 +228,7 @@ impl CiphertextValidityProof {
         // check the required algebraic conditions
         let Y_0 = self.Y_0.decompress().ok_or(DecompressionError)?;
         let Y_1 = self.Y_1.decompress().ok_or(DecompressionError)?;
-        let Y_2 = if let Some(Y_2) = self.Y_2.as_ref() {
-            Some(Y_2.decompress().ok_or(DecompressionError)?)
-        } else {
-            None
-        };
-
-        if Y_2.is_some() != check_y_2 {
-            return Err(ProofVerificationError::CiphertextValidityProof);
-        }
+        let Y_2 = Y_2_compressed.decompress().ok_or(DecompressionError)?;
 
         let P_dest = dest_pubkey.as_point();
         let P_source = source_pubkey.as_point();
@@ -235,55 +237,32 @@ impl CiphertextValidityProof {
         let D_dest = dest_handle.as_point();
         let D_source = source_handle.as_point();
 
-        let check = if let Some(Y_2) = Y_2 {
-            RistrettoPoint::vartime_multiscalar_mul(
-                vec![
-                    &self.z_r,           // z_r
-                    &self.z_x,           // z_x
-                    &(-&c),              // -c
-                    &-(&Scalar::ONE),    // -identity
-                    &(&w * &self.z_r),   // w * z_r
-                    &(&w_negated * &c),  // -w * c
-                    &w_negated,          // -w
-                    &(&ww * &self.z_r),  // ww * z_r
-                    &(&ww_negated * &c), // -ww * c
-                    &ww_negated,         // -ww
-                ],
-                vec![
-                    &(*H),    // H
-                    &(*G),    // G
-                    C,        // C
-                    &Y_0,     // Y_0
-                    P_dest,   // P_first
-                    D_dest,   // D_first
-                    &Y_1,     // Y_1
-                    P_source, // P_second
-                    D_source, // D_second
-                    &Y_2,     // Y_2
-                ],
-            )
-        } else {
-            RistrettoPoint::vartime_multiscalar_mul(
-                vec![
-                    &self.z_r,          // z_r
-                    &self.z_x,          // z_x
-                    &(-&c),             // -c
-                    &-(&Scalar::ONE),   // -identity
-                    &(&w * &self.z_r),  // w * z_r
-                    &(&w_negated * &c), // -w * c
-                    &w_negated,         // -w
-                ],
-                vec![
-                    &(*H),  // H
-                    &(*G),  // G
-                    C,      // C
-                    &Y_0,   // Y_0
-                    P_dest, // P_first
-                    D_dest, // D_first
-                    &Y_1,   // Y_1
-                ],
-            )
-        };
+        let check = RistrettoPoint::vartime_multiscalar_mul(
+            vec![
+                &self.z_r,           // z_r
+                &self.z_x,           // z_x
+                &(-&c),              // -c
+                &-(&Scalar::ONE),    // -identity
+                &(&w * &self.z_r),   // w * z_r
+                &(&w_negated * &c),  // -w * c
+                &w_negated,          // -w
+                &(&ww * &self.z_r),  // ww * z_r
+                &(&ww_negated * &c), // -ww * c
+                &ww_negated,         // -ww
+            ],
+            vec![
+                &(*H),    // H
+                &(*G),    // G
+                C,        // C
+                &Y_0,     // Y_0
+                P_dest,   // P_first
+                D_dest,   // D_first
+                &Y_1,     // Y_1
+                P_source, // P_second
+                D_source, // D_second
+                &Y_2,     // Y_2
+            ],
+        );
 
         if check.is_identity() {
             Ok(())
@@ -355,12 +334,13 @@ mod tests {
         // Create the sender handle
         let sender_handle = sender.get_public_key().decrypt_handle(&opening);
 
-        // Generate the proof
+        // Generate the proof with T1 version (includes Y_2)
         let proof = CiphertextValidityProof::new(
             keypair.get_public_key(),
-            Some(sender.get_public_key()),
+            sender.get_public_key(),
             amount,
             &opening,
+            TxVersion::T1,
             &mut transcript,
         );
 
@@ -368,18 +348,30 @@ mod tests {
         let mut transcript = Transcript::new(b"test");
         let mut batch_collector = BatchCollector::default();
 
-        // Verify the proof
+        // Verify the proof using pre_verify
         let result = proof.pre_verify(
             &commitment,
             keypair.get_public_key(),
             sender.get_public_key(),
             &receiver_handle,
             &sender_handle,
-            true,
+            TxVersion::T1,
             &mut transcript,
             &mut batch_collector,
         );
         assert!(result.is_ok());
         assert!(batch_collector.verify().is_ok());
+
+        // Also test verify() method
+        let mut transcript = Transcript::new(b"test");
+        let result = proof.verify(
+            &commitment,
+            keypair.get_public_key(),
+            sender.get_public_key(),
+            &receiver_handle,
+            &sender_handle,
+            &mut transcript,
+        );
+        assert!(result.is_ok());
     }
 }

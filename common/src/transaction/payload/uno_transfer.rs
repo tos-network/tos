@@ -183,6 +183,7 @@ impl Serializer for UnoTransferPayload {
 mod tests {
     use super::*;
     use crate::crypto::elgamal::{KeyPair, PedersenOpening};
+    use crate::transaction::TxVersion;
     use tos_crypto::merlin::Transcript;
 
     fn create_test_payload() -> UnoTransferPayload {
@@ -201,13 +202,14 @@ mod tests {
         let sender_handle = sender_keypair.get_public_key().decrypt_handle(&opening);
         let receiver_handle = receiver_keypair.get_public_key().decrypt_handle(&opening);
 
-        // Create a valid proof
+        // Create a valid proof with T1 version (includes Y_2 for sender authentication)
         let mut transcript = Transcript::new(b"test_uno_transfer");
         let proof = CiphertextValidityProof::new(
             receiver_keypair.get_public_key(),
-            Some(sender_keypair.get_public_key()),
+            sender_keypair.get_public_key(),
             amount,
             &opening,
+            TxVersion::T1,
             &mut transcript,
         );
 

@@ -1082,7 +1082,7 @@ impl Transaction {
                 &source_decompressed,
                 &decompressed.receiver_handle,
                 &decompressed.sender_handle,
-                self.version >= TxVersion::T0,
+                self.version,
                 &mut transcript,
                 sigma_batch_collector,
             )?;
@@ -1313,7 +1313,7 @@ impl Transaction {
                 &dest_pubkey,
                 &decompressed.sender_handle,
                 &decompressed.sender_handle,
-                self.version >= TxVersion::T0,
+                self.version,
                 &mut transcript,
                 sigma_batch_collector,
             )?;

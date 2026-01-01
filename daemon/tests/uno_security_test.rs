@@ -24,7 +24,9 @@ use tos_common::{
         proofs::{BatchCollector, CiphertextValidityProof, G},
     },
     serializer::Serializer,
-    transaction::{verify::BlockchainVerificationState, Reference, Role, UnoTransferPayload},
+    transaction::{
+        verify::BlockchainVerificationState, Reference, Role, TxVersion, UnoTransferPayload,
+    },
     versioned_type::Versioned,
 };
 use tos_crypto::curve25519_dalek::Scalar;
@@ -87,9 +89,10 @@ fn create_test_uno_payload(
     let mut transcript = tos_common::crypto::new_proof_transcript(b"test_uno_transfer");
     let proof = CiphertextValidityProof::new(
         receiver_keypair.get_public_key(),
-        Some(sender_keypair.get_public_key()),
+        sender_keypair.get_public_key(),
         amount,
         &opening,
+        TxVersion::T1,
         &mut transcript,
     );
 
@@ -125,9 +128,10 @@ fn test_security_proof_replay_attack() {
     let mut transcript1 = tos_common::crypto::new_proof_transcript(b"replay_test");
     let proof1 = CiphertextValidityProof::new(
         receiver.get_public_key(),
-        Some(sender.get_public_key()),
+        sender.get_public_key(),
         amount1,
         &opening1,
+        TxVersion::T1,
         &mut transcript1,
     );
 
@@ -147,7 +151,7 @@ fn test_security_proof_replay_attack() {
         sender.get_public_key(),
         &receiver_handle1,
         &sender_handle1,
-        true,
+        TxVersion::T1,
         &mut verify_transcript,
         &mut batch_collector,
     );
@@ -163,7 +167,7 @@ fn test_security_proof_replay_attack() {
         sender.get_public_key(),
         &receiver_handle2,
         &sender_handle2,
-        true,
+        TxVersion::T1,
         &mut replay_transcript,
         &mut replay_collector,
     );
@@ -192,9 +196,10 @@ fn test_security_proof_substitution_attack() {
     let mut transcript = tos_common::crypto::new_proof_transcript(b"substitution_test");
     let alice_proof = CiphertextValidityProof::new(
         bob.get_public_key(),
-        Some(alice.get_public_key()),
+        alice.get_public_key(),
         amount,
         &opening,
+        TxVersion::T1,
         &mut transcript,
     );
 
@@ -212,7 +217,7 @@ fn test_security_proof_substitution_attack() {
         carol.get_public_key(), // Wrong sender
         &dave_handle,
         &carol_handle,
-        true,
+        TxVersion::T1,
         &mut verify_transcript,
         &mut batch_collector,
     );
@@ -237,9 +242,10 @@ fn test_security_fake_proof_injection() {
     let mut transcript = tos_common::crypto::new_proof_transcript(b"fake_test");
     let valid_proof = CiphertextValidityProof::new(
         receiver.get_public_key(),
-        Some(sender.get_public_key()),
+        sender.get_public_key(),
         amount,
         &opening,
+        TxVersion::T1,
         &mut transcript,
     );
     let valid_bytes = valid_proof.to_bytes();
@@ -262,7 +268,7 @@ fn test_security_fake_proof_injection() {
             sender.get_public_key(),
             &receiver_handle,
             &sender_handle,
-            true,
+            TxVersion::T1,
             &mut verify_transcript,
             &mut batch_collector,
         );
@@ -285,9 +291,10 @@ fn test_security_truncated_proof() {
     let mut transcript = tos_common::crypto::new_proof_transcript(b"truncate_test");
     let valid_proof = CiphertextValidityProof::new(
         receiver.get_public_key(),
-        Some(sender.get_public_key()),
+        sender.get_public_key(),
         amount,
         &opening,
+        TxVersion::T1,
         &mut transcript,
     );
     let valid_bytes = valid_proof.to_bytes();
@@ -316,9 +323,10 @@ fn test_security_transcript_manipulation() {
     let mut gen_transcript = tos_common::crypto::new_proof_transcript(b"domain_A");
     let proof = CiphertextValidityProof::new(
         receiver.get_public_key(),
-        Some(sender.get_public_key()),
+        sender.get_public_key(),
         amount,
         &opening,
+        TxVersion::T1,
         &mut gen_transcript,
     );
 
@@ -331,7 +339,7 @@ fn test_security_transcript_manipulation() {
         sender.get_public_key(),
         &receiver_handle,
         &sender_handle,
-        true,
+        TxVersion::T1,
         &mut verify_transcript,
         &mut batch_collector,
     );
@@ -363,9 +371,10 @@ fn test_security_commitment_amount_mismatch() {
     let mut transcript = tos_common::crypto::new_proof_transcript(b"mismatch_test");
     let proof = CiphertextValidityProof::new(
         receiver.get_public_key(),
-        Some(sender.get_public_key()),
+        sender.get_public_key(),
         amount_claimed, // Claiming 200
         &opening,
+        TxVersion::T1,
         &mut transcript,
     );
 
@@ -378,7 +387,7 @@ fn test_security_commitment_amount_mismatch() {
         sender.get_public_key(),
         &receiver_handle,
         &sender_handle,
-        true,
+        TxVersion::T1,
         &mut verify_transcript,
         &mut batch_collector,
     );
@@ -853,9 +862,10 @@ fn test_security_shield_amount_mismatch() {
     let mut transcript = tos_common::crypto::new_proof_transcript(b"shield_mismatch");
     let proof = CiphertextValidityProof::new(
         receiver.get_public_key(),
-        Some(sender.get_public_key()),
+        sender.get_public_key(),
         claimed_amount, // Claiming different amount
         &opening,
+        TxVersion::T1,
         &mut transcript,
     );
 
@@ -868,7 +878,7 @@ fn test_security_shield_amount_mismatch() {
         sender.get_public_key(),
         &receiver_handle,
         &sender_handle,
-        true,
+        TxVersion::T1,
         &mut verify_transcript,
         &mut batch_collector,
     );

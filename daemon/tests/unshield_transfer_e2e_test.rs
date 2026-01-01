@@ -42,10 +42,11 @@ fn create_test_unshield_payload(
     // so that Y_2 is included in the proof.
     let mut transcript = tos_common::crypto::new_proof_transcript(b"unshield_validity_proof");
     let proof = CiphertextValidityProof::new(
-        sender_keypair.get_public_key(),         // destination pubkey
-        Some(receiver_keypair.get_public_key()), // source pubkey for Y_2 serialization
+        sender_keypair.get_public_key(),   // destination pubkey
+        receiver_keypair.get_public_key(), // source pubkey (no Option wrapper)
         amount,
         &opening,
+        TxVersion::T1, // current version with Y_2 support
         &mut transcript,
     );
 
@@ -230,9 +231,10 @@ fn test_unshield_transfer_with_extra_data() {
     let mut transcript = tos_common::crypto::new_proof_transcript(b"unshield_validity_proof");
     let proof = CiphertextValidityProof::new(
         sender.get_public_key(),
-        Some(receiver.get_public_key()), // Include for Y_2 serialization
+        receiver.get_public_key(), // source pubkey (no Option wrapper)
         amount,
         &opening,
+        TxVersion::T1, // current version with Y_2 support
         &mut transcript,
     );
 

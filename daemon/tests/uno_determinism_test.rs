@@ -15,6 +15,7 @@ use tos_common::{
         proofs::{CiphertextValidityProof, G, H},
     },
     serializer::Serializer,
+    transaction::TxVersion,
 };
 use tos_crypto::curve25519_dalek::Scalar;
 
@@ -46,18 +47,20 @@ fn test_determinism_same_inputs_same_semantic_value() {
     let mut transcript1 = new_proof_transcript(b"det_test");
     let proof1 = CiphertextValidityProof::new(
         receiver.get_public_key(),
-        Some(sender.get_public_key()),
+        sender.get_public_key(),
         amount,
         &opening1,
+        TxVersion::T1,
         &mut transcript1,
     );
 
     let mut transcript2 = new_proof_transcript(b"det_test");
     let proof2 = CiphertextValidityProof::new(
         receiver.get_public_key(),
-        Some(sender.get_public_key()),
+        sender.get_public_key(),
         amount,
         &opening2,
+        TxVersion::T1,
         &mut transcript2,
     );
 
@@ -101,18 +104,20 @@ fn test_determinism_different_transcripts_different_proofs() {
     let mut transcript1 = new_proof_transcript(b"domain_A");
     let proof1 = CiphertextValidityProof::new(
         receiver.get_public_key(),
-        Some(sender.get_public_key()),
+        sender.get_public_key(),
         amount,
         &opening,
+        TxVersion::T1,
         &mut transcript1,
     );
 
     let mut transcript2 = new_proof_transcript(b"domain_B");
     let proof2 = CiphertextValidityProof::new(
         receiver.get_public_key(),
-        Some(sender.get_public_key()),
+        sender.get_public_key(),
         amount,
         &opening,
+        TxVersion::T1,
         &mut transcript2,
     );
 
@@ -360,9 +365,10 @@ fn test_determinism_proof_serialization_platform_independent() {
     let mut create_transcript = new_proof_transcript(b"platform_test");
     let proof = CiphertextValidityProof::new(
         receiver.get_public_key(),
-        Some(sender.get_public_key()),
+        sender.get_public_key(),
         amount,
         &opening,
+        TxVersion::T1,
         &mut create_transcript,
     );
 
@@ -392,9 +398,10 @@ fn test_determinism_proof_serialization_platform_independent() {
     let mut transcript2 = new_proof_transcript(b"platform_test");
     let proof2 = CiphertextValidityProof::new(
         receiver.get_public_key(),
-        Some(sender.get_public_key()),
+        sender.get_public_key(),
         amount,
         &opening,
+        TxVersion::T1,
         &mut transcript2,
     );
 

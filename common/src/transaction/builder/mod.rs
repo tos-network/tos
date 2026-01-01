@@ -1160,17 +1160,12 @@ impl TransactionBuilder {
                 transcript.append_handle(b"amount_sender_handle", &sender_handle);
                 transcript.append_handle(b"amount_receiver_handle", &receiver_handle);
 
-                let source_pubkey = if self.version >= TxVersion::T0 {
-                    Some(source_keypair.get_public_key())
-                } else {
-                    None
-                };
-
                 let ct_validity_proof = CiphertextValidityProof::new(
                     &transfer.destination,
-                    source_pubkey,
+                    source_keypair.get_public_key(),
                     transfer.inner.amount,
                     &transfer.amount_opening,
+                    self.version,
                     &mut transcript,
                 );
 
@@ -1505,9 +1500,10 @@ impl TransactionBuilder {
                 // Generate ciphertext validity proof
                 let ct_validity_proof = CiphertextValidityProof::new(
                     source_keypair.get_public_key(),
-                    Some(&destination_pubkey),
+                    &destination_pubkey,
                     transfer.amount,
                     &opening,
+                    self.version,
                     &mut transcript,
                 );
 

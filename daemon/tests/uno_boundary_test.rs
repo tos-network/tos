@@ -22,7 +22,9 @@ use tos_common::{
         proofs::{CiphertextValidityProof, G},
         Hash,
     },
-    transaction::{verify::BlockchainVerificationState, Reference, Role, UnoTransferPayload},
+    transaction::{
+        verify::BlockchainVerificationState, Reference, Role, TxVersion, UnoTransferPayload,
+    },
     versioned_type::Versioned,
 };
 use tos_crypto::curve25519_dalek::Scalar;
@@ -84,9 +86,10 @@ fn create_test_uno_payload(
     let mut transcript = tos_common::crypto::new_proof_transcript(b"test_uno_transfer");
     let proof = CiphertextValidityProof::new(
         receiver_keypair.get_public_key(),
-        Some(sender_keypair.get_public_key()),
+        sender_keypair.get_public_key(),
         amount,
         &opening,
+        TxVersion::T1,
         &mut transcript,
     );
 
