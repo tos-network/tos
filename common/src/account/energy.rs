@@ -10,7 +10,7 @@ use crate::{
 use serde::{Deserialize, Serialize};
 
 // ============================================================================
-// STAKE 2.0 ENERGY MODEL (TRON-style)
+// STAKE 2.0 ENERGY MODEL
 // ============================================================================
 //
 // New proportional energy allocation model:
@@ -694,7 +694,7 @@ impl Serializer for FreezeRecord {
 }
 
 /// Energy resource management for TOS
-/// Enhanced with TRON-style freeze duration and reward multiplier system
+/// Enhanced with freeze duration and reward multiplier system
 ///
 /// # Deprecated
 /// This struct is deprecated in favor of Stake 2.0 model.
@@ -931,7 +931,7 @@ impl EnergyResource {
     ///
     /// # When to call
     /// This should be called periodically by the network (e.g., daily) to restore
-    /// energy usage. In TRON-like systems, this typically happens every 24 hours.
+    /// energy usage. This typically happens every 24 hours.
     ///
     /// # Edge Cases
     /// - Resets used_energy to 0, making all total_energy available again

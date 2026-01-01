@@ -76,6 +76,12 @@ pub enum TransactionType {
     UnshieldTransfers(Vec<UnshieldTransferPayload>),
 }
 
+/// Fee type for transaction fees
+///
+/// # Deprecated
+/// This enum is deprecated in favor of Stake 2.0 unified energy model.
+/// All transactions now use energy, with optional TOS auto-burn via `fee_limit`.
+#[deprecated(note = "Use Stake 2.0 energy model with fee_limit instead")]
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub enum FeeType {
     /// Transaction uses TOS for fees (traditional fee model)
@@ -84,6 +90,7 @@ pub enum FeeType {
     Energy,
 }
 
+#[allow(deprecated)]
 impl FeeType {
     /// Check if this fee type is Energy-based
     pub fn is_energy(&self) -> bool {
@@ -92,6 +99,90 @@ impl FeeType {
     /// Check if this fee type is TOS-based
     pub fn is_tos(&self) -> bool {
         matches!(self, FeeType::TOS)
+    }
+}
+
+// ============================================================================
+// TRANSACTION RESULT (Stake 2.0)
+// ============================================================================
+
+/// Result of transaction execution
+///
+/// This struct records the actual resources consumed during transaction execution.
+/// It separates input (fee_limit) from output (actual costs).
+///
+/// # Usage
+/// - Stored with transaction receipt after execution
+/// - Enables RPC queries for actual energy/fee consumed
+/// - Provides transparency for users and explorers
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct TransactionResult {
+    /// Actual TOS burned (0 if covered by frozen energy)
+    pub fee: u64,
+
+    /// Total energy consumed
+    pub energy_used: u64,
+
+    /// Breakdown: free quota consumed
+    pub free_energy_used: u64,
+
+    /// Breakdown: frozen energy consumed
+    pub frozen_energy_used: u64,
+}
+
+impl TransactionResult {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Create a result with specific values
+    pub fn with_values(
+        fee: u64,
+        energy_used: u64,
+        free_energy_used: u64,
+        frozen_energy_used: u64,
+    ) -> Self {
+        Self {
+            fee,
+            energy_used,
+            free_energy_used,
+            frozen_energy_used,
+        }
+    }
+
+    /// Total energy from free + frozen sources (not including auto-burned)
+    pub fn total_energy_from_stake(&self) -> u64 {
+        self.free_energy_used.saturating_add(self.frozen_energy_used)
+    }
+
+    /// Energy that was covered by auto-burning TOS
+    /// Calculated as: energy_used - free_energy_used - frozen_energy_used
+    pub fn auto_burned_energy(&self) -> u64 {
+        self.energy_used
+            .saturating_sub(self.free_energy_used)
+            .saturating_sub(self.frozen_energy_used)
+    }
+}
+
+impl Serializer for TransactionResult {
+    fn write(&self, writer: &mut Writer) {
+        writer.write_u64(&self.fee);
+        writer.write_u64(&self.energy_used);
+        writer.write_u64(&self.free_energy_used);
+        writer.write_u64(&self.frozen_energy_used);
+    }
+
+    fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
+        Ok(Self {
+            fee: reader.read_u64()?,
+            energy_used: reader.read_u64()?,
+            free_energy_used: reader.read_u64()?,
+            frozen_energy_used: reader.read_u64()?,
+        })
+    }
+
+    fn size(&self) -> usize {
+        32 // 4 × u64
     }
 }
 
@@ -127,10 +218,10 @@ pub struct Transaction {
     source: CompressedPublicKey,
     /// Type of the transaction
     data: TransactionType,
-    /// Fees in Tos (TOS or Energy depending on fee_type)
-    fee: u64,
-    /// Fee type: TOS or Energy
-    fee_type: FeeType,
+    /// Maximum TOS willing to burn if frozen energy insufficient (Stake 2.0)
+    /// 0 = rely only on frozen energy + free quota (TX fails if insufficient)
+    /// > 0 = auto-burn up to this amount if energy insufficient
+    fee_limit: u64,
     /// nonce must be equal to the one on chain account
     /// used to prevent replay attacks and have ordered transactions
     nonce: Nonce,
@@ -157,8 +248,7 @@ impl Transaction {
         chain_id: u8,
         source: CompressedPublicKey,
         data: TransactionType,
-        fee: u64,
-        fee_type: FeeType,
+        fee_limit: u64,
         nonce: Nonce,
         reference: Reference,
         multisig: Option<MultiSig>,
@@ -169,8 +259,7 @@ impl Transaction {
             chain_id,
             source,
             data,
-            fee,
-            fee_type,
+            fee_limit,
             nonce,
             source_commitments: Vec::new(),
             range_proof: None,
@@ -187,8 +276,7 @@ impl Transaction {
         chain_id: u8,
         source: CompressedPublicKey,
         data: TransactionType,
-        fee: u64,
-        fee_type: FeeType,
+        fee_limit: u64,
         nonce: Nonce,
         source_commitments: Vec<SourceCommitment>,
         range_proof: RangeProof,
@@ -201,8 +289,7 @@ impl Transaction {
             chain_id,
             source,
             data,
-            fee,
-            fee_type,
+            fee_limit,
             nonce,
             source_commitments,
             range_proof: Some(range_proof),
@@ -217,21 +304,13 @@ impl Transaction {
     pub fn prepare_transcript(
         version: TxVersion,
         source_pubkey: &CompressedPublicKey,
-        fee: u64,
-        fee_type: &FeeType,
+        fee_limit: u64,
         nonce: Nonce,
     ) -> Transcript {
         let mut transcript = Transcript::new(b"transaction-proof");
         transcript.append_u64(b"version", version.into());
         transcript.append_public_key(b"source_pubkey", source_pubkey);
-        transcript.append_u64(b"fee", fee);
-        transcript.append_u64(
-            b"fee_type",
-            match fee_type {
-                FeeType::TOS => 0u64,
-                FeeType::Energy => 1u64,
-            },
-        );
+        transcript.append_u64(b"fee_limit", fee_limit);
         transcript.append_u64(b"nonce", nonce);
         transcript
     }
@@ -256,9 +335,27 @@ impl Transaction {
         &self.data
     }
 
-    // Get fees paid to miners
+    // Get the fee limit (max TOS willing to burn)
+    pub fn get_fee_limit(&self) -> u64 {
+        self.fee_limit
+    }
+
+    /// Get fee (deprecated - use get_fee_limit() instead)
+    /// Returns fee_limit for backward compatibility during Stake 2.0 migration
+    #[deprecated(note = "Use get_fee_limit() for Stake 2.0")]
     pub fn get_fee(&self) -> u64 {
-        self.fee
+        self.fee_limit
+    }
+
+    /// Get fee type (deprecated - Stake 2.0 uses energy-only model)
+    /// Returns a default FeeType::TOS for backward compatibility
+    #[deprecated(note = "Stake 2.0 uses energy-only model, fee_type is deprecated")]
+    #[allow(deprecated)]
+    pub fn get_fee_type(&self) -> &FeeType {
+        // In Stake 2.0, all transactions use energy first
+        // This is a stub for backward compatibility
+        static DEFAULT_FEE_TYPE: FeeType = FeeType::TOS;
+        &DEFAULT_FEE_TYPE
     }
 
     // Get the nonce used
@@ -380,29 +477,54 @@ impl Transaction {
         }
     }
 
-    // Get the fee type
-    pub fn get_fee_type(&self) -> &FeeType {
-        &self.fee_type
-    }
-
-    /// Calculate energy cost for this transaction
-    /// Only applicable for transfer transactions with energy fees
+    /// Calculate energy cost for this transaction (Stake 2.0)
+    /// All transactions consume energy based on size and outputs
     pub fn calculate_energy_cost(&self) -> u64 {
-        if !self.fee_type.is_energy() {
-            return 0;
-        }
+        use crate::config::{
+            ENERGY_COST_BURN, ENERGY_COST_CONTRACT_DEPLOY_BASE,
+            ENERGY_COST_CONTRACT_DEPLOY_PER_BYTE, ENERGY_COST_PER_BYTE, ENERGY_COST_PER_OUTPUT,
+        };
+
+        let tx_size = self.size();
+        let base_cost = (tx_size as u64) * ENERGY_COST_PER_BYTE;
 
         match &self.data {
             TransactionType::Transfers(transfers) => {
-                let tx_size = self.size();
-                let output_count = transfers.len();
-                let new_addresses = 0; // This would need to be calculated from state
-
-                use crate::utils::calculate_energy_fee;
-                calculate_energy_fee(tx_size, output_count, new_addresses)
+                base_cost + (transfers.len() as u64) * ENERGY_COST_PER_OUTPUT
             }
-            _ => 0, // Only transfer transactions can use energy fees
+            TransactionType::UnoTransfers(transfers) => {
+                // UNO transfers cost more (5x per output)
+                base_cost + (transfers.len() as u64) * ENERGY_COST_PER_OUTPUT * 5
+            }
+            TransactionType::ShieldTransfers(transfers) => {
+                base_cost + (transfers.len() as u64) * ENERGY_COST_PER_OUTPUT * 5
+            }
+            TransactionType::UnshieldTransfers(transfers) => {
+                base_cost + (transfers.len() as u64) * ENERGY_COST_PER_OUTPUT * 5
+            }
+            TransactionType::Burn(_) => base_cost + ENERGY_COST_BURN,
+            TransactionType::DeployContract(payload) => {
+                // Use Serializer::size() to get module size
+                let bytecode_size = payload.size() as u64;
+                base_cost
+                    + ENERGY_COST_CONTRACT_DEPLOY_BASE
+                    + bytecode_size * ENERGY_COST_CONTRACT_DEPLOY_PER_BYTE
+            }
+            TransactionType::InvokeContract(_) => {
+                // Actual cost determined by execution (CU consumed)
+                base_cost
+            }
+            // Energy operations are free
+            TransactionType::Energy(_) => 0,
+            // Other transactions use base cost + account creation if applicable
+            _ => base_cost,
         }
+    }
+
+    /// Get additional energy cost for creating new accounts
+    pub fn account_creation_energy_cost(new_accounts: usize) -> u64 {
+        use crate::config::ENERGY_COST_ACCOUNT_CREATION;
+        (new_accounts as u64) * ENERGY_COST_ACCOUNT_CREATION
     }
 
     /// Get the bytes that were used for signing this transaction
@@ -420,8 +542,7 @@ impl Transaction {
 
         self.source.write(&mut writer);
         self.data.write(&mut writer);
-        self.fee.write(&mut writer);
-        self.fee_type.write(&mut writer);
+        self.fee_limit.write(&mut writer);
         self.nonce.write(&mut writer);
         self.reference.write(&mut writer);
         // Do NOT include multisig - multisig participants sign without it
@@ -446,8 +567,7 @@ impl Transaction {
 
         self.source.write(&mut writer);
         self.data.write(&mut writer);
-        self.fee.write(&mut writer);
-        self.fee_type.write(&mut writer);
+        self.fee_limit.write(&mut writer);
         self.nonce.write(&mut writer);
         self.reference.write(&mut writer);
         // Do NOT include multisig field - it should not be part of the main signature
@@ -710,8 +830,7 @@ impl Serializer for Transaction {
 
         self.source.write(writer);
         self.data.write(writer);
-        self.fee.write(writer);
-        self.fee_type.write(writer);
+        self.fee_limit.write(writer);
         self.nonce.write(writer);
 
         // UNO fields: source_commitments and range_proof
@@ -748,8 +867,7 @@ impl Serializer for Transaction {
 
         let source = CompressedPublicKey::read(reader)?;
         let data = TransactionType::read(reader)?;
-        let fee = reader.read_u64()?;
-        let fee_type = FeeType::read(reader)?;
+        let fee_limit = reader.read_u64()?;
         let nonce = Nonce::read(reader)?;
 
         // UNO fields: source_commitments and range_proof
@@ -804,8 +922,7 @@ impl Serializer for Transaction {
             chain_id,
             source,
             data,
-            fee,
-            fee_type,
+            fee_limit,
             nonce,
             source_commitments,
             range_proof,
@@ -816,12 +933,11 @@ impl Serializer for Transaction {
     }
 
     fn size(&self) -> usize {
-        // Version byte
+        // Version byte + fee_limit (u64 = 8 bytes)
         let mut size = 1
             + self.source.size()
             + self.data.size()
-            + self.fee.size()
-            + self.fee_type.size()
+            + 8 // fee_limit
             + self.nonce.size()
             + self.reference.size()
             + self.signature.size();

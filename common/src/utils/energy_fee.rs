@@ -5,12 +5,12 @@ use crate::{
 };
 
 /// Energy-based fee calculator for TOS
-/// Implements TRON-style energy model without bandwidth
+/// Implements energy model without bandwidth
 ///
 /// # Energy Cost Model
 /// - Transfer operations: 1 energy per transfer (regardless of transaction size)
 /// - Account creation: 0 energy (no energy cost for new addresses)
-/// - Transaction size: Ignored in energy calculation (unlike TRON's bandwidth)
+/// - Transaction size: Ignored in energy calculation
 ///
 /// # Edge Cases
 /// - Large transactions consume the same energy as small ones (size-independent)
@@ -29,7 +29,7 @@ impl EnergyFeeCalculator {
     /// - `new_addresses`: Number of new addresses created (currently costs 0 energy)
     ///
     /// # Edge Cases
-    /// - Transaction size is completely ignored (unlike TRON's bandwidth model)
+    /// - Transaction size is completely ignored
     /// - New address creation is free in terms of energy
     /// - Zero outputs = zero energy cost
     /// - Large transactions with 1 output = same cost as small transactions with 1 output

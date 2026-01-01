@@ -7,7 +7,7 @@ use core::fmt;
 pub enum TxVersion {
     // Legacy: no chain_id in signing bytes
     T0 = 0,
-    // New: includes chain_id in signing bytes for cross-network replay protection
+    // Current: chain_id + fee_limit (Stake 2.0)
     #[default]
     T1 = 1,
 }

@@ -1,3 +1,6 @@
+// Allow deprecated fee/fee_type usage during Stake 2.0 migration
+#![allow(deprecated)]
+
 mod contract;
 mod error;
 mod kyc;
@@ -152,7 +155,7 @@ impl Transaction {
 
         // Fees are applied to the UNO asset for privacy-preserving transfers
         if *asset == UNO_ASSET {
-            output += tos_crypto::curve25519_dalek::Scalar::from(self.fee);
+            output += tos_crypto::curve25519_dalek::Scalar::from(self.get_fee());
         }
 
         // Sum up all UNO transfers for this asset
@@ -753,7 +756,7 @@ impl Transaction {
         if !self.get_fee_type().is_energy() {
             let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
             *current = current
-                .checked_add(self.fee)
+                .checked_add(self.get_fee())
                 .ok_or(VerificationError::Overflow)?;
         }
 
@@ -952,8 +955,7 @@ impl Transaction {
         let mut transcript = Self::prepare_transcript(
             self.version,
             &self.source,
-            self.fee,
-            &self.fee_type,
+            self.get_fee_limit(),
             self.nonce,
         );
 
@@ -1231,8 +1233,7 @@ impl Transaction {
         let mut transcript = Self::prepare_transcript(
             self.version,
             &self.source,
-            self.fee,
-            &self.fee_type,
+            self.get_fee_limit(),
             self.nonce,
         );
 
@@ -1499,7 +1500,7 @@ impl Transaction {
                 }
             }
             TransactionType::Burn(payload) => {
-                let fee = self.fee;
+                let fee = self.get_fee();
                 let amount = payload.amount;
 
                 if amount == 0 {
@@ -1939,7 +1940,7 @@ impl Transaction {
                 if log::log_enabled!(log::Level::Debug) {
                     debug!(
                         "Energy transaction verification - payload: {:?}, fee: {}, nonce: {}",
-                        payload, self.fee, self.nonce
+                        payload, self.get_fee(), self.nonce
                     );
                 }
             }
@@ -1947,7 +1948,7 @@ impl Transaction {
                 if log::log_enabled!(log::Level::Debug) {
                     debug!(
                         "AI Mining transaction verification - payload: {:?}, fee: {}, nonce: {}",
-                        payload, self.fee, self.nonce
+                        payload, self.get_fee(), self.nonce
                     );
                 }
             }
@@ -1955,7 +1956,7 @@ impl Transaction {
                 if log::log_enabled!(log::Level::Debug) {
                     debug!(
                         "BindReferrer transaction verification - referrer: {:?}, fee: {}, nonce: {}",
-                        payload.get_referrer(), self.fee, self.nonce
+                        payload.get_referrer(), self.get_fee(), self.nonce
                     );
                 }
             }
@@ -1965,7 +1966,7 @@ impl Transaction {
                         "BatchReferralReward verification - levels: {}, total_amount: {}, fee: {}",
                         payload.get_levels(),
                         payload.get_total_amount(),
-                        self.fee
+                        self.get_fee()
                     );
                 }
             }
@@ -2117,7 +2118,7 @@ impl Transaction {
         if !self.get_fee_type().is_energy() {
             let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
             *current = current
-                .checked_add(self.fee)
+                .checked_add(self.get_fee())
                 .ok_or(VerificationError::Overflow)?;
         }
 
@@ -2489,12 +2490,12 @@ impl Transaction {
         if !self.get_fee_type().is_energy() {
             let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
             *current = current
-                .checked_add(self.fee)
+                .checked_add(self.get_fee())
                 .ok_or(VerificationError::Overflow)?;
 
             // Add fee to gas fee counter
             state
-                .add_gas_fee(self.fee)
+                .add_gas_fee(self.get_fee())
                 .await
                 .map_err(VerificationError::State)?;
         }
@@ -3891,7 +3892,7 @@ impl Transaction {
         if !self.get_fee_type().is_energy() {
             let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
             *current = current
-                .checked_add(self.fee)
+                .checked_add(self.get_fee())
                 .ok_or(VerificationError::Overflow)?;
         }
 

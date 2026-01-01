@@ -277,8 +277,7 @@ impl<'a> From<RPCTransaction<'a>> for Transaction {
             tx.chain_id,
             tx.source.to_public_key(),
             tx.data.into(),
-            tx.fee,
-            FeeType::TOS,
+            tx.fee, // fee_limit
             tx.nonce,
             tx.reference.into_owned(),
             tx.multisig.into_owned(),

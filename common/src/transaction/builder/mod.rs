@@ -2,6 +2,9 @@
 //! Not really a 'builder' per say
 //! Intended to be used when creating a transaction before making the associated proofs and signature
 
+// Allow deprecated fee_type usage during Stake 2.0 migration
+#![allow(deprecated)]
+
 mod fee;
 mod payload;
 mod state;
@@ -942,13 +945,12 @@ impl TransactionBuilder {
             }
         };
 
-        let unsigned_tx = UnsignedTransaction::new_with_fee_type(
+        let unsigned_tx = UnsignedTransaction::new(
             self.version,
             self.chain_id,
             self.source,
             data,
-            fee,
-            fee_type,
+            fee, // fee_limit
             nonce,
             reference,
         );
@@ -1082,7 +1084,7 @@ impl TransactionBuilder {
 
         // Prepare transcript for proofs
         let mut transcript =
-            Transaction::prepare_transcript(self.version, &self.source, fee, &fee_type, nonce);
+            Transaction::prepare_transcript(self.version, &self.source, fee, nonce);
 
         // Build source commitments with CommitmentEqProof
         let source_commitments: Vec<SourceCommitment> = used_assets
@@ -1255,8 +1257,7 @@ impl TransactionBuilder {
             self.chain_id,
             self.source,
             data,
-            fee,
-            fee_type,
+            fee, // fee_limit
             nonce,
             reference,
             source_commitments,
@@ -1367,13 +1368,12 @@ impl TransactionBuilder {
         let data = TransactionType::ShieldTransfers(transfer_payloads);
         let fee_type = FeeType::TOS;
 
-        let unsigned_tx = UnsignedTransaction::new_with_fee_type(
+        let unsigned_tx = UnsignedTransaction::new(
             self.version,
             self.chain_id,
             self.source,
             data,
-            fee,
-            fee_type,
+            fee, // fee_limit
             nonce,
             reference,
         );
@@ -1461,7 +1461,7 @@ impl TransactionBuilder {
 
         // Prepare transcript for proofs
         let mut transcript =
-            Transaction::prepare_transcript(self.version, &self.source, fee, &fee_type, nonce);
+            Transaction::prepare_transcript(self.version, &self.source, fee, nonce);
 
         // Generate opening for the new source commitment
         let new_source_opening = PedersenOpening::generate_new();
@@ -1588,8 +1588,7 @@ impl TransactionBuilder {
             self.chain_id,
             self.source,
             data,
-            fee,
-            fee_type,
+            fee, // fee_limit
             nonce,
             reference,
             source_commitments,

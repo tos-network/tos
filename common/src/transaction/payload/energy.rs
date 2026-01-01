@@ -5,7 +5,7 @@ use crate::{
 use serde::{Deserialize, Serialize};
 
 /// Energy-related transaction payloads for Transfer operations only
-/// Enhanced with TRON-style freeze duration and reward multiplier system
+/// Enhanced with freeze duration and reward multiplier system
 ///
 /// # Supported Operations
 /// - `FreezeTos`: Lock TOS to gain energy for free transfers
@@ -43,7 +43,7 @@ impl EnergyPayload {
     pub fn energy_cost(&self) -> u64 {
         match self {
             // FreezeTos and UnfreezeTos don't consume energy
-            // They require TOS fees to prevent abuse (similar to TRON's bandwidth cost)
+            // They require TOS fees to prevent abuse
             Self::FreezeTos { .. } => 0,
             Self::UnfreezeTos { .. } => 0,
         }
@@ -56,7 +56,6 @@ impl EnergyPayload {
 
         match self {
             // Small TOS fee to prevent frequent freeze/unfreeze abuse
-            // Similar to TRON's bandwidth cost for freeze/unfreeze operations
             Self::FreezeTos { .. } => FEE_PER_TRANSFER,
             Self::UnfreezeTos { .. } => FEE_PER_TRANSFER,
         }

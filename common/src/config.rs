@@ -12,7 +12,7 @@ pub const UNO_ASSET: Hash = Hash::new([
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
 ]);
 
-// ===== ENERGY STAKE 2.0 MODEL (TRON-style) =====
+// ===== ENERGY STAKE 2.0 MODEL =====
 //
 // New proportional energy allocation model:
 // - Energy = (frozen_balance / total_energy_weight) × TOTAL_ENERGY_LIMIT
@@ -44,7 +44,6 @@ pub const ENERGY_RECOVERY_WINDOW_MS: u64 = 86_400_000;
 pub const MAX_UNFREEZING_LIST_SIZE: usize = 32;
 
 // Delay in days before unfrozen TOS can be withdrawn
-// TRON uses 14 days for Stake 2.0
 pub const UNFREEZE_DELAY_DAYS: u32 = 14;
 
 // Auto-burn rate: atomic TOS units per energy unit
