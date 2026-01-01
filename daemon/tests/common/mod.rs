@@ -23,6 +23,7 @@ use tos_daemon::core::{
 };
 
 /// Create a test storage instance with TOS asset registered
+#[allow(dead_code)]
 pub async fn create_test_storage() -> Arc<tokio::sync::RwLock<RocksStorage>> {
     let temp_dir = TempDir::new("tos_parallel_test").unwrap();
     let config = RocksDBConfig::default();
@@ -51,6 +52,7 @@ pub async fn create_test_storage() -> Arc<tokio::sync::RwLock<RocksStorage>> {
 }
 
 /// Create a dummy block for testing
+#[allow(dead_code)]
 pub fn create_dummy_block() -> (Block, Hash) {
     let mut buffer = Vec::new();
     let mut writer = Writer::new(&mut buffer);
@@ -79,6 +81,7 @@ pub fn create_dummy_block() -> (Block, Hash) {
 ///
 /// RocksDB handles concurrent access better than Sled, so we no longer need
 /// the complex workarounds that were required for Sled's internal locking.
+#[allow(dead_code)]
 pub async fn setup_account_safe(
     storage: &Arc<tokio::sync::RwLock<RocksStorage>>,
     account: &CompressedPublicKey,
