@@ -1402,6 +1402,55 @@ pub struct UnfreezingInfo {
     pub can_withdraw: bool,
 }
 
+// ===== Stake 2.0 Delegation API Types =====
+
+/// Get delegated resources from an account
+#[derive(Serialize, Deserialize)]
+pub struct GetDelegationsFromParams<'a> {
+    /// The delegator's address
+    pub address: Cow<'a, Address>,
+}
+
+/// Get delegated resources to an account
+#[derive(Serialize, Deserialize)]
+pub struct GetDelegationsToParams<'a> {
+    /// The receiver's address
+    pub address: Cow<'a, Address>,
+}
+
+/// Get a specific delegation between two accounts
+#[derive(Serialize, Deserialize)]
+pub struct GetDelegationParams<'a> {
+    /// The delegator's address
+    pub from: Cow<'a, Address>,
+    /// The receiver's address
+    pub to: Cow<'a, Address>,
+}
+
+/// Delegation info for API response
+#[derive(Serialize, Deserialize, Clone)]
+pub struct DelegationInfo {
+    /// The delegator's address
+    pub from: Address,
+    /// The receiver's address
+    pub to: Address,
+    /// Amount of frozen TOS delegated
+    pub frozen_balance: u64,
+    /// Lock expiry timestamp (ms), 0 if unlocked
+    pub expire_time: u64,
+    /// Whether this delegation is currently locked
+    pub is_locked: bool,
+}
+
+/// Get delegations result
+#[derive(Serialize, Deserialize)]
+pub struct GetDelegationsResult {
+    /// List of delegations
+    pub delegations: Vec<DelegationInfo>,
+    /// Total delegated amount
+    pub total_amount: u64,
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct RPCVersioned<T> {
     pub topoheight: TopoHeight,

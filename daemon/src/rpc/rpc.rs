@@ -799,6 +799,17 @@ pub fn register_methods<S: Storage>(
     // Energy management
     handler.register_method("get_energy", async_handler!(get_energy::<S>));
 
+    // Delegation management (Stake 2.0)
+    handler.register_method(
+        "get_delegations_from",
+        async_handler!(get_delegations_from::<S>),
+    );
+    handler.register_method(
+        "get_delegations_to",
+        async_handler!(get_delegations_to::<S>),
+    );
+    handler.register_method("get_delegation", async_handler!(get_delegation::<S>));
+
     // AI Mining management
     handler.register_method(
         "get_ai_mining_state",
@@ -3238,6 +3249,112 @@ async fn get_energy<S: Storage>(context: &Context, body: Value) -> Result<Value,
     };
 
     Ok(result)
+}
+
+// ===== Stake 2.0 Delegation RPC Methods =====
+
+/// Get all delegations from an account (delegator)
+async fn get_delegations_from<S: Storage>(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    use tos_common::api::daemon::{DelegationInfo, GetDelegationsFromParams, GetDelegationsResult};
+
+    let params: GetDelegationsFromParams = parse_params(body)?;
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let storage = blockchain.get_storage().read().await;
+
+    let now_ms = tos_common::time::get_current_time_in_millis();
+    let pubkey = params.address.into_owned().to_public_key();
+    let delegations = storage.get_delegations_from(&pubkey).await?;
+
+    let is_mainnet = storage.is_mainnet();
+    let delegation_infos: Vec<DelegationInfo> = delegations
+        .iter()
+        .map(|d| DelegationInfo {
+            from: d.from.as_address(is_mainnet),
+            to: d.to.as_address(is_mainnet),
+            frozen_balance: d.frozen_balance,
+            expire_time: d.expire_time,
+            is_locked: d.expire_time > now_ms,
+        })
+        .collect();
+
+    let total_amount = delegations.iter().map(|d| d.frozen_balance).sum();
+
+    Ok(json!(GetDelegationsResult {
+        delegations: delegation_infos,
+        total_amount,
+    }))
+}
+
+/// Get all delegations to an account (receiver)
+async fn get_delegations_to<S: Storage>(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    use tos_common::api::daemon::{DelegationInfo, GetDelegationsResult, GetDelegationsToParams};
+
+    let params: GetDelegationsToParams = parse_params(body)?;
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let storage = blockchain.get_storage().read().await;
+
+    let now_ms = tos_common::time::get_current_time_in_millis();
+    let pubkey = params.address.into_owned().to_public_key();
+    let delegations = storage.get_delegations_to(&pubkey).await?;
+
+    let is_mainnet = storage.is_mainnet();
+    let delegation_infos: Vec<DelegationInfo> = delegations
+        .iter()
+        .map(|d| DelegationInfo {
+            from: d.from.as_address(is_mainnet),
+            to: d.to.as_address(is_mainnet),
+            frozen_balance: d.frozen_balance,
+            expire_time: d.expire_time,
+            is_locked: d.expire_time > now_ms,
+        })
+        .collect();
+
+    let total_amount = delegations.iter().map(|d| d.frozen_balance).sum();
+
+    Ok(json!(GetDelegationsResult {
+        delegations: delegation_infos,
+        total_amount,
+    }))
+}
+
+/// Get a specific delegation between two accounts
+async fn get_delegation<S: Storage>(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    use tos_common::api::daemon::{DelegationInfo, GetDelegationParams};
+
+    let params: GetDelegationParams = parse_params(body)?;
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let storage = blockchain.get_storage().read().await;
+
+    let now_ms = tos_common::time::get_current_time_in_millis();
+    let from_pubkey = params.from.into_owned().to_public_key();
+    let to_pubkey = params.to.into_owned().to_public_key();
+
+    let delegation = storage
+        .get_delegated_resource(&from_pubkey, &to_pubkey)
+        .await?;
+
+    match delegation {
+        Some(d) => {
+            let is_mainnet = storage.is_mainnet();
+            Ok(json!(DelegationInfo {
+                from: d.from.as_address(is_mainnet),
+                to: d.to.as_address(is_mainnet),
+                frozen_balance: d.frozen_balance,
+                expire_time: d.expire_time,
+                is_locked: d.expire_time > now_ms,
+            }))
+        }
+        None => Ok(json!(null)),
+    }
 }
 
 // Get the current AI mining state
