@@ -21,7 +21,10 @@ use tos_common::{
         AssetChanges, ChainState as ContractChainState, ContractCache, ContractEvent,
         ContractEventTracker, ContractExecutor, ContractOutput, ContractStorage,
     },
-    crypto::{elgamal::CompressedPublicKey, Hash, Hashable, KeyPair, PublicKey},
+    crypto::{
+        elgamal::{Ciphertext, CompressedPublicKey},
+        Hash, Hashable, KeyPair, PublicKey,
+    },
     immutable::Immutable,
     kyc::{CommitteeMember, CommitteeStatus, KycRegion, KycStatus, MemberRole, SecurityCommittee},
     network::Network,
@@ -373,6 +376,32 @@ impl<'a> BlockchainVerificationState<'a, TestError> for KycTestChainState {
 
     fn get_network(&self) -> Network {
         Network::Devnet
+    }
+
+    async fn get_receiver_uno_balance<'b>(
+        &'b mut self,
+        _account: Cow<'a, CompressedPublicKey>,
+        _asset: Cow<'a, Hash>,
+    ) -> Result<&'b mut Ciphertext, TestError> {
+        Err(TestError::Unsupported)
+    }
+
+    async fn get_sender_uno_balance<'b>(
+        &'b mut self,
+        _account: &'a CompressedPublicKey,
+        _asset: &'a Hash,
+        _reference: &Reference,
+    ) -> Result<&'b mut Ciphertext, TestError> {
+        Err(TestError::Unsupported)
+    }
+
+    async fn add_sender_uno_output(
+        &mut self,
+        _account: &'a CompressedPublicKey,
+        _asset: &'a Hash,
+        _output: Ciphertext,
+    ) -> Result<(), TestError> {
+        Err(TestError::Unsupported)
     }
 }
 

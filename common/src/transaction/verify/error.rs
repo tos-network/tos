@@ -62,4 +62,6 @@ pub enum VerificationError<T> {
     InsufficientFunds { available: u64, required: u64 },
     #[error("Arithmetic overflow during balance calculation")]
     Overflow,
+    #[error("Invalid transfer amount")]
+    InvalidTransferAmount,
 }

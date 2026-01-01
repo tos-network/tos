@@ -21,8 +21,9 @@ use crate::{
         BatchReferralRewardPayload, BindReferrerPayload, BootstrapCommitteePayload, BurnPayload,
         DeployContractPayload, EmergencySuspendPayload, EnergyPayload, FeeType,
         InvokeContractPayload, MultiSigPayload, Reference, RegisterCommitteePayload,
-        RenewKycPayload, RevokeKycPayload, SetKycPayload, Transaction, TransactionType,
-        TransferKycPayload, TransferPayload, TxVersion, UpdateCommitteePayload,
+        RenewKycPayload, RevokeKycPayload, SetKycPayload, ShieldTransferPayload, Transaction,
+        TransactionType, TransferKycPayload, TransferPayload, TxVersion, UnoTransferPayload,
+        UnshieldTransferPayload, UpdateCommitteePayload,
     },
 };
 pub use data::*;
@@ -87,6 +88,10 @@ pub enum RPCTransactionType<'a> {
     RegisterCommittee(Cow<'a, RegisterCommitteePayload>),
     UpdateCommittee(Cow<'a, UpdateCommitteePayload>),
     EmergencySuspend(Cow<'a, EmergencySuspendPayload>),
+    // UNO (Privacy Balance) transaction types
+    UnoTransfers(Cow<'a, Vec<UnoTransferPayload>>),
+    ShieldTransfers(Cow<'a, Vec<ShieldTransferPayload>>),
+    UnshieldTransfers(Cow<'a, Vec<UnshieldTransferPayload>>),
 }
 
 impl<'a> RPCTransactionType<'a> {
@@ -135,6 +140,15 @@ impl<'a> RPCTransactionType<'a> {
             }
             TransactionType::EmergencySuspend(payload) => {
                 Self::EmergencySuspend(Cow::Borrowed(payload))
+            }
+            TransactionType::UnoTransfers(transfers) => {
+                Self::UnoTransfers(Cow::Borrowed(transfers))
+            }
+            TransactionType::ShieldTransfers(transfers) => {
+                Self::ShieldTransfers(Cow::Borrowed(transfers))
+            }
+            TransactionType::UnshieldTransfers(transfers) => {
+                Self::UnshieldTransfers(Cow::Borrowed(transfers))
             }
         }
     }
@@ -194,6 +208,15 @@ impl From<RPCTransactionType<'_>> for TransactionType {
             }
             RPCTransactionType::EmergencySuspend(payload) => {
                 TransactionType::EmergencySuspend(payload.into_owned())
+            }
+            RPCTransactionType::UnoTransfers(transfers) => {
+                TransactionType::UnoTransfers(transfers.into_owned())
+            }
+            RPCTransactionType::ShieldTransfers(transfers) => {
+                TransactionType::ShieldTransfers(transfers.into_owned())
+            }
+            RPCTransactionType::UnshieldTransfers(transfers) => {
+                TransactionType::UnshieldTransfers(transfers.into_owned())
             }
         }
     }

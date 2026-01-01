@@ -83,7 +83,7 @@ pub fn signature_verify_fn(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use curve25519_dalek::Scalar;
+    use tos_crypto::curve25519_dalek::Scalar;
 
     #[test]
     fn test_serde() {

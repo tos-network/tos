@@ -22,7 +22,10 @@ use tos_common::{
         AssetChanges, ChainState as ContractChainState, ContractCache, ContractEventTracker,
         ContractOutput, ScheduledExecution,
     },
-    crypto::{elgamal::CompressedPublicKey, Hash, PublicKey},
+    crypto::{
+        elgamal::{Ciphertext, CompressedPublicKey},
+        Hash, PublicKey,
+    },
     transaction::{
         verify::{BlockchainApplyState, BlockchainVerificationState, ContractEnvironment},
         ContractDeposit, MultiSigPayload, Reference,
@@ -96,6 +99,42 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError>
         output: u64,
     ) -> Result<(), BlockchainError> {
         self.inner.add_sender_output(account, asset, output).await
+    }
+
+    // ===== UNO (Privacy Balance) Methods =====
+    // UNO balance storage implemented in apply_changes() method
+
+    /// Get the UNO (encrypted) balance for a receiver account
+    async fn get_receiver_uno_balance<'b>(
+        &'b mut self,
+        account: Cow<'a, PublicKey>,
+        asset: Cow<'a, Hash>,
+    ) -> Result<&'b mut Ciphertext, BlockchainError> {
+        self.inner.get_receiver_uno_balance(account, asset).await
+    }
+
+    /// Get the UNO (encrypted) balance used for verification of funds for the sender account
+    async fn get_sender_uno_balance<'b>(
+        &'b mut self,
+        account: &'a PublicKey,
+        asset: &'a Hash,
+        reference: &Reference,
+    ) -> Result<&'b mut Ciphertext, BlockchainError> {
+        self.inner
+            .get_sender_uno_balance(account, asset, reference)
+            .await
+    }
+
+    /// Apply new output ciphertext to a sender's UNO account
+    async fn add_sender_uno_output(
+        &mut self,
+        account: &'a PublicKey,
+        asset: &'a Hash,
+        output: Ciphertext,
+    ) -> Result<(), BlockchainError> {
+        self.inner
+            .add_sender_uno_output(account, asset, output)
+            .await
     }
 
     /// Get the nonce of an account
@@ -1097,6 +1136,85 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
                     }
                 }
             }
+
+            // Process UNO (encrypted) sender assets
+            // Similar to plaintext assets but with homomorphic ciphertext operations
+            let uno_balances = self
+                .inner
+                .receiver_uno_balances
+                .entry(Cow::Borrowed(key))
+                .or_insert_with(HashMap::new);
+
+            for (asset, uno_echange) in account.uno_assets.drain() {
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!(
+                        "UNO {} updated for {} at topoheight {}",
+                        asset,
+                        key.as_address(self.inner.storage.is_mainnet()),
+                        self.inner.topoheight
+                    );
+                }
+                let super::UnoEchange {
+                    mut version,
+                    output_sum,
+                    output_balance_used,
+                    new_version,
+                    ..
+                } = uno_echange;
+
+                match uno_balances.entry(Cow::Borrowed(asset)) {
+                    Entry::Occupied(mut o) => {
+                        if log::log_enabled!(log::Level::Trace) {
+                            trace!(
+                                "{} already has UNO balance for {} at topoheight {}",
+                                key.as_address(self.inner.storage.is_mainnet()),
+                                asset,
+                                self.inner.topoheight
+                            );
+                        }
+                        // We got incoming funds while spending some
+                        let final_version = o.get_mut();
+                        final_version.set_balance_type(BalanceType::Both);
+
+                        // Set output balance from sender's version
+                        let output_balance = version.take_balance_with(output_balance_used);
+                        final_version.set_output_balance(Some(output_balance));
+
+                        // Subtract output_sum from final balance (homomorphic subtraction)
+                        final_version.sub_ciphertext_from_balance(&output_sum)?;
+                    }
+                    Entry::Vacant(e) => {
+                        if log::log_enabled!(log::Level::Trace) {
+                            trace!(
+                                "{} has no UNO balance for {} at topoheight {}",
+                                key.as_address(self.inner.storage.is_mainnet()),
+                                asset,
+                                self.inner.topoheight
+                            );
+                        }
+                        let version = if output_balance_used || !new_version {
+                            let (mut new_version, _) = self
+                                .inner
+                                .storage
+                                .get_new_versioned_uno_balance(key, asset, self.inner.topoheight)
+                                .await?;
+                            // Subtract output_sum (homomorphic subtraction)
+                            new_version.sub_ciphertext_from_balance(&output_sum)?;
+
+                            // Report output balance for next TX verification
+                            new_version.set_output_balance(Some(
+                                version.take_balance_with(output_balance_used),
+                            ));
+                            new_version.set_balance_type(BalanceType::Both);
+                            new_version
+                        } else {
+                            version.set_balance_type(BalanceType::Output);
+                            version
+                        };
+                        e.insert(version);
+                    }
+                }
+            }
         }
 
         // Apply the assets
@@ -1327,6 +1445,58 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
                 self.inner
                     .storage
                     .set_last_balance_to(&account, &asset, self.inner.topoheight, &version)
+                    .await?;
+            }
+        }
+
+        // Apply all UNO (encrypted) balance changes at topoheight
+        // Similar to plaintext balances but stored in UNO-specific columns
+        for (account, uno_balances) in self.inner.receiver_uno_balances {
+            // UNO balances: If account has no nonce, set default nonce
+            if !self.inner.accounts.contains_key(account.as_ref())
+                && !self.inner.storage.has_nonce(&account).await?
+            {
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "{} has now a UNO balance but without any nonce registered, set default (0) nonce",
+                        account.as_address(self.inner.storage.is_mainnet())
+                    );
+                }
+                self.inner
+                    .storage
+                    .set_last_nonce_to(
+                        &account,
+                        self.inner.topoheight,
+                        &VersionedNonce::new(0, None),
+                    )
+                    .await?;
+            }
+
+            // Mark as registered at this topoheight
+            if !self
+                .inner
+                .storage
+                .is_account_registered_for_topoheight(&account, self.inner.topoheight)
+                .await?
+            {
+                self.inner
+                    .storage
+                    .set_account_registration_topoheight(&account, self.inner.topoheight)
+                    .await?;
+            }
+
+            // UNO is a single asset, but we iterate to support the data structure
+            for (asset, version) in uno_balances {
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!(
+                        "Saving versioned UNO balance for {} at topoheight {}",
+                        account.as_address(self.inner.storage.is_mainnet()),
+                        self.inner.topoheight
+                    );
+                }
+                self.inner
+                    .storage
+                    .set_last_uno_balance_to(&account, &asset, self.inner.topoheight, &version)
                     .await?;
             }
         }

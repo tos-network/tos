@@ -31,7 +31,7 @@ use tos_common::{
     block::BlockVersion,
     config::{COIN_VALUE, TOS_ASSET},
     crypto::{
-        elgamal::{CompressedPublicKey, KeyPair},
+        elgamal::{Ciphertext, CompressedPublicKey, KeyPair},
         Hash, Hashable,
     },
     network::Network,
@@ -402,6 +402,32 @@ impl<'a> tos_common::transaction::verify::BlockchainVerificationState<'a, ()>
 
     fn get_network(&self) -> Network {
         Network::Mainnet
+    }
+
+    async fn get_receiver_uno_balance<'b>(
+        &'b mut self,
+        _account: Cow<'a, CompressedPublicKey>,
+        _asset: Cow<'a, Hash>,
+    ) -> Result<&'b mut Ciphertext, ()> {
+        Err(())
+    }
+
+    async fn get_sender_uno_balance<'b>(
+        &'b mut self,
+        _account: &'a CompressedPublicKey,
+        _asset: &'a Hash,
+        _reference: &Reference,
+    ) -> Result<&'b mut Ciphertext, ()> {
+        Err(())
+    }
+
+    async fn add_sender_uno_output(
+        &mut self,
+        _account: &'a CompressedPublicKey,
+        _asset: &'a Hash,
+        _output: Ciphertext,
+    ) -> Result<(), ()> {
+        Err(())
     }
 }
 

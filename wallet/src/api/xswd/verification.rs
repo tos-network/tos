@@ -112,7 +112,7 @@ mod tests {
             public_key,
             timestamp,
             nonce,
-            signature: [0u8; 64], // Placeholder
+            signature: [0u8; 64], // Temporary zero value for serialization; actual signature computed below
         };
 
         // Sign the message

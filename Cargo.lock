@@ -881,6 +881,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "bulletproofs"
+version = "5.0.2"
+source = "git+https://github.com/tos-network/bulletproofs?rev=566a53ec0a00b066e9271bbf9dc48ca6c33828f7#566a53ec0a00b066e9271bbf9dc48ca6c33828f7"
+dependencies = [
+ "byteorder",
+ "curve25519-dalek 4.1.3 (git+https://github.com/tos-network/curve25519-dalek?rev=0ca0e1a1cab7c08733e35cfedc33fc68db2058be)",
+ "digest 0.10.7",
+ "group",
+ "merlin",
+ "rand 0.8.5",
+ "rand_core 0.6.4",
+ "serde",
+ "serde_derive",
+ "sha3",
+ "subtle",
+ "thiserror 1.0.69",
+ "zeroize",
+]
+
+[[package]]
 name = "bumpalo"
 version = "3.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3046,6 +3066,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32a282da65faaf38286cf3be983213fcf1d2e2a58700e808f83f4ea9a4804bc0"
 
 [[package]]
+name = "merlin"
+version = "3.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "58c38e2799fc0978b65dfff8023ec7843e2330bb462f19198840b34b6582397d"
+dependencies = [
+ "byteorder",
+ "keccak",
+ "rand_core 0.6.4",
+ "zeroize",
+]
+
+[[package]]
 name = "metrics"
 version = "0.24.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4681,7 +4713,7 @@ dependencies = [
 [[package]]
 name = "tako-sdk"
 version = "0.2.1"
-source = "git+https://github.com/tos-network/tako?rev=fa4d4fb#fa4d4fb15f346bc5ef2acd3ff4ed7bd54d2a9fb9"
+source = "git+https://github.com/tos-network/tako?rev=c52af76#c52af7643f456d0f6fefe47c57e99dadd4518c9b"
 
 [[package]]
 name = "tap"
@@ -5078,7 +5110,7 @@ dependencies = [
 [[package]]
 name = "tos-builder"
 version = "0.1.0"
-source = "git+https://github.com/tos-network/tako?rev=fa4d4fb#fa4d4fb15f346bc5ef2acd3ff4ed7bd54d2a9fb9"
+source = "git+https://github.com/tos-network/tako?rev=c52af76#c52af7643f456d0f6fefe47c57e99dadd4518c9b"
 dependencies = [
  "anyhow",
  "log",
@@ -5090,28 +5122,11 @@ dependencies = [
 [[package]]
 name = "tos-bytecode"
 version = "0.1.0"
-source = "git+https://github.com/tos-network/tako?rev=fa4d4fb#fa4d4fb15f346bc5ef2acd3ff4ed7bd54d2a9fb9"
+source = "git+https://github.com/tos-network/tako?rev=c52af76#c52af7643f456d0f6fefe47c57e99dadd4518c9b"
 dependencies = [
  "indexmap 2.10.0",
  "serde",
  "tos-types",
-]
-
-[[package]]
-name = "tos-crypto"
-version = "0.1.0"
-source = "git+https://github.com/tos-network/tos-crypto?rev=e487d8d#e487d8d9ee70c9ab34c974dc5e4a3c67c0856e0f"
-dependencies = [
- "blake3",
- "curve25519-dalek 4.1.3 (git+https://github.com/tos-network/curve25519-dalek?rev=0ca0e1a1cab7c08733e35cfedc33fc68db2058be)",
- "hex",
- "lazy_static",
- "rand 0.8.5",
- "serde",
- "sha3",
- "subtle",
- "thiserror 2.0.12",
- "zeroize",
 ]
 
 [[package]]
@@ -5132,9 +5147,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "tos-crypto"
+version = "0.2.0"
+source = "git+https://github.com/tos-network/tos-crypto?rev=971e01c#971e01c411749848f2907174256fb34d5d39df1f"
+dependencies = [
+ "blake3",
+ "bulletproofs",
+ "curve25519-dalek 4.1.3 (git+https://github.com/tos-network/curve25519-dalek?rev=0ca0e1a1cab7c08733e35cfedc33fc68db2058be)",
+ "hex",
+ "lazy_static",
+ "merlin",
+ "rand 0.8.5",
+ "serde",
+ "sha3",
+ "subtle",
+ "thiserror 2.0.12",
+ "zeroize",
+]
+
+[[package]]
 name = "tos-environment"
 version = "0.1.0"
-source = "git+https://github.com/tos-network/tako?rev=fa4d4fb#fa4d4fb15f346bc5ef2acd3ff4ed7bd54d2a9fb9"
+source = "git+https://github.com/tos-network/tako?rev=c52af76#c52af7643f456d0f6fefe47c57e99dadd4518c9b"
 dependencies = [
  "anyhow",
  "better_any",
@@ -5160,7 +5194,7 @@ dependencies = [
 [[package]]
 name = "tos-kernel"
 version = "0.1.0"
-source = "git+https://github.com/tos-network/tako?rev=fa4d4fb#fa4d4fb15f346bc5ef2acd3ff4ed7bd54d2a9fb9"
+source = "git+https://github.com/tos-network/tako?rev=c52af76#c52af7643f456d0f6fefe47c57e99dadd4518c9b"
 dependencies = [
  "indexmap 2.10.0",
  "log",
@@ -5174,7 +5208,7 @@ dependencies = [
 [[package]]
 name = "tos-poseidon"
 version = "0.1.0"
-source = "git+https://github.com/tos-network/tako?rev=fa4d4fb#fa4d4fb15f346bc5ef2acd3ff4ed7bd54d2a9fb9"
+source = "git+https://github.com/tos-network/tako?rev=c52af76#c52af7643f456d0f6fefe47c57e99dadd4518c9b"
 dependencies = [
  "ark-bn254",
  "ark-ff",
@@ -5185,7 +5219,7 @@ dependencies = [
 [[package]]
 name = "tos-precompiles"
 version = "0.2.1"
-source = "git+https://github.com/tos-network/tako?rev=fa4d4fb#fa4d4fb15f346bc5ef2acd3ff4ed7bd54d2a9fb9"
+source = "git+https://github.com/tos-network/tako?rev=c52af76#c52af7643f456d0f6fefe47c57e99dadd4518c9b"
 dependencies = [
  "bincode",
  "blst",
@@ -5196,14 +5230,14 @@ dependencies = [
  "sha2 0.10.9",
  "sha3",
  "thiserror 2.0.12",
- "tos-crypto 0.1.0 (git+https://github.com/tos-network/tos-crypto?rev=e487d8d9ee70c9ab34c974dc5e4a3c67c0856e0f)",
+ "tos-crypto 0.1.0",
  "tos-types",
 ]
 
 [[package]]
 name = "tos-program-runtime"
 version = "0.2.1"
-source = "git+https://github.com/tos-network/tako?rev=fa4d4fb#fa4d4fb15f346bc5ef2acd3ff4ed7bd54d2a9fb9"
+source = "git+https://github.com/tos-network/tako?rev=c52af76#c52af7643f456d0f6fefe47c57e99dadd4518c9b"
 dependencies = [
  "anyhow",
  "bincode",
@@ -5218,7 +5252,7 @@ dependencies = [
 [[package]]
 name = "tos-syscalls"
 version = "0.2.1"
-source = "git+https://github.com/tos-network/tako?rev=fa4d4fb#fa4d4fb15f346bc5ef2acd3ff4ed7bd54d2a9fb9"
+source = "git+https://github.com/tos-network/tako?rev=c52af76#c52af7643f456d0f6fefe47c57e99dadd4518c9b"
 dependencies = [
  "ark-bn254",
  "ark-ec",
@@ -5265,7 +5299,7 @@ dependencies = [
 
 [[package]]
 name = "tos-testing-framework"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5294,7 +5328,7 @@ dependencies = [
 [[package]]
 name = "tos-types"
 version = "0.1.0"
-source = "git+https://github.com/tos-network/tako?rev=fa4d4fb#fa4d4fb15f346bc5ef2acd3ff4ed7bd54d2a9fb9"
+source = "git+https://github.com/tos-network/tako?rev=c52af76#c52af7643f456d0f6fefe47c57e99dadd4518c9b"
 dependencies = [
  "anyhow",
  "indexmap 2.10.0",
@@ -5307,7 +5341,7 @@ dependencies = [
 
 [[package]]
 name = "tos_ai_miner"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "anyhow",
  "blake3",
@@ -5328,7 +5362,7 @@ dependencies = [
 
 [[package]]
 name = "tos_common"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "actix-rt",
  "actix-web",
@@ -5346,7 +5380,6 @@ dependencies = [
  "console-subscriber",
  "criterion",
  "crossterm",
- "curve25519-dalek 4.1.3 (git+https://github.com/tos-network/curve25519-dalek?rev=0ca0e1a1cab7c08733e35cfedc33fc68db2058be)",
  "fern",
  "futures",
  "futures-util",
@@ -5379,7 +5412,7 @@ dependencies = [
  "tokio",
  "tokio-tungstenite-wasm",
  "tokio_with_wasm",
- "tos-crypto 0.1.0 (git+https://github.com/tos-network/tos-crypto?rev=e487d8d)",
+ "tos-crypto 0.2.0",
  "tos-hash",
  "tos-kernel",
  "urlencoding",
@@ -5390,7 +5423,7 @@ dependencies = [
 
 [[package]]
 name = "tos_daemon"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "actix-web",
  "anyhow",
@@ -5438,6 +5471,7 @@ dependencies = [
  "thiserror 2.0.12",
  "tokio",
  "tokio-socks",
+ "tos-crypto 0.2.0",
  "tos-environment",
  "tos-kernel",
  "tos-program-runtime",
@@ -5451,7 +5485,7 @@ dependencies = [
 
 [[package]]
 name = "tos_genesis"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "hex",
  "indexmap 2.10.0",
@@ -5460,7 +5494,7 @@ dependencies = [
 
 [[package]]
 name = "tos_miner"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "anyhow",
  "clap",
@@ -5477,7 +5511,7 @@ dependencies = [
 
 [[package]]
 name = "tos_wallet"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "actix-web",
  "actix-web-httpauth",

@@ -1,6 +1,6 @@
 [package]
 name = "tos-testing-framework"
-version = "0.1.9"
+version = "0.1.10"
 edition = "2021"
 authors = ["TOS Network Team"]
 description = "Comprehensive testing framework for TOS blockchain - V3.0 Production-Ready"
@@ -32,8 +32,8 @@ tos_common = { path = "../common" }
 tos_daemon = { path = "../daemon" }
 
 # TAKO dependencies for contract testing
-tos-kernel = { package = "tos-kernel", git = "https://github.com/tos-network/tako", rev = "fa4d4fb" }
-tos-syscalls = { package = "tos-syscalls", git = "https://github.com/tos-network/tako", rev = "fa4d4fb" }
+tos-kernel = { package = "tos-kernel", git = "https://github.com/tos-network/tako", rev = "c52af76" }
+tos-syscalls = { package = "tos-syscalls", git = "https://github.com/tos-network/tako", rev = "c52af76" }
 
 [dev-dependencies]
 proptest = "1.4"

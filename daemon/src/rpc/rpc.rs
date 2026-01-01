@@ -184,7 +184,7 @@ use tos_common::{
     asset::RPCAssetData,
     async_handler,
     block::{Block, BlockHeader, MinerWork, TopoHeight},
-    config::{MAXIMUM_SUPPLY, MAX_TRANSACTION_SIZE, TOS_ASSET, VERSION},
+    config::{MAXIMUM_SUPPLY, MAX_TRANSACTION_SIZE, TOS_ASSET, UNO_ASSET, VERSION},
     context::Context,
     contract::ScheduledExecution,
     crypto::{elgamal::CompressedPublicKey, Address, AddressType, Hash},
@@ -591,6 +591,14 @@ pub fn register_methods<S: Storage>(
         "get_balance_at_topoheight",
         async_handler!(get_balance_at_topoheight::<S>),
     );
+
+    // UNO (encrypted) balance methods
+    handler.register_method("get_uno_balance", async_handler!(get_uno_balance::<S>));
+    handler.register_method(
+        "get_uno_balance_at_topoheight",
+        async_handler!(get_uno_balance_at_topoheight::<S>),
+    );
+    handler.register_method("has_uno_balance", async_handler!(has_uno_balance::<S>));
 
     handler.register_method("get_nonce", async_handler!(get_nonce::<S>));
     handler.register_method("has_nonce", async_handler!(has_nonce::<S>));
@@ -1322,6 +1330,101 @@ async fn get_balance_at_topoheight<S: Storage>(
         .await
         .context("Error while retrieving balance at exact topo height")?;
     Ok(json!(balance))
+}
+
+// UNO (encrypted) balance RPC handlers
+
+async fn get_uno_balance<S: Storage>(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    let params: GetBalanceParams = parse_params(body)?;
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    if params.address.is_mainnet() != blockchain.get_network().is_mainnet() {
+        return Err(InternalRpcError::InvalidParamsAny(
+            BlockchainError::InvalidNetwork.into(),
+        ));
+    }
+    if params.asset.as_ref() != &UNO_ASSET {
+        return Err(InternalRpcError::InvalidParamsAny(anyhow::anyhow!(
+            "UNO asset must be UNO_ASSET"
+        )));
+    }
+
+    let storage = blockchain.get_storage().read().await;
+    let (topoheight, version) = storage
+        .get_last_uno_balance(params.address.get_public_key(), &params.asset)
+        .await
+        .context("Error while retrieving UNO balance")?;
+    Ok(json!(GetUnoBalanceResult {
+        version,
+        topoheight
+    }))
+}
+
+async fn get_uno_balance_at_topoheight<S: Storage>(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    let params: GetBalanceAtTopoHeightParams = parse_params(body)?;
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    if params.address.is_mainnet() != blockchain.get_network().is_mainnet() {
+        return Err(InternalRpcError::InvalidParamsAny(
+            BlockchainError::InvalidNetwork.into(),
+        ));
+    }
+    if params.asset.as_ref() != &UNO_ASSET {
+        return Err(InternalRpcError::InvalidParamsAny(anyhow::anyhow!(
+            "UNO asset must be UNO_ASSET"
+        )));
+    }
+
+    let storage = blockchain.get_storage().read().await;
+    let balance = storage
+        .get_uno_balance_at_exact_topoheight(
+            params.address.get_public_key(),
+            &params.asset,
+            params.topoheight,
+        )
+        .await
+        .context("Error while retrieving UNO balance at topoheight")?;
+    Ok(json!(balance))
+}
+
+async fn has_uno_balance<S: Storage>(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    let params: HasBalanceParams = parse_params(body)?;
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    if params.address.is_mainnet() != blockchain.get_network().is_mainnet() {
+        return Err(InternalRpcError::InvalidParamsAny(
+            BlockchainError::InvalidNetwork.into(),
+        ));
+    }
+    if params.asset.as_ref() != &UNO_ASSET {
+        return Err(InternalRpcError::InvalidParamsAny(anyhow::anyhow!(
+            "UNO asset must be UNO_ASSET"
+        )));
+    }
+
+    let storage = blockchain.get_storage().read().await;
+    let exist = if let Some(topoheight) = params.topoheight {
+        storage
+            .has_uno_balance_at_exact_topoheight(
+                params.address.get_public_key(),
+                &params.asset,
+                topoheight,
+            )
+            .await
+            .context("Error while checking UNO balance at topo")?
+    } else {
+        storage
+            .has_uno_balance_for(params.address.get_public_key(), &params.asset)
+            .await
+            .context("Error while checking UNO balance")?
+    };
+    Ok(json!(HasUnoBalanceResult { exist }))
 }
 
 async fn has_nonce<S: Storage>(context: &Context, body: Value) -> Result<Value, InternalRpcError> {
@@ -2291,6 +2394,13 @@ async fn get_account_history<S: Storage>(
                 | TransactionType::EmergencySuspend(_) => {
                     // KYC transactions don't affect account history for now
                     // This could be extended to track KYC activities
+                }
+                // UNO (Privacy Balance) transaction types
+                TransactionType::UnoTransfers(_)
+                | TransactionType::ShieldTransfers(_)
+                | TransactionType::UnshieldTransfers(_) => {
+                    // UNO/Shield/Unshield transfers involve encrypted balances
+                    // This could be extended to track privacy transfer activities
                 }
             }
         }
@@ -4467,7 +4577,7 @@ async fn get_uplines<S: Storage>(
     let uplines: Vec<Address> = result
         .uplines
         .iter()
-        .map(|key| key.to_address(network.is_mainnet()))
+        .map(|key| key.as_address(network.is_mainnet()))
         .collect();
 
     Ok(json!(GetUplinesResult {
@@ -4505,7 +4615,7 @@ async fn get_direct_referrals<S: Storage>(
     let referrals: Vec<Address> = result
         .referrals
         .iter()
-        .map(|key| key.to_address(network.is_mainnet()))
+        .map(|key| key.as_address(network.is_mainnet()))
         .collect();
 
     Ok(json!(GetDirectReferralsResult {
@@ -5039,7 +5149,7 @@ fn convert_committee_to_rpc(
         .members
         .iter()
         .map(|m| CommitteeMemberRpc {
-            public_key: m.public_key.to_address(is_mainnet),
+            public_key: m.public_key.as_address(is_mainnet),
             name: m.name.clone(),
             role: m.role.as_str().to_string(),
             status: m.status.as_str().to_string(),

@@ -3,7 +3,7 @@ pub mod languages;
 use languages::*;
 use log::debug;
 use thiserror::Error;
-use tos_common::crypto::PrivateKey;
+use tos_common::{crypto::PrivateKey, serializer::Serializer};
 
 const KEY_SIZE: usize = 32;
 const SEED_LENGTH: usize = 24;

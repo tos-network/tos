@@ -23,4 +23,5 @@ mod referral;
 mod state;
 mod tips;
 mod transaction;
+mod uno_balance;
 mod versioned;

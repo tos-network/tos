@@ -47,3 +47,5 @@ debug-assertions = false
 overflow-checks = false
 lto = true
 strip = true
+
+# Note: curve25519-dalek patch removed - now managed by tos-crypto

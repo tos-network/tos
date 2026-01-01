@@ -60,6 +60,7 @@ use tos_common::{
     },
     config::{
         COIN_DECIMALS, MAXIMUM_SUPPLY, MAX_BLOCK_SIZE, MAX_TRANSACTION_SIZE, TIPS_LIMIT, TOS_ASSET,
+        UNO_ASSET,
     },
     contract::{build_environment, ContractExecutor},
     crypto::{random::secure_random_bytes, Hash, Hashable, PublicKey, HASH_SIZE},
@@ -710,6 +711,27 @@ impl<S: Storage> Blockchain<S> {
                             "TOS".to_owned(),
                             ticker,
                             Some(MAXIMUM_SUPPLY),
+                            None,
+                        ),
+                        None,
+                    ),
+                )
+                .await?;
+
+            // register UNO asset (privacy balance)
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Registering UNO asset: {} at topoheight 0", UNO_ASSET);
+            }
+            storage
+                .add_asset(
+                    &UNO_ASSET,
+                    1,
+                    VersionedAssetData::new(
+                        AssetData::new(
+                            COIN_DECIMALS,
+                            "UNO".to_owned(),
+                            "UNO".to_owned(),
+                            None,
                             None,
                         ),
                         None,

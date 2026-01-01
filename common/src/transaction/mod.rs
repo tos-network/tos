@@ -1,9 +1,13 @@
 use serde::{Deserialize, Serialize};
+use tos_crypto::merlin::Transcript;
 
 use crate::{
     account::Nonce,
     ai_mining::AIMiningPayload,
-    crypto::{elgamal::CompressedPublicKey, Hash, Hashable, Signature},
+    crypto::{
+        elgamal::CompressedPublicKey, proofs::RangeProof, Hash, Hashable, ProtocolTranscript,
+        Signature,
+    },
     serializer::*,
 };
 
@@ -17,10 +21,12 @@ pub mod verify;
 
 mod payload;
 mod reference;
+mod source_commitment;
 mod version;
 
 pub use payload::*;
 pub use reference::Reference;
+pub use source_commitment::SourceCommitment;
 pub use version::TxVersion;
 
 #[cfg(test)]
@@ -33,7 +39,7 @@ pub const EXTRA_DATA_LIMIT_SIZE: usize = 128; // 128 bytes - balanced for securi
                                               // Maximum total size of payload across all transfers per transaction
 pub const EXTRA_DATA_LIMIT_SUM_SIZE: usize = EXTRA_DATA_LIMIT_SIZE * 32; // 4KB total limit
                                                                          // Maximum number of transfers per transaction
-pub const MAX_TRANSFER_COUNT: usize = 255;
+pub const MAX_TRANSFER_COUNT: usize = 500;
 // Maximum number of deposits per Invoke Call
 pub const MAX_DEPOSIT_PER_INVOKE_CALL: usize = 255;
 // Maximum number of participants in a multi signature account
@@ -62,6 +68,12 @@ pub enum TransactionType {
     RegisterCommittee(RegisterCommitteePayload),
     UpdateCommittee(UpdateCommitteePayload),
     EmergencySuspend(EmergencySuspendPayload),
+    /// UNO privacy transfers (encrypted amounts)
+    UnoTransfers(Vec<UnoTransferPayload>),
+    /// Shield transfers: TOS (plaintext) -> UNO (encrypted)
+    ShieldTransfers(Vec<ShieldTransferPayload>),
+    /// Unshield transfers: UNO (encrypted) -> TOS (plaintext)
+    UnshieldTransfers(Vec<UnshieldTransferPayload>),
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -122,6 +134,12 @@ pub struct Transaction {
     /// nonce must be equal to the one on chain account
     /// used to prevent replay attacks and have ordered transactions
     nonce: Nonce,
+    /// Source commitments for UNO transfers (one per asset)
+    /// Empty for plaintext-only transactions
+    source_commitments: Vec<SourceCommitment>,
+    /// Aggregated range proof for all UNO transfers
+    /// None for plaintext-only transactions
+    range_proof: Option<RangeProof>,
     /// At which block the TX is built
     reference: Reference,
     /// MultiSig contains the signatures of the transaction
@@ -132,7 +150,7 @@ pub struct Transaction {
 }
 
 impl Transaction {
-    // Create a new transaction
+    // Create a new transaction (plaintext, no UNO)
     #[inline(always)]
     pub fn new(
         version: TxVersion,
@@ -154,10 +172,68 @@ impl Transaction {
             fee,
             fee_type,
             nonce,
+            source_commitments: Vec::new(),
+            range_proof: None,
             reference,
             multisig,
             signature,
         }
+    }
+
+    // Create a new UNO transaction with privacy proofs
+    #[inline(always)]
+    pub fn new_with_uno(
+        version: TxVersion,
+        chain_id: u8,
+        source: CompressedPublicKey,
+        data: TransactionType,
+        fee: u64,
+        fee_type: FeeType,
+        nonce: Nonce,
+        source_commitments: Vec<SourceCommitment>,
+        range_proof: RangeProof,
+        reference: Reference,
+        multisig: Option<MultiSig>,
+        signature: Signature,
+    ) -> Self {
+        Self {
+            version,
+            chain_id,
+            source,
+            data,
+            fee,
+            fee_type,
+            nonce,
+            source_commitments,
+            range_proof: Some(range_proof),
+            reference,
+            multisig,
+            signature,
+        }
+    }
+
+    /// Prepare a transcript for ZK proof generation/verification
+    /// This establishes the common reference string for all proofs in the transaction
+    pub fn prepare_transcript(
+        version: TxVersion,
+        source_pubkey: &CompressedPublicKey,
+        fee: u64,
+        fee_type: &FeeType,
+        nonce: Nonce,
+    ) -> Transcript {
+        let mut transcript = Transcript::new(b"transaction-proof");
+        transcript.append_u64(b"version", version.into());
+        transcript.append_public_key(b"source_pubkey", source_pubkey);
+        transcript.append_u64(b"fee", fee);
+        transcript.append_u64(
+            b"fee_type",
+            match fee_type {
+                FeeType::TOS => 0u64,
+                FeeType::Energy => 1u64,
+            },
+        );
+        transcript.append_u64(b"nonce", nonce);
+        transcript
     }
 
     // Get the transaction version
@@ -210,6 +286,26 @@ impl Transaction {
         &self.reference
     }
 
+    // Get source commitments for UNO transfers
+    pub fn get_source_commitments(&self) -> &[SourceCommitment] {
+        &self.source_commitments
+    }
+
+    // Get the range proof for UNO transfers
+    pub fn get_range_proof(&self) -> Option<&RangeProof> {
+        self.range_proof.as_ref()
+    }
+
+    // Check if this transaction involves UNO transfers (including Shield/Unshield)
+    pub fn has_uno_transfers(&self) -> bool {
+        matches!(
+            self.data,
+            TransactionType::UnoTransfers(_)
+                | TransactionType::ShieldTransfers(_)
+                | TransactionType::UnshieldTransfers(_)
+        )
+    }
+
     // Get the burned amount
     // This will returns the burned amount by a Burn payload
     // Or the % of execution fees to burn due to a Smart Contracts call
@@ -221,7 +317,7 @@ impl Transaction {
         }
     }
 
-    // Get all assets used in this transaction (plaintext balance version)
+    // Get all assets used in this transaction
     // Returns a HashSet containing all unique assets referenced in the transaction
     pub fn get_assets(&self) -> std::collections::HashSet<&Hash> {
         use std::collections::HashSet;
@@ -229,6 +325,21 @@ impl Transaction {
 
         match &self.data {
             TransactionType::Transfers(transfers) => {
+                for transfer in transfers {
+                    assets.insert(transfer.get_asset());
+                }
+            }
+            TransactionType::UnoTransfers(transfers) => {
+                for transfer in transfers {
+                    assets.insert(transfer.get_asset());
+                }
+            }
+            TransactionType::ShieldTransfers(transfers) => {
+                for transfer in transfers {
+                    assets.insert(transfer.get_asset());
+                }
+            }
+            TransactionType::UnshieldTransfers(transfers) => {
                 for transfer in transfers {
                     assets.insert(transfer.get_asset());
                 }
@@ -261,6 +372,9 @@ impl Transaction {
     pub fn get_outputs_count(&self) -> usize {
         match &self.data {
             TransactionType::Transfers(transfers) => transfers.len(),
+            TransactionType::UnoTransfers(transfers) => transfers.len(),
+            TransactionType::ShieldTransfers(transfers) => transfers.len(),
+            TransactionType::UnshieldTransfers(transfers) => transfers.len(),
             TransactionType::InvokeContract(payload) => payload.deposits.len().max(1),
             _ => 1,
         }
@@ -355,9 +469,9 @@ impl Serializer for TransactionType {
             }
             TransactionType::Transfers(txs) => {
                 writer.write_u8(1);
-                // max 255 txs per transaction
-                let len: u8 = txs.len() as u8;
-                writer.write_u8(len);
+                // max 500 txs per transaction
+                let len: u16 = txs.len() as u16;
+                writer.write_u16(len);
                 for tx in txs {
                     tx.write(writer);
                 }
@@ -427,6 +541,30 @@ impl Serializer for TransactionType {
                 writer.write_u8(15);
                 payload.write(writer);
             }
+            TransactionType::UnoTransfers(transfers) => {
+                writer.write_u8(18);
+                let len: u16 = transfers.len() as u16;
+                writer.write_u16(len);
+                for tx in transfers {
+                    tx.write(writer);
+                }
+            }
+            TransactionType::ShieldTransfers(transfers) => {
+                writer.write_u8(19);
+                let len: u16 = transfers.len() as u16;
+                writer.write_u16(len);
+                for tx in transfers {
+                    tx.write(writer);
+                }
+            }
+            TransactionType::UnshieldTransfers(transfers) => {
+                writer.write_u8(20);
+                let len: u16 = transfers.len() as u16;
+                writer.write_u16(len);
+                for tx in transfers {
+                    tx.write(writer);
+                }
+            }
         };
     }
 
@@ -437,8 +575,8 @@ impl Serializer for TransactionType {
                 TransactionType::Burn(payload)
             }
             1 => {
-                let txs_count = reader.read_u8()?;
-                if txs_count == 0 || txs_count > MAX_TRANSFER_COUNT as u8 {
+                let txs_count = reader.read_u16()?;
+                if txs_count == 0 || txs_count as usize > MAX_TRANSFER_COUNT {
                     return Err(ReaderError::InvalidSize);
                 }
 
@@ -465,6 +603,39 @@ impl Serializer for TransactionType {
             15 => TransactionType::EmergencySuspend(EmergencySuspendPayload::read(reader)?),
             16 => TransactionType::TransferKyc(TransferKycPayload::read(reader)?),
             17 => TransactionType::AppealKyc(AppealKycPayload::read(reader)?),
+            18 => {
+                let txs_count = reader.read_u16()?;
+                if txs_count == 0 || txs_count as usize > MAX_TRANSFER_COUNT {
+                    return Err(ReaderError::InvalidSize);
+                }
+                let mut txs = Vec::with_capacity(txs_count as usize);
+                for _ in 0..txs_count {
+                    txs.push(UnoTransferPayload::read(reader)?);
+                }
+                TransactionType::UnoTransfers(txs)
+            }
+            19 => {
+                let txs_count = reader.read_u16()?;
+                if txs_count == 0 || txs_count as usize > MAX_TRANSFER_COUNT {
+                    return Err(ReaderError::InvalidSize);
+                }
+                let mut txs = Vec::with_capacity(txs_count as usize);
+                for _ in 0..txs_count {
+                    txs.push(ShieldTransferPayload::read(reader)?);
+                }
+                TransactionType::ShieldTransfers(txs)
+            }
+            20 => {
+                let txs_count = reader.read_u16()?;
+                if txs_count == 0 || txs_count as usize > MAX_TRANSFER_COUNT {
+                    return Err(ReaderError::InvalidSize);
+                }
+                let mut txs = Vec::with_capacity(txs_count as usize);
+                for _ in 0..txs_count {
+                    txs.push(UnshieldTransferPayload::read(reader)?);
+                }
+                TransactionType::UnshieldTransfers(txs)
+            }
             _ => return Err(ReaderError::InvalidValue),
         })
     }
@@ -473,8 +644,8 @@ impl Serializer for TransactionType {
         1 + match self {
             TransactionType::Burn(payload) => payload.size(),
             TransactionType::Transfers(txs) => {
-                // 1 byte for variant, 1 byte for count of transfers
-                let mut size = 1;
+                // 2 bytes for count of transfers (u16)
+                let mut size = 2;
                 for tx in txs {
                     size += tx.size();
                 }
@@ -500,6 +671,30 @@ impl Serializer for TransactionType {
             TransactionType::RegisterCommittee(payload) => payload.size(),
             TransactionType::UpdateCommittee(payload) => payload.size(),
             TransactionType::EmergencySuspend(payload) => payload.size(),
+            TransactionType::UnoTransfers(txs) => {
+                // 2 bytes for count of transfers (u16)
+                let mut size = 2;
+                for tx in txs {
+                    size += tx.size();
+                }
+                size
+            }
+            TransactionType::ShieldTransfers(txs) => {
+                // 2 bytes for count of transfers (u16)
+                let mut size = 2;
+                for tx in txs {
+                    size += tx.size();
+                }
+                size
+            }
+            TransactionType::UnshieldTransfers(txs) => {
+                // 2 bytes for count of transfers (u16)
+                let mut size = 2;
+                for tx in txs {
+                    size += tx.size();
+                }
+                size
+            }
         }
     }
 }
@@ -518,6 +713,20 @@ impl Serializer for Transaction {
         self.fee.write(writer);
         self.fee_type.write(writer);
         self.nonce.write(writer);
+
+        // UNO fields: source_commitments and range_proof
+        // Only written for UNO transactions
+        if self.has_uno_transfers() {
+            let len: u8 = self.source_commitments.len() as u8;
+            writer.write_u8(len);
+            for sc in &self.source_commitments {
+                sc.write(writer);
+            }
+            if let Some(ref rp) = self.range_proof {
+                rp.write(writer);
+            }
+        }
+
         self.reference.write(writer);
 
         self.multisig.write(writer);
@@ -542,15 +751,68 @@ impl Serializer for Transaction {
         let fee = reader.read_u64()?;
         let fee_type = FeeType::read(reader)?;
         let nonce = Nonce::read(reader)?;
+
+        // UNO fields: source_commitments and range_proof
+        // Read for UNO transactions (including Shield/Unshield)
+        let (source_commitments, range_proof) = match &data {
+            TransactionType::UnoTransfers(_) => {
+                // UNO transfers always have source_commitments and range_proof
+                let sc_count = reader.read_u8()?;
+                let mut scs = Vec::with_capacity(sc_count as usize);
+                for _ in 0..sc_count {
+                    scs.push(SourceCommitment::read(reader)?);
+                }
+                let rp = RangeProof::read(reader)?;
+                (scs, Some(rp))
+            }
+            TransactionType::ShieldTransfers(_) => {
+                // Shield transfers have source_commitments count (should be 0) but no range_proof
+                let sc_count = reader.read_u8()?;
+                let mut scs = Vec::with_capacity(sc_count as usize);
+                for _ in 0..sc_count {
+                    scs.push(SourceCommitment::read(reader)?);
+                }
+                // Shield doesn't require range proof (amount is public)
+                (scs, None)
+            }
+            TransactionType::UnshieldTransfers(_) => {
+                // Unshield transfers have source_commitments and range_proof
+                let sc_count = reader.read_u8()?;
+                let mut scs = Vec::with_capacity(sc_count as usize);
+                for _ in 0..sc_count {
+                    scs.push(SourceCommitment::read(reader)?);
+                }
+                // Unshield requires range proof for remaining balance
+                let rp = if sc_count > 0 {
+                    Some(RangeProof::read(reader)?)
+                } else {
+                    None
+                };
+                (scs, rp)
+            }
+            _ => (Vec::new(), None),
+        };
+
         let reference = Reference::read(reader)?;
 
         let multisig = Option::read(reader)?;
 
         let signature = Signature::read(reader)?;
 
-        Ok(Transaction::new(
-            version, chain_id, source, data, fee, fee_type, nonce, reference, multisig, signature,
-        ))
+        Ok(Transaction {
+            version,
+            chain_id,
+            source,
+            data,
+            fee,
+            fee_type,
+            nonce,
+            source_commitments,
+            range_proof,
+            reference,
+            multisig,
+            signature,
+        })
     }
 
     fn size(&self) -> usize {
@@ -567,6 +829,17 @@ impl Serializer for Transaction {
         // T1+: add chain_id byte
         if self.version >= TxVersion::T1 {
             size += 1;
+        }
+
+        // UNO fields
+        if self.has_uno_transfers() {
+            size += 1; // source_commitments count
+            for sc in &self.source_commitments {
+                size += sc.size();
+            }
+            if let Some(ref rp) = self.range_proof {
+                size += rp.size();
+            }
         }
 
         size += self.multisig.size();

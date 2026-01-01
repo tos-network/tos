@@ -24,6 +24,7 @@ mod referral;
 mod state;
 mod tips;
 mod transaction;
+mod uno_balance;
 mod versioned;
 
 pub use account::*;
@@ -52,4 +53,5 @@ pub use referral::*;
 pub use state::*;
 pub use tips::*;
 pub use transaction::*;
+pub use uno_balance::*;
 pub use versioned::*;

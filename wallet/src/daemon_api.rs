@@ -297,6 +297,60 @@ impl DaemonAPI {
         Ok(balance)
     }
 
+    /// Get UNO (encrypted) balance for an address
+    pub async fn get_uno_balance(&self, address: &Address) -> Result<GetUnoBalanceResult> {
+        trace!("get_uno_balance");
+        let balance = self
+            .client
+            .call_with(
+                "get_uno_balance",
+                &GetBalanceParams {
+                    address: Cow::Borrowed(address),
+                    asset: Cow::Borrowed(&tos_common::config::UNO_ASSET),
+                },
+            )
+            .await?;
+        Ok(balance)
+    }
+
+    /// Check if an address has a UNO (encrypted) balance
+    pub async fn has_uno_balance(&self, address: &Address) -> Result<bool> {
+        trace!("has_uno_balance");
+        let result: HasUnoBalanceResult = self
+            .client
+            .call_with(
+                "has_uno_balance",
+                &HasBalanceParams {
+                    address: Cow::Borrowed(address),
+                    asset: Cow::Borrowed(&tos_common::config::UNO_ASSET),
+                    topoheight: None,
+                },
+            )
+            .await?;
+        Ok(result.exist)
+    }
+
+    /// Get UNO (encrypted) balance at a specific topoheight
+    pub async fn get_uno_balance_at_topoheight(
+        &self,
+        address: &Address,
+        topoheight: u64,
+    ) -> Result<tos_common::account::VersionedUnoBalance> {
+        trace!("get_uno_balance_at_topoheight");
+        let balance = self
+            .client
+            .call_with(
+                "get_uno_balance_at_topoheight",
+                &GetBalanceAtTopoHeightParams {
+                    topoheight,
+                    asset: Cow::Borrowed(&tos_common::config::UNO_ASSET),
+                    address: Cow::Borrowed(address),
+                },
+            )
+            .await?;
+        Ok(balance)
+    }
+
     pub async fn get_block_at_topoheight(&self, topoheight: u64) -> Result<BlockResponse> {
         trace!("get_block_at_topoheight");
         let block = self

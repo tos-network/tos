@@ -22,6 +22,7 @@ use tos_common::{
         elgamal::DecryptHandle, Address, Hash, Hashable, KeyPair, PrivateKey, PublicKey, Signature,
     },
     network::Network,
+    serializer::Serializer,
     tokio::sync::{broadcast, Mutex, RwLock, Semaphore},
     transaction::{
         builder::{FeeBuilder, TransactionBuilder, TransactionTypeBuilder, UnsignedTransaction},
@@ -275,7 +276,6 @@ impl Wallet {
                 }
             };
             KeyPair::from_private_key(key)
-                .map_err(|_| WalletError::Any(anyhow::anyhow!("Invalid private key")))?
         } else {
             debug!("Generating a new keypair...");
             KeyPair::new()
@@ -408,8 +408,7 @@ impl Wallet {
         let storage = EncryptedStorage::new(storage, &master_key, salt, network)?;
         debug!("Retrieving private key from encrypted storage");
         let private_key = storage.get_private_key()?;
-        let keypair = KeyPair::from_private_key(private_key)
-            .map_err(|_| WalletError::Any(anyhow::anyhow!("Invalid private key")))?;
+        let keypair = KeyPair::from_private_key(private_key);
 
         Ok(Self::new(
             storage,

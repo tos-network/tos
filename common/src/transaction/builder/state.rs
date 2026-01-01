@@ -1,4 +1,8 @@
-use crate::{account::Nonce, crypto::Hash, transaction::Reference};
+use crate::{
+    account::{CiphertextCache, Nonce},
+    crypto::{elgamal::Ciphertext, Hash},
+    transaction::Reference,
+};
 
 use super::FeeHelper;
 
@@ -27,4 +31,24 @@ pub trait AccountState: FeeHelper {
     /// Check if an account is registered (exists) on the blockchain
     /// This is used to validate Energy fee restrictions for new addresses
     fn is_account_registered(&self, key: &crate::crypto::PublicKey) -> Result<bool, Self::Error>;
+}
+
+/// Extended trait for UNO (privacy-preserving) transactions
+/// Provides access to encrypted balance ciphertexts required for ZK proof generation
+pub trait UnoAccountState: AccountState {
+    /// Get the UNO balance ciphertext for a given asset
+    /// Required for generating CommitmentEqProof (proving new balance equals old - spent)
+    fn get_uno_ciphertext(&self, asset: &Hash) -> Result<CiphertextCache, Self::Error>;
+
+    /// Get the plaintext UNO balance amount (decrypted locally by wallet)
+    fn get_uno_balance(&self, asset: &Hash) -> Result<u64, Self::Error>;
+
+    /// Update the UNO balance after a transfer
+    /// Both the plaintext amount and ciphertext must be updated
+    fn update_uno_balance(
+        &mut self,
+        asset: &Hash,
+        new_balance: u64,
+        new_ciphertext: Ciphertext,
+    ) -> Result<(), Self::Error>;
 }

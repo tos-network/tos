@@ -2,9 +2,10 @@ use crate::{error::WalletError, storage::EncryptedStorage};
 use log::trace;
 use std::collections::{HashMap, HashSet};
 use tos_common::{
-    crypto::{Hash, Hashable, PublicKey},
+    account::CiphertextCache,
+    crypto::{elgamal::Ciphertext, Hash, Hashable, PublicKey},
     transaction::{
-        builder::{AccountState, FeeHelper},
+        builder::{AccountState, FeeHelper, UnoAccountState},
         Reference, Transaction,
     },
 };
@@ -19,6 +20,22 @@ pub struct Balance {
 impl Balance {
     pub fn new(amount: u64) -> Self {
         Self { amount }
+    }
+}
+
+/// UNO (privacy) balance container
+/// Holds both the encrypted ciphertext and the decrypted plaintext amount
+#[derive(Debug, Clone)]
+pub struct UnoBalance {
+    /// The encrypted balance ciphertext (for ZK proof generation)
+    pub ciphertext: CiphertextCache,
+    /// The decrypted plaintext amount (known only to wallet owner)
+    pub amount: u64,
+}
+
+impl UnoBalance {
+    pub fn new(ciphertext: CiphertextCache, amount: u64) -> Self {
+        Self { ciphertext, amount }
     }
 }
 
@@ -60,8 +77,10 @@ pub struct TransactionBuilderState {
     inner: EstimateFeesState,
     // If we are on mainnet or not
     mainnet: bool,
-    // Balances of the wallet
+    // Balances of the wallet (plaintext)
     balances: HashMap<Hash, Balance>,
+    // UNO balances of the wallet (encrypted)
+    uno_balances: HashMap<Hash, UnoBalance>,
     // Reference at which the transaction is built
     reference: Reference,
     // Nonce of the transaction
@@ -81,6 +100,7 @@ impl TransactionBuilderState {
             },
             mainnet,
             balances: HashMap::new(),
+            uno_balances: HashMap::new(),
             reference,
             nonce,
             tx_hash_built: None,
@@ -132,6 +152,21 @@ impl TransactionBuilderState {
 
     pub fn add_balance(&mut self, asset: Hash, balance: Balance) {
         self.balances.insert(asset, balance);
+    }
+
+    /// Set all UNO (encrypted) balances
+    pub fn set_uno_balances(&mut self, uno_balances: HashMap<Hash, UnoBalance>) {
+        self.uno_balances = uno_balances;
+    }
+
+    /// Add a single UNO balance
+    pub fn add_uno_balance(&mut self, asset: Hash, balance: UnoBalance) {
+        self.uno_balances.insert(asset, balance);
+    }
+
+    /// Check if UNO balance exists for an asset
+    pub fn has_uno_balance_for(&self, asset: &Hash) -> bool {
+        self.uno_balances.contains_key(asset)
     }
 
     pub fn set_registered_keys(&mut self, registered_keys: HashSet<PublicKey>) {
@@ -221,6 +256,38 @@ impl AccountState for TransactionBuilderState {
     fn is_account_registered(&self, key: &PublicKey) -> Result<bool, Self::Error> {
         // Use the same logic as account_exists for consistency
         Ok(self.inner.registered_keys.contains(key))
+    }
+}
+
+impl UnoAccountState for TransactionBuilderState {
+    fn get_uno_ciphertext(&self, asset: &Hash) -> Result<CiphertextCache, Self::Error> {
+        self.uno_balances
+            .get(asset)
+            .map(|b| b.ciphertext.clone())
+            .ok_or_else(|| WalletError::UnoBalanceNotFound(asset.clone()))
+    }
+
+    fn get_uno_balance(&self, asset: &Hash) -> Result<u64, Self::Error> {
+        self.uno_balances
+            .get(asset)
+            .map(|b| b.amount)
+            .ok_or_else(|| WalletError::UnoBalanceNotFound(asset.clone()))
+    }
+
+    fn update_uno_balance(
+        &mut self,
+        asset: &Hash,
+        new_balance: u64,
+        new_ciphertext: Ciphertext,
+    ) -> Result<(), Self::Error> {
+        self.uno_balances.insert(
+            asset.clone(),
+            UnoBalance {
+                ciphertext: CiphertextCache::Decompressed(new_ciphertext),
+                amount: new_balance,
+            },
+        );
+        Ok(())
     }
 }
 

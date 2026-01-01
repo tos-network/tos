@@ -365,7 +365,7 @@ mod tests {
 
     // Helper functions
     fn create_test_pubkey(bytes: [u8; 32]) -> CompressedPublicKey {
-        use curve25519_dalek::ristretto::CompressedRistretto;
+        use tos_crypto::curve25519_dalek::ristretto::CompressedRistretto;
         CompressedPublicKey::new(CompressedRistretto::from_slice(&bytes).unwrap())
     }
 

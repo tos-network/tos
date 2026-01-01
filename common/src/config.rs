@@ -1,7 +1,16 @@
 use crate::{contract::register_opaque_types, crypto::Hash, static_assert};
 
 pub const VERSION: &str = env!("BUILD_VERSION");
+
+// Native TOS asset (plaintext balances)
 pub const TOS_ASSET: Hash = Hash::zero();
+
+// UNO privacy asset (encrypted balances using Twisted ElGamal)
+// Asset ID: 0x01 (distinct from TOS_ASSET which is 0x00)
+pub const UNO_ASSET: Hash = Hash::new([
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+]);
 
 // ===== NEW ENERGY-BASED FEE MODEL =====
 
@@ -21,6 +30,12 @@ pub const FEE_PER_KB: u64 = 10000;
 pub const FEE_PER_ACCOUNT_CREATION: u64 = 100000;
 pub const FEE_PER_TRANSFER: u64 = 5000;
 pub const FEE_PER_MULTISIG_SIGNATURE: u64 = 500;
+
+// UNO-based fee model constants (privacy transfers)
+pub const UNO_FEE_PER_KB: u64 = 10000;
+pub const UNO_FEE_PER_ACCOUNT_CREATION: u64 = 100000;
+pub const UNO_FEE_PER_TRANSFER: u64 = 5000;
+pub const UNO_FEE_PER_MULTISIG_SIGNATURE: u64 = 500;
 
 // Contracts rules
 // 1 TOS per contract deployed

@@ -9,10 +9,13 @@ use std::{
     collections::{hash_map::Entry, HashMap},
 };
 use tos_common::{
-    account::{Nonce, VersionedBalance, VersionedNonce},
+    account::{Nonce, VersionedBalance, VersionedNonce, VersionedUnoBalance},
     block::{BlockVersion, TopoHeight},
     config::TOS_ASSET,
-    crypto::{elgamal::CompressedPublicKey, Hash, PublicKey},
+    crypto::{
+        elgamal::{Ciphertext, CompressedPublicKey},
+        Hash, PublicKey,
+    },
     transaction::{verify::BlockchainVerificationState, MultiSigPayload, Reference, Transaction},
     utils::format_tos,
     versioned_type::VersionedState,
@@ -70,14 +73,61 @@ impl Echange {
     }
 }
 
+// UNO (encrypted) sender changes
+// This tracks encrypted balance changes for privacy-preserving transactions
+struct UnoEchange {
+    // If we are allowed to use the output balance for verification
+    allow_output_balance: bool,
+    // if the versioned balance below is new for the current topoheight
+    // (used during storage finalization, matches plaintext Echange pattern)
+    #[allow(dead_code)]
+    new_version: bool,
+    // Version balance of the account used for the verification
+    version: VersionedUnoBalance,
+    // Sum of all transactions output (encrypted ciphertext)
+    output_sum: Ciphertext,
+    // If we used the output balance or not
+    output_balance_used: bool,
+}
+
+impl UnoEchange {
+    fn new(allow_output_balance: bool, new_version: bool, version: VersionedUnoBalance) -> Self {
+        Self {
+            allow_output_balance,
+            new_version,
+            version,
+            output_sum: Ciphertext::zero(),
+            output_balance_used: false,
+        }
+    }
+
+    // Get the right balance to use for TX verification
+    // Returns a decompressed Ciphertext for ZK proof operations
+    fn get_balance(&mut self) -> Result<&mut Ciphertext, BlockchainError> {
+        let output = self.output_balance_used || self.allow_output_balance;
+        let (cache, used) = self.version.select_balance(output);
+        if !self.output_balance_used {
+            self.output_balance_used = used;
+        }
+        // Decompress the ciphertext for computation
+        cache.computable().map_err(BlockchainError::from)
+    }
+
+    // Add a change to the account
+    fn add_output_to_sum(&mut self, output: Ciphertext) {
+        self.output_sum += output;
+    }
+}
+
 struct Account<'a> {
     // Account nonce used to verify valid transaction
     nonce: VersionedNonce,
     // Assets ready as source for any transfer/transaction
-    // TODO: they must store also the ciphertext change
     // It will be added by next change at each TX
     // This is necessary to easily build the final user balance
     assets: HashMap<&'a Hash, Echange>,
+    // UNO (encrypted) assets for privacy-preserving transactions
+    uno_assets: HashMap<&'a Hash, UnoEchange>,
     // Multisig configured
     // This is used to verify the validity of the multisig setup
     multisig: Option<(VersionedState, Option<MultiSigPayload>)>,
@@ -92,6 +142,8 @@ pub struct ChainState<'a, S: Storage> {
     environment: &'a Environment,
     // Balances of the receiver accounts
     receiver_balances: HashMap<Cow<'a, PublicKey>, HashMap<Cow<'a, Hash>, VersionedBalance>>,
+    // UNO (encrypted) balances of the receiver accounts
+    receiver_uno_balances: HashMap<Cow<'a, PublicKey>, HashMap<Cow<'a, Hash>, VersionedUnoBalance>>,
     // Sender accounts
     // This is used to verify ZK Proofs and store/update nonces
     accounts: HashMap<&'a PublicKey, Account<'a>>,
@@ -123,6 +175,7 @@ impl<'a, S: Storage> ChainState<'a, S> {
             storage,
             environment,
             receiver_balances: HashMap::new(),
+            receiver_uno_balances: HashMap::new(),
             accounts: HashMap::new(),
             stable_topoheight,
             topoheight,
@@ -262,6 +315,7 @@ impl<'a, S: Storage> ChainState<'a, S> {
             return Ok(Account {
                 nonce: version,
                 assets: HashMap::new(),
+                uno_assets: HashMap::new(),
                 multisig,
             });
         }
@@ -291,6 +345,7 @@ impl<'a, S: Storage> ChainState<'a, S> {
             return Ok(Account {
                 nonce: VersionedNonce::new(0, None), // Default nonce = 0
                 assets: HashMap::new(),
+                uno_assets: HashMap::new(),
                 multisig,
             });
         }
@@ -327,6 +382,7 @@ impl<'a, S: Storage> ChainState<'a, S> {
                 return Ok(Account {
                     nonce: version,
                     assets: HashMap::new(),
+                    uno_assets: HashMap::new(),
                     multisig,
                 });
             }
@@ -358,6 +414,7 @@ impl<'a, S: Storage> ChainState<'a, S> {
             return Ok(Account {
                 nonce: VersionedNonce::new(0, None),
                 assets: HashMap::new(),
+                uno_assets: HashMap::new(),
                 multisig,
             });
         }
@@ -483,6 +540,193 @@ impl<'a, S: Storage> ChainState<'a, S> {
 
         // Increase the total output
         change.add_output_to_sum(new_ct);
+
+        Ok(())
+    }
+
+    // ===== UNO (Privacy Balance) Internal Methods =====
+
+    // Retrieve the UNO receiver balance of an account
+    async fn internal_get_receiver_uno_balance<'b>(
+        &'b mut self,
+        key: Cow<'a, PublicKey>,
+        asset: Cow<'a, Hash>,
+    ) -> Result<&'b mut Ciphertext, BlockchainError> {
+        match self
+            .receiver_uno_balances
+            .entry(key.clone())
+            .or_insert_with(HashMap::new)
+            .entry(asset.clone())
+        {
+            Entry::Occupied(o) => {
+                // Decompress for computation
+                o.into_mut()
+                    .get_mut_balance()
+                    .computable()
+                    .map_err(BlockchainError::from)
+            }
+            Entry::Vacant(e) => {
+                let (version, _) = self
+                    .storage
+                    .get_new_versioned_uno_balance(&key, &asset, self.topoheight)
+                    .await?;
+                // Decompress for computation
+                e.insert(version)
+                    .get_mut_balance()
+                    .computable()
+                    .map_err(BlockchainError::from)
+            }
+        }
+    }
+
+    // Create a UNO echange for a sender account
+    async fn create_sender_uno_echange(
+        storage: &StorageReference<'a, S>,
+        key: &PublicKey,
+        asset: &Hash,
+        topoheight: TopoHeight,
+        reference: &Reference,
+    ) -> Result<UnoEchange, BlockchainError> {
+        // Check if we should use output balance (based on reference topoheight)
+        let allow_output_balance = reference.topoheight < topoheight;
+
+        // Get the versioned UNO balance from storage
+        let (version, new_version) = storage
+            .get_new_versioned_uno_balance(key, asset, topoheight)
+            .await?;
+
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "create_sender_uno_echange: key={}, asset={}, topoheight={}, allow_output={}, new_version={}",
+                key.as_address(storage.is_mainnet()),
+                asset,
+                topoheight,
+                allow_output_balance,
+                new_version
+            );
+        }
+
+        Ok(UnoEchange::new(allow_output_balance, new_version, version))
+    }
+
+    // Retrieve the UNO sender balance of an account for verification
+    async fn internal_get_sender_uno_balance<'b>(
+        &'b mut self,
+        key: &'a PublicKey,
+        asset: &'a Hash,
+        reference: &Reference,
+    ) -> Result<&'b mut Ciphertext, BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "getting sender UNO balance for {} at topoheight {}, reference: {}",
+                key.as_address(self.storage.is_mainnet()),
+                self.topoheight,
+                reference.topoheight
+            );
+        }
+        // First check if this account has received UNO in this block (receiver_uno_balances)
+        // This handles the case where Shield and Unshield are in the same block template
+        let receiver_uno = self
+            .receiver_uno_balances
+            .get(key)
+            .and_then(|assets| assets.get(asset))
+            .map(|v| v.clone());
+
+        match self.accounts.entry(key) {
+            Entry::Occupied(o) => {
+                let account = o.into_mut();
+                match account.uno_assets.entry(asset) {
+                    Entry::Occupied(o) => o.into_mut().get_balance(),
+                    Entry::Vacant(e) => {
+                        // Check receiver_uno_balances first, then storage
+                        let echange = if let Some(receiver_version) = receiver_uno {
+                            if log::log_enabled!(log::Level::Trace) {
+                                trace!(
+                                    "Using receiver UNO balance for sender {} (same block Shield/Unshield)",
+                                    key.as_address(self.storage.is_mainnet())
+                                );
+                            }
+                            // Create UnoEchange from receiver balance
+                            let allow_output_balance = reference.topoheight < self.topoheight;
+                            UnoEchange::new(allow_output_balance, false, receiver_version)
+                        } else {
+                            Self::create_sender_uno_echange(
+                                &self.storage,
+                                key,
+                                asset,
+                                self.topoheight,
+                                reference,
+                            )
+                            .await?
+                        };
+                        e.insert(echange).get_balance()
+                    }
+                }
+            }
+            Entry::Vacant(e) => {
+                // Create a new account for the sender
+                let account = Self::create_sender_account(
+                    key,
+                    &self.storage,
+                    self.topoheight,
+                    &self.receiver_balances,
+                )
+                .await?;
+
+                // Check receiver_uno_balances first, then storage
+                let echange = if let Some(receiver_version) = receiver_uno {
+                    if log::log_enabled!(log::Level::Trace) {
+                        trace!(
+                            "Using receiver UNO balance for new sender account {} (same block Shield/Unshield)",
+                            key.as_address(self.storage.is_mainnet())
+                        );
+                    }
+                    // Create UnoEchange from receiver balance
+                    let allow_output_balance = reference.topoheight < self.topoheight;
+                    UnoEchange::new(allow_output_balance, false, receiver_version)
+                } else {
+                    Self::create_sender_uno_echange(
+                        &self.storage,
+                        key,
+                        asset,
+                        self.topoheight,
+                        reference,
+                    )
+                    .await?
+                };
+
+                e.insert(account)
+                    .uno_assets
+                    .entry(asset)
+                    .or_insert(echange)
+                    .get_balance()
+            }
+        }
+    }
+
+    // Update the UNO output echanges of an account
+    async fn internal_update_sender_uno_echange(
+        &mut self,
+        key: &'a PublicKey,
+        asset: &'a Hash,
+        output_ct: Ciphertext,
+    ) -> Result<(), BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "update sender UNO echange for {}",
+                key.as_address(self.storage.is_mainnet())
+            );
+        }
+        let change = self
+            .accounts
+            .get_mut(key)
+            .and_then(|a| a.uno_assets.get_mut(asset))
+            .ok_or_else(|| {
+                BlockchainError::NoTxSender(key.as_address(self.storage.is_mainnet()))
+            })?;
+
+        // Increase the total output
+        change.add_output_to_sum(output_ct);
 
         Ok(())
     }
@@ -701,6 +945,39 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for ChainS
         output: u64,
     ) -> Result<(), BlockchainError> {
         self.internal_update_sender_echange(account, asset, output)
+            .await
+    }
+
+    // ===== UNO (Privacy Balance) Methods =====
+
+    /// Get the UNO (encrypted) balance for a receiver account
+    async fn get_receiver_uno_balance<'b>(
+        &'b mut self,
+        account: Cow<'a, PublicKey>,
+        asset: Cow<'a, Hash>,
+    ) -> Result<&'b mut Ciphertext, BlockchainError> {
+        self.internal_get_receiver_uno_balance(account, asset).await
+    }
+
+    /// Get the UNO (encrypted) balance used for verification of funds for the sender account
+    async fn get_sender_uno_balance<'b>(
+        &'b mut self,
+        account: &'a PublicKey,
+        asset: &'a Hash,
+        reference: &Reference,
+    ) -> Result<&'b mut Ciphertext, BlockchainError> {
+        self.internal_get_sender_uno_balance(account, asset, reference)
+            .await
+    }
+
+    /// Apply new output ciphertext to a sender's UNO account
+    async fn add_sender_uno_output(
+        &mut self,
+        account: &'a PublicKey,
+        asset: &'a Hash,
+        output: Ciphertext,
+    ) -> Result<(), BlockchainError> {
+        self.internal_update_sender_uno_echange(account, asset, output)
             .await
     }
 

@@ -1,7 +1,7 @@
 use std::ops::{Add, AddAssign, Sub, SubAssign};
 
-use curve25519_dalek::{RistrettoPoint, Scalar};
 use rand::rngs::OsRng;
+use tos_crypto::curve25519_dalek::{RistrettoPoint, Scalar};
 
 use crate::crypto::proofs::{G, PC_GENS};
 
@@ -114,7 +114,7 @@ impl Add<Scalar> for PedersenCommitment {
     type Output = Self;
 
     fn add(self, rhs: Scalar) -> Self {
-        Self(self.0 + (rhs * G))
+        Self(self.0 + (rhs * *G))
     }
 }
 
@@ -122,7 +122,7 @@ impl Add<&Scalar> for PedersenCommitment {
     type Output = Self;
 
     fn add(self, rhs: &Scalar) -> Self {
-        Self(self.0 + (rhs * G))
+        Self(self.0 + (*rhs * *G))
     }
 }
 
@@ -158,13 +158,13 @@ impl AddAssign<&PedersenCommitment> for PedersenCommitment {
 
 impl AddAssign<Scalar> for PedersenCommitment {
     fn add_assign(&mut self, rhs: Scalar) {
-        self.0 += rhs * G;
+        self.0 += rhs * *G;
     }
 }
 
 impl AddAssign<&Scalar> for PedersenCommitment {
     fn add_assign(&mut self, rhs: &Scalar) {
-        self.0 += rhs * G;
+        self.0 += *rhs * *G;
     }
 }
 
@@ -202,7 +202,7 @@ impl Sub<Scalar> for PedersenCommitment {
     type Output = Self;
 
     fn sub(self, rhs: Scalar) -> Self {
-        Self(self.0 - rhs * G)
+        Self(self.0 - rhs * *G)
     }
 }
 
@@ -210,7 +210,7 @@ impl Sub<&Scalar> for PedersenCommitment {
     type Output = Self;
 
     fn sub(self, rhs: &Scalar) -> Self {
-        Self(self.0 - rhs * G)
+        Self(self.0 - *rhs * *G)
     }
 }
 
@@ -246,13 +246,13 @@ impl SubAssign<&PedersenCommitment> for PedersenCommitment {
 
 impl SubAssign<Scalar> for PedersenCommitment {
     fn sub_assign(&mut self, rhs: Scalar) {
-        self.0 -= rhs * G;
+        self.0 -= rhs * *G;
     }
 }
 
 impl SubAssign<&Scalar> for PedersenCommitment {
     fn sub_assign(&mut self, rhs: &Scalar) {
-        self.0 -= rhs * G;
+        self.0 -= *rhs * *G;
     }
 }
 

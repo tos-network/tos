@@ -459,6 +459,10 @@ pub enum BlockchainError {
     InvalidCommitteeThreshold,
     #[error("Cannot delete committee with active children")]
     CommitteeHasChildren,
+
+    // UNO (Privacy Balance) errors
+    #[error("UNO (privacy balance) not implemented yet")]
+    UnoNotImplemented,
 }
 
 impl BlockchainError {
