@@ -76,32 +76,6 @@ pub enum TransactionType {
     UnshieldTransfers(Vec<UnshieldTransferPayload>),
 }
 
-/// Fee type for transaction fees
-///
-/// # Deprecated
-/// This enum is deprecated in favor of Stake 2.0 unified energy model.
-/// All transactions now use energy, with optional TOS auto-burn via `fee_limit`.
-#[deprecated(note = "Use Stake 2.0 energy model with fee_limit instead")]
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-pub enum FeeType {
-    /// Transaction uses TOS for fees (traditional fee model)
-    TOS,
-    /// Transaction uses Energy for fees (only available for Transfer transactions)
-    Energy,
-}
-
-#[allow(deprecated)]
-impl FeeType {
-    /// Check if this fee type is Energy-based
-    pub fn is_energy(&self) -> bool {
-        matches!(self, FeeType::Energy)
-    }
-    /// Check if this fee type is TOS-based
-    pub fn is_tos(&self) -> bool {
-        matches!(self, FeeType::TOS)
-    }
-}
-
 // ============================================================================
 // TRANSACTION RESULT (Stake 2.0)
 // ============================================================================
@@ -152,7 +126,8 @@ impl TransactionResult {
 
     /// Total energy from free + frozen sources (not including auto-burned)
     pub fn total_energy_from_stake(&self) -> u64 {
-        self.free_energy_used.saturating_add(self.frozen_energy_used)
+        self.free_energy_used
+            .saturating_add(self.frozen_energy_used)
     }
 
     /// Energy that was covered by auto-burning TOS
@@ -183,26 +158,6 @@ impl Serializer for TransactionResult {
 
     fn size(&self) -> usize {
         32 // 4 × u64
-    }
-}
-
-impl Serializer for FeeType {
-    fn write(&self, writer: &mut Writer) {
-        let v = match self {
-            FeeType::TOS => 0u8,
-            FeeType::Energy => 1u8,
-        };
-        writer.write_u8(v);
-    }
-    fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
-        match reader.read_u8()? {
-            0 => Ok(FeeType::TOS),
-            1 => Ok(FeeType::Energy),
-            _ => Err(ReaderError::InvalidValue),
-        }
-    }
-    fn size(&self) -> usize {
-        1
     }
 }
 
@@ -340,24 +295,6 @@ impl Transaction {
         self.fee_limit
     }
 
-    /// Get fee (deprecated - use get_fee_limit() instead)
-    /// Returns fee_limit for backward compatibility during Stake 2.0 migration
-    #[deprecated(note = "Use get_fee_limit() for Stake 2.0")]
-    pub fn get_fee(&self) -> u64 {
-        self.fee_limit
-    }
-
-    /// Get fee type (deprecated - Stake 2.0 uses energy-only model)
-    /// Returns a default FeeType::TOS for backward compatibility
-    #[deprecated(note = "Stake 2.0 uses energy-only model, fee_type is deprecated")]
-    #[allow(deprecated)]
-    pub fn get_fee_type(&self) -> &FeeType {
-        // In Stake 2.0, all transactions use energy first
-        // This is a stub for backward compatibility
-        static DEFAULT_FEE_TYPE: FeeType = FeeType::TOS;
-        &DEFAULT_FEE_TYPE
-    }
-
     // Get the nonce used
     pub fn get_nonce(&self) -> Nonce {
         self.nonce
@@ -478,29 +415,35 @@ impl Transaction {
     }
 
     /// Calculate energy cost for this transaction (Stake 2.0)
-    /// All transactions consume energy based on size and outputs
+    ///
+    /// Formula: size_bytes + outputs × ENERGY_COST_TRANSFER_PER_OUTPUT
+    /// - Transfer: size + outputs × 100
+    /// - UNO/Shield transfers: size + outputs × 500 (5x for privacy overhead)
+    /// - Burn: size + 1,000
+    /// - Deploy contract: size + 32,000 + bytecode_size × 10
+    /// - Invoke contract: size (actual cost from execution)
+    /// - Energy operations: 0 (free)
     pub fn calculate_energy_cost(&self) -> u64 {
         use crate::config::{
             ENERGY_COST_BURN, ENERGY_COST_CONTRACT_DEPLOY_BASE,
-            ENERGY_COST_CONTRACT_DEPLOY_PER_BYTE, ENERGY_COST_PER_BYTE, ENERGY_COST_PER_OUTPUT,
+            ENERGY_COST_CONTRACT_DEPLOY_PER_BYTE, ENERGY_COST_TRANSFER_PER_OUTPUT,
         };
 
-        let tx_size = self.size();
-        let base_cost = (tx_size as u64) * ENERGY_COST_PER_BYTE;
+        let base_cost = self.size() as u64;
 
         match &self.data {
             TransactionType::Transfers(transfers) => {
-                base_cost + (transfers.len() as u64) * ENERGY_COST_PER_OUTPUT
+                base_cost + (transfers.len() as u64) * ENERGY_COST_TRANSFER_PER_OUTPUT
             }
             TransactionType::UnoTransfers(transfers) => {
                 // UNO transfers cost more (5x per output)
-                base_cost + (transfers.len() as u64) * ENERGY_COST_PER_OUTPUT * 5
+                base_cost + (transfers.len() as u64) * ENERGY_COST_TRANSFER_PER_OUTPUT * 5
             }
             TransactionType::ShieldTransfers(transfers) => {
-                base_cost + (transfers.len() as u64) * ENERGY_COST_PER_OUTPUT * 5
+                base_cost + (transfers.len() as u64) * ENERGY_COST_TRANSFER_PER_OUTPUT * 5
             }
             TransactionType::UnshieldTransfers(transfers) => {
-                base_cost + (transfers.len() as u64) * ENERGY_COST_PER_OUTPUT * 5
+                base_cost + (transfers.len() as u64) * ENERGY_COST_TRANSFER_PER_OUTPUT * 5
             }
             TransactionType::Burn(_) => base_cost + ENERGY_COST_BURN,
             TransactionType::DeployContract(payload) => {
@@ -523,8 +466,8 @@ impl Transaction {
 
     /// Get additional energy cost for creating new accounts
     pub fn account_creation_energy_cost(new_accounts: usize) -> u64 {
-        use crate::config::ENERGY_COST_ACCOUNT_CREATION;
-        (new_accounts as u64) * ENERGY_COST_ACCOUNT_CREATION
+        use crate::config::ENERGY_COST_NEW_ACCOUNT;
+        (new_accounts as u64) * ENERGY_COST_NEW_ACCOUNT
     }
 
     /// Get the bytes that were used for signing this transaction

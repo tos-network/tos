@@ -2,9 +2,6 @@
 //! Not really a 'builder' per say
 //! Intended to be used when creating a transaction before making the associated proofs and signature
 
-// Allow deprecated fee_type usage during Stake 2.0 migration
-#![allow(deprecated)]
-
 mod fee;
 mod payload;
 mod state;
@@ -12,7 +9,8 @@ mod unsigned;
 
 pub use fee::{FeeBuilder, FeeHelper};
 pub use payload::{
-    ShieldTransferBuilder, TransferBuilder, UnoTransferBuilder, UnshieldTransferBuilder,
+    EnergyOperationType, ShieldTransferBuilder, TransferBuilder, UnoTransferBuilder,
+    UnshieldTransferBuilder,
 };
 pub use state::{AccountState, UnoAccountState};
 pub use unsigned::UnsignedTransaction;
@@ -21,9 +19,9 @@ use super::{
     extra_data::{ExtraDataType, PlaintextData, UnknownExtraDataFormat},
     payload::{ShieldTransferPayload, UnoTransferPayload, UnshieldTransferPayload},
     BatchReferralRewardPayload, BindReferrerPayload, BurnPayload, ContractDeposit,
-    DeployContractPayload, EnergyPayload, FeeType, InvokeConstructorPayload, InvokeContractPayload,
-    MultiSigPayload, Role, SourceCommitment, Transaction, TransactionType, TransferPayload,
-    TxVersion, EXTRA_DATA_LIMIT_SIZE, EXTRA_DATA_LIMIT_SUM_SIZE, MAX_MULTISIG_PARTICIPANTS,
+    DeployContractPayload, InvokeConstructorPayload, InvokeContractPayload, MultiSigPayload, Role,
+    SourceCommitment, Transaction, TransactionType, TransferPayload, TxVersion,
+    EXTRA_DATA_LIMIT_SIZE, EXTRA_DATA_LIMIT_SUM_SIZE, MAX_MULTISIG_PARTICIPANTS,
     MAX_TRANSFER_COUNT,
 };
 use crate::ai_mining::AIMiningPayload;
@@ -41,7 +39,7 @@ use crate::{
         Hash, ProtocolTranscript, HASH_SIZE, SIGNATURE_SIZE,
     },
     serializer::Serializer,
-    utils::{calculate_energy_fee, calculate_tx_fee, calculate_uno_tx_fee},
+    utils::{calculate_tx_fee, calculate_uno_tx_fee},
 };
 use indexmap::{IndexMap, IndexSet};
 use serde::{Deserialize, Serialize};
@@ -99,10 +97,6 @@ pub enum GenerationError<T> {
     InvalidModule,
     #[error("Configured max gas is above the network limit")]
     MaxGasReached,
-    #[error("Energy fee type can only be used with Transfer transactions")]
-    InvalidEnergyFeeType,
-    #[error("Energy fee type cannot be used for transfers to new addresses")]
-    InvalidEnergyFeeForNewAddress,
     #[error("UNO transfers must use UNO_ASSET")]
     InvalidUnoAsset,
 }
@@ -137,8 +131,6 @@ pub struct TransactionBuilder {
     required_thresholds: Option<u8>,
     data: TransactionTypeBuilder,
     fee_builder: FeeBuilder,
-    /// Optional fee type (TOS or Energy). If None, use default logic.
-    fee_type: Option<super::FeeType>,
 }
 
 impl TransactionBuilder {
@@ -157,27 +149,12 @@ impl TransactionBuilder {
             required_thresholds,
             data,
             fee_builder,
-            fee_type: None,
         }
     }
-    /// Set the fee type for this transaction
-    pub fn with_fee_type(mut self, fee_type: super::FeeType) -> Self {
-        self.fee_type = Some(fee_type);
-        self
-    }
 
-    /// Create a transaction builder with energy-based fees (fee = 0)
-    /// Energy can only be used for Transfer transactions to provide free TOS and other token transfers
-    pub fn with_energy_fees(mut self) -> Self {
-        self.fee_builder = FeeBuilder::Value(0);
-        self.fee_type = Some(FeeType::Energy);
-        self
-    }
-
-    /// Create a transaction builder with TOS-based fees
-    pub fn with_tos_fees(mut self, fee: u64) -> Self {
-        self.fee_builder = FeeBuilder::Value(fee);
-        self.fee_type = Some(FeeType::TOS);
+    /// Set the fee limit (max TOS willing to burn if energy insufficient)
+    pub fn with_fee_limit(mut self, fee_limit: u64) -> Self {
+        self.fee_builder = FeeBuilder::Value(fee_limit);
         self
     }
 
@@ -191,10 +168,8 @@ impl TransactionBuilder {
         + self.source.size()
         // Transaction type byte
         + 1
-        // Fee u64
+        // Fee limit u64 (Stake 2.0: fee_type removed, only fee_limit remains)
         + 8
-        // Fee type byte (TOS or Energy)
-        + 1
         // Nonce u64
         + 8
         // Reference (hash, topo)
@@ -315,25 +290,7 @@ impl TransactionBuilder {
             }
             TransactionTypeBuilder::Energy(payload) => {
                 // Convert EnergyBuilder to EnergyPayload for size calculation
-                let energy_payload = match payload {
-                    EnergyBuilder {
-                        amount,
-                        is_freeze: true,
-                        freeze_duration: Some(duration),
-                    } => EnergyPayload::FreezeTos {
-                        amount: *amount,
-                        duration: *duration,
-                    },
-                    EnergyBuilder {
-                        amount,
-                        is_freeze: false,
-                        freeze_duration: None,
-                    } => EnergyPayload::UnfreezeTos { amount: *amount },
-                    _ => {
-                        // This should not happen due to validation, but handle gracefully
-                        EnergyPayload::UnfreezeTos { amount: 0 }
-                    }
-                };
+                let energy_payload = payload.build();
 
                 // Payload size
                 size += energy_payload.size();
@@ -462,48 +419,21 @@ impl TransactionBuilder {
                         (0, 0)
                     };
 
-                // Check if we should use energy fees for transfer transactions
-                let expected_fee = if let Some(ref fee_type) = self.fee_type {
-                    if *fee_type == FeeType::Energy
-                        && matches!(self.data, TransactionTypeBuilder::Transfers(_))
-                    {
-                        // Use energy fee calculation for transfer transactions
-                        calculate_energy_fee(size, transfers, new_addresses)
-                    } else {
-                        // Use regular fee calculation (TOS or UNO/Unshield)
-                        // UNO and Unshield transfers have ZK proofs and need higher fees
-                        let fee_calc =
-                            if matches!(self.data, TransactionTypeBuilder::UnoTransfers(_))
-                                || matches!(self.data, TransactionTypeBuilder::UnshieldTransfers(_))
-                            {
-                                calculate_uno_tx_fee
-                            } else {
-                                calculate_tx_fee
-                            };
-                        fee_calc(
-                            size,
-                            transfers,
-                            new_addresses,
-                            self.required_thresholds.unwrap_or(0) as usize,
-                        )
-                    }
+                // Stake 2.0: Calculate fee based on transaction type
+                // UNO and Unshield transfers have ZK proofs and need higher fees
+                let fee_calc = if matches!(self.data, TransactionTypeBuilder::UnoTransfers(_))
+                    || matches!(self.data, TransactionTypeBuilder::UnshieldTransfers(_))
+                {
+                    calculate_uno_tx_fee
                 } else {
-                    // Default to TOS fees (or UNO fees for UNO/Unshield transfers)
-                    // UNO and Unshield transfers have ZK proofs and need higher fees
-                    let fee_calc = if matches!(self.data, TransactionTypeBuilder::UnoTransfers(_))
-                        || matches!(self.data, TransactionTypeBuilder::UnshieldTransfers(_))
-                    {
-                        calculate_uno_tx_fee
-                    } else {
-                        calculate_tx_fee
-                    };
-                    fee_calc(
-                        size,
-                        transfers,
-                        new_addresses,
-                        self.required_thresholds.unwrap_or(0) as usize,
-                    )
+                    calculate_tx_fee
                 };
+                let expected_fee = fee_calc(
+                    size,
+                    transfers,
+                    new_addresses,
+                    self.required_thresholds.unwrap_or(0) as usize,
+                );
 
                 match self.fee_builder {
                     // SAFE: f64 used for client-side fee estimation only
@@ -519,18 +449,14 @@ impl TransactionBuilder {
     }
 
     /// Compute the full cost of the transaction
-    pub fn get_transaction_cost(&self, fee: u64, asset: &Hash) -> u64 {
+    /// In Stake 2.0, fee_limit is the max TOS willing to burn
+    /// Actual fee deduction happens during execution based on energy consumption
+    pub fn get_transaction_cost(&self, fee_limit: u64, asset: &Hash) -> u64 {
         let mut cost = 0;
 
-        // Check if we should apply fees to TOS balance
-        let should_apply_fees = if let Some(ref fee_type) = self.fee_type {
-            // For Energy fees, we don't deduct from TOS balance
-            // Energy is consumed separately from the account's energy resource
-            *fee_type == FeeType::TOS
-        } else {
-            // Default to TOS fees
-            true
-        };
+        // Stake 2.0: fee_limit is added to cost for TOS asset
+        // This represents the max possible cost (actual may be less)
+        let should_apply_fees = true;
 
         let fee_asset = if matches!(self.data, TransactionTypeBuilder::UnoTransfers(_)) {
             &UNO_ASSET
@@ -540,7 +466,7 @@ impl TransactionBuilder {
 
         if *asset == *fee_asset && should_apply_fees {
             // Fees are applied to the fee asset (TOS or UNO).
-            cost += fee;
+            cost += fee_limit;
         }
 
         match &self.data {
@@ -591,7 +517,10 @@ impl TransactionBuilder {
             }
             TransactionTypeBuilder::Energy(payload) => {
                 if *asset == TOS_ASSET {
-                    cost += payload.amount;
+                    // Only FreezeTos costs TOS (adds to frozen balance)
+                    if let EnergyOperationType::FreezeTos = payload.operation {
+                        cost += payload.amount.unwrap_or(0);
+                    }
                 }
             }
             TransactionTypeBuilder::AIMining(payload) => {
@@ -682,30 +611,7 @@ impl TransactionBuilder {
     where
         <B as FeeHelper>::Error: for<'a> std::convert::From<&'a str>,
     {
-        // Validate that Energy fee type can only be used with Transfer transactions
-        if let Some(fee_type) = &self.fee_type {
-            if *fee_type == FeeType::Energy
-                && !matches!(self.data, TransactionTypeBuilder::Transfers(_))
-            {
-                return Err(GenerationError::InvalidEnergyFeeType);
-            }
-
-            // Validate that Energy fee type cannot be used for transfers to new addresses
-            if *fee_type == FeeType::Energy {
-                if let TransactionTypeBuilder::Transfers(transfers) = &self.data {
-                    for transfer in transfers {
-                        if !state
-                            .is_account_registered(transfer.destination.get_public_key())
-                            .map_err(GenerationError::State)?
-                        {
-                            return Err(GenerationError::InvalidEnergyFeeForNewAddress);
-                        }
-                    }
-                }
-            }
-        }
-
-        // Compute the fees
+        // Stake 2.0: Compute the fee_limit (max TOS willing to burn)
         let fee = self.estimate_fees(state)?;
 
         // Get the nonce
@@ -733,9 +639,6 @@ impl TransactionBuilder {
                 .update_account_balance(asset, new_balance)
                 .map_err(GenerationError::State)?;
         }
-
-        // Determine fee type
-        let fee_type = self.fee_type.clone().unwrap_or(FeeType::TOS);
 
         // Build transaction data based on type
         let data = match self.data {
@@ -889,27 +792,12 @@ impl TransactionBuilder {
                 })
             }
             TransactionTypeBuilder::Energy(ref payload) => {
-                let energy_payload = match payload {
-                    EnergyBuilder {
-                        amount,
-                        is_freeze: true,
-                        freeze_duration: Some(duration),
-                    } => EnergyPayload::FreezeTos {
-                        amount: *amount,
-                        duration: *duration,
-                    },
-                    EnergyBuilder {
-                        amount,
-                        is_freeze: false,
-                        freeze_duration: None,
-                    } => EnergyPayload::UnfreezeTos { amount: *amount },
-                    _ => {
-                        return Err(GenerationError::State(
-                            "Invalid EnergyBuilder configuration".into(),
-                        ));
-                    }
-                };
-                TransactionType::Energy(energy_payload)
+                // Validate the builder configuration
+                // SAFE: validate() returns &'static str, which implements From for B::Error
+                if let Err(e) = payload.validate() {
+                    return Err(GenerationError::State(e.into()));
+                }
+                TransactionType::Energy(payload.build())
             }
             TransactionTypeBuilder::AIMining(ref payload) => {
                 TransactionType::AIMining(payload.clone())
@@ -1029,7 +917,6 @@ impl TransactionBuilder {
 
         let reference = state.get_reference();
         let used_assets = self.data.used_assets();
-        let fee_type = self.fee_type.clone().unwrap_or(FeeType::TOS);
 
         // Create transfer commitments
         let transfers_commitments: Vec<UnoTransferWithCommitment> = match &self.data {
@@ -1366,7 +1253,6 @@ impl TransactionBuilder {
             .collect::<Result<Vec<_>, GenerationError<B::Error>>>()?;
 
         let data = TransactionType::ShieldTransfers(transfer_payloads);
-        let fee_type = FeeType::TOS;
 
         let unsigned_tx = UnsignedTransaction::new(
             self.version,
@@ -1423,7 +1309,6 @@ impl TransactionBuilder {
 
         // Fees are paid from TOS balance (plaintext)
         let fee = self.estimate_fees(state)?;
-        let fee_type = FeeType::TOS;
 
         // Check TOS balance for fees
         let current_tos_balance = state
@@ -1758,103 +1643,4 @@ impl UnoTransferWithCommitment {
 /// ```
 pub fn compute_contract_address(deployer: &CompressedPublicKey, bytecode: &[u8]) -> Hash {
     crate::crypto::compute_deterministic_contract_address(deployer, bytecode)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_energy_fee_type_validation() {
-        use super::super::FeeType;
-
-        // Test valid case: Energy fee with Transfer transaction
-        let transfer_builder = TransactionTypeBuilder::Transfers(vec![]);
-        let energy_fee = FeeType::Energy;
-
-        // This should not cause an error during construction
-        let _ = TransactionBuilder::new(
-            TxVersion::T0,
-            0, // chain_id: 0 for tests
-            CompressedPublicKey::new(
-                tos_crypto::curve25519_dalek::ristretto::CompressedRistretto::default(),
-            ),
-            None,
-            transfer_builder,
-            FeeBuilder::Value(0),
-        )
-        .with_fee_type(energy_fee.clone());
-
-        // Test invalid case: Energy fee with non-Transfer transaction
-        let burn_builder = TransactionTypeBuilder::Burn(BurnPayload {
-            asset: Hash::zero(),
-            amount: 100,
-        });
-
-        // This should cause an error when building
-        let _builder = TransactionBuilder::new(
-            TxVersion::T0,
-            0, // chain_id: 0 for tests
-            CompressedPublicKey::new(
-                tos_crypto::curve25519_dalek::ristretto::CompressedRistretto::default(),
-            ),
-            None,
-            burn_builder.clone(),
-            FeeBuilder::Value(0),
-        )
-        .with_fee_type(energy_fee.clone());
-
-        // The validation should happen during build_unsigned, but we'll test the logic directly
-        // by checking that the fee_type validation is in place
-        assert!(matches!(energy_fee, FeeType::Energy));
-        assert!(matches!(burn_builder, TransactionTypeBuilder::Burn(_)));
-
-        // Verify that the validation logic is correct
-        let fee_type = Some(FeeType::Energy);
-        let is_transfer = matches!(burn_builder, TransactionTypeBuilder::Transfers(_));
-        let should_fail = fee_type == Some(FeeType::Energy) && !is_transfer;
-
-        assert!(
-            should_fail,
-            "Energy fee type should only be allowed with Transfer transactions"
-        );
-    }
-
-    #[test]
-    fn test_energy_fee_for_new_address_validation() {
-        use super::super::FeeType;
-
-        // Test that Energy fee type cannot be used for transfers to new addresses
-        let energy_fee = FeeType::Energy;
-
-        // Create a transfer to a new address (non-existent account)
-        // We'll use a simple test that validates the logic without complex type construction
-        let transfer_to_new_address = TransactionTypeBuilder::Transfers(vec![]);
-
-        // This should cause an error when building due to new address validation
-        let _builder = TransactionBuilder::new(
-            TxVersion::T0,
-            0, // chain_id: 0 for tests
-            CompressedPublicKey::new(
-                tos_crypto::curve25519_dalek::ristretto::CompressedRistretto::default(),
-            ),
-            None,
-            transfer_to_new_address.clone(),
-            FeeBuilder::Value(0),
-        )
-        .with_fee_type(energy_fee.clone());
-
-        // Verify that the validation logic is correct
-        let fee_type = Some(FeeType::Energy);
-        let is_transfer = matches!(
-            transfer_to_new_address,
-            TransactionTypeBuilder::Transfers(_)
-        );
-        let should_fail = fee_type == Some(FeeType::Energy) && is_transfer;
-
-        assert!(
-            should_fail,
-            "Energy fee type should not be allowed for transfers to new addresses"
-        );
-    }
 }

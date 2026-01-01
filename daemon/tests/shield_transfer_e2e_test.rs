@@ -19,8 +19,7 @@ use tos_common::{
     },
     serializer::{Reader, Serializer},
     transaction::{
-        FeeType, Reference, ShieldTransferPayload, Transaction, TransactionType, TransferPayload,
-        TxVersion,
+        Reference, ShieldTransferPayload, Transaction, TransactionType, TransferPayload, TxVersion,
     },
 };
 
@@ -172,7 +171,6 @@ fn test_transaction_with_shield_transfers_hashable() {
         sender.get_public_key().compress(),
         tx_type,
         1000,
-        FeeType::TOS,
         0,
         reference,
         None,
@@ -346,7 +344,6 @@ fn test_plaintext_transaction_distinct_from_shield() {
         keypair.get_public_key().compress(),
         TransactionType::Transfers(vec![transfer]),
         1000,
-        FeeType::TOS,
         0,
         reference,
         None,
@@ -386,7 +383,6 @@ fn test_shield_full_transaction_serialization() {
         sender.get_public_key().compress(),
         tx_type,
         1000,
-        FeeType::TOS,
         42,
         reference.clone(),
         None,
@@ -400,7 +396,7 @@ fn test_shield_full_transaction_serialization() {
 
     assert_eq!(tx.get_version(), restored.get_version());
     assert_eq!(tx.get_source(), restored.get_source());
-    assert_eq!(tx.get_fee(), restored.get_fee());
+    assert_eq!(tx.get_fee_limit(), restored.get_fee_limit());
     assert_eq!(tx.get_nonce(), restored.get_nonce());
     assert_eq!(tx.hash(), restored.hash());
 

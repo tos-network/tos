@@ -5,7 +5,7 @@ use std::{borrow::Cow, collections::HashMap, sync::Arc};
 use async_trait::async_trait;
 use indexmap::{IndexMap, IndexSet};
 use tos_common::{
-    account::{EnergyResource, Nonce},
+    account::{AccountEnergy, Nonce},
     block::{Block, BlockHeader, BlockVersion, EXTRA_NONCE_SIZE},
     config::TOS_ASSET,
     contract::{
@@ -501,17 +501,17 @@ impl<'a> BlockchainApplyState<'a, DummyContractProvider, TestError> for TestChai
         Err(TestError::Unsupported)
     }
 
-    async fn get_energy_resource(
+    async fn get_account_energy(
         &mut self,
         _account: &'a PublicKey,
-    ) -> Result<Option<EnergyResource>, TestError> {
+    ) -> Result<Option<AccountEnergy>, TestError> {
         Ok(None)
     }
 
-    async fn set_energy_resource(
+    async fn set_account_energy(
         &mut self,
         _account: &'a PublicKey,
-        _energy_resource: EnergyResource,
+        _energy: AccountEnergy,
     ) -> Result<(), TestError> {
         Ok(())
     }

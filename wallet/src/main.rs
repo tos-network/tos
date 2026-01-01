@@ -1892,25 +1892,12 @@ async fn transfer(manager: &CommandManager, mut args: ArgumentManager) -> Result
 
     let amount = from_coin(amount, asset_data.inner.get_decimals()).context("Invalid amount")?;
 
-    // Read fee_type parameter
-    let fee_type = if args.has_argument("fee_type") {
-        let fee_type_str = args.get_value("fee_type")?.to_string_value()?;
-        match fee_type_str.to_lowercase().as_str() {
-            "tos" => Some(tos_common::transaction::FeeType::TOS),
-            "energy" => Some(tos_common::transaction::FeeType::Energy),
-            _ => {
-                manager.error("Invalid fee_type. Use 'tos' or 'energy'");
-                return Ok(());
-            }
-        }
-    } else {
-        None
-    };
-
-    // Validate fee_type for energy
-    if fee_type.as_ref() == Some(&tos_common::transaction::FeeType::Energy) && asset != TOS_ASSET {
-        manager.error("Energy fees can only be used for TOS transfers");
-        return Ok(());
+    // Stake 2.0: fee_type parameter is deprecated, all transactions use energy model
+    // fee_limit is used for auto-burn fallback when energy is insufficient
+    if args.has_argument("fee_type") {
+        manager.message(
+            "Note: fee_type is deprecated in Stake 2.0. All transactions use energy model.",
+        );
     }
 
     manager.message(format!(
@@ -1954,25 +1941,17 @@ async fn transfer(manager: &CommandManager, mut args: ArgumentManager) -> Result
         .await
         .context("Error while creating transaction state")?;
 
-    // Create transaction with fee type
+    // Create transaction with Stake 2.0 energy model
     let tx_version = storage
         .get_tx_version()
         .await
         .context("Error while getting tx version")?;
 
-    // Create a custom fee builder if energy fees are requested
-    let fee_builder = if let Some(ref ft) = fee_type {
-        if *ft == tos_common::transaction::FeeType::Energy {
-            FeeBuilder::Value(0) // Energy fees are 0 TOS
-        } else {
-            FeeBuilder::default()
-        }
-    } else {
-        FeeBuilder::default()
-    };
+    // Stake 2.0: Use default fee builder (energy with auto-burn fallback)
+    let fee_builder = FeeBuilder::default();
 
-    // Create transaction builder with fee type
-    let mut builder = tos_common::transaction::builder::TransactionBuilder::new(
+    // Create transaction builder
+    let builder = tos_common::transaction::builder::TransactionBuilder::new(
         tx_version,
         wallet.get_network().chain_id() as u8,
         wallet.get_public_key().clone(),
@@ -1981,23 +1960,9 @@ async fn transfer(manager: &CommandManager, mut args: ArgumentManager) -> Result
         fee_builder,
     );
 
-    // Set fee type if specified
-    if let Some(ref ft) = fee_type {
-        builder = builder.with_fee_type(ft.clone());
-    }
-
     let tx = match builder.build(&mut state, wallet.get_keypair()) {
         Ok(tx) => {
-            manager.message(format!(
-                "Transaction created with {} fees",
-                match fee_type
-                    .as_ref()
-                    .unwrap_or(&tos_common::transaction::FeeType::TOS)
-                {
-                    tos_common::transaction::FeeType::TOS => "TOS",
-                    tos_common::transaction::FeeType::Energy => "Energy",
-                }
-            ));
+            manager.message("Transaction created with Stake 2.0 energy model".to_string());
             tx
         }
         Err(e) => {
@@ -2045,29 +2010,14 @@ async fn transfer_all(
         return Err(CommandError::MissingArgument("asset".to_string()));
     };
 
-    // Read fee_type parameter
-    let fee_type = if args.has_argument("fee_type") {
-        let fee_type_str = args.get_value("fee_type")?.to_string_value()?;
-        match fee_type_str.to_lowercase().as_str() {
-            "tos" => Some(tos_common::transaction::FeeType::TOS),
-            "energy" => Some(tos_common::transaction::FeeType::Energy),
-            _ => {
-                manager.error("Invalid fee_type. Use 'tos' or 'energy'");
-                return Ok(());
-            }
-        }
-    } else {
-        None
-    };
-
-    // Validate fee_type for energy
-    if fee_type.as_ref() == Some(&tos_common::transaction::FeeType::Energy) && asset != TOS_ASSET {
-        manager.error("Energy fees can only be used for TOS transfers");
-        return Ok(());
+    // Stake 2.0: fee_type parameter is deprecated, all transactions use energy model
+    if args.has_argument("fee_type") {
+        manager.message(
+            "Note: fee_type is deprecated in Stake 2.0. All transactions use energy model.",
+        );
     }
 
     // Query balance, asset data, and multisig from daemon API (stateless)
-
     let (mut amount, asset_data, multisig) = {
         let network_handler = wallet.get_network_handler().lock().await;
         let handler = network_handler.as_ref().ok_or_else(|| {
@@ -2110,48 +2060,26 @@ async fn transfer_all(
     };
     let tx_type = TransactionTypeBuilder::Transfers(vec![transfer]);
 
-    // Estimate fees based on fee type
-    let estimated_fees = if let Some(ref ft) = fee_type {
-        if *ft == tos_common::transaction::FeeType::Energy {
-            // For energy fees, we don't deduct from TOS balance
-            0
-        } else {
-            wallet
-                .estimate_fees(tx_type.clone(), FeeBuilder::default())
-                .await
-                .context("Error while estimating fees")?
-        }
-    } else {
-        wallet
-            .estimate_fees(tx_type.clone(), FeeBuilder::default())
-            .await
-            .context("Error while estimating fees")?
-    };
+    // Stake 2.0: Estimate fees using energy model
+    let estimated_fees = wallet
+        .estimate_fees(tx_type.clone(), FeeBuilder::default())
+        .await
+        .context("Error while estimating fees")?;
 
-    if asset == TOS_ASSET && fee_type.as_ref() != Some(&tos_common::transaction::FeeType::Energy) {
+    // For TOS transfers, deduct fees from amount
+    if asset == TOS_ASSET {
         amount = amount
             .checked_sub(estimated_fees)
             .context("Insufficient balance to pay fees")?;
     }
 
-    let fee_display = if let Some(ref ft) = fee_type {
-        match ft {
-            tos_common::transaction::FeeType::TOS => {
-                format!("TOS fees: {}", format_tos(estimated_fees))
-            }
-            tos_common::transaction::FeeType::Energy => "Energy fees: 0 TOS".to_string(),
-        }
-    } else {
-        format!("TOS fees: {}", format_tos(estimated_fees))
-    };
-
     manager.message(format!(
-        "Sending {} of {} ({}) to {} ({})",
+        "Sending {} of {} ({}) to {} (fee_limit: {} TOS)",
         format_coin(amount, asset_data.inner.get_decimals()),
         asset_data.inner.get_name(),
         asset,
         address,
-        fee_display
+        format_tos(estimated_fees)
     ));
 
     manager.message("Building transaction...");
@@ -2180,33 +2108,24 @@ async fn transfer_all(
     }
 
     let tx = {
-        // Create transaction with appropriate fee type
+        // Create transaction with Stake 2.0 energy model
         let storage = wallet.get_storage().read().await;
         let mut state = wallet
             .create_transaction_state_with_storage(&storage, &tx_type, &FeeBuilder::default(), None)
             .await
             .context("Error while creating transaction state")?;
 
-        // Create transaction with fee type
         let tx_version = storage
             .get_tx_version()
             .await
             .context("Error while getting tx version")?;
         let threshold = None;
 
-        // Create a custom fee builder if energy fees are requested
-        let fee_builder = if let Some(ref ft) = fee_type {
-            if *ft == tos_common::transaction::FeeType::Energy {
-                FeeBuilder::Value(0) // Energy fees are 0 TOS
-            } else {
-                FeeBuilder::default()
-            }
-        } else {
-            FeeBuilder::default()
-        };
+        // Stake 2.0: Use default fee builder (energy with auto-burn fallback)
+        let fee_builder = FeeBuilder::default();
 
-        // Create transaction builder with fee type
-        let mut builder = tos_common::transaction::builder::TransactionBuilder::new(
+        // Create transaction builder
+        let builder = tos_common::transaction::builder::TransactionBuilder::new(
             tx_version,
             wallet.get_network().chain_id() as u8,
             wallet.get_public_key().clone(),
@@ -2215,23 +2134,9 @@ async fn transfer_all(
             fee_builder,
         );
 
-        // Set fee type if specified
-        if let Some(ref ft) = fee_type {
-            builder = builder.with_fee_type(ft.clone());
-        }
-
         match builder.build(&mut state, wallet.get_keypair()) {
             Ok(tx) => {
-                manager.message(format!(
-                    "Transaction created with {} fees",
-                    match fee_type
-                        .as_ref()
-                        .unwrap_or(&tos_common::transaction::FeeType::TOS)
-                    {
-                        tos_common::transaction::FeeType::TOS => "TOS",
-                        tos_common::transaction::FeeType::Energy => "Energy",
-                    }
-                ));
+                manager.message("Transaction created with Stake 2.0 energy model".to_string());
                 tx
             }
             Err(e) => {
@@ -3098,11 +3003,32 @@ async fn history(
                     format!("Contract call: {} (entry {})", contract, entry_id)
                 }
                 AccountHistoryType::DeployContract => "Contract deployed".to_string(),
-                AccountHistoryType::FreezeTos { amount, duration } => {
-                    format!("Freeze: {} TOS for {}", format_tos(*amount), duration)
+                AccountHistoryType::FreezeTos { amount } => {
+                    format!("Freeze: {} TOS (Stake 2.0)", format_tos(*amount))
                 }
                 AccountHistoryType::UnfreezeTos { amount } => {
                     format!("Unfreeze: {} TOS", format_tos(*amount))
+                }
+                AccountHistoryType::WithdrawExpireUnfreeze { amount } => {
+                    format!("Withdraw expired: {} TOS (Stake 2.0)", format_tos(*amount))
+                }
+                AccountHistoryType::CancelAllUnfreeze {
+                    withdrawn,
+                    cancelled,
+                } => {
+                    format!(
+                        "Cancel unfreeze: withdrawn {} / cancelled {} TOS",
+                        format_tos(*withdrawn),
+                        format_tos(*cancelled)
+                    )
+                }
+                AccountHistoryType::DelegateResource {
+                    receiver, amount, ..
+                } => {
+                    format!("Delegate: {} TOS to {}", format_tos(*amount), receiver)
+                }
+                AccountHistoryType::UndelegateResource { receiver, amount } => {
+                    format!("Undelegate: {} TOS from {}", format_tos(*amount), receiver)
                 }
                 AccountHistoryType::BindReferrer { referrer } => {
                     format!("Bind referrer: {}", referrer)
@@ -3149,7 +3075,7 @@ async fn transaction(
                 .as_address(wallet.get_network().is_mainnet())
         ));
         manager.message(format!("Nonce: {}", tx.get_nonce()));
-        manager.message(format!("Fee: {} TOS", format_tos(tx.get_fee())));
+        manager.message(format!("Fee: {} TOS", format_tos(tx.get_fee_limit())));
         manager.message(format!("Reference: {}", tx.get_reference()));
 
         // Display transaction type details
@@ -3198,13 +3124,40 @@ async fn transaction(
             TransactionType::Energy(payload) => {
                 use tos_common::transaction::EnergyPayload;
                 match payload {
-                    EnergyPayload::FreezeTos { amount, duration } => {
-                        manager.message("Type: FreezeTos".to_string());
+                    EnergyPayload::FreezeTos { amount } => {
+                        manager.message("Type: FreezeTos (Stake 2.0)".to_string());
                         manager.message(format!("  Amount: {} TOS", format_tos(*amount)));
-                        manager.message(format!("  Duration: {:?}", duration));
                     }
                     EnergyPayload::UnfreezeTos { amount } => {
-                        manager.message("Type: UnfreezeTos".to_string());
+                        manager.message("Type: UnfreezeTos (Stake 2.0)".to_string());
+                        manager.message(format!("  Amount: {} TOS", format_tos(*amount)));
+                    }
+                    EnergyPayload::WithdrawExpireUnfreeze => {
+                        manager.message("Type: WithdrawExpireUnfreeze (Stake 2.0)".to_string());
+                    }
+                    EnergyPayload::CancelAllUnfreeze => {
+                        manager.message("Type: CancelAllUnfreeze (Stake 2.0)".to_string());
+                    }
+                    EnergyPayload::DelegateResource {
+                        receiver,
+                        amount,
+                        lock,
+                        lock_period,
+                    } => {
+                        manager.message("Type: DelegateResource (Stake 2.0)".to_string());
+                        manager.message(format!(
+                            "  Receiver: {}",
+                            receiver.as_address(wallet.get_network().is_mainnet())
+                        ));
+                        manager.message(format!("  Amount: {} TOS", format_tos(*amount)));
+                        manager.message(format!("  Lock: {} (period: {} days)", lock, lock_period));
+                    }
+                    EnergyPayload::UndelegateResource { receiver, amount } => {
+                        manager.message("Type: UndelegateResource (Stake 2.0)".to_string());
+                        manager.message(format!(
+                            "  Receiver: {}",
+                            receiver.as_address(wallet.get_network().is_mainnet())
+                        ));
                         manager.message(format!("  Amount: {} TOS", format_tos(*amount)));
                     }
                 }
@@ -3443,11 +3396,31 @@ async fn export_transactions_csv(
                     format!("InvokeContract,contract:{} entry:{}", contract, entry_id)
                 }
                 AccountHistoryType::DeployContract => "DeployContract,".to_string(),
-                AccountHistoryType::FreezeTos { amount, duration } => {
-                    format!("FreezeTos,amount:{} duration:{}", amount, duration)
+                AccountHistoryType::FreezeTos { amount } => {
+                    format!("FreezeTos,amount:{}", amount)
                 }
                 AccountHistoryType::UnfreezeTos { amount } => {
                     format!("UnfreezeTos,amount:{}", amount)
+                }
+                AccountHistoryType::WithdrawExpireUnfreeze { amount } => {
+                    format!("WithdrawExpireUnfreeze,amount:{}", amount)
+                }
+                AccountHistoryType::CancelAllUnfreeze {
+                    withdrawn,
+                    cancelled,
+                } => {
+                    format!(
+                        "CancelAllUnfreeze,withdrawn:{},cancelled:{}",
+                        withdrawn, cancelled
+                    )
+                }
+                AccountHistoryType::DelegateResource {
+                    receiver, amount, ..
+                } => {
+                    format!("DelegateResource,receiver:{},amount:{}", receiver, amount)
+                }
+                AccountHistoryType::UndelegateResource { receiver, amount } => {
+                    format!("UndelegateResource,receiver:{},amount:{}", receiver, amount)
                 }
                 AccountHistoryType::BindReferrer { referrer } => {
                     format!("BindReferrer,referrer:{}", referrer)
@@ -5074,7 +5047,8 @@ async fn broadcast_tx(wallet: &Wallet, manager: &CommandManager, tx: Transaction
     }
 }
 
-/// Freeze TOS to get energy with duration-based rewards
+/// Freeze TOS to gain proportional energy (Stake 2.0)
+/// Energy is calculated as: (frozen_balance / total_weight) × 18.4B
 async fn freeze_tos(
     manager: &CommandManager,
     mut args: ArgumentManager,
@@ -5084,39 +5058,26 @@ async fn freeze_tos(
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
 
-    // Get amount and duration from arguments (batch mode only)
+    // Get amount from arguments (batch mode only)
+    // Note: Stake 2.0 doesn't use duration - energy is proportional to frozen amount
     let amount_str = if args.has_argument("amount") {
         args.get_value("amount")?.to_string_value()?
     } else {
         return Err(CommandError::MissingArgument("amount".to_string()));
     };
 
-    let duration_num = if args.has_argument("duration") {
-        args.get_value("duration")?.to_number()?
-    } else {
-        return Err(CommandError::MissingArgument("duration".to_string()));
-    };
+    // Warn if duration is provided (deprecated in Stake 2.0)
+    if args.has_argument("duration") {
+        manager.message("Note: 'duration' parameter is deprecated in Stake 2.0. Energy is now proportional to frozen amount.");
+    }
 
     // Parse amount
     let amount = from_coin(&amount_str, 8).context("Invalid amount")?;
 
-    // Parse duration (3-90 days)
-    let duration = if (3..=90).contains(&duration_num) {
-        tos_common::account::FreezeDuration::new(duration_num as u32)
-            .map_err(|e| CommandError::InvalidArgument(e.to_string()))?
-    } else {
-        return Err(CommandError::InvalidArgument(
-            "Duration must be between 3 and 90 days".to_string(),
-        ));
-    };
-
-    // Create freeze transaction
-    let _payload = tos_common::transaction::EnergyPayload::FreezeTos { amount, duration };
-
     manager.message("Building transaction...");
 
-    // Create energy transaction builder with validated parameters
-    let energy_builder = EnergyBuilder::freeze_tos(amount, duration);
+    // Stake 2.0: Create energy transaction builder (no duration needed)
+    let energy_builder = EnergyBuilder::freeze_tos(amount);
 
     // Validate the builder configuration before creating transaction
     if let Err(e) = energy_builder.validate() {
@@ -5138,15 +5099,10 @@ async fn freeze_tos(
     let hash = tx.hash();
     manager.message(format!("Freeze transaction created: {}", hash));
     manager.message(format!("Amount: {} TOS", format_coin(amount, 8)));
-    manager.message(format!("Duration: {:?}", duration));
-    manager.message(format!(
-        "Reward multiplier: {}x",
-        duration.reward_multiplier()
-    ));
+    manager.message("Energy model: Proportional (Stake 2.0)".to_string());
 
-    // Note: Energy state is now tracked by daemon, not local storage
-    // The actual energy gained will be calculated by daemon when the transaction is confirmed
-    manager.message("Note: Energy will be credited after transaction confirmation.");
+    // Stake 2.0: Energy is proportional to (frozen_balance / total_weight) × 18.4B
+    manager.message("Note: Energy will be credited proportionally after confirmation.");
 
     // Broadcast the transaction
     broadcast_tx(wallet, manager, tx).await;
@@ -5213,7 +5169,7 @@ async fn unfreeze_tos(
     Ok(())
 }
 
-/// Show energy information and freeze records
+/// Show energy information (Stake 2.0 model)
 async fn energy_info(manager: &CommandManager, _args: ArgumentManager) -> Result<(), CommandError> {
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
@@ -5241,71 +5197,62 @@ async fn energy_info(manager: &CommandManager, _args: ArgumentManager) -> Result
                 let energy_result: tos_common::api::daemon::GetEnergyResult =
                     serde_json::from_value(result).context("Failed to parse energy result")?;
 
-                manager.message(format!("Energy Information for {}:", address));
+                manager.message(format!("Energy Information for {} (Stake 2.0):", address));
+
+                // Stake 2.0: Frozen balances
                 manager.message(format!(
                     "  Frozen TOS: {} TOS",
-                    format_tos(energy_result.frozen_tos)
+                    format_tos(energy_result.frozen_balance)
                 ));
                 manager.message(format!(
-                    "  Total Energy: {} units",
-                    energy_result.total_energy
+                    "  Delegated to others: {} TOS",
+                    format_tos(energy_result.delegated_frozen_balance)
                 ));
                 manager.message(format!(
-                    "  Used Energy: {} units",
-                    energy_result.used_energy
+                    "  Acquired from others: {} TOS",
+                    format_tos(energy_result.acquired_delegated_balance)
+                ));
+
+                // Stake 2.0: Energy metrics
+                manager.message(format!(
+                    "  Energy Limit: {} units",
+                    energy_result.energy_limit
+                ));
+                manager.message(format!(
+                    "  Energy Usage: {} units",
+                    energy_result.energy_usage
                 ));
                 manager.message(format!(
                     "  Available Energy: {} units",
                     energy_result.available_energy
                 ));
+
+                // Free energy quota
                 manager.message(format!(
-                    "  Last Update: topoheight {}",
-                    energy_result.last_update
+                    "  Free Energy: {}/{} units",
+                    energy_result.free_energy_available, energy_result.free_energy_limit
                 ));
 
-                if !energy_result.freeze_records.is_empty() {
-                    manager.message("  Freeze Records:");
-                    for (i, record) in energy_result.freeze_records.iter().enumerate() {
+                // Stake 2.0: Unfreezing queue (14-day delay)
+                if !energy_result.unfreezing_list.is_empty() {
+                    manager.message(format!(
+                        "  Unfreezing Queue ({} entries, {} TOS total):",
+                        energy_result.unfreezing_list.len(),
+                        format_tos(energy_result.total_unfreezing)
+                    ));
+                    for (i, record) in energy_result.unfreezing_list.iter().enumerate() {
+                        let status = if record.can_withdraw {
+                            "✅ Ready"
+                        } else {
+                            "🔒 Pending"
+                        };
                         manager.message(format!(
-                            "    Record {}: {} TOS for {} days",
+                            "    Entry {}: {} TOS (expires: {}) {}",
                             i + 1,
                             format_tos(record.amount),
-                            record.duration
+                            record.expire_time,
+                            status
                         ));
-                        manager.message(format!(
-                            "      Energy Gained: {} units",
-                            record.energy_gained
-                        ));
-                        manager.message(format!(
-                            "      Freeze Time: topoheight {}",
-                            record.freeze_topoheight
-                        ));
-                        manager.message(format!(
-                            "      Unlock Time: topoheight {}",
-                            record.unlock_topoheight
-                        ));
-
-                        if record.can_unlock {
-                            manager.message("      Status: ✅ Unlockable".to_string());
-                        } else {
-                            // Use network-specific blocks per day for accurate display
-                            // Mainnet/Testnet: 86400 blocks/day, Devnet: 10 blocks/day
-                            let blocks_per_day =
-                                wallet.get_network().freeze_duration_multiplier() as f64;
-                            let remaining_days = record.remaining_blocks as f64 / blocks_per_day;
-                            if wallet.get_network().is_devnet() {
-                                // Devnet: show in blocks for clarity
-                                manager.message(format!(
-                                    "      Status: 🔒 Locked ({} blocks remaining, ~{:.1} devnet-days)",
-                                    record.remaining_blocks, remaining_days
-                                ));
-                            } else {
-                                manager.message(format!(
-                                    "      Status: 🔒 Locked ({:.2} days remaining)",
-                                    remaining_days
-                                ));
-                            }
-                        }
                     }
                 }
             }

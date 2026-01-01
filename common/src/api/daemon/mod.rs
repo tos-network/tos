@@ -488,11 +488,28 @@ pub enum AccountHistoryType {
     // Contract hash is already stored
     // by the parent struct
     DeployContract,
+    // Stake 2.0 Energy operations
     FreezeTos {
         amount: u64,
-        duration: String,
     },
     UnfreezeTos {
+        amount: u64,
+    },
+    WithdrawExpireUnfreeze {
+        amount: u64,
+    },
+    CancelAllUnfreeze {
+        withdrawn: u64,
+        cancelled: u64,
+    },
+    DelegateResource {
+        receiver: Address,
+        amount: u64,
+        lock: bool,
+        lock_period: u32,
+    },
+    UndelegateResource {
+        receiver: Address,
         amount: u64,
     },
     BindReferrer {
@@ -1347,25 +1364,42 @@ pub struct GetEnergyParams<'a> {
     pub address: Cow<'a, Address>,
 }
 
+/// Get energy result for Stake 2.0 model
 #[derive(Serialize, Deserialize)]
 pub struct GetEnergyResult {
-    pub frozen_tos: u64,
-    pub total_energy: u64,
-    pub used_energy: u64,
+    /// Total frozen TOS (own)
+    pub frozen_balance: u64,
+    /// Frozen TOS delegated to others
+    pub delegated_frozen_balance: u64,
+    /// Frozen TOS received from others via delegation
+    pub acquired_delegated_balance: u64,
+    /// Proportional energy limit based on frozen balance
+    pub energy_limit: u64,
+    /// Current energy usage (decays over 24h)
+    pub energy_usage: u64,
+    /// Available energy (limit - decayed usage)
     pub available_energy: u64,
-    pub last_update: u64,
-    pub freeze_records: Vec<FreezeRecordInfo>,
+    /// Free quota limit (1,500/day)
+    pub free_energy_limit: u64,
+    /// Free quota usage
+    pub free_energy_usage: u64,
+    /// Available free energy
+    pub free_energy_available: u64,
+    /// Pending unfreeze operations
+    pub unfreezing_list: Vec<UnfreezingInfo>,
+    /// Total amount in unfreezing queue
+    pub total_unfreezing: u64,
 }
 
+/// Unfreezing record info for Stake 2.0
 #[derive(Serialize, Deserialize)]
-pub struct FreezeRecordInfo {
+pub struct UnfreezingInfo {
+    /// Amount being unfrozen
     pub amount: u64,
-    pub duration: String,
-    pub freeze_topoheight: u64,
-    pub unlock_topoheight: u64,
-    pub energy_gained: u64,
-    pub can_unlock: bool,
-    pub remaining_blocks: u64,
+    /// Timestamp (ms) when this becomes withdrawable
+    pub expire_time: u64,
+    /// Whether this can be withdrawn now
+    pub can_withdraw: bool,
 }
 
 #[derive(Serialize, Deserialize)]

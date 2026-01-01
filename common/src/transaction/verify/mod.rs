@@ -1,5 +1,4 @@
-// Allow deprecated fee/fee_type usage during Stake 2.0 migration
-#![allow(deprecated)]
+// Transaction verification module
 
 mod contract;
 mod error;
@@ -21,7 +20,6 @@ use tos_kernel::ModuleValidator;
 
 use super::{payload::EnergyPayload, ContractDeposit, Role, Transaction, TransactionType};
 use crate::{
-    account::EnergyResource,
     config::{BURN_PER_CONTRACT, MAX_GAS_USAGE_PER_TX, TOS_ASSET, UNO_ASSET},
     contract::ContractProvider,
     crypto::{
@@ -155,7 +153,7 @@ impl Transaction {
 
         // Fees are applied to the UNO asset for privacy-preserving transfers
         if *asset == UNO_ASSET {
-            output += tos_crypto::curve25519_dalek::Scalar::from(self.get_fee());
+            output += tos_crypto::curve25519_dalek::Scalar::from(self.get_fee_limit());
         }
 
         // Sum up all UNO transfers for this asset
@@ -418,7 +416,7 @@ impl Transaction {
                     .map_err(|err| VerificationError::ModuleError(format!("{err:#}")))?;
             }
             TransactionType::Energy(payload) => match payload {
-                EnergyPayload::FreezeTos { amount, duration } => {
+                EnergyPayload::FreezeTos { amount } => {
                     if *amount == 0 {
                         return Err(VerificationError::AnyError(anyhow!(
                             "Freeze amount must be greater than zero"
@@ -434,12 +432,6 @@ impl Transaction {
                     if *amount < crate::config::MIN_FREEZE_TOS_AMOUNT {
                         return Err(VerificationError::AnyError(anyhow!(
                             "Freeze amount must be at least 1 TOS"
-                        )));
-                    }
-
-                    if !duration.is_valid() {
-                        return Err(VerificationError::AnyError(anyhow!(
-                            "Freeze duration must be between 3 and 180 days"
                         )));
                     }
                 }
@@ -459,6 +451,32 @@ impl Transaction {
                     if *amount < crate::config::MIN_UNFREEZE_TOS_AMOUNT {
                         return Err(VerificationError::AnyError(anyhow!(
                             "Unfreeze amount must be at least 1 TOS"
+                        )));
+                    }
+                }
+                EnergyPayload::WithdrawExpireUnfreeze | EnergyPayload::CancelAllUnfreeze => {
+                    // No additional validation needed
+                }
+                EnergyPayload::DelegateResource {
+                    amount,
+                    lock_period,
+                    ..
+                } => {
+                    if *amount == 0 {
+                        return Err(VerificationError::AnyError(anyhow!(
+                            "Delegate amount must be greater than zero"
+                        )));
+                    }
+                    if *lock_period > crate::config::MAX_DELEGATE_LOCK_DAYS {
+                        return Err(VerificationError::AnyError(anyhow!(
+                            "Lock period cannot exceed 365 days"
+                        )));
+                    }
+                }
+                EnergyPayload::UndelegateResource { amount, .. } => {
+                    if *amount == 0 {
+                        return Err(VerificationError::AnyError(anyhow!(
+                            "Undelegate amount must be greater than zero"
                         )));
                     }
                 }
@@ -697,14 +715,19 @@ impl Transaction {
             }
             TransactionType::Energy(payload) => {
                 match payload {
-                    EnergyPayload::FreezeTos { amount, .. } => {
+                    EnergyPayload::FreezeTos { amount } => {
+                        // FreezeTos spends TOS to add to frozen balance
                         let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
                         *current = current
                             .checked_add(*amount)
                             .ok_or(VerificationError::Overflow)?;
                     }
-                    EnergyPayload::UnfreezeTos { .. } => {
-                        // Unfreeze doesn't spend, it releases frozen funds
+                    EnergyPayload::UnfreezeTos { .. }
+                    | EnergyPayload::WithdrawExpireUnfreeze
+                    | EnergyPayload::CancelAllUnfreeze
+                    | EnergyPayload::DelegateResource { .. }
+                    | EnergyPayload::UndelegateResource { .. } => {
+                        // These operations don't spend TOS directly
                     }
                 }
             }
@@ -752,13 +775,12 @@ impl Transaction {
             }
         }
 
-        // Add fee to TOS spending (unless using energy fee)
-        if !self.get_fee_type().is_energy() {
-            let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
-            *current = current
-                .checked_add(self.get_fee())
-                .ok_or(VerificationError::Overflow)?;
-        }
+        // Energy model: fee_limit is the max TOS burned when energy is insufficient
+        // Add fee_limit to TOS spending for balance verification
+        let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+        *current = current
+            .checked_add(self.get_fee_limit())
+            .ok_or(VerificationError::Overflow)?;
 
         // Verify sender has sufficient balance for each asset
         // CRITICAL: Mutate balance during verification (like old encrypted balance code)
@@ -952,12 +974,8 @@ impl Transaction {
             .map_err(|err| VerificationError::Proof(err.into()))?;
 
         // Prepare transcript for proof verification
-        let mut transcript = Self::prepare_transcript(
-            self.version,
-            &self.source,
-            self.get_fee_limit(),
-            self.nonce,
-        );
+        let mut transcript =
+            Self::prepare_transcript(self.version, &self.source, self.get_fee_limit(), self.nonce);
 
         // Verify signature
         let bytes = self.get_signing_bytes();
@@ -1230,12 +1248,8 @@ impl Transaction {
             .map_err(|err| VerificationError::Proof(err.into()))?;
 
         // Prepare transcript for proof verification
-        let mut transcript = Self::prepare_transcript(
-            self.version,
-            &self.source,
-            self.get_fee_limit(),
-            self.nonce,
-        );
+        let mut transcript =
+            Self::prepare_transcript(self.version, &self.source, self.get_fee_limit(), self.nonce);
 
         // Verify signature
         let bytes = self.get_signing_bytes();
@@ -1415,24 +1429,8 @@ impl Transaction {
             return Err(VerificationError::InvalidFormat);
         }
 
-        // Validate that Energy fee type can only be used with Transfer transactions
-        if self.get_fee_type().is_energy() {
-            if !matches!(self.data, TransactionType::Transfers(_)) {
-                return Err(VerificationError::InvalidFormat);
-            }
-
-            // Validate that Energy fee type cannot be used for transfers to new addresses
-            if let TransactionType::Transfers(transfers) = &self.data {
-                for transfer in transfers {
-                    // Try to get the account nonce to check if account exists
-                    // If account doesn't exist, this will fail with AccountNotFound error
-                    let _nonce = state
-                        .get_account_nonce(transfer.get_destination())
-                        .await
-                        .map_err(|_| VerificationError::InvalidFormat)?;
-                }
-            }
-        }
+        // All transactions use the Energy model (Stake 2.0)
+        // No special validation needed for fee types
 
         trace!("Pre-verifying transaction on state");
         state
@@ -1500,7 +1498,7 @@ impl Transaction {
                 }
             }
             TransactionType::Burn(payload) => {
-                let fee = self.get_fee();
+                let fee = self.get_fee_limit();
                 let amount = payload.amount;
 
                 if amount == 0 {
@@ -1939,34 +1937,36 @@ impl Transaction {
             TransactionType::Energy(payload) => {
                 if log::log_enabled!(log::Level::Debug) {
                     debug!(
-                        "Energy transaction verification - payload: {:?}, fee: {}, nonce: {}",
-                        payload, self.get_fee(), self.nonce
+                        "Energy transaction verification - payload: {:?}, fee_limit: {}, nonce: {}",
+                        payload,
+                        self.get_fee_limit(),
+                        self.nonce
                     );
                 }
             }
             TransactionType::AIMining(payload) => {
                 if log::log_enabled!(log::Level::Debug) {
                     debug!(
-                        "AI Mining transaction verification - payload: {:?}, fee: {}, nonce: {}",
-                        payload, self.get_fee(), self.nonce
+                        "AI Mining transaction verification - payload: {:?}, fee_limit: {}, nonce: {}",
+                        payload, self.get_fee_limit(), self.nonce
                     );
                 }
             }
             TransactionType::BindReferrer(payload) => {
                 if log::log_enabled!(log::Level::Debug) {
                     debug!(
-                        "BindReferrer transaction verification - referrer: {:?}, fee: {}, nonce: {}",
-                        payload.get_referrer(), self.get_fee(), self.nonce
+                        "BindReferrer transaction verification - referrer: {:?}, fee_limit: {}, nonce: {}",
+                        payload.get_referrer(), self.get_fee_limit(), self.nonce
                     );
                 }
             }
             TransactionType::BatchReferralReward(payload) => {
                 if log::log_enabled!(log::Level::Debug) {
                     debug!(
-                        "BatchReferralReward verification - levels: {}, total_amount: {}, fee: {}",
+                        "BatchReferralReward verification - levels: {}, total_amount: {}, fee_limit: {}",
                         payload.get_levels(),
                         payload.get_total_amount(),
-                        self.get_fee()
+                        self.get_fee_limit()
                     );
                 }
             }
@@ -2057,14 +2057,19 @@ impl Transaction {
             }
             TransactionType::Energy(payload) => {
                 match payload {
-                    EnergyPayload::FreezeTos { amount, .. } => {
+                    EnergyPayload::FreezeTos { amount } => {
+                        // FreezeTos spends TOS to add to frozen balance
                         let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
                         *current = current
                             .checked_add(*amount)
                             .ok_or(VerificationError::Overflow)?;
                     }
-                    EnergyPayload::UnfreezeTos { .. } => {
-                        // Unfreeze doesn't spend, it releases frozen funds
+                    EnergyPayload::UnfreezeTos { .. }
+                    | EnergyPayload::WithdrawExpireUnfreeze
+                    | EnergyPayload::CancelAllUnfreeze
+                    | EnergyPayload::DelegateResource { .. }
+                    | EnergyPayload::UndelegateResource { .. } => {
+                        // These operations don't spend TOS directly
                     }
                 }
             }
@@ -2114,13 +2119,12 @@ impl Transaction {
             }
         };
 
-        // Add fee to TOS spending (unless using energy fee)
-        if !self.get_fee_type().is_energy() {
-            let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
-            *current = current
-                .checked_add(self.get_fee())
-                .ok_or(VerificationError::Overflow)?;
-        }
+        // Energy model: fee_limit is the max TOS burned when energy is insufficient
+        // Add fee_limit to TOS spending for balance verification
+        let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+        *current = current
+            .checked_add(self.get_fee_limit())
+            .ok_or(VerificationError::Overflow)?;
 
         // Verify sender has sufficient balance for each asset
         // CRITICAL: Mutate balance during verification (like old encrypted balance code)
@@ -2428,15 +2432,19 @@ impl Transaction {
             }
             TransactionType::Energy(payload) => {
                 match payload {
-                    EnergyPayload::FreezeTos { amount, .. } => {
+                    EnergyPayload::FreezeTos { amount } => {
+                        // FreezeTos spends TOS to add to frozen balance
                         let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
                         *current = current
                             .checked_add(*amount)
                             .ok_or(VerificationError::Overflow)?;
                     }
-                    EnergyPayload::UnfreezeTos { .. } => {
-                        // Unfreeze doesn't spend, it releases frozen funds
-                        // Instead it will be added back to sender balance below
+                    EnergyPayload::UnfreezeTos { .. }
+                    | EnergyPayload::WithdrawExpireUnfreeze
+                    | EnergyPayload::CancelAllUnfreeze
+                    | EnergyPayload::DelegateResource { .. }
+                    | EnergyPayload::UndelegateResource { .. } => {
+                        // These operations don't spend TOS directly
                     }
                 }
             }
@@ -2486,19 +2494,18 @@ impl Transaction {
             }
         };
 
-        // Add fee to TOS spending (unless using energy fee)
-        if !self.get_fee_type().is_energy() {
-            let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
-            *current = current
-                .checked_add(self.get_fee())
-                .ok_or(VerificationError::Overflow)?;
+        // Energy model: fee_limit is the max TOS burned when energy is insufficient
+        // Add fee_limit to TOS spending for balance verification
+        let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+        *current = current
+            .checked_add(self.get_fee_limit())
+            .ok_or(VerificationError::Overflow)?;
 
-            // Add fee to gas fee counter
-            state
-                .add_gas_fee(self.get_fee())
-                .await
-                .map_err(VerificationError::State)?;
-        }
+        // Add fee_limit to gas fee counter for block reward calculation
+        state
+            .add_gas_fee(self.get_fee_limit())
+            .await
+            .map_err(VerificationError::State)?;
 
         // Track sender outputs for final balance calculation
         // Note: Sender balance was already mutated during verification (pre_verify/verify_dynamic_parts)
@@ -2588,43 +2595,10 @@ impl Transaction {
                 .map_err(VerificationError::State)?;
         }
 
-        // Handle energy consumption if this transaction uses energy for fees
-        if self.get_fee_type().is_energy() {
-            // Only transfer transactions can use energy fees
-            if let TransactionType::Transfers(_) = &self.data {
-                let energy_cost = self.calculate_energy_cost();
-
-                // Get user's energy resource
-                let energy_resource = state
-                    .get_energy_resource(&self.source)
-                    .await
-                    .map_err(VerificationError::State)?;
-
-                if let Some(mut energy_resource) = energy_resource {
-                    // Check if user has enough energy
-                    if !energy_resource.has_enough_energy(energy_cost) {
-                        return Err(VerificationError::InsufficientEnergy(energy_cost));
-                    }
-
-                    // Consume energy
-                    energy_resource
-                        .consume_energy(energy_cost)
-                        .map_err(|_| VerificationError::InsufficientEnergy(energy_cost))?;
-
-                    // Update energy resource in state
-                    state
-                        .set_energy_resource(&self.source, energy_resource)
-                        .await
-                        .map_err(VerificationError::State)?;
-
-                    if log::log_enabled!(log::Level::Debug) {
-                        debug!("Consumed {energy_cost} energy for transaction {tx_hash}");
-                    }
-                } else {
-                    return Err(VerificationError::InsufficientEnergy(energy_cost));
-                }
-            }
-        }
+        // Stake 2.0: Energy consumption is handled in apply() using EnergyResourceManager
+        // The fee_limit is reserved during balance verification; actual energy consumption
+        // happens at block apply time with proper global energy weight calculation
+        // See: EnergyResourceManager::consume_transaction_energy()
 
         // Apply receiver balances
         match &self.data {
@@ -2729,71 +2703,49 @@ impl Transaction {
                 }
             }
             TransactionType::Energy(payload) => {
-                // Handle energy operations (freeze/unfreeze TOS)
+                // Handle Stake 2.0 energy operations
+                // TODO: Implement full Stake 2.0 energy operations in daemon apply phase
+                // For now, just log the operations - actual state changes will be in daemon
                 match payload {
-                    EnergyPayload::FreezeTos { amount, duration } => {
-                        // Get current energy resource for the account
-                        let energy_resource = state
-                            .get_energy_resource(&self.source)
-                            .await
-                            .map_err(VerificationError::State)?;
-
-                        let mut energy_resource =
-                            energy_resource.unwrap_or_else(EnergyResource::new);
-
-                        // Freeze TOS for energy - get topoheight from the blockchain state
-                        let topoheight = state.get_block().get_height(); // BlockDAG uses height
-                                                                         // Use network-aware freeze duration (Devnet uses accelerated timing)
-                        let network = state.get_network();
-                        energy_resource.freeze_tos_for_energy_with_network(
-                            *amount, *duration, topoheight, &network,
-                        );
-
-                        // Update energy resource in state
-                        state
-                            .set_energy_resource(&self.source, energy_resource)
-                            .await
-                            .map_err(VerificationError::State)?;
-
+                    EnergyPayload::FreezeTos { amount } => {
                         if log::log_enabled!(log::Level::Debug) {
-                            debug!("FreezeTos applied: {} TOS frozen for {} duration, energy gained: {} units",
-                                   amount, duration.name(), (*amount / crate::config::COIN_VALUE) * duration.reward_multiplier());
+                            debug!("FreezeTos: {} TOS to be frozen (Stake 2.0)", amount);
                         }
                     }
                     EnergyPayload::UnfreezeTos { amount } => {
-                        // Get current energy resource for the account
-                        let energy_resource = state
-                            .get_energy_resource(&self.source)
-                            .await
-                            .map_err(VerificationError::State)?;
-
-                        if let Some(mut energy_resource) = energy_resource {
-                            // Unfreeze TOS - get topoheight from the blockchain state
-                            let topoheight = state.get_block().get_height(); // BlockDAG uses height
-                            energy_resource
-                                .unfreeze_tos(*amount, topoheight)
-                                .map_err(|_| {
-                                    VerificationError::AnyError(anyhow::anyhow!(
-                                        "Invalid energy operation"
-                                    ))
-                                })?;
-
-                            // Update energy resource in state
-                            state
-                                .set_energy_resource(&self.source, energy_resource)
-                                .await
-                                .map_err(VerificationError::State)?;
-
-                            // NOTE: Balance refund is done in verify phase (verify_dynamic_parts/pre_verify)
-                            // to keep mempool state consistent. Do NOT add balance here to avoid double-refund.
-
-                            if log::log_enabled!(log::Level::Debug) {
-                                debug!("UnfreezeTos applied: {amount} TOS unfrozen (balance already refunded in verify phase)");
-                            }
-                        } else {
-                            return Err(VerificationError::AnyError(anyhow::anyhow!(
-                                "Invalid energy operation"
-                            )));
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!(
+                                "UnfreezeTos: {} TOS added to unfreezing queue (14-day delay)",
+                                amount
+                            );
+                        }
+                    }
+                    EnergyPayload::WithdrawExpireUnfreeze => {
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("WithdrawExpireUnfreeze: Withdrawing expired unfreeze entries");
+                        }
+                    }
+                    EnergyPayload::CancelAllUnfreeze => {
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("CancelAllUnfreeze: Cancelling pending unfreeze, returning to frozen");
+                        }
+                    }
+                    EnergyPayload::DelegateResource {
+                        receiver,
+                        amount,
+                        lock,
+                        lock_period,
+                    } => {
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!(
+                                "DelegateResource: {} TOS to {:?}, lock={}, period={} days",
+                                amount, receiver, lock, lock_period
+                            );
+                        }
+                    }
+                    EnergyPayload::UndelegateResource { receiver, amount } => {
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("UndelegateResource: {} TOS from {:?}", amount, receiver);
                         }
                     }
                 }
@@ -3831,14 +3783,19 @@ impl Transaction {
             }
             TransactionType::Energy(payload) => {
                 match payload {
-                    EnergyPayload::FreezeTos { amount, .. } => {
+                    EnergyPayload::FreezeTos { amount } => {
+                        // FreezeTos spends TOS to add to frozen balance
                         let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
                         *current = current
                             .checked_add(*amount)
                             .ok_or(VerificationError::Overflow)?;
                     }
-                    EnergyPayload::UnfreezeTos { .. } => {
-                        // Unfreeze doesn't spend, it releases frozen funds
+                    EnergyPayload::UnfreezeTos { .. }
+                    | EnergyPayload::WithdrawExpireUnfreeze
+                    | EnergyPayload::CancelAllUnfreeze
+                    | EnergyPayload::DelegateResource { .. }
+                    | EnergyPayload::UndelegateResource { .. } => {
+                        // These operations don't spend TOS directly
                     }
                 }
             }
@@ -3888,13 +3845,12 @@ impl Transaction {
             }
         };
 
-        // Add fee to TOS spending (unless using energy fee)
-        if !self.get_fee_type().is_energy() {
-            let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
-            *current = current
-                .checked_add(self.get_fee())
-                .ok_or(VerificationError::Overflow)?;
-        }
+        // Energy model: fee_limit is the max TOS burned when energy is insufficient
+        // Add fee_limit to TOS spending for balance verification
+        let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+        *current = current
+            .checked_add(self.get_fee_limit())
+            .ok_or(VerificationError::Overflow)?;
 
         // Deduct spending from sender balance
         // This matches BLOCKDAG's behavior where balance deduction happens before apply()

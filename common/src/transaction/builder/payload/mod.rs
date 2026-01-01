@@ -1,5 +1,4 @@
 use crate::{
-    account::FreezeDuration,
     api::DataElement,
     crypto::{elgamal::CompressedPublicKey, Address, Hash},
 };
@@ -166,99 +165,182 @@ pub struct DeployContractInvokeBuilder {
     pub deposits: IndexMap<Hash, ContractDepositBuilder>,
 }
 
-/// Builder for energy-related transactions (FreezeTos/UnfreezeTos)
+/// Energy operation type for Stake 2.0
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub enum EnergyOperationType {
+    /// Freeze TOS to gain proportional energy
+    FreezeTos,
+    /// Start 14-day unfreeze queue
+    UnfreezeTos,
+    /// Withdraw expired unfreeze entries
+    WithdrawExpireUnfreeze,
+    /// Cancel all pending unfreeze
+    CancelAllUnfreeze,
+    /// Delegate energy to another account
+    DelegateResource,
+    /// Undelegate energy
+    UndelegateResource,
+}
+
+/// Builder for energy-related transactions (Stake 2.0)
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct EnergyBuilder {
-    /// Amount of TOS to freeze or unfreeze
-    pub amount: u64,
-    /// Whether this is a freeze operation (true) or unfreeze operation (false)
-    pub is_freeze: bool,
-    /// Freeze duration for freeze operations (3, 7, or 14 days)
-    /// This affects the reward multiplier: 1.0x, 1.1x, or 1.2x respectively
-    /// Only used when is_freeze is true
+    /// Type of energy operation
+    pub operation: EnergyOperationType,
+    /// Amount of TOS (for freeze/unfreeze/delegate/undelegate)
     #[serde(default)]
-    pub freeze_duration: Option<FreezeDuration>,
+    pub amount: Option<u64>,
+    /// Receiver for delegation operations
+    #[serde(default)]
+    pub receiver: Option<CompressedPublicKey>,
+    /// Lock delegation for a period
+    #[serde(default)]
+    pub lock: bool,
+    /// Lock period in days (0-365)
+    #[serde(default)]
+    pub lock_period: u32,
 }
 
 impl EnergyBuilder {
-    /// Create a new freeze TOS builder with specified duration
-    pub fn freeze_tos(amount: u64, duration: FreezeDuration) -> Self {
+    /// Create a new freeze TOS builder
+    pub fn freeze_tos(amount: u64) -> Self {
         Self {
-            amount,
-            is_freeze: true,
-            freeze_duration: Some(duration),
+            operation: EnergyOperationType::FreezeTos,
+            amount: Some(amount),
+            receiver: None,
+            lock: false,
+            lock_period: 0,
         }
     }
 
     /// Create a new unfreeze TOS builder
     pub fn unfreeze_tos(amount: u64) -> Self {
         Self {
-            amount,
-            is_freeze: false,
-            freeze_duration: None,
+            operation: EnergyOperationType::UnfreezeTos,
+            amount: Some(amount),
+            receiver: None,
+            lock: false,
+            lock_period: 0,
         }
     }
 
-    /// Get the freeze duration for this operation
-    pub fn get_duration(&self) -> Option<&FreezeDuration> {
-        self.freeze_duration.as_ref()
+    /// Create a withdraw expired unfreeze builder
+    pub fn withdraw_expire_unfreeze() -> Self {
+        Self {
+            operation: EnergyOperationType::WithdrawExpireUnfreeze,
+            amount: None,
+            receiver: None,
+            lock: false,
+            lock_period: 0,
+        }
     }
 
-    /// Calculate the energy that would be gained from this freeze operation
-    pub fn calculate_energy_gain(&self) -> Option<u64> {
-        if self.is_freeze {
-            self.freeze_duration.as_ref().map(|duration| {
-                (self.amount / crate::config::COIN_VALUE) * duration.reward_multiplier()
-            })
-        } else {
-            None
+    /// Create a cancel all unfreeze builder
+    pub fn cancel_all_unfreeze() -> Self {
+        Self {
+            operation: EnergyOperationType::CancelAllUnfreeze,
+            amount: None,
+            receiver: None,
+            lock: false,
+            lock_period: 0,
+        }
+    }
+
+    /// Create a delegate resource builder
+    pub fn delegate_resource(
+        receiver: CompressedPublicKey,
+        amount: u64,
+        lock: bool,
+        lock_period: u32,
+    ) -> Self {
+        Self {
+            operation: EnergyOperationType::DelegateResource,
+            amount: Some(amount),
+            receiver: Some(receiver),
+            lock,
+            lock_period,
+        }
+    }
+
+    /// Create an undelegate resource builder
+    pub fn undelegate_resource(receiver: CompressedPublicKey, amount: u64) -> Self {
+        Self {
+            operation: EnergyOperationType::UndelegateResource,
+            amount: Some(amount),
+            receiver: Some(receiver),
+            lock: false,
+            lock_period: 0,
         }
     }
 
     /// Validate the builder configuration
     pub fn validate(&self) -> Result<(), &'static str> {
-        if self.amount == 0 {
-            return Err("Amount must be greater than 0");
-        }
-
-        // Check minimum freeze amount (1 TOS) and ensure whole TOS amounts
-        if self.is_freeze {
-            if self.amount < crate::config::MIN_FREEZE_TOS_AMOUNT {
-                return Err("Minimum freeze amount is 1 TOS");
-            }
-
-            // Check if amount is a whole number of TOS (no decimals)
-            if !self.amount.is_multiple_of(crate::config::COIN_VALUE) {
-                return Err("Freeze amount must be a whole number of TOS (no decimals)");
-            }
-
-            if self.freeze_duration.is_none() {
-                return Err("Freeze duration must be specified for freeze operations");
-            }
-
-            // Validate freeze duration (3-180 days)
-            if let Some(duration) = &self.freeze_duration {
-                if !duration.is_valid() {
-                    return Err("Freeze duration must be between 3 and 180 days");
+        match self.operation {
+            EnergyOperationType::FreezeTos | EnergyOperationType::UnfreezeTos => {
+                let amount = self.amount.ok_or("Amount is required")?;
+                if amount == 0 {
+                    return Err("Amount must be greater than 0");
+                }
+                if amount < crate::config::MIN_FREEZE_TOS_AMOUNT {
+                    return Err("Minimum amount is 1 TOS");
+                }
+                if !amount.is_multiple_of(crate::config::COIN_VALUE) {
+                    return Err("Amount must be a whole number of TOS");
                 }
             }
-        } else {
-            // Check if unfreeze amount is a whole number of TOS (no decimals)
-            if !self.amount.is_multiple_of(crate::config::COIN_VALUE) {
-                return Err("Unfreeze amount must be a whole number of TOS (no decimals)");
+            EnergyOperationType::DelegateResource | EnergyOperationType::UndelegateResource => {
+                let amount = self.amount.ok_or("Amount is required")?;
+                if amount == 0 {
+                    return Err("Amount must be greater than 0");
+                }
+                if self.receiver.is_none() {
+                    return Err("Receiver is required for delegation operations");
+                }
+                if self.operation == EnergyOperationType::DelegateResource
+                    && self.lock
+                    && self.lock_period > 365
+                {
+                    return Err("Lock period cannot exceed 365 days");
+                }
             }
-
-            // Check minimum unfreeze amount (1 TOS)
-            if self.amount < crate::config::MIN_UNFREEZE_TOS_AMOUNT {
-                return Err("Minimum unfreeze amount is 1 TOS");
-            }
-
-            if self.freeze_duration.is_some() {
-                return Err("Freeze duration should not be specified for unfreeze operations");
+            EnergyOperationType::WithdrawExpireUnfreeze
+            | EnergyOperationType::CancelAllUnfreeze => {
+                // No additional validation needed
             }
         }
-
         Ok(())
+    }
+
+    /// Build the EnergyPayload from this builder
+    pub fn build(&self) -> crate::transaction::payload::EnergyPayload {
+        use crate::transaction::payload::EnergyPayload;
+
+        match self.operation {
+            EnergyOperationType::FreezeTos => EnergyPayload::FreezeTos {
+                amount: self.amount.unwrap_or(0),
+            },
+            EnergyOperationType::UnfreezeTos => EnergyPayload::UnfreezeTos {
+                amount: self.amount.unwrap_or(0),
+            },
+            EnergyOperationType::WithdrawExpireUnfreeze => EnergyPayload::WithdrawExpireUnfreeze,
+            EnergyOperationType::CancelAllUnfreeze => EnergyPayload::CancelAllUnfreeze,
+            EnergyOperationType::DelegateResource => {
+                // SAFE: validate() ensures receiver is Some for delegate operations
+                EnergyPayload::DelegateResource {
+                    receiver: self.receiver.clone().expect("receiver required"),
+                    amount: self.amount.unwrap_or(0),
+                    lock: self.lock,
+                    lock_period: self.lock_period,
+                }
+            }
+            EnergyOperationType::UndelegateResource => {
+                // SAFE: validate() ensures receiver is Some for undelegate operations
+                EnergyPayload::UndelegateResource {
+                    receiver: self.receiver.clone().expect("receiver required"),
+                    amount: self.amount.unwrap_or(0),
+                }
+            }
+        }
     }
 }
 
@@ -269,213 +351,70 @@ mod tests {
 
     #[test]
     fn test_energy_builder_freeze() {
-        let duration = FreezeDuration::new(7).unwrap();
-        let builder = EnergyBuilder::freeze_tos(100000000, duration); // 1 TOS
+        let builder = EnergyBuilder::freeze_tos(COIN_VALUE); // 1 TOS
 
-        assert_eq!(builder.amount, 100000000);
-        assert!(builder.is_freeze);
-        assert_eq!(builder.get_duration(), Some(&duration));
-        assert_eq!(builder.calculate_energy_gain(), Some(14)); // 1 TOS * 14 = 14 transfers
+        assert_eq!(builder.operation, EnergyOperationType::FreezeTos);
+        assert_eq!(builder.amount, Some(COIN_VALUE));
         assert!(builder.validate().is_ok());
     }
 
     #[test]
     fn test_energy_builder_unfreeze() {
-        let builder = EnergyBuilder::unfreeze_tos(100000000); // 1 TOS
+        let builder = EnergyBuilder::unfreeze_tos(COIN_VALUE); // 1 TOS
 
-        assert_eq!(builder.amount, 100000000);
-        assert!(!builder.is_freeze);
-        assert_eq!(builder.get_duration(), None);
-        assert_eq!(builder.calculate_energy_gain(), None);
+        assert_eq!(builder.operation, EnergyOperationType::UnfreezeTos);
+        assert_eq!(builder.amount, Some(COIN_VALUE));
+        assert!(builder.validate().is_ok());
+    }
+
+    #[test]
+    fn test_energy_builder_withdraw_expire() {
+        let builder = EnergyBuilder::withdraw_expire_unfreeze();
+
+        assert_eq!(
+            builder.operation,
+            EnergyOperationType::WithdrawExpireUnfreeze
+        );
+        assert!(builder.amount.is_none());
+        assert!(builder.validate().is_ok());
+    }
+
+    #[test]
+    fn test_energy_builder_cancel_all() {
+        let builder = EnergyBuilder::cancel_all_unfreeze();
+
+        assert_eq!(builder.operation, EnergyOperationType::CancelAllUnfreeze);
+        assert!(builder.amount.is_none());
         assert!(builder.validate().is_ok());
     }
 
     #[test]
     fn test_energy_builder_validation() {
-        // Test zero amount
-        let duration = FreezeDuration::new(3).unwrap();
-        let builder = EnergyBuilder::freeze_tos(0, duration);
+        // Test zero amount for freeze
+        let mut builder = EnergyBuilder::freeze_tos(0);
         assert!(builder.validate().is_err());
 
         // Test minimum freeze amount (less than 1 TOS)
-        let duration = FreezeDuration::new(3).unwrap();
-        let builder = EnergyBuilder::freeze_tos(50000000, duration); // 0.5 TOS
+        builder = EnergyBuilder::freeze_tos(COIN_VALUE / 2);
         assert!(builder.validate().is_err());
 
         // Test freeze with decimal amount (1.5 TOS)
-        let duration = FreezeDuration::new(3).unwrap();
-        let builder = EnergyBuilder::freeze_tos(150000000, duration); // 1.5 TOS
+        builder = EnergyBuilder::freeze_tos(COIN_VALUE + COIN_VALUE / 2);
         assert!(builder.validate().is_err());
 
-        // Test freeze with decimal amount (1.1 TOS)
-        let duration = FreezeDuration::new(3).unwrap();
-        let builder = EnergyBuilder::freeze_tos(110000000, duration); // 1.1 TOS
-        assert!(builder.validate().is_err());
-
-        // Test freeze without duration
-        let builder = EnergyBuilder {
-            amount: 1000,
-            is_freeze: true,
-            freeze_duration: None,
-        };
-        assert!(builder.validate().is_err());
-
-        // Test freeze with invalid duration (less than 3 days)
-        let builder = EnergyBuilder {
-            amount: 100000000,
-            is_freeze: true,
-            freeze_duration: Some(FreezeDuration { days: 2 }),
-        };
-        assert!(builder.validate().is_err());
-
-        // Test freeze with invalid duration (more than 180 days)
-        let builder = EnergyBuilder {
-            amount: 100000000,
-            is_freeze: true,
-            freeze_duration: Some(FreezeDuration { days: 181 }),
-        };
-        assert!(builder.validate().is_err());
-
-        // Test unfreeze with duration
-        let duration = FreezeDuration::new(7).unwrap();
-        let builder = EnergyBuilder {
-            amount: 1000,
-            is_freeze: false,
-            freeze_duration: Some(duration),
-        };
-        assert!(builder.validate().is_err());
-
-        // Test unfreeze with decimal amount (1.5 TOS)
-        let builder = EnergyBuilder::unfreeze_tos(150000000); // 1.5 TOS
-        assert!(builder.validate().is_err());
-
-        // Test unfreeze with decimal amount (1.1 TOS)
-        let builder = EnergyBuilder::unfreeze_tos(110000000); // 1.1 TOS
-        assert!(builder.validate().is_err());
-    }
-
-    #[test]
-    fn test_different_duration_rewards() {
-        let amounts = [100000000, 200000000, 300000000]; // 1, 2, 3 TOS
-        let durations = [
-            FreezeDuration::new(3).unwrap(),
-            FreezeDuration::new(7).unwrap(),
-            FreezeDuration::new(14).unwrap(),
-        ];
-
-        for amount in amounts {
-            for duration in &durations {
-                let builder = EnergyBuilder::freeze_tos(amount, *duration);
-                let expected_energy = (amount / COIN_VALUE) * duration.reward_multiplier();
-                assert_eq!(builder.calculate_energy_gain(), Some(expected_energy));
-            }
-        }
-    }
-
-    #[test]
-    fn test_minimum_freeze_amount_boundary() {
-        let duration = FreezeDuration::new(3).unwrap();
-
-        // Test exactly 1 TOS (should pass)
-        let builder = EnergyBuilder::freeze_tos(COIN_VALUE, duration);
-        assert!(builder.validate().is_ok());
-
-        // Test slightly less than 1 TOS (should fail)
-        let builder = EnergyBuilder::freeze_tos(COIN_VALUE - 1, duration);
-        assert!(builder.validate().is_err());
-
-        // Test 0.5 TOS (should fail)
-        let builder = EnergyBuilder::freeze_tos(COIN_VALUE / 2, duration);
-        assert!(builder.validate().is_err());
-
-        // Test 2 TOS (should pass)
-        let builder = EnergyBuilder::freeze_tos(COIN_VALUE * 2, duration);
-        assert!(builder.validate().is_ok());
-    }
-
-    #[test]
-    fn test_whole_tos_amount_validation() {
-        let duration = FreezeDuration::new(3).unwrap();
-
-        // Test valid whole TOS amounts for freeze
-        let valid_amounts = [COIN_VALUE, COIN_VALUE * 2, COIN_VALUE * 3, COIN_VALUE * 10]; // 1, 2, 3, 10 TOS
+        // Test valid whole TOS amounts
+        let valid_amounts = [COIN_VALUE, COIN_VALUE * 2, COIN_VALUE * 10];
         for amount in valid_amounts {
-            let builder = EnergyBuilder::freeze_tos(amount, duration);
+            let builder = EnergyBuilder::freeze_tos(amount);
             assert!(
                 builder.validate().is_ok(),
-                "Freeze amount {amount} should be valid"
+                "Amount {amount} should be valid"
             );
         }
 
-        // Test invalid decimal amounts for freeze
-        let invalid_amounts = [
-            COIN_VALUE + COIN_VALUE / 2,     // 1.5 TOS
-            COIN_VALUE + COIN_VALUE / 10,    // 1.1 TOS
-            COIN_VALUE * 2 + COIN_VALUE / 2, // 2.5 TOS
-            COIN_VALUE + 1,                  // 1.00000001 TOS
-            COIN_VALUE * 2 - 1,              // 1.99999999 TOS
-        ];
-        for amount in invalid_amounts {
-            let builder = EnergyBuilder::freeze_tos(amount, duration);
-            assert!(
-                builder.validate().is_err(),
-                "Freeze amount {amount} should be invalid"
-            );
-        }
-    }
-
-    #[test]
-    fn test_unfreeze_whole_tos_validation() {
-        // Test valid whole TOS amounts for unfreeze
-        let valid_amounts = [COIN_VALUE, COIN_VALUE * 2, COIN_VALUE * 3, COIN_VALUE * 10]; // 1, 2, 3, 10 TOS
-        for amount in valid_amounts {
-            let builder = EnergyBuilder::unfreeze_tos(amount);
-            assert!(
-                builder.validate().is_ok(),
-                "Unfreeze amount {amount} should be valid"
-            );
-        }
-
-        // Test invalid decimal amounts for unfreeze
-        let invalid_amounts = [
-            COIN_VALUE + COIN_VALUE / 2,     // 1.5 TOS
-            COIN_VALUE + COIN_VALUE / 10,    // 1.1 TOS
-            COIN_VALUE * 2 + COIN_VALUE / 2, // 2.5 TOS
-            COIN_VALUE + 1,                  // 1.00000001 TOS
-            COIN_VALUE * 2 - 1,              // 1.99999999 TOS
-        ];
-        for amount in invalid_amounts {
-            let builder = EnergyBuilder::unfreeze_tos(amount);
-            assert!(
-                builder.validate().is_err(),
-                "Unfreeze amount {amount} should be invalid"
-            );
-        }
-    }
-
-    #[test]
-    fn test_freeze_duration_validation() {
-        // Test valid freeze durations
-        let valid_durations = [3, 7, 14, 30, 60, 90, 120, 150, 180]; // 3-180 days
-        for days in valid_durations {
-            let duration = FreezeDuration::new(days).unwrap();
-            let builder = EnergyBuilder::freeze_tos(100000000, duration); // 1 TOS
-            assert!(
-                builder.validate().is_ok(),
-                "Duration {days} days should be valid"
-            );
-        }
-
-        // Test invalid freeze durations
-        let invalid_durations = [1, 2, 181, 182, 365]; // Less than 3 or more than 180 days
-        for days in invalid_durations {
-            let duration = FreezeDuration { days };
-            let builder = EnergyBuilder::freeze_tos(100000000, duration); // 1 TOS
-            assert!(
-                builder.validate().is_err(),
-                "Duration {days} days should be invalid"
-            );
-        }
+        // Test unfreeze validation
+        let builder = EnergyBuilder::unfreeze_tos(COIN_VALUE + 1); // 1.00000001 TOS
+        assert!(builder.validate().is_err());
     }
 
     // UnoTransferBuilder tests

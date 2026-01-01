@@ -34,7 +34,6 @@ use tos_common::{
         builder::{
             AccountState, FeeBuilder, TransactionBuilder, TransactionTypeBuilder, TransferBuilder,
         },
-        FeeType, Reference, Transaction, TxVersion,
     },
 };
 
@@ -407,7 +406,6 @@ impl TransactionGenerator {
                 TransactionTypeBuilder::Transfers(vec![transfer]),
                 FeeBuilder::Value(fee),
             )
-            .with_fee_type(FeeType::TOS)
             .build(&mut state, sender_keypair)
             .context(format!("Failed to build transaction {i}"))?;
 

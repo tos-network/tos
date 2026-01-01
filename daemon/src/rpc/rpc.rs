@@ -321,7 +321,7 @@ where
                 .is_tx_executed_in_block(tx_hash, &hash)
                 .context("Error while checking if tx was executed")?
             {
-                total_fees += tx.get_fee();
+                total_fees += tx.get_fee_limit();
             }
         }
     }
@@ -1802,7 +1802,7 @@ async fn get_mempool_summary<S: Storage>(
         let tx = MempoolTransactionSummary {
             hash: Cow::Borrowed(hash),
             source: sorted_tx.get_tx().get_source().as_address(mainnet),
-            fee: sorted_tx.get_fee(),
+            fee: sorted_tx.get_fee_limit(),
             first_seen: sorted_tx.get_first_seen(),
             size: sorted_tx.get_size(),
         };
@@ -2065,7 +2065,7 @@ async fn get_transactions_summary<S: Storage>(
                 source: tx
                     .get_source()
                     .as_address(blockchain.get_network().is_mainnet()),
-                fee: tx.get_fee(),
+                fee: tx.get_fee_limit(),
                 size: tx.size(),
             })
         } else {
@@ -2331,26 +2331,75 @@ async fn get_account_history<S: Storage>(
                 }
                 TransactionType::Energy(payload) => {
                     if is_sender {
+                        use tos_common::transaction::EnergyPayload;
                         match payload {
-                            tos_common::transaction::EnergyPayload::FreezeTos {
-                                amount,
-                                duration,
-                            } => {
+                            EnergyPayload::FreezeTos { amount } => {
                                 history.push(AccountHistoryEntry {
                                     topoheight: topo,
                                     hash: tx_hash.clone(),
-                                    history_type: AccountHistoryType::FreezeTos {
-                                        amount: *amount,
-                                        duration: format!("{}_days", duration.get_days()),
-                                    },
+                                    history_type: AccountHistoryType::FreezeTos { amount: *amount },
                                     block_timestamp: block_header.get_timestamp(),
                                 });
                             }
-                            tos_common::transaction::EnergyPayload::UnfreezeTos { amount } => {
+                            EnergyPayload::UnfreezeTos { amount } => {
                                 history.push(AccountHistoryEntry {
                                     topoheight: topo,
                                     hash: tx_hash.clone(),
                                     history_type: AccountHistoryType::UnfreezeTos {
+                                        amount: *amount,
+                                    },
+                                    block_timestamp: block_header.get_timestamp(),
+                                });
+                            }
+                            EnergyPayload::WithdrawExpireUnfreeze => {
+                                // Amount is determined at execution time, not in history
+                                history.push(AccountHistoryEntry {
+                                    topoheight: topo,
+                                    hash: tx_hash.clone(),
+                                    history_type: AccountHistoryType::WithdrawExpireUnfreeze {
+                                        amount: 0, // Actual amount determined at execution
+                                    },
+                                    block_timestamp: block_header.get_timestamp(),
+                                });
+                            }
+                            EnergyPayload::CancelAllUnfreeze => {
+                                // Amounts determined at execution time
+                                history.push(AccountHistoryEntry {
+                                    topoheight: topo,
+                                    hash: tx_hash.clone(),
+                                    history_type: AccountHistoryType::CancelAllUnfreeze {
+                                        withdrawn: 0,
+                                        cancelled: 0,
+                                    },
+                                    block_timestamp: block_header.get_timestamp(),
+                                });
+                            }
+                            EnergyPayload::DelegateResource {
+                                receiver,
+                                amount,
+                                lock,
+                                lock_period,
+                            } => {
+                                let mainnet = blockchain.get_network().is_mainnet();
+                                history.push(AccountHistoryEntry {
+                                    topoheight: topo,
+                                    hash: tx_hash.clone(),
+                                    history_type: AccountHistoryType::DelegateResource {
+                                        receiver: receiver.as_address(mainnet),
+                                        amount: *amount,
+                                        lock: *lock,
+                                        lock_period: *lock_period,
+                                    },
+                                    block_timestamp: block_header.get_timestamp(),
+                                });
+                            }
+                            EnergyPayload::UndelegateResource { receiver, amount } => {
+                                let mainnet = blockchain.get_network().is_mainnet();
+                                history.push(AccountHistoryEntry {
+                                    topoheight: topo,
+                                    hash: tx_hash.clone(),
+                                    history_type: AccountHistoryType::UndelegateResource {
+                                        receiver: receiver.as_address(mainnet),
                                         amount: *amount,
                                     },
                                     block_timestamp: block_header.get_timestamp(),
@@ -3115,55 +3164,76 @@ async fn get_p2p_block_propagation<S: Storage>(
 
 // Energy management RPC methods
 
-/// Get energy information for an account
+/// Get energy information for an account (Stake 2.0)
 async fn get_energy<S: Storage>(context: &Context, body: Value) -> Result<Value, InternalRpcError> {
+    use tos_common::config::FREE_ENERGY_QUOTA;
+
     let params: GetEnergyParams = parse_params(body)?;
     let blockchain: &Arc<Blockchain<S>> = context.get()?;
     let storage = blockchain.get_storage().read().await;
 
-    // Get current topoheight
-    let current_topoheight = storage.get_top_height().await?;
+    // Get current time in milliseconds (use block timestamp for consistency)
+    let now_ms = tos_common::time::get_current_time_in_millis();
 
-    // Get energy resource for the account
+    // Get account energy for the account (Stake 2.0)
     let pubkey = params.address.into_owned().to_public_key();
-    let energy_resource = storage.get_energy_resource(&pubkey).await?;
+    let account_energy = storage.get_account_energy(&pubkey).await?;
 
-    let result = if let Some(energy_resource) = energy_resource {
-        // Convert freeze records to FreezeRecordInfo format
-        let freeze_records = energy_resource
-            .freeze_records
+    // TODO: Get total_energy_weight from global state
+    // For now, use a placeholder - this should come from GlobalEnergyState
+    let total_energy_weight: u64 = 1_000_000_000; // Placeholder
+
+    let result = if let Some(account_energy) = account_energy {
+        // Calculate energy metrics using Stake 2.0 model
+        let energy_limit = account_energy.calculate_energy_limit(total_energy_weight);
+        let available_energy =
+            account_energy.calculate_frozen_energy_available(now_ms, total_energy_weight);
+        let free_energy_available = account_energy.calculate_free_energy_available(now_ms);
+
+        // Convert unfreezing list to API format
+        let unfreezing_list = account_energy
+            .unfreezing_list
             .iter()
-            .map(|record| FreezeRecordInfo {
-                amount: record.amount,
-                duration: format!("{}_days", record.duration.get_days()),
-                freeze_topoheight: record.freeze_topoheight,
-                unlock_topoheight: record.unlock_topoheight,
-                energy_gained: record.energy_gained,
-                can_unlock: record.can_unlock(current_topoheight),
-                remaining_blocks: if record.can_unlock(current_topoheight) {
-                    0
-                } else {
-                    record.unlock_topoheight.saturating_sub(current_topoheight)
-                },
+            .map(|record| UnfreezingInfo {
+                amount: record.unfreeze_amount,
+                expire_time: record.unfreeze_expire_time,
+                can_withdraw: record.unfreeze_expire_time <= now_ms,
             })
             .collect::<Vec<_>>();
 
+        let total_unfreezing = account_energy
+            .unfreezing_list
+            .iter()
+            .map(|r| r.unfreeze_amount)
+            .sum();
+
         json!(GetEnergyResult {
-            frozen_tos: energy_resource.frozen_tos,
-            total_energy: energy_resource.total_energy,
-            used_energy: energy_resource.used_energy,
-            available_energy: energy_resource.available_energy(),
-            last_update: energy_resource.last_update,
-            freeze_records,
+            frozen_balance: account_energy.frozen_balance,
+            delegated_frozen_balance: account_energy.delegated_frozen_balance,
+            acquired_delegated_balance: account_energy.acquired_delegated_balance,
+            energy_limit,
+            energy_usage: account_energy.energy_usage,
+            available_energy,
+            free_energy_limit: FREE_ENERGY_QUOTA,
+            free_energy_usage: account_energy.free_energy_usage,
+            free_energy_available,
+            unfreezing_list,
+            total_unfreezing,
         })
     } else {
+        // Account has no energy resource yet - return defaults
         json!(GetEnergyResult {
-            frozen_tos: 0,
-            total_energy: 0,
-            used_energy: 0,
+            frozen_balance: 0,
+            delegated_frozen_balance: 0,
+            acquired_delegated_balance: 0,
+            energy_limit: 0,
+            energy_usage: 0,
             available_energy: 0,
-            last_update: current_topoheight,
-            freeze_records: Vec::new(),
+            free_energy_limit: FREE_ENERGY_QUOTA,
+            free_energy_usage: 0,
+            free_energy_available: FREE_ENERGY_QUOTA,
+            unfreezing_list: Vec::new(),
+            total_unfreezing: 0,
         })
     };
 

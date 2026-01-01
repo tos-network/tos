@@ -4,17 +4,17 @@ use crate::core::{
 };
 use async_trait::async_trait;
 use log::trace;
-use tos_common::{account::EnergyResource, block::TopoHeight, crypto::PublicKey};
+use tos_common::{account::AccountEnergy, block::TopoHeight, crypto::PublicKey};
 
 #[async_trait]
 impl EnergyProvider for RocksStorage {
-    async fn get_energy_resource(
+    async fn get_account_energy(
         &self,
         account: &PublicKey,
-    ) -> Result<Option<EnergyResource>, BlockchainError> {
+    ) -> Result<Option<AccountEnergy>, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!(
-                "get energy resource for account {}",
+                "get account energy for account {}",
                 account.as_address(self.is_mainnet())
             );
         }
@@ -30,27 +30,27 @@ impl EnergyProvider for RocksStorage {
 
         // Read energy data from VersionedEnergyResources
         let key = format!("{}_{}", topo, account.as_address(self.is_mainnet()));
-        let energy = self.load_optional_from_disk::<Vec<u8>, EnergyResource>(
+        let energy = self.load_optional_from_disk::<Vec<u8>, AccountEnergy>(
             Column::VersionedEnergyResources,
             &key.as_bytes().to_vec(),
         )?;
 
         if log::log_enabled!(log::Level::Trace) {
-            trace!("Found energy resource at topoheight {}: {:?}", topo, energy);
+            trace!("Found account energy at topoheight {}: {:?}", topo, energy);
         }
 
         Ok(energy)
     }
 
-    async fn set_energy_resource(
+    async fn set_account_energy(
         &mut self,
         account: &PublicKey,
         topoheight: TopoHeight,
-        energy: &EnergyResource,
+        energy: &AccountEnergy,
     ) -> Result<(), BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!(
-                "set energy resource for account {} at topoheight {}: {:?}",
+                "set account energy for account {} at topoheight {}: {:?}",
                 account.as_address(self.is_mainnet()),
                 topoheight,
                 energy

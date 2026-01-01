@@ -48,15 +48,18 @@ pub(super) async fn pre_verify_tx<P: AccountProvider + BalanceProvider>(
 
     let required_fees =
         blockchain::estimate_required_tx_fees(provider, topoheight, tx, block_version).await?;
-    if required_fees > tx.get_fee() {
+    if required_fees > tx.get_fee_limit() {
         if log::log_enabled!(log::Level::Debug) {
             debug!(
                 "Invalid fees: {} required, {} provided",
                 format_tos(required_fees),
-                format_tos(tx.get_fee())
+                format_tos(tx.get_fee_limit())
             );
         }
-        return Err(BlockchainError::InvalidTxFee(required_fees, tx.get_fee()));
+        return Err(BlockchainError::InvalidTxFee(
+            required_fees,
+            tx.get_fee_limit(),
+        ));
     }
 
     let reference = tx.get_reference();

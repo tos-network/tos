@@ -630,14 +630,14 @@ impl SortedTx {
         &self.tx
     }
 
-    // Get the fee for this TX
-    pub fn get_fee(&self) -> u64 {
-        self.tx.get_fee()
+    // Get the fee limit for this TX (Stake 2.0)
+    pub fn get_fee_limit(&self) -> u64 {
+        self.tx.get_fee_limit()
     }
 
     // Get the fee rate per kB for this TX
     pub fn get_fee_rate_per_kb(&self) -> u64 {
-        self.get_fee() / (self.size as u64 / BYTES_PER_KB as u64)
+        self.get_fee_limit() / (self.size as u64 / BYTES_PER_KB as u64)
     }
 
     // Get the stored size of this TX

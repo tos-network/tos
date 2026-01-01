@@ -19,11 +19,11 @@ use crate::{
     transaction::{
         extra_data::UnknownExtraDataFormat, multisig::MultiSig, AppealKycPayload,
         BatchReferralRewardPayload, BindReferrerPayload, BootstrapCommitteePayload, BurnPayload,
-        DeployContractPayload, EmergencySuspendPayload, EnergyPayload, FeeType,
-        InvokeContractPayload, MultiSigPayload, Reference, RegisterCommitteePayload,
-        RenewKycPayload, RevokeKycPayload, SetKycPayload, ShieldTransferPayload, Transaction,
-        TransactionType, TransferKycPayload, TransferPayload, TxVersion, UnoTransferPayload,
-        UnshieldTransferPayload, UpdateCommitteePayload,
+        DeployContractPayload, EmergencySuspendPayload, EnergyPayload, InvokeContractPayload,
+        MultiSigPayload, Reference, RegisterCommitteePayload, RenewKycPayload, RevokeKycPayload,
+        SetKycPayload, ShieldTransferPayload, Transaction, TransactionType, TransferKycPayload,
+        TransferPayload, TxVersion, UnoTransferPayload, UnshieldTransferPayload,
+        UpdateCommitteePayload,
     },
 };
 pub use data::*;
@@ -260,7 +260,7 @@ impl<'a> RPCTransaction<'a> {
             chain_id: tx.get_chain_id(),
             source: tx.get_source().as_address(mainnet),
             data: RPCTransactionType::from_type(tx.get_data(), mainnet),
-            fee: tx.get_fee(),
+            fee: tx.get_fee_limit(),
             nonce: tx.get_nonce(),
             reference: Cow::Borrowed(tx.get_reference()),
             multisig: Cow::Borrowed(tx.get_multisig()),

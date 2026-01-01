@@ -1,22 +1,22 @@
 use crate::core::error::BlockchainError;
 use async_trait::async_trait;
-use tos_common::{account::EnergyResource, block::TopoHeight, crypto::PublicKey};
+use tos_common::{account::AccountEnergy, block::TopoHeight, crypto::PublicKey};
 
-/// Provider for energy resource storage operations
+/// Provider for account energy storage operations (Stake 2.0)
 #[async_trait]
 pub trait EnergyProvider {
-    /// Get energy resource for an account
-    async fn get_energy_resource(
+    /// Get account energy for an account (Stake 2.0)
+    async fn get_account_energy(
         &self,
         account: &PublicKey,
-    ) -> Result<Option<EnergyResource>, BlockchainError>;
+    ) -> Result<Option<AccountEnergy>, BlockchainError>;
 
-    /// Set energy resource for an account at a specific topoheight
-    async fn set_energy_resource(
+    /// Set account energy for an account at a specific topoheight (Stake 2.0)
+    async fn set_account_energy(
         &mut self,
         account: &PublicKey,
         topoheight: TopoHeight,
-        energy: &EnergyResource,
+        energy: &AccountEnergy,
     ) -> Result<(), BlockchainError>;
 }
 
@@ -25,18 +25,18 @@ pub struct MockEnergyProvider;
 
 #[async_trait::async_trait]
 impl EnergyProvider for MockEnergyProvider {
-    async fn get_energy_resource(
+    async fn get_account_energy(
         &self,
         _account: &PublicKey,
-    ) -> Result<Option<EnergyResource>, BlockchainError> {
+    ) -> Result<Option<AccountEnergy>, BlockchainError> {
         Ok(None) // Return None for now
     }
 
-    async fn set_energy_resource(
+    async fn set_account_energy(
         &mut self,
         _account: &PublicKey,
         _topoheight: TopoHeight,
-        _energy_resource: &EnergyResource,
+        _account_energy: &AccountEnergy,
     ) -> Result<(), BlockchainError> {
         Ok(()) // Do nothing for now
     }

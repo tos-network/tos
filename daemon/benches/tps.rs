@@ -41,7 +41,7 @@ use tos_common::{
             TransferBuilder,
         },
         verify::NoZKPCache,
-        FeeType, MultiSigPayload, Reference, Transaction, TransactionType, TxVersion,
+        MultiSigPayload, Reference, Transaction, TransactionType, TxVersion,
     },
 };
 use tos_kernel::{Environment, Module};
@@ -203,7 +203,7 @@ impl ExecutionLedger {
             .get_mut(sender)
             .ok_or("missing sender balance")?;
         let sender_balance = sender_balances.entry(TOS_ASSET).or_insert(0);
-        let total_cost = amount.checked_add(tx.get_fee()).ok_or("overflow")?;
+        let total_cost = amount.checked_add(tx.get_fee_limit()).ok_or("overflow")?;
         if *sender_balance < total_cost {
             return Err("insufficient balance");
         }
@@ -478,7 +478,6 @@ fn generate_block(tx_count: usize, amount: u64, fee: u64) -> GeneratedBlock {
             TransactionTypeBuilder::Transfers(vec![transfer]),
             FeeBuilder::Value(fee),
         )
-        .with_fee_type(FeeType::TOS)
         .build(&mut builder_state, &sender.keypair)
         .expect("build transaction");
 

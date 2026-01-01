@@ -36,8 +36,8 @@ impl PartialOrd for Transactions<'_> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         self.0
             .front()
-            .map(|e| e.tx.get_fee())
-            .partial_cmp(&other.0.front().map(|e| e.tx.get_fee()))
+            .map(|e| e.tx.get_fee_limit())
+            .partial_cmp(&other.0.front().map(|e| e.tx.get_fee_limit()))
     }
 }
 
@@ -45,8 +45,8 @@ impl Ord for Transactions<'_> {
     fn cmp(&self, other: &Self) -> Ordering {
         self.0
             .front()
-            .map(|e| e.tx.get_fee())
-            .cmp(&other.0.front().map(|e| e.tx.get_fee()))
+            .map(|e| e.tx.get_fee_limit())
+            .cmp(&other.0.front().map(|e| e.tx.get_fee_limit()))
     }
 }
 

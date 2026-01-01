@@ -1,8 +1,8 @@
 use crate::{
     block::TopoHeight,
     config::{
-        ENERGY_RECOVERY_WINDOW_MS, FREE_ENERGY_QUOTA, MAX_UNFREEZING_LIST_SIZE,
-        TOTAL_ENERGY_LIMIT, UNFREEZE_DELAY_DAYS,
+        ENERGY_RECOVERY_WINDOW_MS, FREE_ENERGY_QUOTA, MAX_UNFREEZING_LIST_SIZE, TOTAL_ENERGY_LIMIT,
+        UNFREEZE_DELAY_DAYS,
     },
     crypto::PublicKey,
     serializer::{Reader, ReaderError, Serializer, Writer},
@@ -30,7 +30,7 @@ use serde::{Deserialize, Serialize};
 /// - Energy usage decays linearly over 24 hours
 /// - After 24 hours, full energy limit is available again
 /// - Partial recovery: recovered = usage × (elapsed_ms / 86,400,000)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AccountEnergy {
     // === Own frozen balance ===
     /// TOS frozen by this account (atomic units)
@@ -58,21 +58,6 @@ pub struct AccountEnergy {
     /// Pending unfreeze requests (max 32 entries)
     /// Each entry waits 14 days before TOS can be withdrawn
     pub unfreezing_list: Vec<UnfreezingRecord>,
-}
-
-impl Default for AccountEnergy {
-    fn default() -> Self {
-        Self {
-            frozen_balance: 0,
-            delegated_frozen_balance: 0,
-            acquired_delegated_balance: 0,
-            energy_usage: 0,
-            latest_consume_time: 0,
-            free_energy_usage: 0,
-            latest_free_consume_time: 0,
-            unfreezing_list: Vec::new(),
-        }
-    }
 }
 
 impl AccountEnergy {
@@ -109,9 +94,8 @@ impl AccountEnergy {
         }
 
         // Linear decay: recovered = usage × (elapsed / window)
-        let recovered =
-            (self.free_energy_usage as u128 * elapsed as u128 / ENERGY_RECOVERY_WINDOW_MS as u128)
-                as u64;
+        let recovered = (self.free_energy_usage as u128 * elapsed as u128
+            / ENERGY_RECOVERY_WINDOW_MS as u128) as u64;
         let current_usage = self.free_energy_usage.saturating_sub(recovered);
 
         FREE_ENERGY_QUOTA.saturating_sub(current_usage)
@@ -128,9 +112,8 @@ impl AccountEnergy {
         }
 
         // Linear decay: recovered = usage × (elapsed / window)
-        let recovered =
-            (self.energy_usage as u128 * elapsed as u128 / ENERGY_RECOVERY_WINDOW_MS as u128)
-                as u64;
+        let recovered = (self.energy_usage as u128 * elapsed as u128
+            / ENERGY_RECOVERY_WINDOW_MS as u128) as u64;
         let current_usage = self.energy_usage.saturating_sub(recovered);
 
         limit.saturating_sub(current_usage)
@@ -259,10 +242,7 @@ impl AccountEnergy {
 
     /// Get total amount in unfreezing queue
     pub fn total_unfreezing(&self) -> u64 {
-        self.unfreezing_list
-            .iter()
-            .map(|r| r.unfreeze_amount)
-            .sum()
+        self.unfreezing_list.iter().map(|r| r.unfreeze_amount).sum()
     }
 
     /// Get amount that can be withdrawn now (expired entries)
@@ -467,797 +447,237 @@ impl Serializer for DelegatedResource {
 }
 
 // ============================================================================
-// LEGACY ENERGY MODEL (deprecated)
+// TESTS
 // ============================================================================
-//
-// The following structures are deprecated and kept for backward compatibility.
-// New code should use AccountEnergy, GlobalEnergyState, and DelegatedResource.
-
-/// Flexible freeze duration for TOS staking
-/// Users can set custom days from 3 to 180 days
-///
-/// # Deprecated
-/// This struct is deprecated in favor of Stake 2.0 model which removes
-/// duration-based freezing. Use `AccountEnergy` instead.
-///
-/// # Edge Cases
-/// - Duration below 3 days will be rejected
-/// - Duration above 180 days will be rejected
-/// - Default duration is 3 days (minimum)
-///
-/// # Energy Calculation
-/// Energy gained = 1 TOS × (2 × freeze_days)
-/// Examples:
-/// - 3 days: 1 TOS → 6 energy (6 free transfers)
-/// - 7 days: 1 TOS → 14 energy (14 free transfers)
-/// - 30 days: 1 TOS → 60 energy (60 free transfers)
-#[deprecated(note = "Use AccountEnergy (Stake 2.0) instead")]
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
-pub struct FreezeDuration {
-    /// Number of days to freeze (3-180 days)
-    pub days: u32,
-}
-
-impl FreezeDuration {
-    /// Create a new freeze duration with validation
-    pub fn new(days: u32) -> Result<Self, &'static str> {
-        if !(crate::config::MIN_FREEZE_DURATION_DAYS..=crate::config::MAX_FREEZE_DURATION_DAYS)
-            .contains(&days)
-        {
-            return Err("Freeze duration must be between 3 and 180 days");
-        }
-        Ok(Self { days })
-    }
-
-    /// Get the reward multiplier for this freeze duration
-    /// New energy model: 1 TOS = 2 * days energy (integer calculation)
-    /// Examples:
-    /// - 3 days: 6 energy (6 transfers)
-    /// - 7 days: 14 energy (14 transfers)
-    /// - 14 days: 28 energy (28 transfers)
-    /// - 30 days: 60 energy (60 transfers)
-    /// - 60 days: 120 energy (120 transfers)
-    /// - 90 days: 180 energy (180 transfers)
-    pub fn reward_multiplier(&self) -> u64 {
-        (self.days * 2) as u64
-    }
-
-    /// Get the duration in blocks (assuming 1 block per second)
-    /// Note: For network-specific duration, use `duration_in_blocks_for_network`
-    pub fn duration_in_blocks(&self) -> u64 {
-        self.days as u64 * 24 * 60 * 60 // days * 24 hours * 60 minutes * 60 seconds
-    }
-
-    /// Get the duration in blocks for a specific network
-    /// - Mainnet/Testnet: 1 day = 86400 blocks
-    /// - Devnet: 1 day = 10 blocks (accelerated for testing)
-    pub fn duration_in_blocks_for_network(&self, network: &crate::network::Network) -> u64 {
-        self.days as u64 * network.freeze_duration_multiplier()
-    }
-
-    /// Get the duration name for display
-    pub fn name(&self) -> String {
-        format!("{} days", self.days)
-    }
-
-    /// Get the number of days
-    pub fn get_days(&self) -> u32 {
-        self.days
-    }
-
-    /// Check if duration is valid (3-180 days)
-    pub fn is_valid(&self) -> bool {
-        self.days >= crate::config::MIN_FREEZE_DURATION_DAYS
-            && self.days <= crate::config::MAX_FREEZE_DURATION_DAYS
-    }
-}
-
-impl Default for FreezeDuration {
-    fn default() -> Self {
-        Self { days: 3 } // Default to minimum 3 days
-    }
-}
-
-impl Serializer for FreezeDuration {
-    fn write(&self, writer: &mut Writer) {
-        writer.write_u32(&self.days);
-    }
-
-    fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
-        let days = reader.read_u32()?;
-        FreezeDuration::new(days).map_err(|_| ReaderError::InvalidValue)
-    }
-
-    fn size(&self) -> usize {
-        self.days.size()
-    }
-}
-
-/// Freeze record for tracking individual freeze operations
-///
-/// # Deprecated
-/// This struct is deprecated in favor of Stake 2.0 model.
-/// Use `AccountEnergy` with `UnfreezingRecord` instead.
-///
-/// # Edge Cases
-/// - Only whole TOS amounts can be frozen (fractional parts are discarded)
-/// - Unfreezing is only allowed after the unlock_topoheight is reached
-/// - Partial unfreezing is supported - you can unfreeze less than the full amount
-/// - Energy is calculated using integer arithmetic to avoid precision issues
-///
-/// # Important Notes
-/// - Each freeze record tracks its own unlock time based on the freeze duration
-/// - Energy gained is immutable once frozen (doesn't change with time)
-/// - Unfreezing removes energy proportionally to the amount unfrozen
-#[deprecated(note = "Use AccountEnergy with UnfreezingRecord (Stake 2.0) instead")]
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FreezeRecord {
-    /// Amount of TOS frozen
-    pub amount: u64,
-    /// Freeze duration
-    pub duration: FreezeDuration,
-    /// Topoheight when frozen
-    pub freeze_topoheight: TopoHeight,
-    /// Topoheight when can be unlocked
-    pub unlock_topoheight: TopoHeight,
-    /// Energy gained from this freeze
-    pub energy_gained: u64,
-}
-
-impl FreezeRecord {
-    /// Create a new freeze record (uses default mainnet timing)
-    /// Ensures TOS amount is a whole number (multiple of COIN_VALUE)
-    pub fn new(amount: u64, duration: FreezeDuration, freeze_topoheight: TopoHeight) -> Self {
-        let unlock_topoheight = freeze_topoheight + duration.duration_in_blocks();
-
-        // Ensure amount is a whole number of TOS (multiple of COIN_VALUE)
-        let whole_tos_amount = (amount / crate::config::COIN_VALUE) * crate::config::COIN_VALUE;
-
-        // Calculate energy gained using integer arithmetic
-        let energy_gained =
-            (whole_tos_amount / crate::config::COIN_VALUE) * duration.reward_multiplier();
-
-        Self {
-            amount: whole_tos_amount,
-            duration,
-            freeze_topoheight,
-            unlock_topoheight,
-            energy_gained,
-        }
-    }
-
-    /// Create a new freeze record with network-specific timing
-    /// - Mainnet/Testnet: Uses standard day-to-block conversion
-    /// - Devnet: Uses accelerated timing for testing (1 day = 10 blocks)
-    pub fn new_for_network(
-        amount: u64,
-        duration: FreezeDuration,
-        freeze_topoheight: TopoHeight,
-        network: &crate::network::Network,
-    ) -> Self {
-        let unlock_topoheight =
-            freeze_topoheight + duration.duration_in_blocks_for_network(network);
-
-        // Ensure amount is a whole number of TOS (multiple of COIN_VALUE)
-        let whole_tos_amount = (amount / crate::config::COIN_VALUE) * crate::config::COIN_VALUE;
-
-        // Calculate energy gained using integer arithmetic
-        let energy_gained =
-            (whole_tos_amount / crate::config::COIN_VALUE) * duration.reward_multiplier();
-
-        Self {
-            amount: whole_tos_amount,
-            duration,
-            freeze_topoheight,
-            unlock_topoheight,
-            energy_gained,
-        }
-    }
-
-    /// Check if this freeze record can be unlocked at the given topoheight
-    pub fn can_unlock(&self, current_topoheight: TopoHeight) -> bool {
-        current_topoheight >= self.unlock_topoheight
-    }
-
-    /// Get remaining lock time in blocks
-    pub fn remaining_blocks(&self, current_topoheight: TopoHeight) -> u64 {
-        self.unlock_topoheight.saturating_sub(current_topoheight)
-    }
-}
-
-impl Serializer for FreezeRecord {
-    fn write(&self, writer: &mut Writer) {
-        self.amount.write(writer);
-        self.duration.write(writer);
-        writer.write_u64(&self.freeze_topoheight);
-        writer.write_u64(&self.unlock_topoheight);
-        writer.write_u64(&self.energy_gained);
-    }
-
-    fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
-        Ok(Self {
-            amount: reader.read_u64()?,
-            duration: FreezeDuration::read(reader)?,
-            freeze_topoheight: reader.read_u64()?,
-            unlock_topoheight: reader.read_u64()?,
-            energy_gained: reader.read_u64()?,
-        })
-    }
-
-    fn size(&self) -> usize {
-        self.amount.size()
-            + self.duration.size()
-            + self.freeze_topoheight.size()
-            + self.unlock_topoheight.size()
-            + self.energy_gained.size()
-    }
-}
-
-/// Energy resource management for TOS
-/// Enhanced with freeze duration and reward multiplier system
-///
-/// # Deprecated
-/// This struct is deprecated in favor of Stake 2.0 model.
-/// Use `AccountEnergy` instead which provides:
-/// - Proportional energy allocation
-/// - 24-hour linear decay recovery
-/// - Free quota support
-/// - Delegation support
-///
-/// # Energy Model Overview (Legacy)
-/// - Energy is consumed for transfer operations (1 energy per transfer)
-/// - Energy is gained by freezing TOS for a specified duration
-/// - Energy regenerates when used_energy is reset (periodic reset mechanism)
-/// - Multiple freeze records with different durations can coexist
-///
-/// # Edge Cases and Limitations
-/// - **Minimum freeze amount**: Only whole TOS amounts (multiples of COIN_VALUE)
-/// - **Energy consumption**: Fails if insufficient energy available (no automatic TOS conversion)
-/// - **Unfreezing constraints**: Only unlocked records can be unfrozen
-/// - **Integer arithmetic**: All calculations use integers to avoid floating-point precision issues
-/// - **Energy reset**: used_energy is reset periodically (timing depends on external calls)
-///
-/// # Behavioral Notes
-/// - Freezing 0.5 TOS will actually freeze 0 TOS (rounded down)
-/// - Unfreezing from multiple records follows FIFO order for unlocked records
-/// - Energy total decreases when unfreezing (proportional to amount unfrozen)
-#[deprecated(note = "Use AccountEnergy (Stake 2.0) instead")]
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct EnergyResource {
-    /// Total energy available
-    pub total_energy: u64,
-    /// Used energy
-    pub used_energy: u64,
-    /// Total frozen TOS across all freeze records
-    pub frozen_tos: u64,
-    /// Last update topoheight
-    pub last_update: TopoHeight,
-    /// Individual freeze records for tracking duration-based rewards
-    pub freeze_records: Vec<FreezeRecord>,
-}
-
-impl EnergyResource {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Get available energy
-    pub fn available_energy(&self) -> u64 {
-        self.total_energy.saturating_sub(self.used_energy)
-    }
-
-    /// Check if has enough energy
-    pub fn has_enough_energy(&self, required: u64) -> bool {
-        self.available_energy() >= required
-    }
-
-    /// Consume energy
-    pub fn consume_energy(&mut self, amount: u64) -> Result<(), &'static str> {
-        if self.available_energy() < amount {
-            return Err("Insufficient energy");
-        }
-        self.used_energy += amount;
-        Ok(())
-    }
-
-    /// Freeze TOS to get energy with duration-based rewards
-    /// Ensures TOS amount is a whole number (multiple of COIN_VALUE)
-    /// Returns the actual amount of TOS frozen (may be less than requested if not whole number)
-    pub fn freeze_tos_for_energy(
-        &mut self,
-        tos_amount: u64,
-        duration: FreezeDuration,
-        topoheight: TopoHeight,
-    ) -> u64 {
-        // Use default mainnet timing
-        self.freeze_tos_for_energy_with_network(
-            tos_amount,
-            duration,
-            topoheight,
-            &crate::network::Network::Mainnet,
-        )
-    }
-
-    /// Freeze TOS to get energy with network-specific timing
-    /// - Mainnet/Testnet: Uses standard day-to-block conversion
-    /// - Devnet: Uses accelerated timing for testing (1 day = 10 blocks)
-    pub fn freeze_tos_for_energy_with_network(
-        &mut self,
-        tos_amount: u64,
-        duration: FreezeDuration,
-        topoheight: TopoHeight,
-        network: &crate::network::Network,
-    ) -> u64 {
-        if tos_amount < crate::config::MIN_FREEZE_TOS_AMOUNT {
-            return 0;
-        }
-
-        if !tos_amount.is_multiple_of(crate::config::COIN_VALUE) {
-            return 0;
-        }
-
-        // Create a new freeze record with network-specific timing
-        let freeze_record =
-            FreezeRecord::new_for_network(tos_amount, duration, topoheight, network);
-        let energy_gained = freeze_record.energy_gained;
-        let actual_tos_frozen = freeze_record.amount;
-
-        if actual_tos_frozen == 0 {
-            return 0;
-        }
-
-        // Add to freeze records
-        self.freeze_records.push(freeze_record);
-
-        // Update totals
-        self.frozen_tos += actual_tos_frozen;
-        self.total_energy += energy_gained;
-        self.last_update = topoheight;
-
-        energy_gained
-    }
-
-    /// Unfreeze TOS from a specific freeze record
-    /// Can only unfreeze records that have reached their unlock time
-    /// Ensures TOS amount is a whole number (multiple of COIN_VALUE)
-    pub fn unfreeze_tos(
-        &mut self,
-        tos_amount: u64,
-        current_topoheight: TopoHeight,
-    ) -> Result<u64, String> {
-        // Ensure requested amount is a whole number of TOS
-        let whole_tos_amount = (tos_amount / crate::config::COIN_VALUE) * crate::config::COIN_VALUE;
-
-        if whole_tos_amount == 0 {
-            return Err("Cannot unfreeze 0 TOS".to_string());
-        }
-
-        if self.frozen_tos < whole_tos_amount {
-            return Err("Insufficient frozen TOS".to_string());
-        }
-
-        // Find eligible freeze records (unlocked and with sufficient amount)
-        let mut remaining_to_unfreeze = whole_tos_amount;
-        let mut total_energy_removed = 0;
-        let mut records_to_remove = Vec::new();
-        let mut records_to_modify = Vec::new();
-
-        for (index, record) in self.freeze_records.iter().enumerate() {
-            if !record.can_unlock(current_topoheight) {
-                continue; // Skip records that haven't reached unlock time
-            }
-
-            if remaining_to_unfreeze == 0 {
-                break;
-            }
-
-            let unfreeze_amount = std::cmp::min(remaining_to_unfreeze, record.amount);
-
-            // Calculate energy to remove using integer arithmetic
-            let energy_to_remove =
-                (unfreeze_amount / crate::config::COIN_VALUE) * record.duration.reward_multiplier();
-
-            total_energy_removed += energy_to_remove;
-            remaining_to_unfreeze -= unfreeze_amount;
-
-            // Mark record for removal if fully unfrozen
-            if unfreeze_amount == record.amount {
-                records_to_remove.push(index);
-            } else {
-                // Partially unfreeze the record
-                records_to_modify.push((index, unfreeze_amount));
-            }
-        }
-
-        if remaining_to_unfreeze > 0 {
-            return Err("Insufficient unlocked TOS to unfreeze".to_string());
-        }
-
-        // Remove marked records (in reverse order to maintain indices)
-        for &index in records_to_remove.iter().rev() {
-            self.freeze_records.remove(index);
-        }
-
-        // Modify partially unfrozen records
-        for (index, unfreeze_amount) in records_to_modify.iter().rev() {
-            let record = &mut self.freeze_records[*index];
-            record.amount -= unfreeze_amount;
-
-            // Recalculate energy for the remaining amount
-            let remaining_energy =
-                (record.amount / crate::config::COIN_VALUE) * record.duration.reward_multiplier();
-            record.energy_gained = remaining_energy;
-        }
-
-        // Update totals
-        self.frozen_tos -= whole_tos_amount;
-        self.total_energy = self.total_energy.saturating_sub(total_energy_removed);
-        self.last_update = current_topoheight;
-
-        Ok(total_energy_removed)
-    }
-
-    /// Get all freeze records that can be unlocked at the current topoheight
-    pub fn get_unlockable_records(&self, current_topoheight: TopoHeight) -> Vec<&FreezeRecord> {
-        self.freeze_records
-            .iter()
-            .filter(|record| record.can_unlock(current_topoheight))
-            .collect()
-    }
-
-    /// Get total unlockable TOS amount at the current topoheight
-    pub fn get_unlockable_tos(&self, current_topoheight: TopoHeight) -> u64 {
-        self.get_unlockable_records(current_topoheight)
-            .iter()
-            .map(|record| record.amount)
-            .sum()
-    }
-
-    /// Get freeze records grouped by duration
-    pub fn get_freeze_records_by_duration(
-        &self,
-    ) -> std::collections::HashMap<FreezeDuration, Vec<&FreezeRecord>> {
-        let mut grouped: std::collections::HashMap<FreezeDuration, Vec<&FreezeRecord>> =
-            std::collections::HashMap::new();
-
-        for record in &self.freeze_records {
-            grouped.entry(record.duration).or_default().push(record);
-        }
-
-        grouped
-    }
-
-    /// Reset used energy (called periodically by the network)
-    ///
-    /// # When to call
-    /// This should be called periodically by the network (e.g., daily) to restore
-    /// energy usage. This typically happens every 24 hours.
-    ///
-    /// # Edge Cases
-    /// - Resets used_energy to 0, making all total_energy available again
-    /// - Does not affect frozen TOS or total energy amounts
-    /// - Updates last_update timestamp to current topoheight
-    /// - No validation on timing - caller must implement reset schedule
-    pub fn reset_used_energy(&mut self, topoheight: TopoHeight) {
-        self.used_energy = 0;
-        self.last_update = topoheight;
-    }
-}
-
-/// Energy lease contract
-///
-/// # Deprecated
-/// This struct is deprecated and unused. Use `DelegatedResource` instead
-/// for energy delegation in Stake 2.0 model.
-#[deprecated(note = "Use DelegatedResource (Stake 2.0) instead")]
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EnergyLease {
-    /// Lessor (energy provider)
-    pub lessor: PublicKey,
-    /// Lessee (energy consumer)
-    pub lessee: PublicKey,
-    /// Amount of energy leased
-    pub energy_amount: u64,
-    /// Lease duration in blocks
-    pub duration: u64,
-    /// Start topoheight
-    pub start_topoheight: TopoHeight,
-    /// Price per energy unit
-    pub price_per_energy: u64,
-}
-
-impl EnergyLease {
-    pub fn new(
-        lessor: PublicKey,
-        lessee: PublicKey,
-        energy_amount: u64,
-        duration: u64,
-        start_topoheight: TopoHeight,
-        price_per_energy: u64,
-    ) -> Self {
-        Self {
-            lessor,
-            lessee,
-            energy_amount,
-            duration,
-            start_topoheight,
-            price_per_energy,
-        }
-    }
-
-    /// Check if lease is still valid
-    pub fn is_valid(&self, current_topoheight: TopoHeight) -> bool {
-        current_topoheight < self.start_topoheight + self.duration
-    }
-
-    /// Calculate total cost
-    pub fn total_cost(&self) -> u64 {
-        self.energy_amount * self.price_per_energy
-    }
-}
-
-impl Serializer for EnergyResource {
-    fn write(&self, writer: &mut Writer) {
-        writer.write_u64(&self.total_energy);
-        writer.write_u64(&self.used_energy);
-        writer.write_u64(&self.frozen_tos);
-        writer.write_u64(&self.last_update);
-
-        // Write freeze records
-        writer.write_u64(&(self.freeze_records.len() as u64));
-        for record in &self.freeze_records {
-            record.write(writer);
-        }
-    }
-
-    fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
-        let total_energy = reader.read_u64()?;
-        let used_energy = reader.read_u64()?;
-        let frozen_tos = reader.read_u64()?;
-        let last_update = reader.read_u64()?;
-
-        // Read freeze records
-        let records_count = reader.read_u64()? as usize;
-        let mut freeze_records = Vec::with_capacity(records_count);
-        for _ in 0..records_count {
-            freeze_records.push(FreezeRecord::read(reader)?);
-        }
-
-        Ok(Self {
-            total_energy,
-            used_energy,
-            frozen_tos,
-            last_update,
-            freeze_records,
-        })
-    }
-
-    fn size(&self) -> usize {
-        let base_size = self.total_energy.size()
-            + self.used_energy.size()
-            + self.frozen_tos.size()
-            + self.last_update.size();
-        let records_size = 8 + self.freeze_records.iter().map(|r| r.size()).sum::<usize>();
-        base_size + records_size
-    }
-}
-
-impl Serializer for EnergyLease {
-    fn write(&self, writer: &mut Writer) {
-        self.lessor.write(writer);
-        self.lessee.write(writer);
-        writer.write_u64(&self.energy_amount);
-        writer.write_u64(&self.duration);
-        writer.write_u64(&self.start_topoheight);
-        writer.write_u64(&self.price_per_energy);
-    }
-
-    fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
-        Ok(Self {
-            lessor: PublicKey::read(reader)?,
-            lessee: PublicKey::read(reader)?,
-            energy_amount: reader.read_u64()?,
-            duration: reader.read_u64()?,
-            start_topoheight: reader.read_u64()?,
-            price_per_energy: reader.read_u64()?,
-        })
-    }
-
-    fn size(&self) -> usize {
-        self.lessor.size()
-            + self.lessee.size()
-            + self.energy_amount.size()
-            + self.duration.size()
-            + self.start_topoheight.size()
-            + self.price_per_energy.size()
-    }
-}
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_freeze_duration_reward_multipliers() {
-        let duration = FreezeDuration::new(3).unwrap();
-        assert_eq!(duration.reward_multiplier(), 6);
-        let duration = FreezeDuration::new(7).unwrap();
-        assert_eq!(duration.reward_multiplier(), 14);
-        let duration = FreezeDuration::new(14).unwrap();
-        assert_eq!(duration.reward_multiplier(), 28);
-        let duration = FreezeDuration::new(30).unwrap();
-        assert_eq!(duration.reward_multiplier(), 60);
-        let duration = FreezeDuration::new(60).unwrap();
-        assert_eq!(duration.reward_multiplier(), 120);
-        let duration = FreezeDuration::new(90).unwrap();
-        assert_eq!(duration.reward_multiplier(), 180);
+    fn test_account_energy_default() {
+        let energy = AccountEnergy::new();
+        assert_eq!(energy.frozen_balance, 0);
+        assert_eq!(energy.delegated_frozen_balance, 0);
+        assert_eq!(energy.acquired_delegated_balance, 0);
+        assert_eq!(energy.energy_usage, 0);
+        assert_eq!(energy.free_energy_usage, 0);
+        assert!(energy.unfreezing_list.is_empty());
     }
 
     #[test]
-    fn test_freeze_duration_blocks() {
-        let duration = FreezeDuration::new(3).unwrap();
-        assert_eq!(duration.duration_in_blocks(), 3 * 24 * 60 * 60);
-        let duration = FreezeDuration::new(7).unwrap();
-        assert_eq!(duration.duration_in_blocks(), 7 * 24 * 60 * 60);
-        let duration = FreezeDuration::new(14).unwrap();
-        assert_eq!(duration.duration_in_blocks(), 14 * 24 * 60 * 60);
-        let duration = FreezeDuration::new(30).unwrap();
-        assert_eq!(duration.duration_in_blocks(), 30 * 24 * 60 * 60);
-        let duration = FreezeDuration::new(60).unwrap();
-        assert_eq!(duration.duration_in_blocks(), 60 * 24 * 60 * 60);
-        let duration = FreezeDuration::new(90).unwrap();
-        assert_eq!(duration.duration_in_blocks(), 90 * 24 * 60 * 60);
+    fn test_effective_frozen_balance() {
+        let mut energy = AccountEnergy::new();
+        energy.frozen_balance = 100;
+        energy.acquired_delegated_balance = 50;
+        energy.delegated_frozen_balance = 30;
+
+        // effective = 100 + 50 - 30 = 120
+        assert_eq!(energy.effective_frozen_balance(), 120);
     }
 
     #[test]
-    fn test_freeze_record_creation() {
-        let duration = FreezeDuration::new(7).unwrap();
-        let record = FreezeRecord::new(100000000, duration, 100); // 1 TOS
-        assert_eq!(record.amount, 100000000);
-        assert_eq!(record.duration, duration);
-        assert_eq!(record.freeze_topoheight, 100);
-        assert_eq!(record.unlock_topoheight, 100 + 7 * 24 * 60 * 60);
-        assert_eq!(record.energy_gained, 14); // 1 TOS * 14 = 14 transfers
+    fn test_energy_limit_calculation() {
+        let mut energy = AccountEnergy::new();
+        energy.frozen_balance = 1_000_000;
+
+        // 1M out of 100M total = 1% of 18.4B = 184M energy
+        let limit = energy.calculate_energy_limit(100_000_000);
+        assert_eq!(limit, 184_000_000);
     }
 
     #[test]
-    fn test_freeze_record_unlock_check() {
-        let duration = FreezeDuration::new(3).unwrap();
-        let record = FreezeRecord::new(1000, duration, 100);
-        let unlock_time = 100 + 3 * 24 * 60 * 60;
-
-        assert!(!record.can_unlock(unlock_time - 1));
-        assert!(record.can_unlock(unlock_time));
-        assert!(record.can_unlock(unlock_time + 1000));
+    fn test_energy_limit_zero_weight() {
+        let energy = AccountEnergy::new();
+        assert_eq!(energy.calculate_energy_limit(0), 0);
     }
 
     #[test]
-    fn test_energy_resource_freeze_with_duration() {
-        let mut resource = EnergyResource::new();
-        let topoheight = 1000;
+    fn test_free_energy_availability() {
+        let mut energy = AccountEnergy::new();
+        let now_ms = 100_000_000u64; // 100 seconds
 
-        // Freeze 1 TOS for 7 days
-        let duration = FreezeDuration::new(7).unwrap();
-        let energy_gained = resource.freeze_tos_for_energy(100000000, duration, topoheight);
-        assert_eq!(energy_gained, 14); // 1 TOS * 14 = 14 transfers
-        assert_eq!(resource.frozen_tos, 100000000);
-        assert_eq!(resource.total_energy, 14);
-        assert_eq!(resource.freeze_records.len(), 1);
-
-        // Freeze 1 TOS for 14 days
-        let duration = FreezeDuration::new(14).unwrap();
-        let energy_gained2 = resource.freeze_tos_for_energy(100000000, duration, topoheight);
-        assert_eq!(energy_gained2, 28); // 1 TOS * 28 = 28 transfers
-        assert_eq!(resource.frozen_tos, 200000000);
-        assert_eq!(resource.total_energy, 42);
-        assert_eq!(resource.freeze_records.len(), 2);
-    }
-
-    #[test]
-    fn test_energy_resource_unfreeze() {
-        let mut resource = EnergyResource::new();
-        let freeze_topoheight = 1000;
-        let duration = FreezeDuration::new(7).unwrap();
-        let unlock_topoheight = freeze_topoheight + duration.duration_in_blocks();
-
-        // Freeze 2 TOS for 7 days
-        resource.freeze_tos_for_energy(200000000, duration, freeze_topoheight);
-
-        // Try to unfreeze before unlock time (should fail)
-        let result = resource.unfreeze_tos(100000000, unlock_topoheight - 1);
-        assert!(result.is_err());
-
-        // Unfreeze after unlock time
-        let energy_removed = resource.unfreeze_tos(100000000, unlock_topoheight).unwrap();
-        assert_eq!(energy_removed, 14); // 1 TOS * 14 = 14 transfers
-        assert_eq!(resource.frozen_tos, 100000000);
-        assert_eq!(resource.total_energy, 14);
-    }
-
-    #[test]
-    fn test_get_unlockable_records() {
-        let mut resource = EnergyResource::new();
-        let topoheight = 1000;
-
-        // Freeze with different durations
-        let duration3 = FreezeDuration::new(3).unwrap();
-        resource.freeze_tos_for_energy(100000000, duration3, topoheight); // 1 TOS
-
-        let duration7 = FreezeDuration::new(7).unwrap();
-        resource.freeze_tos_for_energy(100000000, duration7, topoheight); // 1 TOS
-
-        let duration14 = FreezeDuration::new(14).unwrap();
-        resource.freeze_tos_for_energy(100000000, duration14, topoheight); // 1 TOS
-
-        // Check unlockable records at different times
-        let unlockable_3d = resource.get_unlockable_records(topoheight + 3 * 24 * 60 * 60);
-        assert_eq!(unlockable_3d.len(), 1);
-
-        let unlockable_7d = resource.get_unlockable_records(topoheight + 7 * 24 * 60 * 60);
-        assert_eq!(unlockable_7d.len(), 2);
-
-        let unlockable_14d = resource.get_unlockable_records(topoheight + 14 * 24 * 60 * 60);
-        assert_eq!(unlockable_14d.len(), 3);
-    }
-
-    #[test]
-    fn test_serialization() {
-        let mut resource = EnergyResource::new();
-        let duration = FreezeDuration::new(7).unwrap();
-        resource.freeze_tos_for_energy(100000000, duration, 1000); // 1 TOS
-
-        let duration = FreezeDuration::new(14).unwrap();
-        resource.freeze_tos_for_energy(100000000, duration, 1000); // 1 TOS
-
-        let mut bytes = Vec::new();
-        let mut writer = crate::serializer::Writer::new(&mut bytes);
-        resource.write(&mut writer);
-
-        let mut reader = crate::serializer::Reader::new(&bytes);
-        let deserialized = EnergyResource::read(&mut reader).unwrap();
-
-        assert_eq!(resource.total_energy, deserialized.total_energy);
-        assert_eq!(resource.frozen_tos, deserialized.frozen_tos);
+        // No usage, full free quota available
         assert_eq!(
-            resource.freeze_records.len(),
-            deserialized.freeze_records.len()
+            energy.calculate_free_energy_available(now_ms),
+            FREE_ENERGY_QUOTA
+        );
+
+        // Use some free energy
+        energy.consume_free_energy(500, now_ms);
+        assert_eq!(energy.free_energy_usage, 500);
+        // FREE_ENERGY_QUOTA (1500) - usage (500) = 1000 available
+        assert_eq!(energy.calculate_free_energy_available(now_ms), 1000);
+
+        // After 24 hours, free quota resets
+        let next_day = now_ms + ENERGY_RECOVERY_WINDOW_MS;
+        assert_eq!(
+            energy.calculate_free_energy_available(next_day),
+            FREE_ENERGY_QUOTA
         );
     }
 
     #[test]
-    fn test_freeze_duration_serialization() {
-        let durations = [
-            FreezeDuration::new(3).unwrap(),
-            FreezeDuration::new(7).unwrap(),
-            FreezeDuration::new(14).unwrap(),
-        ];
+    fn test_energy_decay_recovery() {
+        let mut energy = AccountEnergy::new();
+        energy.frozen_balance = 1_000_000;
+        energy.energy_usage = 1000;
+        energy.latest_consume_time = 0;
 
-        for duration in &durations {
-            let mut bytes = Vec::new();
-            let mut writer = crate::serializer::Writer::new(&mut bytes);
-            duration.write(&mut writer);
+        let total_weight = 100_000_000u64;
 
-            let mut reader = crate::serializer::Reader::new(&bytes);
-            let deserialized = FreezeDuration::read(&mut reader).unwrap();
+        // Immediately after use, most usage remains
+        assert!(
+            energy.calculate_frozen_energy_available(1, total_weight)
+                < energy.calculate_energy_limit(total_weight)
+        );
 
-            assert_eq!(duration, &deserialized);
-        }
+        // After 12 hours (50%), usage is halved
+        let half_day_ms = ENERGY_RECOVERY_WINDOW_MS / 2;
+        let available = energy.calculate_frozen_energy_available(half_day_ms, total_weight);
+        let limit = energy.calculate_energy_limit(total_weight);
+        // Should be close to limit - 500 (half of 1000 usage recovered)
+        assert!(available > limit - 600);
+        assert!(available < limit);
+
+        // After 24 hours, full energy available
+        let full_day_ms = ENERGY_RECOVERY_WINDOW_MS;
+        assert_eq!(
+            energy.calculate_frozen_energy_available(full_day_ms, total_weight),
+            limit
+        );
     }
 
     #[test]
-    fn test_freeze_record_serialization() {
-        let duration = FreezeDuration::new(7).unwrap();
-        let record = FreezeRecord::new(100000000, duration, 100); // 1 TOS
+    fn test_freeze_and_unfreeze() {
+        let mut energy = AccountEnergy::new();
+        let now_ms = 0u64;
 
-        let mut bytes = Vec::new();
-        let mut writer = crate::serializer::Writer::new(&mut bytes);
-        record.write(&mut writer);
+        // Freeze 1000 TOS
+        energy.freeze(1000);
+        assert_eq!(energy.frozen_balance, 1000);
 
+        // Start unfreeze
+        energy.start_unfreeze(500, now_ms).unwrap();
+        assert_eq!(energy.frozen_balance, 500);
+        assert_eq!(energy.unfreezing_list.len(), 1);
+        assert_eq!(energy.unfreezing_list[0].unfreeze_amount, 500);
+
+        // Cannot withdraw before expiry
+        assert_eq!(energy.withdraw_expired_unfreeze(now_ms), 0);
+
+        // Can withdraw after 14 days
+        let after_14_days = now_ms + (UNFREEZE_DELAY_DAYS as u64 * 24 * 60 * 60 * 1000);
+        let withdrawn = energy.withdraw_expired_unfreeze(after_14_days);
+        assert_eq!(withdrawn, 500);
+        assert!(energy.unfreezing_list.is_empty());
+    }
+
+    #[test]
+    fn test_unfreeze_queue_limit() {
+        let mut energy = AccountEnergy::new();
+        energy.frozen_balance = 100_000;
+
+        // Fill up the queue
+        for i in 0..MAX_UNFREEZING_LIST_SIZE {
+            energy.start_unfreeze(1, i as u64).unwrap();
+        }
+
+        // Queue is now full
+        assert_eq!(energy.unfreezing_list.len(), MAX_UNFREEZING_LIST_SIZE);
+
+        // Cannot add more
+        let result = energy.start_unfreeze(1, 0);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_cancel_all_unfreeze() {
+        let mut energy = AccountEnergy::new();
+        energy.frozen_balance = 1000;
+        let now_ms = 0u64;
+
+        // Start multiple unfreezes
+        energy.start_unfreeze(100, now_ms).unwrap();
+        energy.start_unfreeze(200, now_ms + 1000).unwrap();
+
+        let after_14_days = now_ms + (UNFREEZE_DELAY_DAYS as u64 * 24 * 60 * 60 * 1000);
+
+        // Cancel all - first one is expired, second is not
+        let (withdrawn, cancelled) = energy.cancel_all_unfreeze(after_14_days);
+        assert_eq!(withdrawn, 100); // Expired goes to balance
+        assert_eq!(cancelled, 200); // Not expired goes back to frozen
+        assert_eq!(energy.frozen_balance, 700 + 200); // Original 700 + cancelled 200
+        assert!(energy.unfreezing_list.is_empty());
+    }
+
+    #[test]
+    fn test_delegated_resource() {
+        use crate::crypto::KeyPair;
+
+        let from = KeyPair::new().get_public_key().compress();
+        let to = KeyPair::new().get_public_key().compress();
+
+        let delegation = DelegatedResource::new(from.clone(), to.clone(), 1000, 0);
+        assert!(!delegation.is_locked(0));
+        assert!(delegation.can_undelegate(0));
+
+        // With lock
+        let locked_delegation = DelegatedResource::new(from, to, 1000, 100_000);
+        assert!(locked_delegation.is_locked(0));
+        assert!(!locked_delegation.can_undelegate(0));
+        assert!(!locked_delegation.is_locked(100_001));
+        assert!(locked_delegation.can_undelegate(100_001));
+    }
+
+    #[test]
+    fn test_global_energy_state() {
+        let mut state = GlobalEnergyState::new();
+        assert_eq!(state.total_energy_limit, TOTAL_ENERGY_LIMIT);
+        assert_eq!(state.total_energy_weight, 0);
+
+        state.add_weight(1000, 1);
+        assert_eq!(state.total_energy_weight, 1000);
+        assert_eq!(state.last_update, 1);
+
+        state.remove_weight(500, 2);
+        assert_eq!(state.total_energy_weight, 500);
+        assert_eq!(state.last_update, 2);
+    }
+
+    #[test]
+    fn test_account_energy_serialization() {
+        let mut energy = AccountEnergy::new();
+        energy.frozen_balance = 1000;
+        energy.energy_usage = 500;
+        energy.latest_consume_time = 12345;
+        energy.unfreezing_list.push(UnfreezingRecord {
+            unfreeze_amount: 100,
+            unfreeze_expire_time: 999999,
+        });
+
+        let bytes = energy.to_bytes();
         let mut reader = crate::serializer::Reader::new(&bytes);
-        let deserialized = FreezeRecord::read(&mut reader).unwrap();
+        let restored = AccountEnergy::read(&mut reader).unwrap();
 
-        assert_eq!(record.amount, deserialized.amount);
-        assert_eq!(record.duration, deserialized.duration);
-        assert_eq!(record.energy_gained, deserialized.energy_gained);
+        assert_eq!(energy.frozen_balance, restored.frozen_balance);
+        assert_eq!(energy.energy_usage, restored.energy_usage);
+        assert_eq!(energy.latest_consume_time, restored.latest_consume_time);
+        assert_eq!(energy.unfreezing_list.len(), restored.unfreezing_list.len());
+    }
+
+    #[test]
+    fn test_global_energy_state_serialization() {
+        let mut state = GlobalEnergyState::new();
+        state.total_energy_weight = 5000;
+        state.last_update = 100;
+
+        let bytes = state.to_bytes();
+        let mut reader = crate::serializer::Reader::new(&bytes);
+        let restored = GlobalEnergyState::read(&mut reader).unwrap();
+
+        assert_eq!(state.total_energy_limit, restored.total_energy_limit);
+        assert_eq!(state.total_energy_weight, restored.total_energy_weight);
+        assert_eq!(state.last_update, restored.last_update);
     }
 }

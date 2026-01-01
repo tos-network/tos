@@ -205,17 +205,17 @@ pub trait BlockchainApplyState<'a, P: ContractProvider, E>:
     /// as a None version
     async fn remove_contract_module(&mut self, hash: &Hash) -> Result<(), E>;
 
-    /// Get the energy resource for an account
-    async fn get_energy_resource(
+    /// Get the account energy for an account (Stake 2.0)
+    async fn get_account_energy(
         &mut self,
         account: &'a CompressedPublicKey,
-    ) -> Result<Option<crate::account::EnergyResource>, E>;
+    ) -> Result<Option<crate::account::AccountEnergy>, E>;
 
-    /// Set the energy resource for an account
-    async fn set_energy_resource(
+    /// Set the account energy for an account (Stake 2.0)
+    async fn set_account_energy(
         &mut self,
         account: &'a CompressedPublicKey,
-        energy_resource: crate::account::EnergyResource,
+        account_energy: crate::account::AccountEnergy,
     ) -> Result<(), E>;
 
     /// Get the AI mining state

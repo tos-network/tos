@@ -1,152 +1,193 @@
 use crate::{
-    account::{EnergyResource, FreezeDuration, FreezeRecord},
-    block::TopoHeight,
-    config::ENERGY_PER_TRANSFER,
+    account::AccountEnergy,
+    config::{
+        ENERGY_COST_BURN, ENERGY_COST_CONTRACT_DEPLOY_BASE, ENERGY_COST_CONTRACT_DEPLOY_PER_BYTE,
+        ENERGY_COST_NEW_ACCOUNT, ENERGY_COST_TRANSFER_PER_OUTPUT, TOS_PER_ENERGY,
+    },
 };
 
-/// Energy-based fee calculator for TOS
-/// Implements energy model without bandwidth
+/// Energy-based fee calculator for TOS Stake 2.0
 ///
-/// # Energy Cost Model
-/// - Transfer operations: 1 energy per transfer (regardless of transaction size)
-/// - Account creation: 0 energy (no energy cost for new addresses)
-/// - Transaction size: Ignored in energy calculation
+/// # Stake 2.0 Energy Cost Model
+/// - Transfer: size_bytes + outputs × 100
+/// - Burn: 1,000 energy
+/// - Create account: 25,000 energy additional
+/// - Deploy contract: bytecode_size × 10 + 32,000
+/// - Invoke contract: Actual CU used
+/// - Energy operations: FREE (0 energy)
 ///
-/// # Edge Cases
-/// - Large transactions consume the same energy as small ones (size-independent)
-/// - Multiple outputs scale linearly (N outputs = N energy)
-/// - New account creation doesn't consume additional energy
-/// - Zero outputs result in zero energy cost
+/// # Energy Consumption Priority
+/// 1. Free quota (1,000/day)
+/// 2. Frozen energy (proportional allocation)
+/// 3. Auto-burn TOS (100 atomic/energy)
 pub struct EnergyFeeCalculator;
 
 impl EnergyFeeCalculator {
-    /// Calculate energy cost for a transaction (only transfer operations consume energy)
-    /// Each transfer consumes exactly 1 energy, regardless of transaction size
+    /// Calculate energy cost for a transfer transaction
     ///
-    /// # Parameters
-    /// - `_tx_size`: Transaction size in bytes (ignored in current implementation)
-    /// - `output_count`: Number of transfer outputs (each costs 1 energy)
-    /// - `new_addresses`: Number of new addresses created (currently costs 0 energy)
+    /// Formula: size_bytes + outputs × ENERGY_COST_TRANSFER_PER_OUTPUT
+    pub fn calculate_transfer_cost(tx_size: usize, output_count: usize) -> u64 {
+        let base = tx_size as u64;
+        let output_cost = output_count as u64 * ENERGY_COST_TRANSFER_PER_OUTPUT;
+        base + output_cost
+    }
+
+    /// Calculate additional energy cost for new account creation
+    pub fn calculate_new_account_cost(new_addresses: usize) -> u64 {
+        new_addresses as u64 * ENERGY_COST_NEW_ACCOUNT
+    }
+
+    /// Calculate energy cost for burn transaction
+    pub fn calculate_burn_cost() -> u64 {
+        ENERGY_COST_BURN
+    }
+
+    /// Calculate energy cost for contract deployment
     ///
-    /// # Edge Cases
-    /// - Transaction size is completely ignored
-    /// - New address creation is free in terms of energy
-    /// - Zero outputs = zero energy cost
-    /// - Large transactions with 1 output = same cost as small transactions with 1 output
-    pub fn calculate_energy_cost(
-        _tx_size: usize,
-        output_count: usize,
-        _new_addresses: usize,
-    ) -> u64 {
-        // Energy cost for transfers (1 energy per transfer, regardless of size)
-        // Note: new_addresses parameter is intentionally unused as new account
-        // creation is free in the current energy model
-        output_count as u64 * ENERGY_PER_TRANSFER
+    /// Formula: bytecode_size × 10 + 32,000
+    pub fn calculate_deploy_cost(bytecode_size: usize) -> u64 {
+        ENERGY_COST_CONTRACT_DEPLOY_BASE
+            + (bytecode_size as u64 * ENERGY_COST_CONTRACT_DEPLOY_PER_BYTE)
+    }
+
+    /// Calculate energy cost for UNO (privacy) transfers
+    ///
+    /// UNO transfers have higher costs due to ZK proof overhead
+    /// Formula: size + outputs × 500
+    pub fn calculate_uno_transfer_cost(tx_size: usize, output_count: usize) -> u64 {
+        let base = tx_size as u64;
+        let output_cost = output_count as u64 * 500;
+        base + output_cost
+    }
+
+    /// Legacy compatibility: calculate_energy_cost
+    ///
+    /// For backward compatibility with existing code.
+    /// Uses new Stake 2.0 calculation internally.
+    pub fn calculate_energy_cost(tx_size: usize, output_count: usize, new_addresses: usize) -> u64 {
+        Self::calculate_transfer_cost(tx_size, output_count)
+            + Self::calculate_new_account_cost(new_addresses)
     }
 }
 
-/// Energy resource manager for accounts
+/// Energy status for display purposes
+#[derive(Debug, Clone)]
+pub struct EnergyStatus {
+    /// Current energy limit based on frozen balance
+    pub energy_limit: u64,
+    /// Current energy usage (decays over 24h)
+    pub energy_usage: u64,
+    /// Available energy (limit - usage after decay)
+    pub available_energy: u64,
+    /// Free quota available
+    pub free_energy_available: u64,
+    /// Total frozen TOS
+    pub frozen_balance: u64,
+}
+
+/// Energy resource manager for Stake 2.0
 ///
-/// # Purpose
-/// Provides high-level operations for managing energy resources, including:
-/// - Freezing TOS to gain energy
-/// - Unfreezing TOS (with time constraints)
-/// - Consuming energy for transactions
-/// - Resetting energy usage periodically
-///
-/// # Edge Cases and Error Handling
-/// - All TOS amounts must be whole numbers (fractional parts discarded)
-/// - Energy consumption fails if insufficient energy available
-/// - Unfreezing only works on unlocked freeze records
-/// - Energy reset timing must be managed externally
+/// Provides high-level operations for managing account energy:
+/// - Consuming energy with priority (free → frozen → TOS burn)
+/// - Getting energy status
+/// - Calculating TOS cost for energy shortfall
 pub struct EnergyResourceManager;
 
 impl EnergyResourceManager {
-    /// Create new energy resource for an account
-    pub fn create_energy_resource() -> EnergyResource {
-        EnergyResource::new()
-    }
-
-    /// Freeze TOS to get energy with duration-based rewards
-    pub fn freeze_tos_for_energy(
-        energy_resource: &mut EnergyResource,
-        tos_amount: u64,
-        duration: FreezeDuration,
-        topoheight: TopoHeight,
-    ) -> u64 {
-        energy_resource.freeze_tos_for_energy(tos_amount, duration, topoheight)
-    }
-
-    /// Unfreeze TOS
-    pub fn unfreeze_tos(
-        energy_resource: &mut EnergyResource,
-        tos_amount: u64,
-        topoheight: TopoHeight,
-    ) -> Result<u64, String> {
-        energy_resource.unfreeze_tos(tos_amount, topoheight)
-    }
-
-    /// Consume energy for transaction
-    pub fn consume_energy_for_transaction(
-        energy_resource: &mut EnergyResource,
-        energy_cost: u64,
-    ) -> Result<(), &'static str> {
-        energy_resource.consume_energy(energy_cost)
-    }
-
-    /// Reset energy usage (called periodically)
-    pub fn reset_energy_usage(energy_resource: &mut EnergyResource, topoheight: TopoHeight) {
-        energy_resource.reset_used_energy(topoheight);
-    }
-
     /// Get energy status for an account
-    pub fn get_energy_status(energy_resource: &EnergyResource) -> EnergyStatus {
+    pub fn get_energy_status(
+        account: &AccountEnergy,
+        total_energy_weight: u64,
+        now_ms: u64,
+    ) -> EnergyStatus {
+        let energy_limit = account.calculate_energy_limit(total_energy_weight);
+        let available_energy =
+            account.calculate_frozen_energy_available(now_ms, total_energy_weight);
+        let free_energy_available = account.calculate_free_energy_available(now_ms);
+
         EnergyStatus {
-            total_energy: energy_resource.total_energy,
-            used_energy: energy_resource.used_energy,
-            available_energy: energy_resource.available_energy(),
-            frozen_tos: energy_resource.frozen_tos,
+            energy_limit,
+            energy_usage: account.energy_usage,
+            available_energy,
+            free_energy_available,
+            frozen_balance: account.frozen_balance,
         }
     }
 
-    /// Get unlockable TOS amount at current topoheight
-    pub fn get_unlockable_tos(
-        energy_resource: &EnergyResource,
-        current_topoheight: TopoHeight,
-    ) -> u64 {
-        energy_resource.get_unlockable_tos(current_topoheight)
+    /// Calculate TOS cost for energy shortfall
+    ///
+    /// When energy is insufficient, user must burn TOS at rate of TOS_PER_ENERGY
+    pub fn calculate_tos_cost_for_energy(energy_needed: u64) -> u64 {
+        energy_needed * TOS_PER_ENERGY
     }
 
-    /// Get freeze records grouped by duration
-    pub fn get_freeze_records_by_duration(
-        energy_resource: &EnergyResource,
-    ) -> std::collections::HashMap<FreezeDuration, Vec<&FreezeRecord>> {
-        energy_resource.get_freeze_records_by_duration()
-    }
-}
+    /// Consume energy for a transaction with priority order
+    ///
+    /// Priority:
+    /// 1. Free quota
+    /// 2. Frozen energy
+    /// 3. Auto-burn TOS (returns TOS amount needed)
+    ///
+    /// Returns: (energy_consumed, tos_to_burn)
+    pub fn consume_transaction_energy(
+        account: &mut AccountEnergy,
+        required_energy: u64,
+        total_energy_weight: u64,
+        now_ms: u64,
+    ) -> (u64, u64) {
+        let mut remaining = required_energy;
 
-/// Energy status information
-#[derive(Debug, Clone)]
-pub struct EnergyStatus {
-    pub total_energy: u64,
-    pub used_energy: u64,
-    pub available_energy: u64,
-    pub frozen_tos: u64,
-}
-
-impl EnergyStatus {
-    /// Calculate energy usage percentage
-    pub fn usage_percentage(&self) -> f64 {
-        if self.total_energy == 0 {
-            0.0
-        } else {
-            (self.used_energy as f64 / self.total_energy as f64) * 100.0
+        // 1. Consume free quota first
+        let free_available = account.calculate_free_energy_available(now_ms);
+        let free_to_use = free_available.min(remaining);
+        if free_to_use > 0 {
+            account.consume_free_energy(free_to_use, now_ms);
+            remaining -= free_to_use;
         }
+
+        if remaining == 0 {
+            return (required_energy, 0);
+        }
+
+        // 2. Consume frozen energy
+        let frozen_available =
+            account.calculate_frozen_energy_available(now_ms, total_energy_weight);
+        let frozen_to_use = frozen_available.min(remaining);
+        if frozen_to_use > 0 {
+            account.consume_frozen_energy(frozen_to_use, now_ms, total_energy_weight);
+            remaining -= frozen_to_use;
+        }
+
+        if remaining == 0 {
+            return (required_energy, 0);
+        }
+
+        // 3. Remaining must be paid in TOS
+        let tos_cost = remaining * TOS_PER_ENERGY;
+        (required_energy - remaining, tos_cost)
     }
 
-    /// Check if energy is low (less than 10% available)
-    pub fn is_energy_low(&self) -> bool {
-        self.available_energy < self.total_energy / 10
+    /// Check if account has enough resources (energy + TOS) for transaction
+    pub fn can_afford_transaction(
+        account: &AccountEnergy,
+        required_energy: u64,
+        account_balance: u64,
+        total_energy_weight: u64,
+        now_ms: u64,
+    ) -> bool {
+        let free_available = account.calculate_free_energy_available(now_ms);
+        let frozen_available =
+            account.calculate_frozen_energy_available(now_ms, total_energy_weight);
+        let total_energy = free_available + frozen_available;
+
+        if total_energy >= required_energy {
+            return true;
+        }
+
+        // Check if TOS can cover the shortfall
+        let shortfall = required_energy - total_energy;
+        let tos_needed = shortfall * TOS_PER_ENERGY;
+        account_balance >= tos_needed
     }
 }
 
@@ -155,70 +196,74 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_energy_cost_calculation() {
-        let cost = EnergyFeeCalculator::calculate_energy_cost(1024, 1, 0);
-        assert_eq!(cost, ENERGY_PER_TRANSFER);
+    fn test_transfer_cost_calculation() {
+        // 100 bytes + 1 output = 100 + 100 = 200
+        let cost = EnergyFeeCalculator::calculate_transfer_cost(100, 1);
+        assert_eq!(cost, 200);
+
+        // 100 bytes + 5 outputs = 100 + 500 = 600
+        let cost = EnergyFeeCalculator::calculate_transfer_cost(100, 5);
+        assert_eq!(cost, 600);
     }
 
     #[test]
-    fn test_transfer_energy_cost_is_one() {
-        // Test that each transfer consumes exactly 1 energy
-        let single_transfer_cost = EnergyFeeCalculator::calculate_energy_cost(100, 1, 0);
-        assert_eq!(single_transfer_cost, ENERGY_PER_TRANSFER); // Should be 1 energy
+    fn test_new_account_cost() {
+        let cost = EnergyFeeCalculator::calculate_new_account_cost(1);
+        assert_eq!(cost, ENERGY_COST_NEW_ACCOUNT);
 
-        // Test multiple transfers
-        let multiple_transfer_cost = EnergyFeeCalculator::calculate_energy_cost(100, 5, 0);
-        assert_eq!(multiple_transfer_cost, 5 * ENERGY_PER_TRANSFER); // Should be 5 energy
-
-        // Test with new addresses (new addresses don't consume energy in current implementation)
-        let transfer_with_new_address = EnergyFeeCalculator::calculate_energy_cost(100, 1, 2);
-        assert_eq!(transfer_with_new_address, ENERGY_PER_TRANSFER); // Only 1 energy for the transfer
-
-        // Verify the constant is set to 1
-        assert_eq!(ENERGY_PER_TRANSFER, 1);
+        let cost = EnergyFeeCalculator::calculate_new_account_cost(3);
+        assert_eq!(cost, 3 * ENERGY_COST_NEW_ACCOUNT);
     }
 
     #[test]
-    fn test_transfer_energy_cost_independent_of_size() {
-        // Test that energy cost is independent of transaction size
-        let small_tx_cost = EnergyFeeCalculator::calculate_energy_cost(100, 1, 0);
-        let large_tx_cost = EnergyFeeCalculator::calculate_energy_cost(10000, 1, 0);
-        let huge_tx_cost = EnergyFeeCalculator::calculate_energy_cost(100000, 1, 0);
-
-        // All should cost exactly 1 energy regardless of size
-        assert_eq!(small_tx_cost, 1);
-        assert_eq!(large_tx_cost, 1);
-        assert_eq!(huge_tx_cost, 1);
-
-        // Multiple transfers should scale linearly
-        let multiple_small = EnergyFeeCalculator::calculate_energy_cost(100, 3, 0);
-        let multiple_large = EnergyFeeCalculator::calculate_energy_cost(10000, 3, 0);
-
-        assert_eq!(multiple_small, 3);
-        assert_eq!(multiple_large, 3);
+    fn test_burn_cost() {
+        let cost = EnergyFeeCalculator::calculate_burn_cost();
+        assert_eq!(cost, ENERGY_COST_BURN);
     }
 
     #[test]
-    fn test_energy_resource_management() {
-        let mut resource = EnergyResourceManager::create_energy_resource();
+    fn test_deploy_cost() {
+        // 1000 bytes = 32000 + 10000 = 42000
+        let cost = EnergyFeeCalculator::calculate_deploy_cost(1000);
+        assert_eq!(cost, ENERGY_COST_CONTRACT_DEPLOY_BASE + 10000);
+    }
 
-        // Freeze TOS to get energy with duration
-        let duration = FreezeDuration::new(7).unwrap();
-        let energy_gained = EnergyResourceManager::freeze_tos_for_energy(
-            &mut resource,
-            100000000, // 1 TOS
-            duration,
-            1000,
+    #[test]
+    fn test_legacy_calculate_energy_cost() {
+        // Should match transfer + new account
+        let cost = EnergyFeeCalculator::calculate_energy_cost(100, 1, 1);
+        let expected = EnergyFeeCalculator::calculate_transfer_cost(100, 1)
+            + EnergyFeeCalculator::calculate_new_account_cost(1);
+        assert_eq!(cost, expected);
+    }
+
+    #[test]
+    fn test_tos_cost_calculation() {
+        // 1000 energy = 1000 * 100 = 100,000 atomic TOS
+        let tos_cost = EnergyResourceManager::calculate_tos_cost_for_energy(1000);
+        assert_eq!(tos_cost, 1000 * TOS_PER_ENERGY);
+    }
+
+    #[test]
+    fn test_energy_consumption_priority() {
+        let mut account = AccountEnergy::new();
+        account.frozen_balance = 1_000_000; // 1M frozen
+        let total_weight = 100_000_000; // 100M total
+
+        // Account has some energy limit
+        let limit = account.calculate_energy_limit(total_weight);
+        assert!(limit > 0);
+
+        // With free quota, should use free first
+        let now_ms = 1000u64;
+        let (consumed, tos_needed) = EnergyResourceManager::consume_transaction_energy(
+            &mut account,
+            500, // Less than free quota
+            total_weight,
+            now_ms,
         );
-        assert_eq!(energy_gained, 14); // 1 TOS * 14 = 14 transfers
-        assert_eq!(resource.available_energy(), 14);
-
-        // Consume energy
-        let result = EnergyResourceManager::consume_energy_for_transaction(
-            &mut resource,
-            5, // 5 transfers
-        );
-        assert!(result.is_ok());
-        assert_eq!(resource.available_energy(), 9); // 14 - 5 = 9 transfers remaining
+        assert_eq!(consumed, 500);
+        assert_eq!(tos_needed, 0);
+        assert_eq!(account.free_energy_usage, 500);
     }
 }

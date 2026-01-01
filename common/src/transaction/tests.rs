@@ -12,9 +12,9 @@ use crate::{
     serializer::Serializer,
     transaction::{
         builder::{
-            AccountState, ContractDepositBuilder, DeployContractBuilder, EnergyBuilder, FeeBuilder,
-            FeeHelper, GenerationError, InvokeContractBuilder, MultiSigBuilder, TransactionBuilder,
-            TransactionTypeBuilder, TransferBuilder,
+            AccountState, ContractDepositBuilder, DeployContractBuilder, EnergyBuilder,
+            EnergyOperationType, FeeBuilder, FeeHelper, GenerationError, InvokeContractBuilder,
+            MultiSigBuilder, TransactionBuilder, TransactionTypeBuilder, TransferBuilder,
         },
         extra_data::Role,
         extra_data::{derive_shared_key_from_opening, PlaintextData},
@@ -172,17 +172,24 @@ fn create_tx_for(
     println!(
         "Debug sizes: estimated={estimated_size}, actual={actual_size}, to_bytes={to_bytes_size}"
     );
-    println!("Debug components: version={}, source={}, data={}, fee={}, fee_type={}, nonce={}, signature={}",
-             1, tx.get_source().size(), tx.get_data().size(), 8, 1, 8, tx.get_signature().size());
+    // Stake 2.0: fee_type removed, only fee_limit (8 bytes) remains
+    println!(
+        "Debug components: version={}, source={}, data={}, fee_limit={}, nonce={}, signature={}",
+        1,
+        tx.get_source().size(),
+        tx.get_data().size(),
+        8,
+        8,
+        tx.get_signature().size()
+    );
     println!("Debug reference size: {}", tx.get_reference().size());
 
-    // Calculate actual components
+    // Calculate actual components (Stake 2.0: no fee_type field)
     let actual_components = 1
         + tx.get_source().size()
         + tx.get_data().size()
-        + 8
-        + 1
-        + 8
+        + 8 // fee_limit
+        + 8 // nonce
         + tx.get_reference().size()
         + tx.get_signature().size();
     println!("Debug calculated actual: {actual_components}");
@@ -340,7 +347,7 @@ async fn test_tx_verify() {
 
     // Check Alice balance
     let balance = state.accounts[&alice.keypair.get_public_key().compress()].balances[&TOS_ASSET];
-    assert_eq!(balance, (100u64 * COIN_VALUE) - (50 + tx.fee));
+    assert_eq!(balance, (100u64 * COIN_VALUE) - (50 + tx.fee_limit));
 }
 
 // Balance simplification: Re-enabled test - passes with plaintext balances
@@ -482,7 +489,10 @@ async fn test_burn_tx_verify() {
 
     // Check Alice balance
     let balance = state.accounts[&alice.keypair.get_public_key().compress()].balances[&TOS_ASSET];
-    assert_eq!(balance, (100u64 * COIN_VALUE) - (50 * COIN_VALUE + tx.fee));
+    assert_eq!(
+        balance,
+        (100u64 * COIN_VALUE) - (50 * COIN_VALUE + tx.fee_limit)
+    );
 }
 
 // Balance simplification: Test updated to work with plain u64 balances
@@ -562,7 +572,7 @@ async fn test_tx_invoke_contract() {
     // Check Alice balance
     let balance = state.accounts[&alice.keypair.get_public_key().compress()].balances[&TOS_ASSET];
     // 50 coins deposit + tx fee + 1000 gas fee
-    let total_spend = (50 * COIN_VALUE) + tx.fee + 1000;
+    let total_spend = (50 * COIN_VALUE) + tx.fee_limit + 1000;
 
     assert_eq!(balance, (100 * COIN_VALUE) - total_spend);
 }
@@ -654,7 +664,7 @@ async fn test_tx_invoke_contract_multiple_deposits() {
     // Check Alice balance (sender side - should reflect deduction)
     let balance = state.accounts[&alice.keypair.get_public_key().compress()].balances[&TOS_ASSET];
     // 50 coins deposit + tx fee + 1000 gas fee
-    let total_spend = (50 * COIN_VALUE) + tx.fee + 1000;
+    let total_spend = (50 * COIN_VALUE) + tx.fee_limit + 1000;
 
     assert_eq!(balance, (100 * COIN_VALUE) - total_spend);
 }
@@ -729,7 +739,7 @@ async fn test_tx_deploy_contract() {
     // Check Alice balance
     let balance = state.accounts[&alice.keypair.get_public_key().compress()].balances[&TOS_ASSET];
     // 1 TOS for contract deploy, tx fee
-    let total_spend = BURN_PER_CONTRACT + tx.fee;
+    let total_spend = BURN_PER_CONTRACT + tx.fee_limit;
 
     assert_eq!(balance, (100 * COIN_VALUE) - total_spend);
 }
@@ -1067,7 +1077,7 @@ async fn test_transfer_extra_data_limits() {
 
     // Verify the transaction
     let tx_hash = tx.hash();
-    let tx_fee = tx.fee; // Save fee before moving tx into Arc
+    let tx_fee = tx.fee_limit; // Save fee_limit before moving tx into Arc
     let result = Arc::new(tx).verify(&tx_hash, &mut state, &NoZKPCache).await;
     assert!(
         result.is_ok(),
@@ -1216,9 +1226,11 @@ async fn test_unfreeze_tos_balance_refund() {
         };
 
         let data = TransactionTypeBuilder::Energy(EnergyBuilder {
-            amount: unfreeze_amount,
-            is_freeze: false,
-            freeze_duration: None,
+            operation: EnergyOperationType::UnfreezeTos,
+            amount: Some(unfreeze_amount),
+            receiver: None,
+            lock: false,
+            lock_period: 0,
         });
 
         let builder = TransactionBuilder::new(
@@ -1260,7 +1272,7 @@ async fn test_unfreeze_tos_balance_refund() {
 
     // Verify UnfreezeTos transaction
     let unfreeze_tx_hash = unfreeze_tx.hash();
-    let tx_fee = unfreeze_tx.fee; // Save actual fee from transaction
+    let tx_fee = unfreeze_tx.fee_limit; // Save actual fee_limit from transaction
     println!("Transaction fee: {tx_fee}");
     let unfreeze_result = Arc::new(unfreeze_tx)
         .verify(&unfreeze_tx_hash, &mut state, &NoZKPCache)
@@ -1618,7 +1630,7 @@ async fn test_p04_transfer_balance_mutation() {
 
     // Alice transfers 500 TOS to Bob
     let tx = create_transfer_tx(&alice, bob.address(), 500 * COIN_VALUE, TOS_ASSET);
-    let tx_fee = tx.fee;
+    let tx_fee = tx.fee_limit;
 
     // Create chain state
     let mut state = ChainState::new();
@@ -1892,7 +1904,7 @@ async fn test_p04_fee_deduction() {
 
     // Transfer 100 TOS to Bob
     let tx = create_transfer_tx(&alice, bob.address(), 100 * COIN_VALUE, TOS_ASSET);
-    let tx_fee = tx.fee;
+    let tx_fee = tx.fee_limit;
 
     // Ensure fee is non-zero
     assert!(tx_fee > 0, "Fee should be non-zero");
@@ -1963,7 +1975,7 @@ async fn test_p04_burn_transaction() {
 
     // Burn 200 TOS
     let tx = create_burn_tx(&alice, 200 * COIN_VALUE, TOS_ASSET);
-    let tx_fee = tx.fee;
+    let tx_fee = tx.fee_limit;
 
     // Create chain state
     let mut state = ChainState::new();
@@ -2039,7 +2051,7 @@ async fn test_p04_multiple_transfers() {
     );
 
     let tx = Arc::new(builder.build(&mut state_impl, &alice.keypair).unwrap());
-    let tx_fee = tx.fee;
+    let tx_fee = tx.fee_limit;
 
     // Create chain state
     let mut state = ChainState::new();

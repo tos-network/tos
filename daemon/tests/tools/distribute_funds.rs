@@ -28,7 +28,6 @@ use tos_common::{
             AccountState, FeeBuilder, FeeHelper, TransactionBuilder, TransactionTypeBuilder,
             TransferBuilder,
         },
-        FeeType, Reference, Transaction, TxVersion,
     },
 };
 
@@ -379,7 +378,6 @@ async fn main() -> Result<()> {
             TransactionTypeBuilder::Transfers(vec![transfer]),
             FeeBuilder::Value(args.fee),
         )
-        .with_fee_type(FeeType::TOS)
         .build(&mut state, &keypair_a)?;
 
         let tx_hash = rpc.submit_transaction(&tx).await?;

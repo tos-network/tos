@@ -243,7 +243,7 @@ impl Simulator {
     //             let tx = Transaction::new(key, data, FEE_PER_KB, nonce, signature);
     //             let hash = tx.hash();
 
-    //             debug!("Simulated tx: {}, key: {}, nonce: {}, fee: {}", hash, tx.get_owner(), tx.get_nonce(), tx.get_fee());
+    //             debug!("Simulated tx: {}, key: {}, nonce: {}, fee: {}", hash, tx.get_owner(), tx.get_nonce(), tx.get_fee_limit());
     //             if let Err(e) = blockchain.add_tx_to_mempool_with_hash(tx, hash, false).await {
     //                 error!("Error while adding simulated tx to mempool: {}, key: {}", e, keypair.get_public_key());
     //             }

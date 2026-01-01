@@ -76,7 +76,7 @@ use tos_common::{
         sync::{Mutex, RwLock, Semaphore},
     },
     transaction::{verify::BlockchainVerificationState, Transaction, TransactionType},
-    utils::{calculate_tx_fee, format_tos},
+    utils::format_tos,
     varuint::VarUint,
 };
 use tos_kernel::Environment;
@@ -2220,7 +2220,7 @@ impl<S: Storage> Blockchain<S> {
                     let data = MempoolTransactionSummary {
                         size: tx_size,
                         hash: Cow::Borrowed(&hash),
-                        fee: tx.get_fee(),
+                        fee: tx.get_fee_limit(),
                         source: tx.get_source().as_address(self.network.is_mainnet()),
                         first_seen: get_current_time_in_seconds(),
                     };
@@ -2721,7 +2721,7 @@ impl<S: Storage> Blockchain<S> {
                         "Selected {} (nonce: {}, fees: {}) for mining",
                         hash,
                         tx.get_nonce(),
-                        format_tos(tx.get_fee())
+                        format_tos(tx.get_fee_limit())
                     );
                 }
                 // TODO no clone
@@ -3944,7 +3944,7 @@ impl<S: Storage> Blockchain<S> {
                         }
 
                         // Increase total tx fees for miner
-                        total_fees += tx.get_fee();
+                        total_fees += tx.get_fee_limit();
                     }
                 }
 
@@ -4897,10 +4897,8 @@ pub async fn estimate_required_tx_fees<P: AccountProvider>(
     tx: &Transaction,
     _: BlockVersion,
 ) -> Result<u64, BlockchainError> {
-    let mut output_count = 0;
     let mut processed_keys = HashSet::new();
     if let TransactionType::Transfers(transfers) = tx.get_data() {
-        output_count = transfers.len();
         for transfer in transfers {
             if !processed_keys.contains(transfer.get_destination())
                 && !provider
@@ -4922,20 +4920,11 @@ pub async fn estimate_required_tx_fees<P: AccountProvider>(
         }
     }
 
-    // Check if this transaction uses energy fees
-    if tx.get_fee_type().is_energy() {
-        // For energy fees, we return 0 TOS fee requirement
-        // The energy consumption is handled separately in the transaction verification
-        Ok(0)
-    } else {
-        // For TOS fees, use the traditional fee calculation
-        Ok(calculate_tx_fee(
-            tx.size(),
-            output_count,
-            processed_keys.len(),
-            tx.get_multisig_count(),
-        ))
-    }
+    // Stake 2.0: All transactions use energy model
+    // The fee_limit is reserved for auto-burn if energy is insufficient
+    // Actual energy consumption is handled in apply() with EnergyResourceManager
+    // Return 0 TOS fee requirement since energy handles all fees
+    Ok(0)
 }
 
 // Get the block reward for a side block based on how many side blocks exists at same height

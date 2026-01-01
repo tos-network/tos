@@ -16,7 +16,6 @@ use tos_common::{
     },
     transaction::{
         builder::{AccountState, FeeBuilder, TransactionBuilder, TransactionTypeBuilder, TransferBuilder},
-        FeeType, Reference, Transaction, TxVersion,
     },
     serializer::Serializer,
 };
@@ -108,7 +107,6 @@ fn main() {
         TransactionTypeBuilder::Transfers(vec![transfer]),
         FeeBuilder::Value(5_000),
     )
-    .with_fee_type(FeeType::TOS)
     .build(&mut state, &sender)
     .expect("build single transfer tx");
 
@@ -135,7 +133,6 @@ fn main() {
         TransactionTypeBuilder::Transfers(transfers),
         FeeBuilder::Value(5_000),
     )
-    .with_fee_type(FeeType::TOS)
     .build(&mut state, &sender)
     .expect("build multi-transfer tx");
 
@@ -160,7 +157,6 @@ fn main() {
         TransactionTypeBuilder::Transfers(vec![transfer]),
         FeeBuilder::Value(5_000),
     )
-    .with_fee_type(FeeType::TOS)
     .build(&mut state, &sender)
     .expect("build tx with extra data");
 

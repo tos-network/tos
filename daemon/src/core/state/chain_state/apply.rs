@@ -14,7 +14,7 @@ use std::{
     ops::{Deref, DerefMut},
 };
 use tos_common::{
-    account::{BalanceType, EnergyResource, Nonce, VersionedNonce},
+    account::{AccountEnergy, BalanceType, Nonce, VersionedNonce},
     ai_mining::AIMiningState,
     asset::VersionedAssetData,
     block::{Block, BlockVersion, TopoHeight},
@@ -384,21 +384,21 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for Applicable
         self.remove_contract_module_internal(hash).await
     }
 
-    async fn get_energy_resource(
+    async fn get_account_energy(
         &mut self,
         account: &'a CompressedPublicKey,
-    ) -> Result<Option<EnergyResource>, BlockchainError> {
-        self.inner.storage.get_energy_resource(account).await
+    ) -> Result<Option<AccountEnergy>, BlockchainError> {
+        self.inner.storage.get_account_energy(account).await
     }
 
-    async fn set_energy_resource(
+    async fn set_account_energy(
         &mut self,
         account: &'a CompressedPublicKey,
-        energy_resource: EnergyResource,
+        account_energy: AccountEnergy,
     ) -> Result<(), BlockchainError> {
         self.inner
             .storage
-            .set_energy_resource(account, self.inner.topoheight, &energy_resource)
+            .set_account_energy(account, self.inner.topoheight, &account_energy)
             .await
     }
 

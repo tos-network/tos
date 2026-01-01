@@ -66,15 +66,15 @@ impl Network {
         matches!(self, Self::Devnet)
     }
 
-    /// Get minimum freeze duration in blocks for this network
-    /// - Mainnet/Testnet: 3 days = 259200 blocks (1 block per second)
-    /// - Devnet: 30 blocks (30 seconds for quick testing)
-    pub fn min_freeze_duration_blocks(&self) -> u64 {
+    /// Get unfreeze delay in milliseconds for this network
+    /// - Mainnet/Testnet: 14 days = 1,209,600,000 ms
+    /// - Devnet: 30 seconds = 30,000 ms (for quick testing)
+    pub fn unfreeze_delay_ms(&self) -> u64 {
         match self {
             Self::Mainnet | Self::Testnet | Self::Stagenet => {
-                crate::config::MIN_FREEZE_DURATION_DAYS as u64 * 24 * 60 * 60
+                crate::config::UNFREEZE_DELAY_DAYS as u64 * 24 * 60 * 60 * 1000
             }
-            Self::Devnet => 30, // 30 seconds for quick testing
+            Self::Devnet => 30_000, // 30 seconds for quick testing
         }
     }
 

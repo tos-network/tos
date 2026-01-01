@@ -61,21 +61,13 @@ pub const MAX_DELEGATE_LOCK_DAYS: u32 = 365;
 // 0 = no lock (can undelegate immediately after 3 days minimum)
 pub const DEFAULT_DELEGATE_LOCK_DAYS: u32 = 3;
 
-// Energy costs for different transaction types
-pub const ENERGY_COST_PER_BYTE: u64 = 1;           // Per byte of transaction
-pub const ENERGY_COST_PER_OUTPUT: u64 = 100;       // Per transfer output
-pub const ENERGY_COST_ACCOUNT_CREATION: u64 = 25_000; // Creating new account
-pub const ENERGY_COST_BURN: u64 = 1_000;           // Burn operation
+// Energy costs for different transaction types (Stake 2.0)
+pub const ENERGY_COST_TRANSFER_BASE: u64 = 0; // Base cost for transfer (size-based)
+pub const ENERGY_COST_TRANSFER_PER_OUTPUT: u64 = 100; // Per transfer output
+pub const ENERGY_COST_NEW_ACCOUNT: u64 = 25_000; // Creating new account
+pub const ENERGY_COST_BURN: u64 = 1_000; // Burn operation
 pub const ENERGY_COST_CONTRACT_DEPLOY_BASE: u64 = 32_000; // Base cost for contract deploy
 pub const ENERGY_COST_CONTRACT_DEPLOY_PER_BYTE: u64 = 10; // Per byte of bytecode
-
-// ===== LEGACY ENERGY MODEL (deprecated) =====
-// Kept for backward compatibility during transition
-// TODO: Remove after full migration to Stake 2.0
-
-// Legacy: 1 transfer = 1 energy (size-independent)
-#[deprecated(note = "Use Stake 2.0 energy model instead")]
-pub const ENERGY_PER_TRANSFER: u64 = 1;
 
 // TOS-based fee model constants
 pub const FEE_PER_KB: u64 = 10000;
@@ -130,18 +122,6 @@ pub const COIN_DECIMALS: u8 = 8;
 pub const COIN_VALUE: u64 = 10u64.pow(COIN_DECIMALS as u32);
 // 184M full coin
 pub const MAXIMUM_SUPPLY: u64 = 184_000_000 * COIN_VALUE;
-
-// ===== LEGACY FREEZE DURATION LIMITS (deprecated) =====
-// Stake 2.0 removes duration-based freezing
-// These are kept for backward compatibility during transition
-// TODO: Remove after full migration to Stake 2.0
-
-// Minimum freeze duration in days (legacy)
-#[deprecated(note = "Stake 2.0 removes duration-based freezing")]
-pub const MIN_FREEZE_DURATION_DAYS: u32 = 3;
-// Maximum freeze duration in days (legacy)
-#[deprecated(note = "Stake 2.0 removes duration-based freezing")]
-pub const MAX_FREEZE_DURATION_DAYS: u32 = 180;
 
 // ===== TOS AMOUNT LIMITS =====
 // Minimum TOS amount for freeze operations (1 TOS)
