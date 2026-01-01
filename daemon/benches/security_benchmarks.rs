@@ -13,8 +13,9 @@
 //! 7. Balance verification
 
 #![allow(clippy::disallowed_methods)]
-#![allow(deprecated)]
 #![allow(dead_code)]
+// Allow deprecated criterion::black_box (external crate)
+#![allow(deprecated)]
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use std::time::Duration;

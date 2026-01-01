@@ -1892,14 +1892,6 @@ async fn transfer(manager: &CommandManager, mut args: ArgumentManager) -> Result
 
     let amount = from_coin(amount, asset_data.inner.get_decimals()).context("Invalid amount")?;
 
-    // Stake 2.0: fee_type parameter is deprecated, all transactions use energy model
-    // fee_limit is used for auto-burn fallback when energy is insufficient
-    if args.has_argument("fee_type") {
-        manager.message(
-            "Note: fee_type is deprecated in Stake 2.0. All transactions use energy model.",
-        );
-    }
-
     manager.message(format!(
         "Sending {} of {} ({}) to {}",
         format_coin(amount, asset_data.inner.get_decimals()),
@@ -2009,13 +2001,6 @@ async fn transfer_all(
     } else {
         return Err(CommandError::MissingArgument("asset".to_string()));
     };
-
-    // Stake 2.0: fee_type parameter is deprecated, all transactions use energy model
-    if args.has_argument("fee_type") {
-        manager.message(
-            "Note: fee_type is deprecated in Stake 2.0. All transactions use energy model.",
-        );
-    }
 
     // Query balance, asset data, and multisig from daemon API (stateless)
     let (mut amount, asset_data, multisig) = {
@@ -5065,11 +5050,6 @@ async fn freeze_tos(
     } else {
         return Err(CommandError::MissingArgument("amount".to_string()));
     };
-
-    // Warn if duration is provided (deprecated in Stake 2.0)
-    if args.has_argument("duration") {
-        manager.message("Note: 'duration' parameter is deprecated in Stake 2.0. Energy is now proportional to frozen amount.");
-    }
 
     // Parse amount
     let amount = from_coin(&amount_str, 8).context("Invalid amount")?;
