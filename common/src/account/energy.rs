@@ -680,4 +680,94 @@ mod tests {
         assert_eq!(state.total_energy_weight, restored.total_energy_weight);
         assert_eq!(state.last_update, restored.last_update);
     }
+
+    #[test]
+    fn test_delegated_resource_serialization() {
+        use crate::crypto::KeyPair;
+
+        let from = KeyPair::new().get_public_key().compress();
+        let to = KeyPair::new().get_public_key().compress();
+
+        // Test without lock
+        let delegation = DelegatedResource::new(from.clone(), to.clone(), 1_000_000, 0);
+        let bytes = delegation.to_bytes();
+        let mut reader = crate::serializer::Reader::new(&bytes);
+        let restored = DelegatedResource::read(&mut reader).unwrap();
+
+        assert_eq!(delegation.from, restored.from);
+        assert_eq!(delegation.to, restored.to);
+        assert_eq!(delegation.frozen_balance, restored.frozen_balance);
+        assert_eq!(delegation.expire_time, restored.expire_time);
+
+        // Test with lock
+        let locked_delegation = DelegatedResource::new(from, to, 500_000, 1_000_000_000);
+        let bytes = locked_delegation.to_bytes();
+        let mut reader = crate::serializer::Reader::new(&bytes);
+        let restored = DelegatedResource::read(&mut reader).unwrap();
+
+        assert_eq!(locked_delegation.frozen_balance, restored.frozen_balance);
+        assert_eq!(locked_delegation.expire_time, restored.expire_time);
+    }
+
+    #[test]
+    fn test_delegation_affects_energy_limit() {
+        let total_weight = 100_000_000u64; // 100M TOS total staked
+
+        // Account with 1M frozen (1% of total)
+        let mut energy = AccountEnergy::new();
+        energy.frozen_balance = 1_000_000;
+
+        // Base energy = 1% of 18.4B = 184M
+        let base_limit = energy.calculate_energy_limit(total_weight);
+        assert_eq!(base_limit, 184_000_000);
+
+        // After receiving delegation of 1M (doubles effective stake)
+        energy.acquired_delegated_balance = 1_000_000;
+        let boosted_limit = energy.calculate_energy_limit(total_weight);
+        assert_eq!(boosted_limit, 368_000_000); // 2% = 368M
+
+        // After delegating out 500K (reduces effective stake by half of delegation)
+        energy.delegated_frozen_balance = 500_000;
+        let reduced_limit = energy.calculate_energy_limit(total_weight);
+        // effective = 1M + 1M - 0.5M = 1.5M = 1.5% of 18.4B = 276M
+        assert_eq!(reduced_limit, 276_000_000);
+    }
+
+    #[test]
+    fn test_account_energy_with_delegation_serialization() {
+        let mut energy = AccountEnergy::new();
+        energy.frozen_balance = 1_000_000;
+        energy.delegated_frozen_balance = 200_000;
+        energy.acquired_delegated_balance = 300_000;
+        energy.energy_usage = 50_000;
+        energy.latest_consume_time = 12345;
+        energy.free_energy_usage = 500;
+        energy.latest_free_consume_time = 12340;
+        energy.unfreezing_list.push(UnfreezingRecord {
+            unfreeze_amount: 100_000,
+            unfreeze_expire_time: 999999,
+        });
+
+        let bytes = energy.to_bytes();
+        let mut reader = crate::serializer::Reader::new(&bytes);
+        let restored = AccountEnergy::read(&mut reader).unwrap();
+
+        assert_eq!(energy.frozen_balance, restored.frozen_balance);
+        assert_eq!(
+            energy.delegated_frozen_balance,
+            restored.delegated_frozen_balance
+        );
+        assert_eq!(
+            energy.acquired_delegated_balance,
+            restored.acquired_delegated_balance
+        );
+        assert_eq!(energy.energy_usage, restored.energy_usage);
+        assert_eq!(energy.latest_consume_time, restored.latest_consume_time);
+        assert_eq!(energy.free_energy_usage, restored.free_energy_usage);
+        assert_eq!(
+            energy.latest_free_consume_time,
+            restored.latest_free_consume_time
+        );
+        assert_eq!(energy.unfreezing_list.len(), restored.unfreezing_list.len());
+    }
 }

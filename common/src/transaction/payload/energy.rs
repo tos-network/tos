@@ -264,4 +264,81 @@ mod tests {
             assert_eq!(payload, restored);
         }
     }
+
+    #[test]
+    fn test_delegate_resource_payload() {
+        use crate::crypto::KeyPair;
+
+        let receiver = KeyPair::new().get_public_key().compress();
+        let payload = EnergyPayload::delegate_resource(receiver.clone(), 1_000_000, true, 30);
+
+        assert_eq!(payload.get_amount(), Some(1_000_000));
+        assert_eq!(payload.get_receiver(), Some(&receiver));
+        assert_eq!(payload.energy_cost(), 0);
+        assert_eq!(payload.tos_fee(), 0);
+        assert!(!payload.requires_activation());
+
+        // Test unlocked delegation
+        let unlocked = EnergyPayload::delegate_resource(receiver.clone(), 500_000, false, 0);
+        assert_eq!(unlocked.get_amount(), Some(500_000));
+    }
+
+    #[test]
+    fn test_undelegate_resource_payload() {
+        use crate::crypto::KeyPair;
+
+        let receiver = KeyPair::new().get_public_key().compress();
+        let payload = EnergyPayload::undelegate_resource(receiver.clone(), 500_000);
+
+        assert_eq!(payload.get_amount(), Some(500_000));
+        assert_eq!(payload.get_receiver(), Some(&receiver));
+        assert_eq!(payload.energy_cost(), 0);
+        assert_eq!(payload.tos_fee(), 0);
+    }
+
+    #[test]
+    fn test_delegation_serialization_roundtrip() {
+        use crate::crypto::KeyPair;
+
+        let receiver = KeyPair::new().get_public_key().compress();
+
+        // Test DelegateResource with lock
+        let delegate_locked =
+            EnergyPayload::delegate_resource(receiver.clone(), 1_000_000, true, 90);
+        let bytes = delegate_locked.to_bytes();
+        let mut reader = crate::serializer::Reader::new(&bytes);
+        let restored = EnergyPayload::read(&mut reader).unwrap();
+        assert_eq!(delegate_locked, restored);
+
+        // Test DelegateResource without lock
+        let delegate_unlocked = EnergyPayload::delegate_resource(receiver.clone(), 500_000, false, 0);
+        let bytes = delegate_unlocked.to_bytes();
+        let mut reader = crate::serializer::Reader::new(&bytes);
+        let restored = EnergyPayload::read(&mut reader).unwrap();
+        assert_eq!(delegate_unlocked, restored);
+
+        // Test UndelegateResource
+        let undelegate = EnergyPayload::undelegate_resource(receiver, 250_000);
+        let bytes = undelegate.to_bytes();
+        let mut reader = crate::serializer::Reader::new(&bytes);
+        let restored = EnergyPayload::read(&mut reader).unwrap();
+        assert_eq!(undelegate, restored);
+    }
+
+    #[test]
+    fn test_delegation_size_calculation() {
+        use crate::crypto::KeyPair;
+
+        let receiver = KeyPair::new().get_public_key().compress();
+
+        // DelegateResource: 1 (opcode) + 32 (pubkey) + 8 (amount) + 1 (lock bool) + 4 (lock_period)
+        let delegate = EnergyPayload::delegate_resource(receiver.clone(), 1000, true, 30);
+        let bytes = delegate.to_bytes();
+        assert_eq!(delegate.size(), bytes.len());
+
+        // UndelegateResource: 1 (opcode) + 32 (pubkey) + 8 (amount)
+        let undelegate = EnergyPayload::undelegate_resource(receiver, 500);
+        let bytes = undelegate.to_bytes();
+        assert_eq!(undelegate.size(), bytes.len());
+    }
 }
