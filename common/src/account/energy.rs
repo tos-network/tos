@@ -1,12 +1,484 @@
 use crate::{
     block::TopoHeight,
+    config::{
+        ENERGY_RECOVERY_WINDOW_MS, FREE_ENERGY_QUOTA, MAX_UNFREEZING_LIST_SIZE,
+        TOTAL_ENERGY_LIMIT, UNFREEZE_DELAY_DAYS,
+    },
     crypto::PublicKey,
     serializer::{Reader, ReaderError, Serializer, Writer},
 };
 use serde::{Deserialize, Serialize};
 
+// ============================================================================
+// STAKE 2.0 ENERGY MODEL (TRON-style)
+// ============================================================================
+//
+// New proportional energy allocation model:
+// - Energy = (frozen_balance / total_energy_weight) × TOTAL_ENERGY_LIMIT
+// - 24-hour linear decay recovery
+// - Free quota for casual users (~3 transfers/day)
+// - 14-day unfreeze delay queue (max 32 entries)
+// - Delegation support (DelegateResource / UndelegateResource)
+
+/// Account energy state for Stake 2.0 model
+///
+/// # Energy Calculation
+/// - Energy limit = (frozen_balance + acquired_delegated) / total_weight × TOTAL_ENERGY_LIMIT
+/// - Available energy = limit - current_usage (after decay recovery)
+///
+/// # 24-Hour Linear Decay Recovery
+/// - Energy usage decays linearly over 24 hours
+/// - After 24 hours, full energy limit is available again
+/// - Partial recovery: recovered = usage × (elapsed_ms / 86,400,000)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AccountEnergy {
+    // === Own frozen balance ===
+    /// TOS frozen by this account (atomic units)
+    pub frozen_balance: u64,
+
+    // === Delegation ===
+    /// TOS delegated TO others (reduces own energy, gives to receiver)
+    pub delegated_frozen_balance: u64,
+    /// TOS received FROM others via delegation (increases own energy)
+    pub acquired_delegated_balance: u64,
+
+    // === Energy usage (24h decay) ===
+    /// Current energy usage (decays over 24 hours)
+    pub energy_usage: u64,
+    /// Timestamp (ms) of last energy consumption
+    pub latest_consume_time: u64,
+
+    // === Free quota ===
+    /// Free energy usage (resets daily)
+    pub free_energy_usage: u64,
+    /// Timestamp (ms) of last free energy consumption
+    pub latest_free_consume_time: u64,
+
+    // === Unfreezing queue (Stake 2.0) ===
+    /// Pending unfreeze requests (max 32 entries)
+    /// Each entry waits 14 days before TOS can be withdrawn
+    pub unfreezing_list: Vec<UnfreezingRecord>,
+}
+
+impl Default for AccountEnergy {
+    fn default() -> Self {
+        Self {
+            frozen_balance: 0,
+            delegated_frozen_balance: 0,
+            acquired_delegated_balance: 0,
+            energy_usage: 0,
+            latest_consume_time: 0,
+            free_energy_usage: 0,
+            latest_free_consume_time: 0,
+            unfreezing_list: Vec::new(),
+        }
+    }
+}
+
+impl AccountEnergy {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Calculate effective frozen balance (own + acquired - delegated)
+    pub fn effective_frozen_balance(&self) -> u64 {
+        self.frozen_balance
+            .saturating_add(self.acquired_delegated_balance)
+            .saturating_sub(self.delegated_frozen_balance)
+    }
+
+    /// Calculate energy limit based on stake proportion
+    ///
+    /// Formula: (effective_frozen / total_weight) × TOTAL_ENERGY_LIMIT
+    pub fn calculate_energy_limit(&self, total_energy_weight: u64) -> u64 {
+        if total_energy_weight == 0 {
+            return 0;
+        }
+        let effective = self.effective_frozen_balance();
+        // Use u128 to prevent overflow
+        ((effective as u128 * TOTAL_ENERGY_LIMIT as u128) / total_energy_weight as u128) as u64
+    }
+
+    /// Calculate available free energy (with 24h decay recovery)
+    pub fn calculate_free_energy_available(&self, now_ms: u64) -> u64 {
+        let elapsed = now_ms.saturating_sub(self.latest_free_consume_time);
+
+        // Full recovery after 24 hours
+        if elapsed >= ENERGY_RECOVERY_WINDOW_MS {
+            return FREE_ENERGY_QUOTA;
+        }
+
+        // Linear decay: recovered = usage × (elapsed / window)
+        let recovered =
+            (self.free_energy_usage as u128 * elapsed as u128 / ENERGY_RECOVERY_WINDOW_MS as u128)
+                as u64;
+        let current_usage = self.free_energy_usage.saturating_sub(recovered);
+
+        FREE_ENERGY_QUOTA.saturating_sub(current_usage)
+    }
+
+    /// Calculate available frozen energy (with 24h decay recovery)
+    pub fn calculate_frozen_energy_available(&self, now_ms: u64, total_energy_weight: u64) -> u64 {
+        let limit = self.calculate_energy_limit(total_energy_weight);
+        let elapsed = now_ms.saturating_sub(self.latest_consume_time);
+
+        // Full recovery after 24 hours
+        if elapsed >= ENERGY_RECOVERY_WINDOW_MS {
+            return limit;
+        }
+
+        // Linear decay: recovered = usage × (elapsed / window)
+        let recovered =
+            (self.energy_usage as u128 * elapsed as u128 / ENERGY_RECOVERY_WINDOW_MS as u128)
+                as u64;
+        let current_usage = self.energy_usage.saturating_sub(recovered);
+
+        limit.saturating_sub(current_usage)
+    }
+
+    /// Consume free energy
+    /// Returns the amount actually consumed
+    pub fn consume_free_energy(&mut self, amount: u64, now_ms: u64) -> u64 {
+        let available = self.calculate_free_energy_available(now_ms);
+        let to_consume = amount.min(available);
+
+        if to_consume > 0 {
+            // Update usage with decay applied
+            let elapsed = now_ms.saturating_sub(self.latest_free_consume_time);
+            if elapsed >= ENERGY_RECOVERY_WINDOW_MS {
+                self.free_energy_usage = to_consume;
+            } else {
+                let recovered = (self.free_energy_usage as u128 * elapsed as u128
+                    / ENERGY_RECOVERY_WINDOW_MS as u128) as u64;
+                self.free_energy_usage = self
+                    .free_energy_usage
+                    .saturating_sub(recovered)
+                    .saturating_add(to_consume);
+            }
+            self.latest_free_consume_time = now_ms;
+        }
+
+        to_consume
+    }
+
+    /// Consume frozen energy
+    /// Returns the amount actually consumed
+    pub fn consume_frozen_energy(
+        &mut self,
+        amount: u64,
+        now_ms: u64,
+        total_energy_weight: u64,
+    ) -> u64 {
+        let available = self.calculate_frozen_energy_available(now_ms, total_energy_weight);
+        let to_consume = amount.min(available);
+
+        if to_consume > 0 {
+            // Update usage with decay applied
+            let elapsed = now_ms.saturating_sub(self.latest_consume_time);
+            if elapsed >= ENERGY_RECOVERY_WINDOW_MS {
+                self.energy_usage = to_consume;
+            } else {
+                let recovered = (self.energy_usage as u128 * elapsed as u128
+                    / ENERGY_RECOVERY_WINDOW_MS as u128) as u64;
+                self.energy_usage = self
+                    .energy_usage
+                    .saturating_sub(recovered)
+                    .saturating_add(to_consume);
+            }
+            self.latest_consume_time = now_ms;
+        }
+
+        to_consume
+    }
+
+    /// Add TOS to frozen balance
+    pub fn freeze(&mut self, amount: u64) {
+        self.frozen_balance = self.frozen_balance.saturating_add(amount);
+    }
+
+    /// Start unfreezing process (adds to queue, waits 14 days)
+    pub fn start_unfreeze(&mut self, amount: u64, now_ms: u64) -> Result<(), &'static str> {
+        if self.unfreezing_list.len() >= MAX_UNFREEZING_LIST_SIZE {
+            return Err("Unfreezing queue is full (max 32 entries)");
+        }
+
+        if amount > self.frozen_balance {
+            return Err("Insufficient frozen balance");
+        }
+
+        // Move from frozen to unfreezing queue
+        self.frozen_balance = self.frozen_balance.saturating_sub(amount);
+
+        let expire_time = now_ms + (UNFREEZE_DELAY_DAYS as u64 * 24 * 60 * 60 * 1000);
+        self.unfreezing_list.push(UnfreezingRecord {
+            unfreeze_amount: amount,
+            unfreeze_expire_time: expire_time,
+        });
+
+        Ok(())
+    }
+
+    /// Withdraw all expired unfreeze entries
+    /// Returns total TOS withdrawn
+    pub fn withdraw_expired_unfreeze(&mut self, now_ms: u64) -> u64 {
+        let mut total_withdrawn = 0u64;
+
+        self.unfreezing_list.retain(|record| {
+            if record.unfreeze_expire_time <= now_ms {
+                total_withdrawn = total_withdrawn.saturating_add(record.unfreeze_amount);
+                false // Remove from list
+            } else {
+                true // Keep in list
+            }
+        });
+
+        total_withdrawn
+    }
+
+    /// Cancel all pending unfreeze operations
+    /// Expired entries go to balance, unexpired go back to frozen
+    /// Returns (withdrawn_to_balance, cancelled_to_frozen)
+    pub fn cancel_all_unfreeze(&mut self, now_ms: u64) -> (u64, u64) {
+        let mut withdrawn = 0u64;
+        let mut cancelled = 0u64;
+
+        for record in &self.unfreezing_list {
+            if record.unfreeze_expire_time <= now_ms {
+                withdrawn = withdrawn.saturating_add(record.unfreeze_amount);
+            } else {
+                cancelled = cancelled.saturating_add(record.unfreeze_amount);
+            }
+        }
+
+        // Move cancelled amount back to frozen
+        self.frozen_balance = self.frozen_balance.saturating_add(cancelled);
+        self.unfreezing_list.clear();
+
+        (withdrawn, cancelled)
+    }
+
+    /// Get total amount in unfreezing queue
+    pub fn total_unfreezing(&self) -> u64 {
+        self.unfreezing_list
+            .iter()
+            .map(|r| r.unfreeze_amount)
+            .sum()
+    }
+
+    /// Get amount that can be withdrawn now (expired entries)
+    pub fn withdrawable_amount(&self, now_ms: u64) -> u64 {
+        self.unfreezing_list
+            .iter()
+            .filter(|r| r.unfreeze_expire_time <= now_ms)
+            .map(|r| r.unfreeze_amount)
+            .sum()
+    }
+}
+
+impl Serializer for AccountEnergy {
+    fn write(&self, writer: &mut Writer) {
+        writer.write_u64(&self.frozen_balance);
+        writer.write_u64(&self.delegated_frozen_balance);
+        writer.write_u64(&self.acquired_delegated_balance);
+        writer.write_u64(&self.energy_usage);
+        writer.write_u64(&self.latest_consume_time);
+        writer.write_u64(&self.free_energy_usage);
+        writer.write_u64(&self.latest_free_consume_time);
+
+        // Write unfreezing list
+        writer.write_u8(self.unfreezing_list.len() as u8);
+        for record in &self.unfreezing_list {
+            record.write(writer);
+        }
+    }
+
+    fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
+        let frozen_balance = reader.read_u64()?;
+        let delegated_frozen_balance = reader.read_u64()?;
+        let acquired_delegated_balance = reader.read_u64()?;
+        let energy_usage = reader.read_u64()?;
+        let latest_consume_time = reader.read_u64()?;
+        let free_energy_usage = reader.read_u64()?;
+        let latest_free_consume_time = reader.read_u64()?;
+
+        let list_len = reader.read_u8()? as usize;
+        if list_len > MAX_UNFREEZING_LIST_SIZE {
+            return Err(ReaderError::InvalidValue);
+        }
+
+        let mut unfreezing_list = Vec::with_capacity(list_len);
+        for _ in 0..list_len {
+            unfreezing_list.push(UnfreezingRecord::read(reader)?);
+        }
+
+        Ok(Self {
+            frozen_balance,
+            delegated_frozen_balance,
+            acquired_delegated_balance,
+            energy_usage,
+            latest_consume_time,
+            free_energy_usage,
+            latest_free_consume_time,
+            unfreezing_list,
+        })
+    }
+
+    fn size(&self) -> usize {
+        8 * 7  // 7 u64 fields
+            + 1  // u8 for list length
+            + self.unfreezing_list.iter().map(|r| r.size()).sum::<usize>()
+    }
+}
+
+/// Record for pending unfreeze operation
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UnfreezingRecord {
+    /// Amount of TOS being unfrozen
+    pub unfreeze_amount: u64,
+    /// Timestamp (ms) when TOS can be withdrawn
+    pub unfreeze_expire_time: u64,
+}
+
+impl Serializer for UnfreezingRecord {
+    fn write(&self, writer: &mut Writer) {
+        writer.write_u64(&self.unfreeze_amount);
+        writer.write_u64(&self.unfreeze_expire_time);
+    }
+
+    fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
+        Ok(Self {
+            unfreeze_amount: reader.read_u64()?,
+            unfreeze_expire_time: reader.read_u64()?,
+        })
+    }
+
+    fn size(&self) -> usize {
+        16 // 2 × u64
+    }
+}
+
+/// Global energy state for the network
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct GlobalEnergyState {
+    /// Total energy limit (constant: 18.4 billion)
+    pub total_energy_limit: u64,
+    /// Sum of all frozen TOS across all accounts (atomic units)
+    pub total_energy_weight: u64,
+    /// Last update topoheight
+    pub last_update: TopoHeight,
+}
+
+impl GlobalEnergyState {
+    pub fn new() -> Self {
+        Self {
+            total_energy_limit: TOTAL_ENERGY_LIMIT,
+            total_energy_weight: 0,
+            last_update: 0,
+        }
+    }
+
+    /// Add to total weight (when TOS is frozen)
+    pub fn add_weight(&mut self, amount: u64, topoheight: TopoHeight) {
+        self.total_energy_weight = self.total_energy_weight.saturating_add(amount);
+        self.last_update = topoheight;
+    }
+
+    /// Remove from total weight (when TOS is unfrozen)
+    pub fn remove_weight(&mut self, amount: u64, topoheight: TopoHeight) {
+        self.total_energy_weight = self.total_energy_weight.saturating_sub(amount);
+        self.last_update = topoheight;
+    }
+}
+
+impl Serializer for GlobalEnergyState {
+    fn write(&self, writer: &mut Writer) {
+        writer.write_u64(&self.total_energy_limit);
+        writer.write_u64(&self.total_energy_weight);
+        writer.write_u64(&self.last_update);
+    }
+
+    fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
+        Ok(Self {
+            total_energy_limit: reader.read_u64()?,
+            total_energy_weight: reader.read_u64()?,
+            last_update: reader.read_u64()?,
+        })
+    }
+
+    fn size(&self) -> usize {
+        24 // 3 × u64
+    }
+}
+
+/// Delegated resource record
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DelegatedResource {
+    /// Delegator (who delegated)
+    pub from: PublicKey,
+    /// Receiver (who receives energy)
+    pub to: PublicKey,
+    /// Amount of TOS delegated
+    pub frozen_balance: u64,
+    /// Lock expiry time (ms), 0 = not locked
+    pub expire_time: u64,
+}
+
+impl DelegatedResource {
+    pub fn new(from: PublicKey, to: PublicKey, amount: u64, expire_time: u64) -> Self {
+        Self {
+            from,
+            to,
+            frozen_balance: amount,
+            expire_time,
+        }
+    }
+
+    /// Check if delegation is locked
+    pub fn is_locked(&self, now_ms: u64) -> bool {
+        self.expire_time > 0 && now_ms < self.expire_time
+    }
+
+    /// Check if delegation can be undelegated
+    pub fn can_undelegate(&self, now_ms: u64) -> bool {
+        !self.is_locked(now_ms)
+    }
+}
+
+impl Serializer for DelegatedResource {
+    fn write(&self, writer: &mut Writer) {
+        self.from.write(writer);
+        self.to.write(writer);
+        writer.write_u64(&self.frozen_balance);
+        writer.write_u64(&self.expire_time);
+    }
+
+    fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
+        Ok(Self {
+            from: PublicKey::read(reader)?,
+            to: PublicKey::read(reader)?,
+            frozen_balance: reader.read_u64()?,
+            expire_time: reader.read_u64()?,
+        })
+    }
+
+    fn size(&self) -> usize {
+        self.from.size() + self.to.size() + 16 // 2 × u64
+    }
+}
+
+// ============================================================================
+// LEGACY ENERGY MODEL (deprecated)
+// ============================================================================
+//
+// The following structures are deprecated and kept for backward compatibility.
+// New code should use AccountEnergy, GlobalEnergyState, and DelegatedResource.
+
 /// Flexible freeze duration for TOS staking
 /// Users can set custom days from 3 to 180 days
+///
+/// # Deprecated
+/// This struct is deprecated in favor of Stake 2.0 model which removes
+/// duration-based freezing. Use `AccountEnergy` instead.
 ///
 /// # Edge Cases
 /// - Duration below 3 days will be rejected
@@ -19,6 +491,7 @@ use serde::{Deserialize, Serialize};
 /// - 3 days: 1 TOS → 6 energy (6 free transfers)
 /// - 7 days: 1 TOS → 14 energy (14 free transfers)
 /// - 30 days: 1 TOS → 60 energy (60 free transfers)
+#[deprecated(note = "Use AccountEnergy (Stake 2.0) instead")]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct FreezeDuration {
     /// Number of days to freeze (3-180 days)
@@ -102,6 +575,10 @@ impl Serializer for FreezeDuration {
 
 /// Freeze record for tracking individual freeze operations
 ///
+/// # Deprecated
+/// This struct is deprecated in favor of Stake 2.0 model.
+/// Use `AccountEnergy` with `UnfreezingRecord` instead.
+///
 /// # Edge Cases
 /// - Only whole TOS amounts can be frozen (fractional parts are discarded)
 /// - Unfreezing is only allowed after the unlock_topoheight is reached
@@ -112,6 +589,7 @@ impl Serializer for FreezeDuration {
 /// - Each freeze record tracks its own unlock time based on the freeze duration
 /// - Energy gained is immutable once frozen (doesn't change with time)
 /// - Unfreezing removes energy proportionally to the amount unfrozen
+#[deprecated(note = "Use AccountEnergy with UnfreezingRecord (Stake 2.0) instead")]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FreezeRecord {
     /// Amount of TOS frozen
@@ -218,7 +696,15 @@ impl Serializer for FreezeRecord {
 /// Energy resource management for TOS
 /// Enhanced with TRON-style freeze duration and reward multiplier system
 ///
-/// # Energy Model Overview
+/// # Deprecated
+/// This struct is deprecated in favor of Stake 2.0 model.
+/// Use `AccountEnergy` instead which provides:
+/// - Proportional energy allocation
+/// - 24-hour linear decay recovery
+/// - Free quota support
+/// - Delegation support
+///
+/// # Energy Model Overview (Legacy)
 /// - Energy is consumed for transfer operations (1 energy per transfer)
 /// - Energy is gained by freezing TOS for a specified duration
 /// - Energy regenerates when used_energy is reset (periodic reset mechanism)
@@ -235,6 +721,7 @@ impl Serializer for FreezeRecord {
 /// - Freezing 0.5 TOS will actually freeze 0 TOS (rounded down)
 /// - Unfreezing from multiple records follows FIFO order for unlocked records
 /// - Energy total decreases when unfreezing (proportional to amount unfrozen)
+#[deprecated(note = "Use AccountEnergy (Stake 2.0) instead")]
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct EnergyResource {
     /// Total energy available
@@ -458,6 +945,11 @@ impl EnergyResource {
 }
 
 /// Energy lease contract
+///
+/// # Deprecated
+/// This struct is deprecated and unused. Use `DelegatedResource` instead
+/// for energy delegation in Stake 2.0 model.
+#[deprecated(note = "Use DelegatedResource (Stake 2.0) instead")]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EnergyLease {
     /// Lessor (energy provider)
