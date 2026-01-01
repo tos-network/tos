@@ -1596,7 +1596,7 @@ pub struct AddressPaymentEvent<'a> {
     pub tx_hash: Cow<'a, Hash>,
     /// Amount received in atomic units
     pub amount: u64,
-    /// Asset hash (native TOS if matches XELIS_ASSET)
+    /// Asset hash (native TOS if matches TOS_ASSET)
     pub asset: Cow<'a, Hash>,
     /// Block hash containing the transaction
     pub block_hash: Cow<'a, Hash>,
