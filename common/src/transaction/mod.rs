@@ -39,7 +39,7 @@ pub const EXTRA_DATA_LIMIT_SIZE: usize = 128; // 128 bytes - balanced for securi
                                               // Maximum total size of payload across all transfers per transaction
 pub const EXTRA_DATA_LIMIT_SUM_SIZE: usize = EXTRA_DATA_LIMIT_SIZE * 32; // 4KB total limit
                                                                          // Maximum number of transfers per transaction
-pub const MAX_TRANSFER_COUNT: usize = 255;
+pub const MAX_TRANSFER_COUNT: usize = 500;
 // Maximum number of deposits per Invoke Call
 pub const MAX_DEPOSIT_PER_INVOKE_CALL: usize = 255;
 // Maximum number of participants in a multi signature account
@@ -469,9 +469,9 @@ impl Serializer for TransactionType {
             }
             TransactionType::Transfers(txs) => {
                 writer.write_u8(1);
-                // max 255 txs per transaction
-                let len: u8 = txs.len() as u8;
-                writer.write_u8(len);
+                // max 500 txs per transaction
+                let len: u16 = txs.len() as u16;
+                writer.write_u16(len);
                 for tx in txs {
                     tx.write(writer);
                 }
@@ -543,24 +543,24 @@ impl Serializer for TransactionType {
             }
             TransactionType::UnoTransfers(transfers) => {
                 writer.write_u8(18);
-                let len: u8 = transfers.len() as u8;
-                writer.write_u8(len);
+                let len: u16 = transfers.len() as u16;
+                writer.write_u16(len);
                 for tx in transfers {
                     tx.write(writer);
                 }
             }
             TransactionType::ShieldTransfers(transfers) => {
                 writer.write_u8(19);
-                let len: u8 = transfers.len() as u8;
-                writer.write_u8(len);
+                let len: u16 = transfers.len() as u16;
+                writer.write_u16(len);
                 for tx in transfers {
                     tx.write(writer);
                 }
             }
             TransactionType::UnshieldTransfers(transfers) => {
                 writer.write_u8(20);
-                let len: u8 = transfers.len() as u8;
-                writer.write_u8(len);
+                let len: u16 = transfers.len() as u16;
+                writer.write_u16(len);
                 for tx in transfers {
                     tx.write(writer);
                 }
@@ -575,8 +575,8 @@ impl Serializer for TransactionType {
                 TransactionType::Burn(payload)
             }
             1 => {
-                let txs_count = reader.read_u8()?;
-                if txs_count == 0 || txs_count > MAX_TRANSFER_COUNT as u8 {
+                let txs_count = reader.read_u16()?;
+                if txs_count == 0 || txs_count as usize > MAX_TRANSFER_COUNT {
                     return Err(ReaderError::InvalidSize);
                 }
 
@@ -604,8 +604,8 @@ impl Serializer for TransactionType {
             16 => TransactionType::TransferKyc(TransferKycPayload::read(reader)?),
             17 => TransactionType::AppealKyc(AppealKycPayload::read(reader)?),
             18 => {
-                let txs_count = reader.read_u8()?;
-                if txs_count == 0 || txs_count > MAX_TRANSFER_COUNT as u8 {
+                let txs_count = reader.read_u16()?;
+                if txs_count == 0 || txs_count as usize > MAX_TRANSFER_COUNT {
                     return Err(ReaderError::InvalidSize);
                 }
                 let mut txs = Vec::with_capacity(txs_count as usize);
@@ -615,8 +615,8 @@ impl Serializer for TransactionType {
                 TransactionType::UnoTransfers(txs)
             }
             19 => {
-                let txs_count = reader.read_u8()?;
-                if txs_count == 0 || txs_count > MAX_TRANSFER_COUNT as u8 {
+                let txs_count = reader.read_u16()?;
+                if txs_count == 0 || txs_count as usize > MAX_TRANSFER_COUNT {
                     return Err(ReaderError::InvalidSize);
                 }
                 let mut txs = Vec::with_capacity(txs_count as usize);
@@ -626,8 +626,8 @@ impl Serializer for TransactionType {
                 TransactionType::ShieldTransfers(txs)
             }
             20 => {
-                let txs_count = reader.read_u8()?;
-                if txs_count == 0 || txs_count > MAX_TRANSFER_COUNT as u8 {
+                let txs_count = reader.read_u16()?;
+                if txs_count == 0 || txs_count as usize > MAX_TRANSFER_COUNT {
                     return Err(ReaderError::InvalidSize);
                 }
                 let mut txs = Vec::with_capacity(txs_count as usize);
@@ -644,8 +644,8 @@ impl Serializer for TransactionType {
         1 + match self {
             TransactionType::Burn(payload) => payload.size(),
             TransactionType::Transfers(txs) => {
-                // 1 byte for variant, 1 byte for count of transfers
-                let mut size = 1;
+                // 2 bytes for count of transfers (u16)
+                let mut size = 2;
                 for tx in txs {
                     size += tx.size();
                 }
@@ -672,24 +672,24 @@ impl Serializer for TransactionType {
             TransactionType::UpdateCommittee(payload) => payload.size(),
             TransactionType::EmergencySuspend(payload) => payload.size(),
             TransactionType::UnoTransfers(txs) => {
-                // 1 byte for count of transfers
-                let mut size = 1;
+                // 2 bytes for count of transfers (u16)
+                let mut size = 2;
                 for tx in txs {
                     size += tx.size();
                 }
                 size
             }
             TransactionType::ShieldTransfers(txs) => {
-                // 1 byte for count of transfers
-                let mut size = 1;
+                // 2 bytes for count of transfers (u16)
+                let mut size = 2;
                 for tx in txs {
                     size += tx.size();
                 }
                 size
             }
             TransactionType::UnshieldTransfers(txs) => {
-                // 1 byte for count of transfers
-                let mut size = 1;
+                // 2 bytes for count of transfers (u16)
+                let mut size = 2;
                 for tx in txs {
                     size += tx.size();
                 }

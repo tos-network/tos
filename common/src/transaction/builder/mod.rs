@@ -208,8 +208,8 @@ impl TransactionBuilder {
 
         match &self.data {
             TransactionTypeBuilder::Transfers(transfers) => {
-                // Transfers count byte
-                size += 1;
+                // Transfers count (u16 = 2 bytes)
+                size += 2;
                 for transfer in transfers {
                     size += transfer.asset.size()
                     + transfer.destination.get_public_key().size()
@@ -234,14 +234,14 @@ impl TransactionBuilder {
 
                 // Source commitments: one per asset used
                 // Each: commitment + asset hash + CommitmentEqProof
-                size += 1; // commitments count byte
+                size += 1; // commitments count byte (stays u8 - limited by assets, not transfers)
                 size += assets_used
                     * (RISTRETTO_COMPRESSED_SIZE
                         + HASH_SIZE
                         + (RISTRETTO_COMPRESSED_SIZE * 3 + SCALAR_SIZE * 3));
 
-                // Transfers count byte
-                size += 1;
+                // Transfers count (u16 = 2 bytes)
+                size += 2;
                 for transfer in transfers {
                     size += transfer.asset.size()
                         + transfer.destination.get_public_key().size()
@@ -349,8 +349,8 @@ impl TransactionBuilder {
             }
             TransactionTypeBuilder::ShieldTransfers(transfers) => {
                 // Shield transfers: TOS (plaintext) -> UNO (encrypted)
-                // Transfers count byte
-                size += 1;
+                // Transfers count (u16 = 2 bytes)
+                size += 2;
                 for transfer in transfers {
                     size += transfer.asset.size()
                         + transfer.destination.get_public_key().size()
@@ -379,8 +379,8 @@ impl TransactionBuilder {
                     + HASH_SIZE
                     + (RISTRETTO_COMPRESSED_SIZE * 3 + SCALAR_SIZE * 3);
 
-                // Transfers count byte
-                size += 1;
+                // Transfers count (u16 = 2 bytes)
+                size += 2;
                 for transfer in transfers {
                     size += transfer.asset.size()
                         + transfer.destination.get_public_key().size()
