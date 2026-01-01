@@ -844,6 +844,27 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for Applicable
     async fn is_global_committee_bootstrapped(&self) -> Result<bool, BlockchainError> {
         self.inner.storage.is_global_committee_bootstrapped().await
     }
+
+    // ===== Transaction Result Storage (Stake 2.0) =====
+
+    async fn set_transaction_result(
+        &mut self,
+        tx_hash: &'a Hash,
+        result: &tos_common::transaction::TransactionResult,
+    ) -> Result<(), BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "set transaction result {}: fee={}, energy_used={}",
+                tx_hash,
+                result.fee,
+                result.energy_used
+            );
+        }
+        self.inner
+            .storage
+            .set_transaction_result(tx_hash, result)
+            .await
+    }
 }
 
 impl<'a, S: Storage> Deref for ApplicableChainState<'a, S> {

@@ -44,6 +44,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tos_common::{
+    account::GlobalEnergyState,
     api::{
         daemon::{
             AddressPaymentEvent, BlockOrderedEvent, BlockOrphanedEvent, BlockType, ContractEvent,
@@ -738,6 +739,14 @@ impl<S: Storage> Blockchain<S> {
                     ),
                 )
                 .await?;
+
+            // Initialize GlobalEnergyState for Stake 2.0
+            // Starts with total_energy_weight = 0 (no frozen TOS at genesis)
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Initializing GlobalEnergyState at genesis");
+            }
+            let global_energy_state = GlobalEnergyState::new();
+            storage.set_global_energy_state(&global_energy_state).await?;
 
             let (genesis_block, genesis_hash) =
                 if let Some(genesis_block) = get_hex_genesis_block(&self.network) {

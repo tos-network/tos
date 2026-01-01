@@ -1,6 +1,10 @@
 use crate::core::error::BlockchainError;
 use async_trait::async_trait;
-use tos_common::{crypto::Hash, immutable::Immutable, transaction::Transaction};
+use tos_common::{
+    crypto::Hash,
+    immutable::Immutable,
+    transaction::{Transaction, TransactionResult},
+};
 
 #[async_trait]
 pub trait TransactionProvider {
@@ -34,4 +38,30 @@ pub trait TransactionProvider {
         &mut self,
         hash: &Hash,
     ) -> Result<Immutable<Transaction>, BlockchainError>;
+}
+
+/// Provider for transaction execution results (Stake 2.0)
+///
+/// Stores the actual fee burned and energy consumed after transaction execution.
+/// This separates input (fee_limit) from output (actual costs).
+#[async_trait]
+pub trait TransactionResultProvider {
+    /// Get the execution result for a transaction
+    async fn get_transaction_result(
+        &self,
+        hash: &Hash,
+    ) -> Result<Option<TransactionResult>, BlockchainError>;
+
+    /// Store the execution result for a transaction
+    async fn set_transaction_result(
+        &mut self,
+        hash: &Hash,
+        result: &TransactionResult,
+    ) -> Result<(), BlockchainError>;
+
+    /// Check if a transaction has an execution result stored
+    async fn has_transaction_result(&self, hash: &Hash) -> Result<bool, BlockchainError>;
+
+    /// Delete the execution result for a transaction
+    async fn delete_transaction_result(&mut self, hash: &Hash) -> Result<(), BlockchainError>;
 }

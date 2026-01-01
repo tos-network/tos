@@ -803,6 +803,10 @@ pub fn register_methods<S: Storage>(
         async_handler!(get_global_energy_state::<S>),
     );
     handler.register_method("estimate_energy", async_handler!(estimate_energy::<S>));
+    handler.register_method(
+        "get_transaction_result",
+        async_handler!(get_transaction_result::<S>),
+    );
 
     // Delegation management (Stake 2.0)
     handler.register_method(
@@ -3368,6 +3372,35 @@ async fn estimate_energy<S: Storage>(
         will_succeed,
         error,
     }))
+}
+
+/// Get transaction execution result (Stake 2.0)
+async fn get_transaction_result<S: Storage>(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    use tos_common::api::daemon::{GetTransactionResultParams, TransactionResultInfo};
+
+    let params: GetTransactionResultParams = parse_params(body)?;
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let storage = blockchain.get_storage().read().await;
+
+    let hash = params.hash.into_owned();
+    let result = storage.get_transaction_result(&hash).await?;
+
+    match result {
+        Some(result) => Ok(json!(TransactionResultInfo {
+            fee: result.fee,
+            energy_used: result.energy_used,
+            free_energy_used: result.free_energy_used,
+            frozen_energy_used: result.frozen_energy_used,
+            auto_burned_energy: result.auto_burned_energy(),
+        })),
+        None => Err(InternalRpcError::InvalidParamsAny(anyhow::anyhow!(
+            "No execution result found for transaction {}",
+            hash
+        ))),
+    }
 }
 
 // ===== Stake 2.0 Delegation RPC Methods =====

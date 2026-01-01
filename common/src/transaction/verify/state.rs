@@ -534,4 +534,20 @@ pub trait BlockchainApplyState<'a, P: ContractProvider, E>:
         total_amount: u64,
         ratios: &[u16],
     ) -> Result<crate::referral::DistributionResult, E>;
+
+    // ===== Transaction Result Storage (Stake 2.0) =====
+
+    /// Store the execution result for a transaction
+    ///
+    /// This records the actual fee burned and energy consumed after TX execution.
+    /// Called after each transaction is successfully applied to store its result.
+    ///
+    /// # Arguments
+    /// * `tx_hash` - The transaction hash
+    /// * `result` - The transaction execution result
+    async fn set_transaction_result(
+        &mut self,
+        tx_hash: &'a Hash,
+        result: &crate::transaction::TransactionResult,
+    ) -> Result<(), E>;
 }

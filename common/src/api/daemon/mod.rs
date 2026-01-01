@@ -1524,6 +1524,28 @@ pub struct EstimateEnergyResult {
     pub error: Option<String>,
 }
 
+/// Parameters for get_transaction_result RPC
+#[derive(Serialize, Deserialize)]
+pub struct GetTransactionResultParams<'a> {
+    /// Transaction hash
+    pub hash: Cow<'a, Hash>,
+}
+
+/// Transaction execution result (Stake 2.0)
+#[derive(Serialize, Deserialize)]
+pub struct TransactionResultInfo {
+    /// Actual TOS burned (0 if covered by frozen energy)
+    pub fee: u64,
+    /// Total energy consumed
+    pub energy_used: u64,
+    /// Free quota energy consumed
+    pub free_energy_used: u64,
+    /// Frozen energy consumed
+    pub frozen_energy_used: u64,
+    /// Energy paid via TOS burn
+    pub auto_burned_energy: u64,
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct RPCVersioned<T> {
     pub topoheight: TopoHeight,

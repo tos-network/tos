@@ -135,36 +135,63 @@ impl EnergyResourceManager {
         total_energy_weight: u64,
         now_ms: u64,
     ) -> (u64, u64) {
+        let result = Self::consume_transaction_energy_detailed(
+            account,
+            required_energy,
+            total_energy_weight,
+            now_ms,
+        );
+        (result.total_energy_from_stake(), result.fee)
+    }
+
+    /// Consume energy for a transaction with detailed result tracking (Stake 2.0)
+    ///
+    /// Priority:
+    /// 1. Free quota
+    /// 2. Frozen energy
+    /// 3. Auto-burn TOS
+    ///
+    /// Returns: TransactionResult with detailed breakdown
+    pub fn consume_transaction_energy_detailed(
+        account: &mut AccountEnergy,
+        required_energy: u64,
+        total_energy_weight: u64,
+        now_ms: u64,
+    ) -> crate::transaction::TransactionResult {
         let mut remaining = required_energy;
+        let mut free_energy_used = 0u64;
+        let mut frozen_energy_used = 0u64;
 
         // 1. Consume free quota first
         let free_available = account.calculate_free_energy_available(now_ms);
         let free_to_use = free_available.min(remaining);
         if free_to_use > 0 {
             account.consume_free_energy(free_to_use, now_ms);
+            free_energy_used = free_to_use;
             remaining -= free_to_use;
         }
 
-        if remaining == 0 {
-            return (required_energy, 0);
-        }
-
-        // 2. Consume frozen energy
-        let frozen_available =
-            account.calculate_frozen_energy_available(now_ms, total_energy_weight);
-        let frozen_to_use = frozen_available.min(remaining);
-        if frozen_to_use > 0 {
-            account.consume_frozen_energy(frozen_to_use, now_ms, total_energy_weight);
-            remaining -= frozen_to_use;
-        }
-
-        if remaining == 0 {
-            return (required_energy, 0);
+        if remaining > 0 {
+            // 2. Consume frozen energy
+            let frozen_available =
+                account.calculate_frozen_energy_available(now_ms, total_energy_weight);
+            let frozen_to_use = frozen_available.min(remaining);
+            if frozen_to_use > 0 {
+                account.consume_frozen_energy(frozen_to_use, now_ms, total_energy_weight);
+                frozen_energy_used = frozen_to_use;
+                remaining -= frozen_to_use;
+            }
         }
 
         // 3. Remaining must be paid in TOS
         let tos_cost = remaining * TOS_PER_ENERGY;
-        (required_energy - remaining, tos_cost)
+
+        crate::transaction::TransactionResult {
+            fee: tos_cost,
+            energy_used: required_energy,
+            free_energy_used,
+            frozen_energy_used,
+        }
     }
 
     /// Check if account has enough resources (energy + TOS) for transaction

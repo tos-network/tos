@@ -745,6 +745,17 @@ impl<'a> BlockchainApplyState<'a, DummyContractProvider, TestError> for TestChai
     async fn is_global_committee_bootstrapped(&self) -> Result<bool, TestError> {
         Ok(false)
     }
+
+    // ===== Transaction Result Storage (Stake 2.0) =====
+
+    async fn set_transaction_result(
+        &mut self,
+        _tx_hash: &'a Hash,
+        _result: &tos_common::transaction::TransactionResult,
+    ) -> Result<(), TestError> {
+        // Test stub - no-op for now
+        Ok(())
+    }
 }
 
 #[tokio::test]

@@ -3,12 +3,16 @@ use crate::core::{
     storage::{
         constants::TXS_COUNT,
         rocksdb::{Column, IteratorMode},
-        ClientProtocolProvider, RocksStorage, TransactionProvider,
+        ClientProtocolProvider, RocksStorage, TransactionProvider, TransactionResultProvider,
     },
 };
 use async_trait::async_trait;
 use log::trace;
-use tos_common::{crypto::Hash, immutable::Immutable, transaction::Transaction};
+use tos_common::{
+    crypto::Hash,
+    immutable::Immutable,
+    transaction::{Transaction, TransactionResult},
+};
 
 #[async_trait]
 impl TransactionProvider for RocksStorage {
@@ -90,5 +94,48 @@ impl TransactionProvider for RocksStorage {
         let transaction = self.get_transaction(hash).await?;
         self.remove_from_disk(Column::Transactions, hash)?;
         Ok(transaction)
+    }
+}
+
+#[async_trait]
+impl TransactionResultProvider for RocksStorage {
+    async fn get_transaction_result(
+        &self,
+        hash: &Hash,
+    ) -> Result<Option<TransactionResult>, BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get transaction result {}", hash);
+        }
+        self.load_optional_from_disk(Column::TransactionResults, hash)
+    }
+
+    async fn set_transaction_result(
+        &mut self,
+        hash: &Hash,
+        result: &TransactionResult,
+    ) -> Result<(), BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "set transaction result {}: fee={}, energy_used={}",
+                hash,
+                result.fee,
+                result.energy_used
+            );
+        }
+        self.insert_into_disk(Column::TransactionResults, hash, result)
+    }
+
+    async fn has_transaction_result(&self, hash: &Hash) -> Result<bool, BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("has transaction result {}", hash);
+        }
+        self.contains_data(Column::TransactionResults, hash)
+    }
+
+    async fn delete_transaction_result(&mut self, hash: &Hash) -> Result<(), BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("delete transaction result {}", hash);
+        }
+        self.remove_from_disk(Column::TransactionResults, hash)
     }
 }

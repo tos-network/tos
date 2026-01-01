@@ -797,6 +797,17 @@ impl<'a> BlockchainApplyState<'a, DummyContractProvider, TestError> for KycTestC
         }
         Ok(())
     }
+
+    // ===== Transaction Result Storage (Stake 2.0) =====
+
+    async fn set_transaction_result(
+        &mut self,
+        _tx_hash: &'a Hash,
+        _result: &tos_common::transaction::TransactionResult,
+    ) -> Result<(), TestError> {
+        // Test stub - no-op for now
+        Ok(())
+    }
 }
 
 // ============================================================================

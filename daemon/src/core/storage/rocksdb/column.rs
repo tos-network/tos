@@ -20,6 +20,11 @@ pub enum Column {
     // {tx_hash} => {outputs}
     TransactionsOutputs,
 
+    // Transaction execution results (Stake 2.0)
+    // Stores actual fee burned and energy consumed after TX execution
+    // {tx_hash} => {TransactionResult}
+    TransactionResults,
+
     // ordered blocks hashes based on execution
     // {position} => {block_hash}
     BlocksExecutionOrder,
