@@ -15,8 +15,6 @@
 //!
 //! C. Consistency assertions
 //!    - List vs count consistency
-//!
-//! Reference: memo/13-Referral-System/Referral-Test-Analysis.md
 
 #![allow(clippy::disallowed_methods)]
 

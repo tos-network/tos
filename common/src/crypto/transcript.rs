@@ -45,6 +45,7 @@ pub trait ProtocolTranscript {
     fn balance_proof_domain_separator(&mut self);
     fn ownership_proof_domain_separator(&mut self);
     fn energy_proof_domain_separator(&mut self);
+    fn shield_commitment_proof_domain_separator(&mut self);
 }
 
 impl ProtocolTranscript for Transcript {
@@ -148,5 +149,9 @@ impl ProtocolTranscript for Transcript {
 
     fn energy_proof_domain_separator(&mut self) {
         self.append_message(b"dom-sep", b"energy-proof");
+    }
+
+    fn shield_commitment_proof_domain_separator(&mut self) {
+        self.append_message(b"dom-sep", b"shield-commitment-proof");
     }
 }

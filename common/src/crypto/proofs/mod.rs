@@ -11,6 +11,7 @@ mod ciphertext_validity;
 mod commitment_eq;
 mod ownership;
 mod range_proof;
+mod shield_commitment;
 
 use super::{elgamal::DecompressionError, TranscriptError};
 use crate::transaction::MAX_TRANSFER_COUNT;
@@ -29,6 +30,7 @@ pub use ciphertext_validity::CiphertextValidityProof;
 pub use commitment_eq::CommitmentEqProof;
 pub use ownership::OwnershipProof;
 pub use range_proof::RangeProof;
+pub use shield_commitment::ShieldCommitmentProof;
 
 // We are using 64 bits for the bulletproofs
 pub const BULLET_PROOF_SIZE: usize = 64;

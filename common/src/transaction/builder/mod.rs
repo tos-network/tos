@@ -32,8 +32,8 @@ use crate::{
             PedersenOpening, PublicKey, RISTRETTO_COMPRESSED_SIZE, SCALAR_SIZE,
         },
         proofs::{
-            CiphertextValidityProof, CommitmentEqProof, ProofGenerationError, BP_GENS,
-            BULLET_PROOF_SIZE, PC_GENS,
+            CiphertextValidityProof, CommitmentEqProof, ProofGenerationError,
+            ShieldCommitmentProof, BP_GENS, BULLET_PROOF_SIZE, PC_GENS,
         },
         Hash, ProtocolTranscript, HASH_SIZE, SIGNATURE_SIZE,
     },
@@ -47,6 +47,7 @@ use std::iter;
 use thiserror::Error;
 use tos_crypto::bulletproofs::RangeProof;
 use tos_crypto::curve25519_dalek::Scalar;
+use tos_crypto::merlin::Transcript;
 use tos_kernel::Module;
 
 pub use payload::*;
@@ -1327,7 +1328,7 @@ impl TransactionBuilder {
             .update_account_balance(&TOS_ASSET, new_balance)
             .map_err(GenerationError::State)?;
 
-        // Build shield transfer payloads
+        // Build shield transfer payloads with commitment proofs
         let transfer_payloads: Vec<ShieldTransferPayload> = shield_transfers
             .iter()
             .map(|transfer| {
@@ -1339,6 +1340,15 @@ impl TransactionBuilder {
                     .decompress()
                     .map_err(|_| GenerationError::InvalidDestinationKey)?;
                 let receiver_handle = destination_pubkey.decrypt_handle(&opening);
+
+                // Generate Shield commitment proof (proves commitment is correctly formed)
+                let mut transcript = Transcript::new(b"shield_commitment_proof");
+                let proof = ShieldCommitmentProof::new(
+                    &destination_pubkey,
+                    transfer.amount,
+                    &opening,
+                    &mut transcript,
+                );
 
                 // Handle extra data
                 let extra_data: Option<UnknownExtraDataFormat> =
@@ -1354,6 +1364,7 @@ impl TransactionBuilder {
                     extra_data,
                     commitment.compress(),
                     receiver_handle.compress(),
+                    proof,
                 ))
             })
             .collect::<Result<Vec<_>, GenerationError<B::Error>>>()?;

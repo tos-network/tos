@@ -1,6 +1,7 @@
 use crate::{
     crypto::{
         elgamal::{CompressedCommitment, CompressedHandle, CompressedPublicKey},
+        proofs::ShieldCommitmentProof,
         Hash,
     },
     serializer::*,
@@ -19,12 +20,13 @@ use serde::{Deserialize, Serialize};
 /// - `amount`: Plaintext amount to shield (publicly visible)
 /// - `commitment`: Pedersen commitment C = amount * G + r * H
 /// - `receiver_handle`: Decrypt handle D_r = r * P_receiver
+/// - `proof`: ShieldCommitmentProof proving commitment correctness
 ///
 /// # Verification
-/// Shield transfers require NO ZK proofs because:
-/// 1. The amount is publicly visible in the transaction
-/// 2. Sufficient TOS balance is checked by plaintext comparison
-/// 3. Commitment is deterministically derived from (amount, opening)
+/// Shield transfers require ShieldCommitmentProof to verify:
+/// 1. The commitment contains the claimed amount
+/// 2. The commitment and receiver_handle use the same opening
+/// 3. This prevents inflation attacks via forged commitments
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ShieldTransferPayload {
     asset: Hash,
@@ -37,6 +39,8 @@ pub struct ShieldTransferPayload {
     commitment: CompressedCommitment,
     /// Receiver's decrypt handle: D_r = r * P_receiver
     receiver_handle: CompressedHandle,
+    /// Proof that commitment is correctly formed for the claimed amount
+    proof: ShieldCommitmentProof,
 }
 
 impl ShieldTransferPayload {
@@ -48,6 +52,7 @@ impl ShieldTransferPayload {
         extra_data: Option<UnknownExtraDataFormat>,
         commitment: CompressedCommitment,
         receiver_handle: CompressedHandle,
+        proof: ShieldCommitmentProof,
     ) -> Self {
         ShieldTransferPayload {
             asset,
@@ -56,6 +61,7 @@ impl ShieldTransferPayload {
             extra_data,
             commitment,
             receiver_handle,
+            proof,
         }
     }
 
@@ -95,6 +101,12 @@ impl ShieldTransferPayload {
         &self.receiver_handle
     }
 
+    /// Get the Shield commitment proof
+    #[inline]
+    pub fn get_proof(&self) -> &ShieldCommitmentProof {
+        &self.proof
+    }
+
     /// Consume and return all fields
     #[inline]
     pub fn consume(
@@ -106,6 +118,7 @@ impl ShieldTransferPayload {
         Option<UnknownExtraDataFormat>,
         CompressedCommitment,
         CompressedHandle,
+        ShieldCommitmentProof,
     ) {
         (
             self.asset,
@@ -114,6 +127,7 @@ impl ShieldTransferPayload {
             self.extra_data,
             self.commitment,
             self.receiver_handle,
+            self.proof,
         )
     }
 }
@@ -126,6 +140,7 @@ impl Serializer for ShieldTransferPayload {
         self.extra_data.write(writer);
         self.commitment.write(writer);
         self.receiver_handle.write(writer);
+        self.proof.write(writer);
     }
 
     fn read(reader: &mut Reader) -> Result<ShieldTransferPayload, ReaderError> {
@@ -135,6 +150,7 @@ impl Serializer for ShieldTransferPayload {
         let extra_data = Option::read(reader)?;
         let commitment = CompressedCommitment::read(reader)?;
         let receiver_handle = CompressedHandle::read(reader)?;
+        let proof = ShieldCommitmentProof::read(reader)?;
 
         Ok(ShieldTransferPayload {
             asset,
@@ -143,6 +159,7 @@ impl Serializer for ShieldTransferPayload {
             extra_data,
             commitment,
             receiver_handle,
+            proof,
         })
     }
 
@@ -153,6 +170,7 @@ impl Serializer for ShieldTransferPayload {
             + self.extra_data.size()
             + self.commitment.size()
             + self.receiver_handle.size()
+            + self.proof.size()
     }
 }
 
@@ -160,6 +178,7 @@ impl Serializer for ShieldTransferPayload {
 mod tests {
     use super::*;
     use crate::crypto::elgamal::{KeyPair, PedersenCommitment, PedersenOpening};
+    use tos_crypto::merlin::Transcript;
 
     fn create_test_payload() -> ShieldTransferPayload {
         let receiver_keypair = KeyPair::new();
@@ -172,6 +191,15 @@ mod tests {
         let commitment = PedersenCommitment::new_with_opening(amount, &opening);
         let receiver_handle = receiver_keypair.get_public_key().decrypt_handle(&opening);
 
+        // Create proof
+        let mut transcript = Transcript::new(b"test");
+        let proof = ShieldCommitmentProof::new(
+            receiver_keypair.get_public_key(),
+            amount,
+            &opening,
+            &mut transcript,
+        );
+
         ShieldTransferPayload::new(
             asset,
             destination,
@@ -179,6 +207,7 @@ mod tests {
             None,
             commitment.compress(),
             receiver_handle.compress(),
+            proof,
         )
     }
 
@@ -229,7 +258,7 @@ mod tests {
         let amount = payload.get_amount();
         let commitment = payload.get_commitment().clone();
 
-        let (c_asset, c_dest, c_amount, _, c_commit, _) = payload.consume();
+        let (c_asset, c_dest, c_amount, _, c_commit, _, _) = payload.consume();
 
         assert_eq!(asset, c_asset);
         assert_eq!(destination, c_dest);
@@ -248,6 +277,15 @@ mod tests {
         let commitment = PedersenCommitment::new_with_opening(amount, &opening);
         let receiver_handle = receiver_keypair.get_public_key().decrypt_handle(&opening);
 
+        // Create proof
+        let mut transcript = Transcript::new(b"test");
+        let proof = ShieldCommitmentProof::new(
+            receiver_keypair.get_public_key(),
+            amount,
+            &opening,
+            &mut transcript,
+        );
+
         // Create with extra data
         let extra_data = Some(UnknownExtraDataFormat(vec![1, 2, 3, 4, 5]));
         let payload = ShieldTransferPayload::new(
@@ -257,6 +295,7 @@ mod tests {
             extra_data.clone(),
             commitment.compress(),
             receiver_handle.compress(),
+            proof,
         );
 
         assert!(payload.get_extra_data().is_some());

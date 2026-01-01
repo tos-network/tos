@@ -541,7 +541,7 @@ impl Transaction {
             }
             TransactionType::ShieldTransfers(transfers) => {
                 // Shield transfers: TOS -> UNO (enter privacy mode)
-                // Amount is public, no ZKP needed for amount validity
+                // Amount is public, commitment proof required to prevent forged commitments
                 if transfers.is_empty() || transfers.len() > MAX_TRANSFER_COUNT {
                     return Err(VerificationError::TransferCount);
                 }
@@ -552,6 +552,39 @@ impl Transaction {
                     if transfer.get_amount() == 0 {
                         return Err(VerificationError::InvalidTransferAmount);
                     }
+
+                    // SECURITY: Verify Shield commitment proof
+                    // This ensures the commitment is correctly formed for the claimed amount
+                    // and prevents inflation attacks via forged commitments
+                    let commitment = transfer
+                        .get_commitment()
+                        .decompress()
+                        .map_err(|_| VerificationError::InvalidFormat)?;
+                    let receiver_pubkey = transfer
+                        .get_destination()
+                        .decompress()
+                        .map_err(|_| VerificationError::InvalidFormat)?;
+                    let receiver_handle = transfer
+                        .get_receiver_handle()
+                        .decompress()
+                        .map_err(|_| VerificationError::InvalidFormat)?;
+
+                    let mut transcript = Transcript::new(b"shield_commitment_proof");
+                    transfer
+                        .get_proof()
+                        .verify(
+                            &commitment,
+                            &receiver_pubkey,
+                            &receiver_handle,
+                            transfer.get_amount(),
+                            &mut transcript,
+                        )
+                        .map_err(|e| {
+                            if log::log_enabled!(log::Level::Debug) {
+                                debug!("Shield commitment proof verification failed: {:?}", e);
+                            }
+                            VerificationError::Proof(e)
+                        })?;
 
                     if let Some(extra_data) = transfer.get_extra_data() {
                         let size = extra_data.size();
@@ -1683,6 +1716,39 @@ impl Transaction {
                     if transfer.get_amount() == 0 {
                         return Err(VerificationError::InvalidTransferAmount);
                     }
+
+                    // SECURITY: Verify Shield commitment proof
+                    // This ensures the commitment is correctly formed for the claimed amount
+                    // and prevents inflation attacks via forged commitments
+                    let commitment = transfer
+                        .get_commitment()
+                        .decompress()
+                        .map_err(|_| VerificationError::InvalidFormat)?;
+                    let receiver_pubkey = transfer
+                        .get_destination()
+                        .decompress()
+                        .map_err(|_| VerificationError::InvalidFormat)?;
+                    let receiver_handle = transfer
+                        .get_receiver_handle()
+                        .decompress()
+                        .map_err(|_| VerificationError::InvalidFormat)?;
+
+                    let mut transcript = Transcript::new(b"shield_commitment_proof");
+                    transfer
+                        .get_proof()
+                        .verify(
+                            &commitment,
+                            &receiver_pubkey,
+                            &receiver_handle,
+                            transfer.get_amount(),
+                            &mut transcript,
+                        )
+                        .map_err(|e| {
+                            if log::log_enabled!(log::Level::Debug) {
+                                debug!("Shield commitment proof verification failed: {:?}", e);
+                            }
+                            VerificationError::Proof(e)
+                        })?;
 
                     if let Some(extra_data) = transfer.get_extra_data() {
                         let size = extra_data.size();
