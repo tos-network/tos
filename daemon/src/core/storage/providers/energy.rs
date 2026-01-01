@@ -1,7 +1,7 @@
 use crate::core::error::BlockchainError;
 use async_trait::async_trait;
 use tos_common::{
-    account::{AccountEnergy, DelegatedResource},
+    account::{AccountEnergy, DelegatedResource, GlobalEnergyState},
     block::TopoHeight,
     crypto::PublicKey,
 };
@@ -58,6 +58,19 @@ pub trait DelegatedResourceProvider {
         &self,
         to: &PublicKey,
     ) -> Result<Vec<DelegatedResource>, BlockchainError>;
+}
+
+/// Provider for global energy state storage (Stake 2.0)
+#[async_trait]
+pub trait GlobalEnergyProvider {
+    /// Get the global energy state for the network
+    async fn get_global_energy_state(&self) -> Result<GlobalEnergyState, BlockchainError>;
+
+    /// Set the global energy state for the network
+    async fn set_global_energy_state(
+        &mut self,
+        state: &GlobalEnergyState,
+    ) -> Result<(), BlockchainError>;
 }
 
 // Simple implementation for testing
@@ -119,5 +132,19 @@ impl DelegatedResourceProvider for MockEnergyProvider {
         _to: &PublicKey,
     ) -> Result<Vec<DelegatedResource>, BlockchainError> {
         Ok(vec![])
+    }
+}
+
+#[async_trait::async_trait]
+impl GlobalEnergyProvider for MockEnergyProvider {
+    async fn get_global_energy_state(&self) -> Result<GlobalEnergyState, BlockchainError> {
+        Ok(GlobalEnergyState::default())
+    }
+
+    async fn set_global_energy_state(
+        &mut self,
+        _state: &GlobalEnergyState,
+    ) -> Result<(), BlockchainError> {
+        Ok(())
     }
 }

@@ -1451,6 +1451,17 @@ pub struct GetDelegationsResult {
     pub total_amount: u64,
 }
 
+/// Global energy state info for the network (Stake 2.0)
+#[derive(Serialize, Deserialize)]
+pub struct GlobalEnergyInfo {
+    /// Total energy limit for the network (18.4 billion)
+    pub total_energy_limit: u64,
+    /// Sum of all frozen TOS across all accounts
+    pub total_energy_weight: u64,
+    /// Last update topoheight
+    pub last_update: TopoHeight,
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct RPCVersioned<T> {
     pub topoheight: TopoHeight,

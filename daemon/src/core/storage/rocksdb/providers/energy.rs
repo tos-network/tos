@@ -2,14 +2,15 @@ use crate::core::{
     error::BlockchainError,
     storage::{
         rocksdb::{Column, IteratorMode},
-        DelegatedResourceProvider, EnergyProvider, NetworkProvider, RocksStorage,
+        DelegatedResourceProvider, EnergyProvider, GlobalEnergyProvider, NetworkProvider,
+        RocksStorage,
     },
 };
 use async_trait::async_trait;
 use log::trace;
 use rocksdb::Direction;
 use tos_common::{
-    account::{AccountEnergy, DelegatedResource},
+    account::{AccountEnergy, DelegatedResource, GlobalEnergyState},
     block::TopoHeight,
     crypto::PublicKey,
     serializer::Serializer,
@@ -222,5 +223,42 @@ impl DelegatedResourceProvider for RocksStorage {
         }
 
         Ok(delegations)
+    }
+}
+
+/// Global energy state key
+const GLOBAL_ENERGY_STATE_KEY: &[u8] = b"GLOBAL";
+
+#[async_trait]
+impl GlobalEnergyProvider for RocksStorage {
+    async fn get_global_energy_state(&self) -> Result<GlobalEnergyState, BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get global energy state");
+        }
+
+        // Try to load from storage, return default if not found
+        let state = self.load_optional_from_disk::<&[u8], GlobalEnergyState>(
+            Column::GlobalEnergyState,
+            &GLOBAL_ENERGY_STATE_KEY,
+        )?;
+
+        Ok(state.unwrap_or_default())
+    }
+
+    async fn set_global_energy_state(
+        &mut self,
+        state: &GlobalEnergyState,
+    ) -> Result<(), BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "set global energy state: total_weight={}, last_update={}",
+                state.total_energy_weight,
+                state.last_update
+            );
+        }
+
+        self.insert_into_disk(Column::GlobalEnergyState, GLOBAL_ENERGY_STATE_KEY, state)?;
+
+        Ok(())
     }
 }

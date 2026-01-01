@@ -121,6 +121,10 @@ pub enum Column {
     // Key: {to_pubkey (32 bytes)}{from_pubkey (32 bytes)} => {}
     DelegatedResourcesIndex,
 
+    // Global energy state for the network (Stake 2.0)
+    // Single key "GLOBAL" => {GlobalEnergyState}
+    GlobalEnergyState,
+
     // AI mining state pointer
     // AI_MINING_STATE_TOPOHEIGHT => {topoheight}
     AIMiningState,

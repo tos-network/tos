@@ -798,6 +798,10 @@ pub fn register_methods<S: Storage>(
 
     // Energy management
     handler.register_method("get_energy", async_handler!(get_energy::<S>));
+    handler.register_method(
+        "get_global_energy_state",
+        async_handler!(get_global_energy_state::<S>),
+    );
 
     // Delegation management (Stake 2.0)
     handler.register_method(
@@ -3190,9 +3194,9 @@ async fn get_energy<S: Storage>(context: &Context, body: Value) -> Result<Value,
     let pubkey = params.address.into_owned().to_public_key();
     let account_energy = storage.get_account_energy(&pubkey).await?;
 
-    // TODO: Get total_energy_weight from global state
-    // For now, use a placeholder - this should come from GlobalEnergyState
-    let total_energy_weight: u64 = 1_000_000_000; // Placeholder
+    // Get global energy state for proportional energy calculation
+    let global_state = storage.get_global_energy_state().await?;
+    let total_energy_weight = global_state.total_energy_weight;
 
     let result = if let Some(account_energy) = account_energy {
         // Calculate energy metrics using Stake 2.0 model
@@ -3249,6 +3253,25 @@ async fn get_energy<S: Storage>(context: &Context, body: Value) -> Result<Value,
     };
 
     Ok(result)
+}
+
+/// Get global energy state for the network (Stake 2.0)
+async fn get_global_energy_state<S: Storage>(
+    context: &Context,
+    _body: Value,
+) -> Result<Value, InternalRpcError> {
+    use tos_common::api::daemon::GlobalEnergyInfo;
+
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let storage = blockchain.get_storage().read().await;
+
+    let global_state = storage.get_global_energy_state().await?;
+
+    Ok(json!(GlobalEnergyInfo {
+        total_energy_limit: global_state.total_energy_limit,
+        total_energy_weight: global_state.total_energy_weight,
+        last_update: global_state.last_update,
+    }))
 }
 
 // ===== Stake 2.0 Delegation RPC Methods =====
