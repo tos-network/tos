@@ -12,18 +12,71 @@ pub const UNO_ASSET: Hash = Hash::new([
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
 ]);
 
-// ===== NEW ENERGY-BASED FEE MODEL =====
-
-// Energy-based fee model constants
-// Only transfer operations consume energy
-// Simplified model compared to TRON: 1 transfer = 1 energy (size-independent)
+// ===== ENERGY STAKE 2.0 MODEL (TRON-style) =====
 //
-// Energy Model Overview:
-// - Each transfer consumes exactly 1 energy regardless of transaction size
-// - Energy is gained by freezing TOS with duration-based multipliers
-// - Energy formula: 1 TOS × (2 × freeze_days) = energy units
-// - Example: 1 TOS frozen for 7 days = 14 energy = 14 free transfers
-pub const ENERGY_PER_TRANSFER: u64 = 1; // Basic transfer (1 energy per transfer)
+// New proportional energy allocation model:
+// - Energy = (frozen_balance / total_energy_weight) × TOTAL_ENERGY_LIMIT
+// - 24-hour linear decay recovery
+// - Free quota for casual users (~3 transfers/day)
+// - 14-day unfreeze delay queue (max 32 entries)
+// - Delegation support (DelegateResource / UndelegateResource)
+//
+// Philosophy: "Casual free, power users stake"
+// - Casual users: ~3 free transfers/day
+// - Power users: stake TOS for more energy
+// - dApp users: pay for smart contract execution
+
+// Total energy available network-wide
+// 184M TOS × 100 = 18.4 billion energy (if all TOS staked)
+pub const TOTAL_ENERGY_LIMIT: u64 = 18_400_000_000;
+
+// Free energy quota per account per day
+// Provides ~3 free transfers for casual users
+// Transfer cost ≈ 500 energy → 1,500 ÷ 500 ≈ 3 transfers
+pub const FREE_ENERGY_QUOTA: u64 = 1_500;
+
+// Energy recovery window in milliseconds (24 hours)
+// Energy linearly recovers over this period after consumption
+pub const ENERGY_RECOVERY_WINDOW_MS: u64 = 86_400_000;
+
+// Maximum entries in unfreezing queue per account
+// Prevents unbounded storage growth
+pub const MAX_UNFREEZING_LIST_SIZE: usize = 32;
+
+// Delay in days before unfrozen TOS can be withdrawn
+// TRON uses 14 days for Stake 2.0
+pub const UNFREEZE_DELAY_DAYS: u32 = 14;
+
+// Auto-burn rate: atomic TOS units per energy unit
+// When frozen energy insufficient, TOS is burned at this rate
+// 100 atomic = 0.000001 TOS per energy
+pub const TOS_PER_ENERGY: u64 = 100;
+
+// Minimum TOS amount for delegation (1 TOS)
+pub const MIN_DELEGATION_AMOUNT: u64 = COIN_VALUE;
+
+// Maximum lock period for delegated resources (days)
+pub const MAX_DELEGATE_LOCK_DAYS: u32 = 365;
+
+// Default lock period for delegated resources (days)
+// 0 = no lock (can undelegate immediately after 3 days minimum)
+pub const DEFAULT_DELEGATE_LOCK_DAYS: u32 = 3;
+
+// Energy costs for different transaction types
+pub const ENERGY_COST_PER_BYTE: u64 = 1;           // Per byte of transaction
+pub const ENERGY_COST_PER_OUTPUT: u64 = 100;       // Per transfer output
+pub const ENERGY_COST_ACCOUNT_CREATION: u64 = 25_000; // Creating new account
+pub const ENERGY_COST_BURN: u64 = 1_000;           // Burn operation
+pub const ENERGY_COST_CONTRACT_DEPLOY_BASE: u64 = 32_000; // Base cost for contract deploy
+pub const ENERGY_COST_CONTRACT_DEPLOY_PER_BYTE: u64 = 10; // Per byte of bytecode
+
+// ===== LEGACY ENERGY MODEL (deprecated) =====
+// Kept for backward compatibility during transition
+// TODO: Remove after full migration to Stake 2.0
+
+// Legacy: 1 transfer = 1 energy (size-independent)
+#[deprecated(note = "Use Stake 2.0 energy model instead")]
+pub const ENERGY_PER_TRANSFER: u64 = 1;
 
 // TOS-based fee model constants
 pub const FEE_PER_KB: u64 = 10000;
@@ -79,10 +132,16 @@ pub const COIN_VALUE: u64 = 10u64.pow(COIN_DECIMALS as u32);
 // 184M full coin
 pub const MAXIMUM_SUPPLY: u64 = 184_000_000 * COIN_VALUE;
 
-// ===== FREEZE DURATION LIMITS =====
-// Minimum freeze duration in days
+// ===== LEGACY FREEZE DURATION LIMITS (deprecated) =====
+// Stake 2.0 removes duration-based freezing
+// These are kept for backward compatibility during transition
+// TODO: Remove after full migration to Stake 2.0
+
+// Minimum freeze duration in days (legacy)
+#[deprecated(note = "Stake 2.0 removes duration-based freezing")]
 pub const MIN_FREEZE_DURATION_DAYS: u32 = 3;
-// Maximum freeze duration in days
+// Maximum freeze duration in days (legacy)
+#[deprecated(note = "Stake 2.0 removes duration-based freezing")]
 pub const MAX_FREEZE_DURATION_DAYS: u32 = 180;
 
 // ===== TOS AMOUNT LIMITS =====
