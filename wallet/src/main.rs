@@ -730,9 +730,9 @@ async fn setup_wallet_command_manager(
             ),
         ],
         vec![Arg::new(
-            "fee_type",
-            ArgType::String,
-            "Fee payment type: 'tos' or 'energy'",
+            "fee_limit",
+            ArgType::Number,
+            "Max TOS to burn if energy insufficient (Stake 2.0)",
         )],
         CommandHandler::Async(async_handler!(transfer)),
     ))?;
@@ -744,9 +744,9 @@ async fn setup_wallet_command_manager(
             Arg::new("address", ArgType::String, "Recipient wallet address"),
         ],
         vec![Arg::new(
-            "fee_type",
-            ArgType::String,
-            "Fee payment type: 'tos' or 'energy'",
+            "fee_limit",
+            ArgType::Number,
+            "Max TOS to burn if energy insufficient (Stake 2.0)",
         )],
         CommandHandler::Async(async_handler!(transfer_all)),
     ))?;
