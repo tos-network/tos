@@ -2742,11 +2742,184 @@ impl Transaction {
                                 amount, receiver, lock, lock_period
                             );
                         }
+
+                        // Get sender's account energy
+                        let sender = self.get_source();
+                        let mut sender_energy = state
+                            .get_account_energy(sender)
+                            .await
+                            .map_err(VerificationError::State)?
+                            .unwrap_or_default();
+
+                        // Check sender has enough frozen balance
+                        if sender_energy.frozen_balance < *amount {
+                            return Err(VerificationError::InsufficientFrozenBalance);
+                        }
+
+                        // Get receiver's account energy
+                        let mut receiver_energy = state
+                            .get_account_energy(receiver)
+                            .await
+                            .map_err(VerificationError::State)?
+                            .unwrap_or_default();
+
+                        // Calculate lock expire time
+                        let now_ms = state.get_block().get_timestamp();
+                        let expire_time = if *lock {
+                            now_ms + (*lock_period as u64) * 86_400_000 // days to ms
+                        } else {
+                            0
+                        };
+
+                        // Check if delegation already exists
+                        let existing = state
+                            .get_delegated_resource(sender, receiver)
+                            .await
+                            .map_err(VerificationError::State)?;
+
+                        if let Some(mut existing_delegation) = existing {
+                            // Update existing delegation
+                            existing_delegation.frozen_balance = existing_delegation
+                                .frozen_balance
+                                .checked_add(*amount)
+                                .ok_or(VerificationError::Overflow)?;
+                            // Update lock time if new lock is longer
+                            if expire_time > existing_delegation.expire_time {
+                                existing_delegation.expire_time = expire_time;
+                            }
+                            state
+                                .set_delegated_resource(&existing_delegation)
+                                .await
+                                .map_err(VerificationError::State)?;
+                        } else {
+                            // Create new delegation
+                            let delegation = crate::account::DelegatedResource {
+                                from: sender.clone(),
+                                to: receiver.clone(),
+                                frozen_balance: *amount,
+                                expire_time,
+                            };
+                            state
+                                .set_delegated_resource(&delegation)
+                                .await
+                                .map_err(VerificationError::State)?;
+                        }
+
+                        // Update sender's energy: frozen -> delegated
+                        sender_energy.frozen_balance = sender_energy
+                            .frozen_balance
+                            .checked_sub(*amount)
+                            .ok_or(VerificationError::Underflow)?;
+                        sender_energy.delegated_frozen_balance = sender_energy
+                            .delegated_frozen_balance
+                            .checked_add(*amount)
+                            .ok_or(VerificationError::Overflow)?;
+
+                        // Update receiver's energy: add acquired
+                        receiver_energy.acquired_delegated_balance = receiver_energy
+                            .acquired_delegated_balance
+                            .checked_add(*amount)
+                            .ok_or(VerificationError::Overflow)?;
+
+                        // Save updated energies
+                        state
+                            .set_account_energy(sender, sender_energy)
+                            .await
+                            .map_err(VerificationError::State)?;
+                        state
+                            .set_account_energy(receiver, receiver_energy)
+                            .await
+                            .map_err(VerificationError::State)?;
                     }
                     EnergyPayload::UndelegateResource { receiver, amount } => {
                         if log::log_enabled!(log::Level::Debug) {
                             debug!("UndelegateResource: {} TOS from {:?}", amount, receiver);
                         }
+
+                        let sender = self.get_source();
+
+                        // Get existing delegation
+                        let delegation = state
+                            .get_delegated_resource(sender, receiver)
+                            .await
+                            .map_err(VerificationError::State)?
+                            .ok_or(VerificationError::DelegationNotFound)?;
+
+                        // Check lock has expired
+                        let now_ms = state.get_block().get_timestamp();
+                        if delegation.expire_time > now_ms {
+                            return Err(VerificationError::DelegationStillLocked);
+                        }
+
+                        // Check amount
+                        if delegation.frozen_balance < *amount {
+                            return Err(VerificationError::InsufficientDelegatedBalance);
+                        }
+
+                        // Get sender's and receiver's account energy
+                        let mut sender_energy = state
+                            .get_account_energy(sender)
+                            .await
+                            .map_err(VerificationError::State)?
+                            .unwrap_or_default();
+
+                        let mut receiver_energy = state
+                            .get_account_energy(receiver)
+                            .await
+                            .map_err(VerificationError::State)?
+                            .unwrap_or_default();
+
+                        // Update delegation record
+                        let remaining = delegation
+                            .frozen_balance
+                            .checked_sub(*amount)
+                            .ok_or(VerificationError::Underflow)?;
+
+                        if remaining == 0 {
+                            // Delete delegation if fully undelegated
+                            state
+                                .delete_delegated_resource(sender, receiver)
+                                .await
+                                .map_err(VerificationError::State)?;
+                        } else {
+                            // Update delegation with remaining amount
+                            let updated_delegation = crate::account::DelegatedResource {
+                                from: sender.clone(),
+                                to: receiver.clone(),
+                                frozen_balance: remaining,
+                                expire_time: delegation.expire_time,
+                            };
+                            state
+                                .set_delegated_resource(&updated_delegation)
+                                .await
+                                .map_err(VerificationError::State)?;
+                        }
+
+                        // Update sender's energy: delegated -> frozen
+                        sender_energy.delegated_frozen_balance = sender_energy
+                            .delegated_frozen_balance
+                            .checked_sub(*amount)
+                            .ok_or(VerificationError::Underflow)?;
+                        sender_energy.frozen_balance = sender_energy
+                            .frozen_balance
+                            .checked_add(*amount)
+                            .ok_or(VerificationError::Overflow)?;
+
+                        // Update receiver's energy: remove acquired
+                        receiver_energy.acquired_delegated_balance = receiver_energy
+                            .acquired_delegated_balance
+                            .checked_sub(*amount)
+                            .ok_or(VerificationError::Underflow)?;
+
+                        // Save updated energies
+                        state
+                            .set_account_energy(sender, sender_energy)
+                            .await
+                            .map_err(VerificationError::State)?;
+                        state
+                            .set_account_energy(receiver, receiver_energy)
+                            .await
+                            .map_err(VerificationError::State)?;
                     }
                 }
             }

@@ -112,6 +112,15 @@ pub enum Column {
     // {topoheight}_{account_address} => {energy_resource}
     VersionedEnergyResources,
 
+    // ===== Stake 2.0 Delegation =====
+
+    // Delegated resources: from -> to -> DelegatedResource
+    // Key: {from_pubkey (32 bytes)}{to_pubkey (32 bytes)} => {DelegatedResource}
+    DelegatedResources,
+    // Index for looking up delegations received by an account
+    // Key: {to_pubkey (32 bytes)}{from_pubkey (32 bytes)} => {}
+    DelegatedResourcesIndex,
+
     // AI mining state pointer
     // AI_MINING_STATE_TOPOHEIGHT => {topoheight}
     AIMiningState,
@@ -237,6 +246,11 @@ impl Column {
             CommitteesByRegion => Some(1),
             // Child committees: prefix by parent committee ID (32 bytes)
             ChildCommittees => Some(32),
+
+            // Delegated resources: prefix by from_pubkey (32 bytes)
+            DelegatedResources => Some(32),
+            // Delegated resources index: prefix by to_pubkey (32 bytes)
+            DelegatedResourcesIndex => Some(32),
 
             _ => None,
         }

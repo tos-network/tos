@@ -62,6 +62,17 @@ pub enum VerificationError<T> {
     InsufficientFunds { available: u64, required: u64 },
     #[error("Arithmetic overflow during balance calculation")]
     Overflow,
+    #[error("Arithmetic underflow during balance calculation")]
+    Underflow,
     #[error("Invalid transfer amount")]
     InvalidTransferAmount,
+    // Stake 2.0 Delegation errors
+    #[error("Insufficient frozen balance for delegation")]
+    InsufficientFrozenBalance,
+    #[error("Delegation not found")]
+    DelegationNotFound,
+    #[error("Delegation is still locked")]
+    DelegationStillLocked,
+    #[error("Insufficient delegated balance")]
+    InsufficientDelegatedBalance,
 }

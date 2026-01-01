@@ -402,6 +402,29 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for Applicable
             .await
     }
 
+    async fn get_delegated_resource(
+        &mut self,
+        from: &'a CompressedPublicKey,
+        to: &'a CompressedPublicKey,
+    ) -> Result<Option<tos_common::account::DelegatedResource>, BlockchainError> {
+        self.inner.storage.get_delegated_resource(from, to).await
+    }
+
+    async fn set_delegated_resource(
+        &mut self,
+        delegation: &tos_common::account::DelegatedResource,
+    ) -> Result<(), BlockchainError> {
+        self.inner.storage.set_delegated_resource(delegation).await
+    }
+
+    async fn delete_delegated_resource(
+        &mut self,
+        from: &'a CompressedPublicKey,
+        to: &'a CompressedPublicKey,
+    ) -> Result<(), BlockchainError> {
+        self.inner.storage.delete_delegated_resource(from, to).await
+    }
+
     async fn get_ai_mining_state(&mut self) -> Result<Option<AIMiningState>, BlockchainError> {
         self.inner.storage.get_ai_mining_state().await
     }

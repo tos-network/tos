@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 /// - `UndelegateResource`: Take back delegated energy
 ///
 /// # Fee Model
-/// - Energy operations are FREE (0 energy cost, aligned with TRON)
+/// - Energy operations are FREE (0 energy cost)
 /// - No TOS fees for energy management operations
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum EnergyPayload {
@@ -91,7 +91,7 @@ impl EnergyPayload {
     }
 
     /// Get the energy cost for this operation
-    /// All energy operations are FREE in Stake 2.0 (aligned with TRON)
+    /// All energy operations are FREE in Stake 2.0
     pub fn energy_cost(&self) -> u64 {
         0
     }

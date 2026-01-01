@@ -218,6 +218,42 @@ pub trait BlockchainApplyState<'a, P: ContractProvider, E>:
         account_energy: crate::account::AccountEnergy,
     ) -> Result<(), E>;
 
+    // ===== Stake 2.0 Delegation Operations =====
+
+    /// Get a specific delegation from one account to another
+    ///
+    /// # Arguments
+    /// * `from` - The delegator's public key
+    /// * `to` - The receiver's public key
+    ///
+    /// # Returns
+    /// The delegation if it exists, None otherwise
+    async fn get_delegated_resource(
+        &mut self,
+        from: &'a CompressedPublicKey,
+        to: &'a CompressedPublicKey,
+    ) -> Result<Option<crate::account::DelegatedResource>, E>;
+
+    /// Set or update a delegation from one account to another
+    ///
+    /// # Arguments
+    /// * `delegation` - The delegation record to store
+    async fn set_delegated_resource(
+        &mut self,
+        delegation: &crate::account::DelegatedResource,
+    ) -> Result<(), E>;
+
+    /// Delete a delegation from one account to another
+    ///
+    /// # Arguments
+    /// * `from` - The delegator's public key
+    /// * `to` - The receiver's public key
+    async fn delete_delegated_resource(
+        &mut self,
+        from: &'a CompressedPublicKey,
+        to: &'a CompressedPublicKey,
+    ) -> Result<(), E>;
+
     /// Get the AI mining state
     async fn get_ai_mining_state(&mut self) -> Result<Option<crate::ai_mining::AIMiningState>, E>;
 

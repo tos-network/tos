@@ -1,10 +1,19 @@
 use crate::core::{
     error::BlockchainError,
-    storage::{rocksdb::Column, EnergyProvider, NetworkProvider, RocksStorage},
+    storage::{
+        rocksdb::{Column, IteratorMode},
+        DelegatedResourceProvider, EnergyProvider, NetworkProvider, RocksStorage,
+    },
 };
 use async_trait::async_trait;
 use log::trace;
-use tos_common::{account::AccountEnergy, block::TopoHeight, crypto::PublicKey};
+use rocksdb::Direction;
+use tos_common::{
+    account::{AccountEnergy, DelegatedResource},
+    block::TopoHeight,
+    crypto::PublicKey,
+    serializer::Serializer,
+};
 
 #[async_trait]
 impl EnergyProvider for RocksStorage {
@@ -67,5 +76,151 @@ impl EnergyProvider for RocksStorage {
         self.insert_into_disk(Column::Account, account.as_bytes(), &acc)?;
 
         Ok(())
+    }
+}
+
+/// Build delegation key: {from_pubkey (32 bytes)}{to_pubkey (32 bytes)}
+fn build_delegation_key(from: &PublicKey, to: &PublicKey) -> Vec<u8> {
+    let mut key = Vec::with_capacity(64);
+    key.extend_from_slice(from.as_bytes());
+    key.extend_from_slice(to.as_bytes());
+    key
+}
+
+/// Build delegation index key: {to_pubkey (32 bytes)}{from_pubkey (32 bytes)}
+fn build_delegation_index_key(to: &PublicKey, from: &PublicKey) -> Vec<u8> {
+    let mut key = Vec::with_capacity(64);
+    key.extend_from_slice(to.as_bytes());
+    key.extend_from_slice(from.as_bytes());
+    key
+}
+
+#[async_trait]
+impl DelegatedResourceProvider for RocksStorage {
+    async fn get_delegated_resource(
+        &self,
+        from: &PublicKey,
+        to: &PublicKey,
+    ) -> Result<Option<DelegatedResource>, BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "get delegated resource from {} to {}",
+                from.as_address(self.is_mainnet()),
+                to.as_address(self.is_mainnet())
+            );
+        }
+
+        let key = build_delegation_key(from, to);
+        self.load_optional_from_disk::<Vec<u8>, DelegatedResource>(Column::DelegatedResources, &key)
+    }
+
+    async fn set_delegated_resource(
+        &mut self,
+        delegation: &DelegatedResource,
+    ) -> Result<(), BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "set delegated resource from {} to {}: {} TOS",
+                delegation.from.as_address(self.is_mainnet()),
+                delegation.to.as_address(self.is_mainnet()),
+                delegation.frozen_balance
+            );
+        }
+
+        // Store delegation record
+        let key = build_delegation_key(&delegation.from, &delegation.to);
+        self.insert_into_disk(Column::DelegatedResources, &key, delegation)?;
+
+        // Store index for reverse lookup (to -> from)
+        let index_key = build_delegation_index_key(&delegation.to, &delegation.from);
+        // Index value is empty - we just need to know the key exists
+        self.insert_into_disk(Column::DelegatedResourcesIndex, &index_key, &())?;
+
+        Ok(())
+    }
+
+    async fn delete_delegated_resource(
+        &mut self,
+        from: &PublicKey,
+        to: &PublicKey,
+    ) -> Result<(), BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "delete delegated resource from {} to {}",
+                from.as_address(self.is_mainnet()),
+                to.as_address(self.is_mainnet())
+            );
+        }
+
+        // Delete delegation record
+        let key = build_delegation_key(from, to);
+        self.remove_from_disk(Column::DelegatedResources, &key)?;
+
+        // Delete index
+        let index_key = build_delegation_index_key(to, from);
+        self.remove_from_disk(Column::DelegatedResourcesIndex, &index_key)?;
+
+        Ok(())
+    }
+
+    async fn get_delegations_from(
+        &self,
+        from: &PublicKey,
+    ) -> Result<Vec<DelegatedResource>, BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "get all delegations from {}",
+                from.as_address(self.is_mainnet())
+            );
+        }
+
+        let prefix = from.as_bytes();
+        let mode = IteratorMode::WithPrefix(prefix, Direction::Forward);
+        let iter = self.iter::<Vec<u8>, DelegatedResource>(Column::DelegatedResources, mode)?;
+
+        let mut delegations = Vec::new();
+        for result in iter {
+            let (_, delegation) = result?;
+            delegations.push(delegation);
+        }
+
+        Ok(delegations)
+    }
+
+    async fn get_delegations_to(
+        &self,
+        to: &PublicKey,
+    ) -> Result<Vec<DelegatedResource>, BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "get all delegations to {}",
+                to.as_address(self.is_mainnet())
+            );
+        }
+
+        // Use the index to find all delegators
+        let prefix = to.as_bytes();
+        let mode = IteratorMode::WithPrefix(prefix, Direction::Forward);
+        let iter = self.iter_keys::<Vec<u8>>(Column::DelegatedResourcesIndex, mode)?;
+
+        let mut delegations = Vec::new();
+        for result in iter {
+            let index_key = result?;
+            // Index key format: {to (32 bytes)}{from (32 bytes)}
+            if index_key.len() >= 64 {
+                let from_bytes = &index_key[32..64];
+                if let Ok(from) = PublicKey::from_bytes(from_bytes) {
+                    let delegation_key = build_delegation_key(&from, to);
+                    if let Some(delegation) = self.load_optional_from_disk::<Vec<u8>, DelegatedResource>(
+                        Column::DelegatedResources,
+                        &delegation_key,
+                    )? {
+                        delegations.push(delegation);
+                    }
+                }
+            }
+        }
+
+        Ok(delegations)
     }
 }

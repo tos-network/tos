@@ -516,6 +516,29 @@ impl<'a> BlockchainApplyState<'a, DummyContractProvider, TestError> for TestChai
         Ok(())
     }
 
+    async fn get_delegated_resource(
+        &mut self,
+        _from: &'a PublicKey,
+        _to: &'a PublicKey,
+    ) -> Result<Option<tos_common::account::DelegatedResource>, TestError> {
+        Ok(None)
+    }
+
+    async fn set_delegated_resource(
+        &mut self,
+        _delegation: &tos_common::account::DelegatedResource,
+    ) -> Result<(), TestError> {
+        Ok(())
+    }
+
+    async fn delete_delegated_resource(
+        &mut self,
+        _from: &'a PublicKey,
+        _to: &'a PublicKey,
+    ) -> Result<(), TestError> {
+        Ok(())
+    }
+
     async fn get_ai_mining_state(
         &mut self,
     ) -> Result<Option<tos_common::ai_mining::AIMiningState>, TestError> {
