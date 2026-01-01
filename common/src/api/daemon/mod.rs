@@ -1462,6 +1462,68 @@ pub struct GlobalEnergyInfo {
     pub last_update: TopoHeight,
 }
 
+/// Parameters for estimate_energy RPC
+#[derive(Serialize, Deserialize)]
+pub struct EstimateEnergyParams<'a> {
+    /// Address of the account that will execute the transaction
+    pub address: Cow<'a, Address>,
+    /// Transaction type for energy estimation
+    pub tx_type: EstimateTxType,
+    /// Transaction size in bytes (for transfers)
+    #[serde(default)]
+    pub tx_size: usize,
+    /// Number of outputs (for transfers)
+    #[serde(default)]
+    pub output_count: usize,
+    /// Number of new accounts being created
+    #[serde(default)]
+    pub new_accounts: usize,
+    /// Bytecode size for contract deployment
+    #[serde(default)]
+    pub bytecode_size: usize,
+    /// Fee limit (max TOS willing to burn)
+    #[serde(default)]
+    pub fee_limit: u64,
+}
+
+/// Transaction type for energy estimation
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum EstimateTxType {
+    /// Regular TOS transfer
+    Transfer,
+    /// UNO privacy transfer
+    UnoTransfer,
+    /// Burn TOS
+    Burn,
+    /// Deploy contract
+    DeployContract,
+    /// Invoke contract (uses CU from contract execution)
+    InvokeContract,
+    /// Energy operations (free)
+    Energy,
+}
+
+/// Result of energy estimation
+#[derive(Serialize, Deserialize)]
+pub struct EstimateEnergyResult {
+    /// Energy required for the transaction
+    pub energy_required: u64,
+    /// Free energy available
+    pub free_energy_available: u64,
+    /// Frozen energy available
+    pub frozen_energy_available: u64,
+    /// Total energy available (free + frozen)
+    pub total_energy_available: u64,
+    /// TOS that would be burned (0 if energy covers it)
+    pub estimated_fee: u64,
+    /// Whether the transaction can be executed
+    pub will_succeed: bool,
+    /// Error message if will_succeed is false
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct RPCVersioned<T> {
     pub topoheight: TopoHeight,

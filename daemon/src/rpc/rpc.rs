@@ -802,6 +802,7 @@ pub fn register_methods<S: Storage>(
         "get_global_energy_state",
         async_handler!(get_global_energy_state::<S>),
     );
+    handler.register_method("estimate_energy", async_handler!(estimate_energy::<S>));
 
     // Delegation management (Stake 2.0)
     handler.register_method(
@@ -3271,6 +3272,101 @@ async fn get_global_energy_state<S: Storage>(
         total_energy_limit: global_state.total_energy_limit,
         total_energy_weight: global_state.total_energy_weight,
         last_update: global_state.last_update,
+    }))
+}
+
+/// Estimate energy cost for a transaction (Stake 2.0)
+async fn estimate_energy<S: Storage>(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    use tos_common::api::daemon::{EstimateEnergyParams, EstimateEnergyResult, EstimateTxType};
+    use tos_common::config::TOS_PER_ENERGY;
+    use tos_common::utils::energy_fee::EnergyFeeCalculator;
+
+    let params: EstimateEnergyParams = parse_params(body)?;
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let storage = blockchain.get_storage().read().await;
+
+    let now_ms = tos_common::time::get_current_time_in_millis();
+    let pubkey = params.address.into_owned().to_public_key();
+
+    // Get account energy state
+    let account_energy = storage.get_account_energy(&pubkey).await?.unwrap_or_default();
+    let global_state = storage.get_global_energy_state().await?;
+    let total_energy_weight = global_state.total_energy_weight;
+
+    // Calculate energy required based on transaction type
+    let energy_required = match params.tx_type {
+        EstimateTxType::Transfer => {
+            EnergyFeeCalculator::calculate_transfer_cost(params.tx_size, params.output_count)
+                + EnergyFeeCalculator::calculate_new_account_cost(params.new_accounts)
+        }
+        EstimateTxType::UnoTransfer => {
+            EnergyFeeCalculator::calculate_uno_transfer_cost(params.tx_size, params.output_count)
+                + EnergyFeeCalculator::calculate_new_account_cost(params.new_accounts)
+        }
+        EstimateTxType::Burn => EnergyFeeCalculator::calculate_burn_cost(),
+        EstimateTxType::DeployContract => {
+            EnergyFeeCalculator::calculate_deploy_cost(params.bytecode_size)
+        }
+        EstimateTxType::InvokeContract => {
+            // Contract invocation requires simulation - return 0 for now
+            // Actual cost depends on contract execution
+            0
+        }
+        EstimateTxType::Energy => 0, // Energy operations are free
+    };
+
+    // Calculate available energy
+    let free_energy_available = account_energy.calculate_free_energy_available(now_ms);
+    let frozen_energy_available =
+        account_energy.calculate_frozen_energy_available(now_ms, total_energy_weight);
+    let total_energy_available = free_energy_available + frozen_energy_available;
+
+    // Calculate if TOS burn is needed
+    let (estimated_fee, will_succeed, error) = if total_energy_available >= energy_required {
+        // Energy covers the cost
+        (0, true, None)
+    } else {
+        // Need to burn TOS for the shortfall
+        let shortfall = energy_required - total_energy_available;
+        let tos_needed = shortfall * TOS_PER_ENERGY;
+
+        if params.fee_limit >= tos_needed {
+            // fee_limit covers the shortfall
+            (tos_needed, true, None)
+        } else if params.fee_limit == 0 {
+            // No fee_limit set, would fail
+            (
+                tos_needed,
+                false,
+                Some(format!(
+                    "Insufficient energy: need {} but only {} available. Set fee_limit >= {} to auto-burn TOS",
+                    energy_required, total_energy_available, tos_needed
+                )),
+            )
+        } else {
+            // fee_limit is too low
+            (
+                tos_needed,
+                false,
+                Some(format!(
+                    "fee_limit {} is too low, need {} TOS to cover energy shortfall",
+                    params.fee_limit, tos_needed
+                )),
+            )
+        }
+    };
+
+    Ok(json!(EstimateEnergyResult {
+        energy_required,
+        free_energy_available,
+        frozen_energy_available,
+        total_energy_available,
+        estimated_fee,
+        will_succeed,
+        error,
     }))
 }
 
