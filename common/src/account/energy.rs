@@ -192,7 +192,9 @@ impl AccountEnergy {
         // Move from frozen to unfreezing queue
         self.frozen_balance = self.frozen_balance.saturating_sub(amount);
 
-        let expire_time = now_ms + (UNFREEZE_DELAY_DAYS as u64 * 24 * 60 * 60 * 1000);
+        // BUG-008 FIX: Use saturating arithmetic to prevent overflow with extreme timestamps
+        let delay_ms = (UNFREEZE_DELAY_DAYS as u64).saturating_mul(24 * 60 * 60 * 1000);
+        let expire_time = now_ms.saturating_add(delay_ms);
         self.unfreezing_list.push(UnfreezingRecord {
             unfreeze_amount: amount,
             unfreeze_expire_time: expire_time,
@@ -338,7 +340,7 @@ impl Serializer for UnfreezingRecord {
 }
 
 /// Global energy state for the network
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GlobalEnergyState {
     /// Total energy limit (constant: 18.4 billion)
     pub total_energy_limit: u64,
@@ -346,6 +348,13 @@ pub struct GlobalEnergyState {
     pub total_energy_weight: u64,
     /// Last update topoheight
     pub last_update: TopoHeight,
+}
+
+// BUG-007 FIX: Implement Default manually to use TOTAL_ENERGY_LIMIT instead of 0
+impl Default for GlobalEnergyState {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl GlobalEnergyState {

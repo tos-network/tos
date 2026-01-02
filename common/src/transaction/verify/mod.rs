@@ -20,7 +20,10 @@ use tos_kernel::ModuleValidator;
 
 use super::{payload::EnergyPayload, ContractDeposit, Role, Transaction, TransactionType};
 use crate::{
-    config::{BURN_PER_CONTRACT, MAX_GAS_USAGE_PER_TX, TOS_ASSET, UNO_ASSET},
+    config::{
+        BURN_PER_CONTRACT, COIN_VALUE, MAX_GAS_USAGE_PER_TX, MIN_DELEGATION_AMOUNT, TOS_ASSET,
+        UNO_ASSET,
+    },
     contract::ContractProvider,
     crypto::{
         elgamal::{Ciphertext, DecompressionError, DecryptHandle, PedersenCommitment, PublicKey},
@@ -35,6 +38,7 @@ use crate::{
         TxVersion, EXTRA_DATA_LIMIT_SIZE, EXTRA_DATA_LIMIT_SUM_SIZE, MAX_DEPOSIT_PER_INVOKE_CALL,
         MAX_MULTISIG_PARTICIPANTS, MAX_TRANSFER_COUNT,
     },
+    utils::energy_fee::EnergyResourceManager,
 };
 use contract::InvokeContract;
 
@@ -458,13 +462,28 @@ impl Transaction {
                     // No additional validation needed
                 }
                 EnergyPayload::DelegateResource {
+                    receiver,
                     amount,
                     lock_period,
                     ..
                 } => {
-                    if *amount == 0 {
+                    // BUG-004: Check self-delegation
+                    if receiver == self.get_source() {
                         return Err(VerificationError::AnyError(anyhow!(
-                            "Delegate amount must be greater than zero"
+                            "Cannot delegate to self"
+                        )));
+                    }
+                    // BUG-005: Check minimum delegation amount (1 TOS)
+                    if *amount < MIN_DELEGATION_AMOUNT {
+                        return Err(VerificationError::AnyError(anyhow!(
+                            "Delegation amount must be at least 1 TOS ({} atomic units)",
+                            MIN_DELEGATION_AMOUNT
+                        )));
+                    }
+                    // BUG-006: Check whole-TOS amount (must be multiple of COIN_VALUE)
+                    if *amount % COIN_VALUE != 0 {
+                        return Err(VerificationError::AnyError(anyhow!(
+                            "Delegation amount must be a whole number of TOS"
                         )));
                     }
                     if *lock_period > crate::config::MAX_DELEGATE_LOCK_DAYS {
@@ -807,17 +826,8 @@ impl Transaction {
                 .ok_or(VerificationError::Overflow)?;
         }
 
-        // Credit unfrozen TOS immediately in verification state (mempool/ChainState)
-        if let TransactionType::Energy(EnergyPayload::UnfreezeTos { amount }) = &self.data {
-            let balance = state
-                .get_receiver_balance(Cow::Borrowed(self.get_source()), Cow::Borrowed(&TOS_ASSET))
-                .await
-                .map_err(VerificationError::State)?;
-
-            *balance = balance
-                .checked_add(*amount)
-                .ok_or(VerificationError::Overflow)?;
-        }
+        // NOTE: UnfreezeTos does NOT credit balance here. Balance is credited in apply phase
+        // only via WithdrawExpireUnfreeze after the 14-day waiting period.
 
         // Deduct sender UNO balance for UnshieldTransfers
         // Similar to pre_verify_uno but without CommitmentEqProof (amount is plaintext)
@@ -2150,16 +2160,8 @@ impl Transaction {
                 .ok_or(VerificationError::Overflow)?;
         }
 
-        if let TransactionType::Energy(EnergyPayload::UnfreezeTos { amount }) = &self.data {
-            let balance = state
-                .get_receiver_balance(Cow::Borrowed(self.get_source()), Cow::Borrowed(&TOS_ASSET))
-                .await
-                .map_err(VerificationError::State)?;
-
-            *balance = balance
-                .checked_add(*amount)
-                .ok_or(VerificationError::Overflow)?;
-        }
+        // NOTE: UnfreezeTos does NOT credit balance here. Balance is credited in apply phase
+        // only via WithdrawExpireUnfreeze after the 14-day waiting period.
 
         Ok(())
     }
@@ -2495,17 +2497,13 @@ impl Transaction {
         };
 
         // Energy model: fee_limit is the max TOS burned when energy is insufficient
-        // Add fee_limit to TOS spending for balance verification
+        // Add fee_limit to TOS spending for balance verification (reservation)
+        // Note: fee_limit is reserved upfront; actual energy consumption and refund happen at end of apply
+        let fee_limit = self.get_fee_limit();
         let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
         *current = current
-            .checked_add(self.get_fee_limit())
+            .checked_add(fee_limit)
             .ok_or(VerificationError::Overflow)?;
-
-        // Add fee_limit to gas fee counter for block reward calculation
-        state
-            .add_gas_fee(self.get_fee_limit())
-            .await
-            .map_err(VerificationError::State)?;
 
         // Track sender outputs for final balance calculation
         // Note: Sender balance was already mutated during verification (pre_verify/verify_dynamic_parts)
@@ -2704,13 +2702,44 @@ impl Transaction {
             }
             TransactionType::Energy(payload) => {
                 // Handle Stake 2.0 energy operations
-                // TODO: Implement full Stake 2.0 energy operations in daemon apply phase
-                // For now, just log the operations - actual state changes will be in daemon
                 match payload {
                     EnergyPayload::FreezeTos { amount } => {
                         if log::log_enabled!(log::Level::Debug) {
                             debug!("FreezeTos: {} TOS to be frozen (Stake 2.0)", amount);
                         }
+
+                        let sender = self.get_source();
+
+                        // Get sender's account energy
+                        let mut sender_energy = state
+                            .get_account_energy(sender)
+                            .await
+                            .map_err(VerificationError::State)?
+                            .unwrap_or_default();
+
+                        // Add to frozen balance
+                        sender_energy.frozen_balance = sender_energy
+                            .frozen_balance
+                            .checked_add(*amount)
+                            .ok_or(VerificationError::Overflow)?;
+
+                        // Save updated energy
+                        state
+                            .set_account_energy(sender, sender_energy)
+                            .await
+                            .map_err(VerificationError::State)?;
+
+                        // Update global energy state
+                        let mut global_energy = state
+                            .get_global_energy_state()
+                            .await
+                            .map_err(VerificationError::State)?;
+                        global_energy.total_energy_weight =
+                            global_energy.total_energy_weight.saturating_add(*amount);
+                        state
+                            .set_global_energy_state(global_energy)
+                            .await
+                            .map_err(VerificationError::State)?;
                     }
                     EnergyPayload::UnfreezeTos { amount } => {
                         if log::log_enabled!(log::Level::Debug) {
@@ -2719,15 +2748,134 @@ impl Transaction {
                                 amount
                             );
                         }
+
+                        let sender = self.get_source();
+                        let now_ms = state.get_block().get_timestamp();
+
+                        // Get sender's account energy
+                        let mut sender_energy = state
+                            .get_account_energy(sender)
+                            .await
+                            .map_err(VerificationError::State)?
+                            .unwrap_or_default();
+
+                        // Check frozen balance
+                        if sender_energy.frozen_balance < *amount {
+                            return Err(VerificationError::InsufficientFrozenBalance);
+                        }
+
+                        // Start unfreeze (adds to queue with 14-day delay)
+                        sender_energy
+                            .start_unfreeze(*amount, now_ms)
+                            .map_err(|e| VerificationError::AnyError(anyhow!(e)))?;
+
+                        // Save updated energy
+                        state
+                            .set_account_energy(sender, sender_energy)
+                            .await
+                            .map_err(VerificationError::State)?;
+
+                        // Update global energy state (reduce weight)
+                        let mut global_energy = state
+                            .get_global_energy_state()
+                            .await
+                            .map_err(VerificationError::State)?;
+                        global_energy.total_energy_weight =
+                            global_energy.total_energy_weight.saturating_sub(*amount);
+                        state
+                            .set_global_energy_state(global_energy)
+                            .await
+                            .map_err(VerificationError::State)?;
                     }
                     EnergyPayload::WithdrawExpireUnfreeze => {
                         if log::log_enabled!(log::Level::Debug) {
                             debug!("WithdrawExpireUnfreeze: Withdrawing expired unfreeze entries");
                         }
+
+                        let sender = self.get_source();
+                        let now_ms = state.get_block().get_timestamp();
+
+                        // Get sender's account energy
+                        let mut sender_energy = state
+                            .get_account_energy(sender)
+                            .await
+                            .map_err(VerificationError::State)?
+                            .unwrap_or_default();
+
+                        // Withdraw expired entries (returns TOS to balance)
+                        let withdrawn = sender_energy.withdraw_expired_unfreeze(now_ms);
+
+                        if withdrawn == 0 {
+                            return Err(VerificationError::AnyError(anyhow!(
+                                "No expired unfreeze entries to withdraw"
+                            )));
+                        }
+
+                        // Save updated energy
+                        state
+                            .set_account_energy(sender, sender_energy)
+                            .await
+                            .map_err(VerificationError::State)?;
+
+                        // Credit withdrawn TOS to sender's balance
+                        let balance = state
+                            .get_receiver_balance(Cow::Borrowed(sender), Cow::Borrowed(&TOS_ASSET))
+                            .await
+                            .map_err(VerificationError::State)?;
+                        *balance = balance
+                            .checked_add(withdrawn)
+                            .ok_or(VerificationError::Overflow)?;
                     }
                     EnergyPayload::CancelAllUnfreeze => {
                         if log::log_enabled!(log::Level::Debug) {
                             debug!("CancelAllUnfreeze: Cancelling pending unfreeze, returning to frozen");
+                        }
+
+                        let sender = self.get_source();
+                        let now_ms = state.get_block().get_timestamp();
+
+                        // Get sender's account energy
+                        let mut sender_energy = state
+                            .get_account_energy(sender)
+                            .await
+                            .map_err(VerificationError::State)?
+                            .unwrap_or_default();
+
+                        // Cancel all unfreeze (expired -> balance, not expired -> frozen)
+                        let (withdrawn, cancelled) = sender_energy.cancel_all_unfreeze(now_ms);
+
+                        // Save updated energy
+                        state
+                            .set_account_energy(sender, sender_energy)
+                            .await
+                            .map_err(VerificationError::State)?;
+
+                        // Update global energy state (add back cancelled amount)
+                        if cancelled > 0 {
+                            let mut global_energy = state
+                                .get_global_energy_state()
+                                .await
+                                .map_err(VerificationError::State)?;
+                            global_energy.total_energy_weight =
+                                global_energy.total_energy_weight.saturating_add(cancelled);
+                            state
+                                .set_global_energy_state(global_energy)
+                                .await
+                                .map_err(VerificationError::State)?;
+                        }
+
+                        // Credit withdrawn TOS to sender's balance
+                        if withdrawn > 0 {
+                            let balance = state
+                                .get_receiver_balance(
+                                    Cow::Borrowed(sender),
+                                    Cow::Borrowed(&TOS_ASSET),
+                                )
+                                .await
+                                .map_err(VerificationError::State)?;
+                            *balance = balance
+                                .checked_add(withdrawn)
+                                .ok_or(VerificationError::Overflow)?;
                         }
                     }
                     EnergyPayload::DelegateResource {
@@ -3857,6 +4005,69 @@ impl Transaction {
                         );
                     }
                 }
+            }
+        }
+
+        // ===== Energy Consumption (Stake 2.0) =====
+        // Calculate actual energy cost and consume from account energy resources
+        // Priority: 1. Free quota → 2. Frozen energy → 3. TOS burn (from fee_limit)
+        let fee_limit = self.get_fee_limit();
+        let required_energy = self.calculate_energy_cost();
+        let now_ms = state.get_block().get_timestamp();
+
+        // Get sender's account energy
+        let mut sender_energy = state
+            .get_account_energy(self.get_source())
+            .await
+            .map_err(VerificationError::State)?
+            .unwrap_or_default();
+
+        // Get global energy state for proportional calculation
+        let global_energy = state
+            .get_global_energy_state()
+            .await
+            .map_err(VerificationError::State)?;
+
+        // Consume energy with priority (free → frozen → TOS burn)
+        let tx_result = EnergyResourceManager::consume_transaction_energy_detailed(
+            &mut sender_energy,
+            required_energy,
+            global_energy.total_energy_weight,
+            now_ms,
+        );
+
+        // Save updated energy state
+        state
+            .set_account_energy(self.get_source(), sender_energy)
+            .await
+            .map_err(VerificationError::State)?;
+
+        // Calculate actual TOS burned (capped by fee_limit)
+        let actual_tos_burned = tx_result.fee.min(fee_limit);
+
+        // Add only the actual burned TOS to gas fee (for block rewards)
+        state
+            .add_gas_fee(actual_tos_burned)
+            .await
+            .map_err(VerificationError::State)?;
+
+        // Refund unused fee_limit back to sender's balance
+        let refund = fee_limit.saturating_sub(actual_tos_burned);
+        if refund > 0 {
+            let sender_balance = state
+                .get_receiver_balance(Cow::Borrowed(self.get_source()), Cow::Borrowed(&TOS_ASSET))
+                .await
+                .map_err(VerificationError::State)?;
+            *sender_balance = sender_balance
+                .checked_add(refund)
+                .ok_or(VerificationError::Overflow)?;
+
+            if log::log_enabled!(log::Level::Debug) {
+                debug!(
+                    "Energy fee refund: {} TOS (fee_limit: {}, burned: {}, energy: {} free/{} frozen)",
+                    refund, fee_limit, actual_tos_burned,
+                    tx_result.free_energy_used, tx_result.frozen_energy_used
+                );
             }
         }
 

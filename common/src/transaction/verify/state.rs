@@ -218,6 +218,15 @@ pub trait BlockchainApplyState<'a, P: ContractProvider, E>:
         account_energy: crate::account::AccountEnergy,
     ) -> Result<(), E>;
 
+    /// Get the global energy state (Stake 2.0)
+    async fn get_global_energy_state(&mut self) -> Result<crate::account::GlobalEnergyState, E>;
+
+    /// Set the global energy state (Stake 2.0)
+    async fn set_global_energy_state(
+        &mut self,
+        state: crate::account::GlobalEnergyState,
+    ) -> Result<(), E>;
+
     // ===== Stake 2.0 Delegation Operations =====
 
     /// Get a specific delegation from one account to another

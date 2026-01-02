@@ -485,6 +485,19 @@ impl<'a> BlockchainApplyState<'a, DummyContractProvider, TestError> for KycTestC
         Ok(())
     }
 
+    async fn get_global_energy_state(
+        &mut self,
+    ) -> Result<tos_common::account::GlobalEnergyState, TestError> {
+        Ok(tos_common::account::GlobalEnergyState::default())
+    }
+
+    async fn set_global_energy_state(
+        &mut self,
+        _state: tos_common::account::GlobalEnergyState,
+    ) -> Result<(), TestError> {
+        Ok(())
+    }
+
     async fn get_delegated_resource(
         &mut self,
         _from: &'a CompressedPublicKey,

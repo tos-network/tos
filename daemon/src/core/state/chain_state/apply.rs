@@ -402,6 +402,19 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for Applicable
             .await
     }
 
+    async fn get_global_energy_state(
+        &mut self,
+    ) -> Result<tos_common::account::GlobalEnergyState, BlockchainError> {
+        self.inner.storage.get_global_energy_state().await
+    }
+
+    async fn set_global_energy_state(
+        &mut self,
+        state: tos_common::account::GlobalEnergyState,
+    ) -> Result<(), BlockchainError> {
+        self.inner.storage.set_global_energy_state(&state).await
+    }
+
     async fn get_delegated_resource(
         &mut self,
         from: &'a CompressedPublicKey,

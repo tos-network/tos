@@ -1203,13 +1203,14 @@ async fn test_transfer_extra_data_limits() {
     }
 }
 
-// Test UnfreezeTos balance refund in verify phase
-// This test verifies that unfrozen TOS is returned to balance during verification
+// Test UnfreezeTos does NOT credit balance immediately (Stake 2.0 behavior)
+// BUG-002 FIX: UnfreezeTos adds to unfreezing queue, NOT immediate balance credit
+// Balance is only credited via WithdrawExpireUnfreeze after 14-day waiting period
 #[tokio::test]
 async fn test_unfreeze_tos_balance_refund() {
     let mut alice = Account::new();
     let initial_balance = 1000 * COIN_VALUE;
-    let unfreeze_amount = 100 * COIN_VALUE;
+    let _unfreeze_amount = 100 * COIN_VALUE;
 
     // Set initial balance (simulating post-freeze state)
     alice.set_balance(TOS_ASSET, initial_balance);
@@ -1227,7 +1228,7 @@ async fn test_unfreeze_tos_balance_refund() {
 
         let data = TransactionTypeBuilder::Energy(EnergyBuilder {
             operation: EnergyOperationType::UnfreezeTos,
-            amount: Some(unfreeze_amount),
+            amount: Some(_unfreeze_amount),
             receiver: None,
             lock: false,
             lock_period: 0,
@@ -1282,8 +1283,9 @@ async fn test_unfreeze_tos_balance_refund() {
         "UnfreezeTos transaction should succeed"
     );
 
-    // After UnfreezeTos verify: balance should be increased by unfreeze_amount but decreased by fee
-    // Expected: initial + unfreeze_amount - tx_fee (use actual tx fee, not hardcoded)
+    // After UnfreezeTos verify: balance should NOT include unfreeze_amount (Stake 2.0)
+    // Unfreeze amount goes to unfreezing queue, not immediate balance credit
+    // Note: verify() reserves fee_limit; refund happens in apply() phase
     let alice_balance_after_unfreeze = state
         .accounts
         .get(&alice.keypair.get_public_key().compress())
@@ -1293,31 +1295,30 @@ async fn test_unfreeze_tos_balance_refund() {
         .unwrap();
     println!("Balance after verify: {alice_balance_after_unfreeze}");
 
-    let expected_balance = initial_balance + unfreeze_amount - tx_fee;
+    // In verify-only mode, fee_limit is reserved but not refunded (refund happens in apply)
+    // Expected: initial_balance - tx_fee (fee reserved, no immediate unfreeze credit)
+    let expected_balance = initial_balance - tx_fee;
     println!(
-        "Expected balance: {expected_balance} (initial {initial_balance} + unfreeze {unfreeze_amount} - fee {tx_fee})"
+        "Expected balance: {expected_balance} (initial {initial_balance} - fee {tx_fee}, refund in apply phase)"
     );
     assert_eq!(
         *alice_balance_after_unfreeze, expected_balance,
-        "Balance should be initial + unfreeze_amount - fee (refund happens in verify phase)"
+        "Balance should be initial - fee_limit (refund happens in apply, not verify)"
     );
 
-    // CRITICAL CHECK: Verify balance was refunded (not just fee deducted)
-    // If refund didn't happen, balance would be: initial - tx_fee
-    let no_refund_balance = initial_balance - tx_fee;
+    // CRITICAL: Verify unfreeze amount is NOT credited to balance (Stake 2.0 BUG-002 fix)
+    let old_wrong_balance = initial_balance + _unfreeze_amount - tx_fee;
     assert_ne!(
-        *alice_balance_after_unfreeze, no_refund_balance,
-        "Balance should show refund (if equal to this, refund logic is missing)"
+        *alice_balance_after_unfreeze, old_wrong_balance,
+        "BUG-002: UnfreezeTos should NOT credit balance immediately"
     );
 
-    println!("UnfreezeTos test passed: Balance refund works correctly");
-    println!("   Initial balance:     {initial_balance}");
-    println!("   Unfreeze amount:     {unfreeze_amount}");
-    println!("   Transaction fee:     {tx_fee}");
-    println!("   Final balance:       {expected_balance}");
-    println!(
-        "   Formula verified:    {initial_balance} + {unfreeze_amount} - {tx_fee} = {expected_balance}"
-    );
+    println!("UnfreezeTos test passed: Stake 2.0 queue behavior verified");
+    println!("   Initial balance:      {initial_balance}");
+    println!("   Transaction fee:      {tx_fee} (reserved in verify, refunded in apply)");
+    println!("   Final balance:        {expected_balance}");
+    println!("   Note: Unfreeze amount goes to unfreezing queue, not immediate balance");
+    println!("   Use WithdrawExpireUnfreeze after 14 days to claim balance");
 }
 
 #[async_trait]
