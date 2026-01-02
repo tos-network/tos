@@ -588,7 +588,7 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Mempoo
         &self,
         account: &CompressedPublicKey,
     ) -> Result<bool, BlockchainError> {
-        use tos_common::config::TOS_ASSET;
+        use tos_common::config::{TOS_ASSET, UNO_ASSET};
 
         // Note: tos_common::crypto::PublicKey = CompressedPublicKey
         // So we can use account directly
@@ -599,25 +599,43 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Mempoo
             return Ok(true);
         }
 
-        // Check if account has any TOS balance in receiver_balances cache
+        // Check if account has any balance in receiver_balances cache (any asset)
         if let Some(balances) = self.receiver_balances.get(&Cow::Borrowed(account)) {
-            if let Some(balance) = balances.get(&Cow::Borrowed(&TOS_ASSET)) {
-                if *balance > 0 {
+            if balances.values().any(|balance| *balance > 0) {
+                return Ok(true);
+            }
+        }
+
+        // Check if account has any UNO balance in receiver cache (any asset)
+        if self
+            .receiver_uno_balances
+            .contains_key(&Cow::Borrowed(account))
+        {
+            return Ok(true);
+        }
+
+        // Check storage for any asset balance at current topoheight
+        let assets = self.storage.get_assets_for(account).await?;
+        for asset in assets {
+            let asset = asset?;
+            let balance_result = self
+                .storage
+                .get_balance_at_maximum_topoheight(account, &asset, self.topoheight)
+                .await?;
+            if let Some((_, versioned_balance)) = balance_result {
+                if versioned_balance.get_balance() > 0 {
                     return Ok(true);
                 }
             }
         }
 
-        // Check storage for balance at current topoheight
-        let balance_result = self
+        // Check storage for UNO balance (privacy)
+        if self
             .storage
-            .get_balance_at_maximum_topoheight(account, &TOS_ASSET, self.topoheight)
-            .await?;
-
-        if let Some((_, versioned_balance)) = balance_result {
-            if versioned_balance.get_balance() > 0 {
-                return Ok(true);
-            }
+            .has_uno_balance_for(account, &UNO_ASSET)
+            .await?
+        {
+            return Ok(true);
         }
 
         // Account not registered

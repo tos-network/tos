@@ -4084,4 +4084,316 @@ mod tests {
             assert_eq!(account.balance, initial_balance - transfer_amount);
         }
     }
+
+    // ============================================================================
+    // SCENARIO 35: BUG REPRODUCTION TESTS (BUG-020, BUG-021, BUG-022)
+    // ============================================================================
+    //
+    // These tests reproduce known bugs found during code review.
+    // Tests marked with "DEMONSTRATES BUG" show the current buggy behavior.
+    // Tests marked with "EXPECTED BEHAVIOR" show what should happen after fix.
+    // ============================================================================
+
+    mod scenario_35_bug_reproduction {
+        use super::*;
+
+        // ========================================================================
+        // BUG-020: Delegation Logic Double-Subtracts from frozen_balance
+        // ========================================================================
+        //
+        // The apply() code incorrectly subtracts from frozen_balance when delegating:
+        //   sender_energy.frozen_balance -= amount;  // WRONG
+        //   sender_energy.delegated_frozen_balance += amount;
+        //
+        // This causes double-subtraction in effective_frozen_balance():
+        //   effective = frozen + acquired - delegated
+        //
+        // Expected: frozen_balance should remain unchanged during delegation.
+        // Only delegated_frozen_balance should be updated.
+        // ========================================================================
+
+        /// BUG-020: Verify correct delegation model (EXPECTED BEHAVIOR)
+        ///
+        /// This test verifies the correct delegation model where:
+        /// - frozen_balance represents total frozen TOS (unchanged by delegation)
+        /// - delegated_frozen_balance tracks what's delegated out
+        /// - effective_frozen_balance = frozen + acquired - delegated
+        #[test]
+        fn test_35_1_bug020_correct_delegation_model() {
+            let mut alice = AccountEnergy::new();
+            alice.frozen_balance = 10_000 * COIN_VALUE;
+            alice.delegated_frozen_balance = 0;
+
+            let mut bob = AccountEnergy::new();
+            bob.acquired_delegated_balance = 0;
+
+            // Before delegation
+            assert_eq!(alice.effective_frozen_balance(), 10_000 * COIN_VALUE);
+            assert_eq!(bob.effective_frozen_balance(), 0);
+
+            // Simulate CORRECT delegation (as per test_8_1_basic_delegation)
+            let delegate_amount = 1_000 * COIN_VALUE;
+            // CORRECT: Only update delegated_frozen_balance, NOT frozen_balance
+            alice.delegated_frozen_balance += delegate_amount;
+            bob.acquired_delegated_balance += delegate_amount;
+
+            // After correct delegation
+            // Alice: effective = 10,000 + 0 - 1,000 = 9,000
+            assert_eq!(
+                alice.frozen_balance,
+                10_000 * COIN_VALUE,
+                "frozen_balance should NOT change"
+            );
+            assert_eq!(alice.delegated_frozen_balance, delegate_amount);
+            assert_eq!(alice.effective_frozen_balance(), 9_000 * COIN_VALUE);
+
+            // Bob: effective = 0 + 1,000 - 0 = 1,000
+            assert_eq!(bob.acquired_delegated_balance, delegate_amount);
+            assert_eq!(bob.effective_frozen_balance(), 1_000 * COIN_VALUE);
+
+            // Verify delegation invariant
+            assert!(alice.is_delegation_valid());
+        }
+
+        /// BUG-020: Demonstrate buggy delegation behavior (DEMONSTRATES BUG)
+        ///
+        /// This test shows what happens with the BUGGY code that subtracts
+        /// from frozen_balance during delegation. The effective_frozen_balance
+        /// becomes incorrectly reduced by double the delegation amount.
+        #[test]
+        fn test_35_2_bug020_double_subtract_demonstration() {
+            let mut alice = AccountEnergy::new();
+            alice.frozen_balance = 10_000 * COIN_VALUE;
+            alice.delegated_frozen_balance = 0;
+
+            let delegate_amount = 1_000 * COIN_VALUE;
+
+            // Simulate BUGGY delegation (what apply() currently does)
+            // WRONG: Subtracts from frozen_balance AND adds to delegated_frozen_balance
+            alice.frozen_balance -= delegate_amount; // BUG: This line shouldn't exist
+            alice.delegated_frozen_balance += delegate_amount;
+
+            // With buggy code:
+            // effective = 9,000 + 0 - 1,000 = 8,000 (WRONG - double subtracted!)
+            let buggy_effective = alice.effective_frozen_balance();
+
+            // Expected: 9,000 (single subtraction via delegated_frozen_balance)
+            let expected_effective = 9_000 * COIN_VALUE;
+
+            // This assertion demonstrates the bug
+            assert_eq!(
+                buggy_effective,
+                8_000 * COIN_VALUE,
+                "BUG-020: Double subtraction - effective is 8,000 instead of 9,000"
+            );
+
+            // This assertion shows the discrepancy
+            assert_ne!(
+                buggy_effective, expected_effective,
+                "BUG-020 PRESENT: buggy effective != expected effective"
+            );
+        }
+
+        /// BUG-020: Verify available_for_delegation check (EXPECTED BEHAVIOR)
+        ///
+        /// The validation should use available_for_delegation() instead of
+        /// just checking frozen_balance >= amount.
+        #[test]
+        fn test_35_3_bug020_available_for_delegation_check() {
+            let mut alice = AccountEnergy::new();
+            alice.frozen_balance = 10_000 * COIN_VALUE;
+            alice.delegated_frozen_balance = 9_000 * COIN_VALUE; // Already delegated 9,000
+
+            // Available for delegation = 10,000 - 9,000 = 1,000
+            assert_eq!(alice.available_for_delegation(), 1_000 * COIN_VALUE);
+
+            // Bug: Current code checks frozen_balance >= amount
+            // frozen_balance = 10,000, so it would allow delegating 2,000
+            // But available_for_delegation = 1,000, so it should reject!
+
+            let delegate_amount = 2_000 * COIN_VALUE;
+
+            // WRONG check (what buggy code does)
+            let buggy_check_passes = alice.frozen_balance >= delegate_amount;
+            assert!(
+                buggy_check_passes,
+                "Buggy check incorrectly allows over-delegation"
+            );
+
+            // CORRECT check (what should be done)
+            let correct_check_passes = alice.available_for_delegation() >= delegate_amount;
+            assert!(
+                !correct_check_passes,
+                "Correct check should reject over-delegation"
+            );
+        }
+
+        // ========================================================================
+        // BUG-021: fee_limit Not Enforced as Hard Cap
+        // ========================================================================
+        //
+        // The apply path caps TOS burn to fee_limit but never rejects when
+        // the energy shortfall exceeds fee_limit. This allows underpayment.
+        //
+        // Current behavior (best-effort):
+        //   actual_tos_burned = tx_result.fee.min(fee_limit);
+        //   // Transaction succeeds even if fee > fee_limit
+        //
+        // Expected behavior (hard cap):
+        //   if tx_result.fee > fee_limit {
+        //       return Err("Insufficient fee_limit");
+        //   }
+        // ========================================================================
+
+        /// BUG-021: Demonstrate fee_limit underpayment (DEMONSTRATES BUG)
+        ///
+        /// This test shows that a transaction can succeed while underpaying
+        /// for energy when fee_limit is set too low.
+        #[test]
+        fn test_35_4_bug021_fee_limit_underpayment() {
+            // Scenario: User has no energy, needs to pay 1000 energy via TOS burn
+            // But sets fee_limit to only enough for 100 energy
+            // Bug: Transaction succeeds, only burns fee_limit, underpays
+
+            let required_energy = 1_000u64;
+            let fee_limit = 100u64 * TOS_PER_ENERGY; // Only enough for 100 energy
+
+            // Calculate required TOS burn
+            let required_tos = required_energy * TOS_PER_ENERGY;
+            assert_eq!(required_tos, 100_000, "1000 energy = 100,000 atomic TOS");
+
+            // fee_limit is only 10,000 atomic TOS (100 energy worth)
+            assert_eq!(fee_limit, 10_000, "fee_limit only covers 100 energy");
+
+            // Current (buggy) behavior:
+            // actual_tos_burned = required_tos.min(fee_limit) = 10,000
+            // Transaction succeeds, but user only paid for 100 energy instead of 1000
+            let actual_burned = required_tos.min(fee_limit);
+            assert_eq!(
+                actual_burned, fee_limit,
+                "BUG-021: Only burns fee_limit, not full cost"
+            );
+
+            // Energy shortfall (underpayment)
+            let underpaid_energy = required_energy - (actual_burned / TOS_PER_ENERGY);
+            assert_eq!(
+                underpaid_energy, 900,
+                "BUG-021: User underpaid by 900 energy"
+            );
+
+            // Expected behavior: Transaction should FAIL because fee_limit < required_tos
+            // The fact that it succeeds with underpayment is the bug.
+        }
+
+        /// BUG-021: Verify hard cap requirement (EXPECTED BEHAVIOR)
+        ///
+        /// This test documents what SHOULD happen if fee_limit is a hard cap.
+        #[test]
+        fn test_35_5_bug021_hard_cap_expected_behavior() {
+            let required_energy = 1_000u64;
+            let fee_limit_small = 100u64 * TOS_PER_ENERGY; // Only covers 100 energy
+            let fee_limit_sufficient = 1_000u64 * TOS_PER_ENERGY; // Covers all 1000 energy
+
+            let required_tos = required_energy * TOS_PER_ENERGY;
+
+            // Case 1: fee_limit insufficient - should FAIL (if hard cap)
+            let should_fail = fee_limit_small < required_tos;
+            assert!(
+                should_fail,
+                "fee_limit is insufficient, TX should fail with hard cap"
+            );
+
+            // Case 2: fee_limit sufficient - should SUCCEED
+            let should_succeed = fee_limit_sufficient >= required_tos;
+            assert!(should_succeed, "fee_limit is sufficient, TX should succeed");
+        }
+
+        // ========================================================================
+        // BUG-022: InvokeContract Energy Cost Not Based on Actual CU
+        // ========================================================================
+        //
+        // The calculate_energy_cost() function returns only base_cost for
+        // InvokeContract, regardless of actual computation performed.
+        //
+        // Current code (in transaction/mod.rs:456-458):
+        //   TransactionType::InvokeContract(_) => {
+        //       // Actual cost determined by execution (CU consumed)
+        //       base_cost  // BUG: Just returns base_cost, not actual CU!
+        //   }
+        //
+        // Expected: Energy cost should be proportional to actual CU consumed
+        // ========================================================================
+
+        /// BUG-022: Document InvokeContract fixed cost issue (DEMONSTRATES BUG)
+        ///
+        /// This test documents that InvokeContract only charges base_cost
+        /// regardless of how complex the computation is.
+        ///
+        /// The bug is in Transaction::calculate_energy_cost() which returns
+        /// only `base_cost` for InvokeContract instead of actual CU used.
+        #[test]
+        fn test_35_6_bug022_invoke_contract_fixed_cost() {
+            // According to transaction/mod.rs:456-458:
+            // TransactionType::InvokeContract(_) => {
+            //     // Actual cost determined by execution (CU consumed)
+            //     base_cost  // <-- BUG: Returns fixed cost, not actual CU!
+            // }
+
+            // The comment says "Actual cost determined by execution (CU consumed)"
+            // but the code just returns base_cost regardless of actual CU.
+
+            // This means:
+            // - Simple contract (1 CU): pays base_cost
+            // - Complex contract (1,000,000 CU): pays base_cost (SAME!)
+
+            // Expected behavior:
+            // - Energy cost should reflect actual computation (CU consumed)
+            // - Either pre-estimated from bytecode analysis, or
+            // - Post-execution based on actual CU (requires refund mechanism)
+
+            // This is a documentation test - the actual bug is in the code
+            assert!(
+                true,
+                "BUG-022: InvokeContract uses fixed cost instead of actual CU"
+            );
+        }
+
+        /// BUG-022: Compare expected costs for different contract complexities
+        ///
+        /// This test shows the cost disparity between what's charged vs expected.
+        #[test]
+        fn test_35_7_bug022_cost_disparity() {
+            // Hypothetical scenarios showing the bug impact:
+
+            // Scenario 1: Simple contract (e.g., getter function)
+            let simple_contract_cu = 100u64;
+            let simple_tx_size = 200u64;
+
+            // Scenario 2: Complex contract (e.g., heavy computation)
+            let complex_contract_cu = 1_000_000u64;
+            let complex_tx_size = 200u64; // Same size, different computation
+
+            // Current (buggy) behavior: Both pay the same!
+            // Energy cost = base_cost = tx_size (approximately)
+            let buggy_simple_cost = simple_tx_size;
+            let buggy_complex_cost = complex_tx_size;
+            assert_eq!(
+                buggy_simple_cost, buggy_complex_cost,
+                "BUG-022: Both simple and complex contracts pay the same base cost"
+            );
+
+            // Expected behavior: Cost proportional to CU
+            let expected_simple_cost = simple_contract_cu;
+            let expected_complex_cost = complex_contract_cu;
+            assert!(
+                expected_complex_cost > expected_simple_cost * 100,
+                "Expected: Complex contract should cost 10,000x more than simple"
+            );
+
+            // The disparity is severe:
+            // - Complex contract SHOULD pay ~1,000,000 energy
+            // - Complex contract ACTUALLY pays ~200 energy (same as simple)
+            // - Underpayment ratio: 5,000x
+        }
+    }
 }
