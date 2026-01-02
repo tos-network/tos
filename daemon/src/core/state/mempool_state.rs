@@ -578,4 +578,49 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Mempoo
             .get_network()
             .unwrap_or(tos_common::network::Network::Mainnet)
     }
+
+    /// Check if an account is registered (exists) on the blockchain
+    ///
+    /// An account is considered registered if it has ever had a nonce
+    /// (i.e., has sent transactions before) or has any balance.
+    /// This is used for TOS-Only account creation fee calculation.
+    async fn is_account_registered(
+        &self,
+        account: &CompressedPublicKey,
+    ) -> Result<bool, BlockchainError> {
+        use tos_common::config::TOS_ASSET;
+
+        // Note: tos_common::crypto::PublicKey = CompressedPublicKey
+        // So we can use account directly
+
+        // Check if account has nonce (has sent transactions)
+        let has_nonce = self.storage.has_nonce(account).await?;
+        if has_nonce {
+            return Ok(true);
+        }
+
+        // Check if account has any TOS balance in receiver_balances cache
+        if let Some(balances) = self.receiver_balances.get(&Cow::Borrowed(account)) {
+            if let Some(balance) = balances.get(&Cow::Borrowed(&TOS_ASSET)) {
+                if *balance > 0 {
+                    return Ok(true);
+                }
+            }
+        }
+
+        // Check storage for balance at current topoheight
+        let balance_result = self
+            .storage
+            .get_balance_at_maximum_topoheight(account, &TOS_ASSET, self.topoheight)
+            .await?;
+
+        if let Some((_, versioned_balance)) = balance_result {
+            if versioned_balance.get_balance() > 0 {
+                return Ok(true);
+            }
+        }
+
+        // Account not registered
+        Ok(false)
+    }
 }

@@ -75,4 +75,9 @@ pub enum VerificationError<T> {
     DelegationStillLocked,
     #[error("Insufficient delegated balance")]
     InsufficientDelegatedBalance,
+    // TOS-Only Fee errors
+    #[error("Transfer amount too small for account creation: amount {amount}, fee required {fee}")]
+    AmountTooSmallForAccountCreation { amount: u64, fee: u64 },
+    #[error("Insufficient balance for multisig fee: available {available}, required {required}")]
+    InsufficientBalanceForMultisigFee { available: u64, required: u64 },
 }

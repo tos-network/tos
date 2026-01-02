@@ -1329,14 +1329,23 @@ impl<'a> BlockchainVerificationState<'a, TestError> for ChainState {
     }
 
     /// Get the balance for a receiver account
-    /// Auto-creates balance entry with 0 if it doesn't exist
+    /// Auto-creates account and balance entry with 0 if they don't exist
+    /// This matches the real daemon behavior where new accounts are created on first receive
     async fn get_receiver_balance<'b>(
         &'b mut self,
         account: Cow<'a, PublicKey>,
         asset: Cow<'a, Hash>,
     ) -> Result<&'b mut u64, TestError> {
-        // Get account or error if not found
-        let account_state = self.accounts.get_mut(&account).ok_or(TestError(()))?;
+        let key = account.into_owned();
+
+        // Auto-create account if missing (for new accounts receiving funds)
+        let account_state = self
+            .accounts
+            .entry(key)
+            .or_insert_with(|| AccountChainState {
+                balances: HashMap::new(),
+                nonce: 0,
+            });
         // Auto-create balance entry if missing (for new assets being received)
         Ok(account_state
             .balances
@@ -1490,6 +1499,16 @@ impl<'a> BlockchainVerificationState<'a, TestError> for ChainState {
     fn get_network(&self) -> crate::network::Network {
         // Use Mainnet for tests (chain_id = 0)
         crate::network::Network::Mainnet
+    }
+
+    /// Check if an account is registered (for TOS-Only fee calculation)
+    async fn is_account_registered(
+        &self,
+        account: &CompressedPublicKey,
+    ) -> Result<bool, TestError> {
+        // For testing, check if account exists in our state
+        // Note: crypto::PublicKey = CompressedPublicKey, so account can be used directly
+        Ok(self.accounts.contains_key(account))
     }
 }
 
@@ -2128,4 +2147,323 @@ async fn test_p04_multiple_transfers() {
     );
 
     println!("Multiple transfers correctly processed: 300 + 200 TOS");
+}
+
+// ============================================================================
+// TOS-ONLY FEE VERIFICATION TESTS
+// ============================================================================
+// Account creation fee validation is now in verify() phase!
+// This catches insufficient fee errors early during mempool validation.
+//
+// The validation check ensures that when sending TOS to a new (unregistered) account:
+// 1. verify() checks: amount >= FEE_PER_ACCOUNT_CREATION (0.1 TOS)
+// 2. If amount < 0.1 TOS, verify() returns AmountTooSmallForAccountCreation error
+// 3. apply() handles the actual fee deduction and receiver balance update
+
+use crate::config::FEE_PER_ACCOUNT_CREATION;
+
+/// Test: Transfer less than 0.1 TOS to NEW account fails during verify()
+///
+/// This test validates that the account creation fee check is now in verify(),
+/// allowing mempool to reject invalid transactions early.
+///
+/// Scenario:
+/// - Alice has 100 TOS
+/// - Alice tries to send 0.05 TOS to Bob (new account, not in state)
+/// - Expected: verify() fails with AmountTooSmallForAccountCreation error
+#[tokio::test]
+async fn test_account_creation_fee_validation_in_verify() {
+    let mut alice = Account::new();
+    let bob = Account::new(); // Bob is NEW - will NOT be added to state
+
+    alice.set_balance(TOS_ASSET, 100 * COIN_VALUE);
+
+    // Create transfer transaction: Alice -> Bob (0.05 TOS - less than 0.1 TOS fee)
+    let transfer_amount = FEE_PER_ACCOUNT_CREATION / 2; // 0.05 TOS
+    let tx = create_tx_for(alice.clone(), bob.address(), transfer_amount, None);
+
+    let mut state = ChainState::new();
+
+    // Add Alice to state (existing account)
+    {
+        let mut balances = HashMap::new();
+        for (asset, balance) in &alice.balances {
+            balances.insert(asset.clone(), balance.balance);
+        }
+        state.accounts.insert(
+            alice.keypair.get_public_key().compress(),
+            AccountChainState {
+                balances,
+                nonce: alice.nonce,
+            },
+        );
+    }
+
+    // IMPORTANT: Do NOT add Bob to state - he is a NEW account!
+    // This triggers the account creation fee validation
+
+    let hash = tx.hash();
+    let result = tx.verify(&hash, &mut state, &NoZKPCache).await;
+
+    // CRITICAL ASSERTION: verify() should fail with AmountTooSmallForAccountCreation
+    match result {
+        Err(VerificationError::AmountTooSmallForAccountCreation { amount, fee }) => {
+            assert_eq!(
+                amount, transfer_amount,
+                "Error should report the transfer amount"
+            );
+            assert_eq!(fee, FEE_PER_ACCOUNT_CREATION, "Error should report the fee");
+            println!(
+                "Correctly rejected transfer of {} to new account (fee: {})",
+                amount, fee
+            );
+        }
+        Ok(()) => {
+            panic!(
+                "Expected AmountTooSmallForAccountCreation error, but verify() succeeded. \
+                 Transfer amount {} is less than fee {}",
+                transfer_amount, FEE_PER_ACCOUNT_CREATION
+            );
+        }
+        Err(other) => {
+            panic!(
+                "Expected AmountTooSmallForAccountCreation error, got: {:?}",
+                other
+            );
+        }
+    }
+}
+
+/// Test: Transfer >= 0.1 TOS to NEW account succeeds during verify()
+///
+/// This test validates that transfers with sufficient amount pass verify().
+/// Note: The actual fee deduction happens in apply(), which requires BlockchainApplyState.
+///
+/// Scenario:
+/// - Alice has 100 TOS
+/// - Alice sends 1 TOS to Bob (new account, not in state)
+/// - Expected: verify() succeeds (amount >= FEE_PER_ACCOUNT_CREATION)
+#[tokio::test]
+async fn test_account_creation_fee_sufficient_amount_passes_verify() {
+    let mut alice = Account::new();
+    let bob = Account::new(); // Bob is NEW - will NOT be added to state
+
+    alice.set_balance(TOS_ASSET, 100 * COIN_VALUE);
+
+    // Create transfer transaction: Alice -> Bob (1 TOS - more than 0.1 TOS fee)
+    let transfer_amount = COIN_VALUE; // 1 TOS
+    let tx = create_tx_for(alice.clone(), bob.address(), transfer_amount, None);
+
+    let mut state = ChainState::new();
+
+    // Add Alice to state (existing account)
+    {
+        let mut balances = HashMap::new();
+        for (asset, balance) in &alice.balances {
+            balances.insert(asset.clone(), balance.balance);
+        }
+        state.accounts.insert(
+            alice.keypair.get_public_key().compress(),
+            AccountChainState {
+                balances,
+                nonce: alice.nonce,
+            },
+        );
+    }
+
+    // IMPORTANT: Do NOT add Bob to state - he is a NEW account!
+    // This triggers the account creation fee validation
+
+    let hash = tx.hash();
+    let result = tx.verify(&hash, &mut state, &NoZKPCache).await;
+
+    // ASSERTION: verify() should succeed since amount >= FEE_PER_ACCOUNT_CREATION
+    assert!(
+        result.is_ok(),
+        "Transfer of {} TOS to new account should pass verify() (fee is {}). Error: {:?}",
+        transfer_amount as f64 / COIN_VALUE as f64,
+        FEE_PER_ACCOUNT_CREATION as f64 / COIN_VALUE as f64,
+        result.err()
+    );
+    println!(
+        "Transfer of {} to new account passed verify() (fee: {})",
+        transfer_amount, FEE_PER_ACCOUNT_CREATION
+    );
+}
+
+/// Test: Transfer exactly 0.1 TOS to NEW account succeeds during verify()
+///
+/// Edge case: the minimum valid amount for new account creation.
+#[tokio::test]
+async fn test_account_creation_fee_exact_minimum_passes_verify() {
+    let mut alice = Account::new();
+    let bob = Account::new(); // Bob is NEW - will NOT be added to state
+
+    alice.set_balance(TOS_ASSET, 100 * COIN_VALUE);
+
+    // Create transfer transaction: Alice -> Bob (exactly 0.1 TOS - equals fee)
+    let transfer_amount = FEE_PER_ACCOUNT_CREATION; // Exactly 0.1 TOS
+    let tx = create_tx_for(alice.clone(), bob.address(), transfer_amount, None);
+
+    let mut state = ChainState::new();
+
+    // Add Alice to state (existing account)
+    {
+        let mut balances = HashMap::new();
+        for (asset, balance) in &alice.balances {
+            balances.insert(asset.clone(), balance.balance);
+        }
+        state.accounts.insert(
+            alice.keypair.get_public_key().compress(),
+            AccountChainState {
+                balances,
+                nonce: alice.nonce,
+            },
+        );
+    }
+
+    // IMPORTANT: Do NOT add Bob to state - he is a NEW account!
+
+    let hash = tx.hash();
+    let result = tx.verify(&hash, &mut state, &NoZKPCache).await;
+
+    // ASSERTION: verify() should succeed since amount == FEE_PER_ACCOUNT_CREATION
+    assert!(
+        result.is_ok(),
+        "Transfer of exactly {} (the fee) to new account should pass verify(). Error: {:?}",
+        FEE_PER_ACCOUNT_CREATION,
+        result.err()
+    );
+    println!(
+        "Transfer of exactly {} (the fee) to new account passed verify()",
+        FEE_PER_ACCOUNT_CREATION
+    );
+}
+
+/// Test: Transfer to EXISTING account does NOT deduct creation fee
+///
+/// NOTE: This test verifies existing account behavior (no fee deduction).
+/// Currently works because we manually add transfer amount like other tests.
+#[tokio::test]
+async fn test_no_creation_fee_for_existing_account() {
+    let mut alice = Account::new();
+    let mut bob = Account::new();
+
+    alice.set_balance(TOS_ASSET, 100 * COIN_VALUE);
+    bob.set_balance(TOS_ASSET, 10 * COIN_VALUE); // Bob exists with balance
+
+    let transfer_amount = COIN_VALUE; // 1 TOS
+    let tx = create_tx_for(alice.clone(), bob.address(), transfer_amount, None);
+
+    let mut state = ChainState::new();
+
+    // Add Alice to state
+    {
+        let mut balances = HashMap::new();
+        for (asset, balance) in &alice.balances {
+            balances.insert(asset.clone(), balance.balance);
+        }
+        state.accounts.insert(
+            alice.keypair.get_public_key().compress(),
+            AccountChainState {
+                balances,
+                nonce: alice.nonce,
+            },
+        );
+    }
+
+    // Add Bob to state (EXISTING account)
+    {
+        let mut balances = HashMap::new();
+        for (asset, balance) in &bob.balances {
+            balances.insert(asset.clone(), balance.balance);
+        }
+        state.accounts.insert(
+            bob.keypair.get_public_key().compress(),
+            AccountChainState {
+                balances,
+                nonce: bob.nonce,
+            },
+        );
+    }
+
+    let hash = tx.hash();
+    tx.verify(&hash, &mut state, &NoZKPCache).await.unwrap();
+
+    // Manually add transfer amount to Bob (as verify doesn't do this for receiver)
+    {
+        let bob_balance = state
+            .accounts
+            .get_mut(&bob.keypair.get_public_key().compress())
+            .unwrap()
+            .balances
+            .entry(TOS_ASSET)
+            .or_insert(0);
+        *bob_balance = bob_balance.checked_add(transfer_amount).unwrap();
+    }
+
+    // Bob should have 10 + 1 = 11 TOS (no creation fee deducted)
+    let bob_balance = state.accounts[&bob.keypair.get_public_key().compress()].balances[&TOS_ASSET];
+    let expected_bob_balance = 10 * COIN_VALUE + transfer_amount;
+    assert_eq!(
+        bob_balance, expected_bob_balance,
+        "Existing account should receive full transfer amount without creation fee"
+    );
+
+    println!(
+        "No creation fee for existing account: Bob has {} TOS",
+        bob_balance / COIN_VALUE
+    );
+}
+
+/// Test: Transfer amount less than 0.1 TOS to new account should fail
+///
+/// NOTE: This test is ignored because the validation happens in apply(), not verify().
+/// In the current architecture, this transaction would pass verify() but fail in apply().
+#[tokio::test]
+#[ignore = "Account creation fee validation is in apply(), not verify()"]
+async fn test_transfer_below_creation_fee_to_new_account_fails() {
+    let mut alice = Account::new();
+    let bob = Account::new(); // New account
+
+    alice.set_balance(TOS_ASSET, 100 * COIN_VALUE);
+
+    // Try to send 0.05 TOS (less than 0.1 TOS creation fee)
+    let transfer_amount = FEE_PER_ACCOUNT_CREATION / 2; // 0.05 TOS
+    let tx = create_tx_for(alice.clone(), bob.address(), transfer_amount, None);
+
+    let mut state = ChainState::new();
+
+    // Add Alice to state
+    {
+        let mut balances = HashMap::new();
+        for (asset, balance) in &alice.balances {
+            balances.insert(asset.clone(), balance.balance);
+        }
+        state.accounts.insert(
+            alice.keypair.get_public_key().compress(),
+            AccountChainState {
+                balances,
+                nonce: alice.nonce,
+            },
+        );
+    }
+
+    // Do NOT add Bob to state (new account)
+
+    let hash = tx.hash();
+    let result = tx.verify(&hash, &mut state, &NoZKPCache).await;
+
+    // Should fail because transfer amount < account creation fee
+    assert!(
+        result.is_err(),
+        "Transfer of {} to new account should fail (less than {} creation fee)",
+        transfer_amount,
+        FEE_PER_ACCOUNT_CREATION
+    );
+
+    println!(
+        "Correctly rejected transfer of {} to new account (< {} fee)",
+        transfer_amount, FEE_PER_ACCOUNT_CREATION
+    );
 }

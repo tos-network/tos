@@ -130,6 +130,16 @@ pub trait BlockchainVerificationState<'a, E> {
     /// Get the network type (for chain_id validation)
     fn get_network(&self) -> crate::network::Network;
 
+    /// Check if an account is registered (exists) on the blockchain
+    /// This is used to determine if account creation fee (TOS-Only) should be charged
+    ///
+    /// # Arguments
+    /// * `account` - The account's compressed public key
+    ///
+    /// # Returns
+    /// true if the account exists (has nonce > 0 or has any balance), false otherwise
+    async fn is_account_registered(&self, account: &CompressedPublicKey) -> Result<bool, E>;
+
     /// Set the contract module
     async fn set_contract_module(&mut self, hash: &Hash, module: &'a Module) -> Result<(), E>;
 

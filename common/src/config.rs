@@ -71,15 +71,24 @@ pub const ENERGY_COST_CONTRACT_DEPLOY_PER_BYTE: u64 = 10; // Per byte of bytecod
 
 // TOS-based fee model constants
 pub const FEE_PER_KB: u64 = 10000;
-pub const FEE_PER_ACCOUNT_CREATION: u64 = 100000;
 pub const FEE_PER_TRANSFER: u64 = 5000;
-pub const FEE_PER_MULTISIG_SIGNATURE: u64 = 500;
 
-// UNO-based fee model constants (privacy transfers)
-pub const UNO_FEE_PER_KB: u64 = 10000;
-pub const UNO_FEE_PER_ACCOUNT_CREATION: u64 = 100000;
-pub const UNO_FEE_PER_TRANSFER: u64 = 5000;
-pub const UNO_FEE_PER_MULTISIG_SIGNATURE: u64 = 500;
+// ===== TOS-Only Fees (cannot use Energy) =====
+// These fees must be paid in TOS, not Energy. Aligned with TRON mainnet.
+
+/// Account creation fee - deducted from transfer amount when sending to new account
+/// 0.1 TOS = 10,000,000 atomic units
+/// This prevents Sybil attacks (mass account creation)
+pub const FEE_PER_ACCOUNT_CREATION: u64 = 10_000_000;
+
+/// MultiSig transaction fee - per signature, deducted from sender's TOS balance
+/// 1 TOS = 100,000,000 atomic units per signature
+/// Only charged when transaction has 2+ signatures
+/// Aligned with TRON's MULTI_SIGN_FEE (1 TRX/signature)
+pub const FEE_PER_MULTISIG_SIGNATURE: u64 = COIN_VALUE;
+
+// Note: UNO transfers use Energy model with 5x multiplier (see EnergyFeeCalculator)
+// Account creation fee for UNO is the same as TOS (FEE_PER_ACCOUNT_CREATION)
 
 // Contracts rules
 // 1 TOS per contract deployed

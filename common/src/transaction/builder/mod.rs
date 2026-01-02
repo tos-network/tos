@@ -39,7 +39,7 @@ use crate::{
         Hash, ProtocolTranscript, HASH_SIZE, SIGNATURE_SIZE,
     },
     serializer::Serializer,
-    utils::{calculate_tx_fee, calculate_uno_tx_fee},
+    utils::{calculate_tx_fee, energy_fee::EnergyFeeCalculator},
 };
 use indexmap::{IndexMap, IndexSet};
 use serde::{Deserialize, Serialize};
@@ -423,20 +423,35 @@ impl TransactionBuilder {
                     };
 
                 // Stake 2.0: Calculate fee based on transaction type
-                // UNO and Unshield transfers have ZK proofs and need higher fees
-                let fee_calc = if matches!(self.data, TransactionTypeBuilder::UnoTransfers(_))
+                // UNO and Unshield transfers use Energy model with 5x multiplier
+                let expected_fee = if matches!(self.data, TransactionTypeBuilder::UnoTransfers(_))
                     || matches!(self.data, TransactionTypeBuilder::UnshieldTransfers(_))
                 {
-                    calculate_uno_tx_fee
+                    // Energy-based fee: calculate energy cost and convert to TOS
+                    // Energy cost = size + outputs × 500 (5x multiplier for privacy)
+                    // TOS cost = energy × TOS_PER_ENERGY (100 atomic TOS/energy)
+                    use crate::config::{
+                        FEE_PER_ACCOUNT_CREATION, FEE_PER_MULTISIG_SIGNATURE, TOS_PER_ENERGY,
+                    };
+                    let energy_cost =
+                        EnergyFeeCalculator::calculate_uno_transfer_cost(size, transfers);
+                    let energy_tos_cost = energy_cost * TOS_PER_ENERGY;
+                    // Add TOS-Only fees (cannot be paid with Energy)
+                    let account_creation_fee = new_addresses as u64 * FEE_PER_ACCOUNT_CREATION;
+                    let multisig_fee = if self.required_thresholds.unwrap_or(0) > 1 {
+                        self.required_thresholds.unwrap_or(0) as u64 * FEE_PER_MULTISIG_SIGNATURE
+                    } else {
+                        0
+                    };
+                    energy_tos_cost + account_creation_fee + multisig_fee
                 } else {
-                    calculate_tx_fee
+                    calculate_tx_fee(
+                        size,
+                        transfers,
+                        new_addresses,
+                        self.required_thresholds.unwrap_or(0) as usize,
+                    )
                 };
-                let expected_fee = fee_calc(
-                    size,
-                    transfers,
-                    new_addresses,
-                    self.required_thresholds.unwrap_or(0) as usize,
-                );
 
                 match self.fee_builder {
                     // SAFE: f64 used for client-side fee estimation only

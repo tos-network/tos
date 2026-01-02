@@ -2,15 +2,18 @@ use log::warn;
 use std::net::SocketAddr;
 
 use crate::{
-    config::{
-        BYTES_PER_KB, COIN_DECIMALS, FEE_PER_ACCOUNT_CREATION, FEE_PER_KB, FEE_PER_TRANSFER,
-        UNO_FEE_PER_ACCOUNT_CREATION, UNO_FEE_PER_KB, UNO_FEE_PER_TRANSFER,
-    },
+    config::{BYTES_PER_KB, COIN_DECIMALS, FEE_PER_ACCOUNT_CREATION, FEE_PER_KB, FEE_PER_TRANSFER},
     difficulty::Difficulty,
     varuint::VarUint,
 };
 
 pub mod energy_fee;
+
+#[cfg(test)]
+mod tos_only_fee_tests;
+
+#[cfg(test)]
+mod energy_fee_e2e_tests;
 
 /// Static assert macro to check conditions at compile time
 /// Usage: `static_assert!(condition);` or `static_assert!(condition, "Error message");`
@@ -134,24 +137,8 @@ pub fn calculate_tx_fee(
     )
 }
 
-// return the fee for a UNO transaction based on its size in bytes
-// the fee is calculated in atomic units for UNO
-pub fn calculate_uno_tx_fee(
-    tx_size: usize,
-    output_count: usize,
-    new_addresses: usize,
-    multisig: usize,
-) -> u64 {
-    calculate_fee_with_schedule(
-        tx_size,
-        output_count,
-        new_addresses,
-        multisig,
-        UNO_FEE_PER_KB,
-        UNO_FEE_PER_TRANSFER,
-        UNO_FEE_PER_ACCOUNT_CREATION,
-    )
-}
+// Note: UNO transaction fees are calculated using EnergyFeeCalculator::calculate_uno_transfer_cost
+// which applies the 5x multiplier for privacy operations (see energy_fee.rs)
 
 fn calculate_fee_with_schedule(
     tx_size: usize,
@@ -264,7 +251,8 @@ mod tests {
 
     #[test]
     fn test_tos_format() {
-        assert_eq!(format_tos(FEE_PER_ACCOUNT_CREATION), "0.00100000");
+        // FEE_PER_ACCOUNT_CREATION = 10,000,000 = 0.1 TOS (TOS-Only fee)
+        assert_eq!(format_tos(FEE_PER_ACCOUNT_CREATION), "0.10000000");
         assert_eq!(format_tos(FEE_PER_KB), "0.00010000");
         assert_eq!(format_tos(FEE_PER_TRANSFER), "0.00005000");
         assert_eq!(format_tos(COIN_VALUE), "1.00000000");

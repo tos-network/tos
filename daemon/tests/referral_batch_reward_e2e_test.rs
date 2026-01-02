@@ -413,6 +413,14 @@ impl<'a> BlockchainVerificationState<'a, TestError> for TestChainState {
         Network::Devnet
     }
 
+    async fn is_account_registered(
+        &self,
+        _account: &CompressedPublicKey,
+    ) -> Result<bool, TestError> {
+        // For testing, assume all accounts are registered
+        Ok(true)
+    }
+
     async fn get_receiver_uno_balance<'b>(
         &'b mut self,
         _account: Cow<'a, CompressedPublicKey>,

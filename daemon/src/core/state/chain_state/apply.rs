@@ -219,6 +219,15 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError>
             .get_network()
             .unwrap_or(tos_common::network::Network::Mainnet)
     }
+
+    /// Check if an account is registered (exists) on the blockchain
+    async fn is_account_registered(
+        &self,
+        account: &CompressedPublicKey,
+    ) -> Result<bool, BlockchainError> {
+        // Delegate to inner ChainState implementation
+        self.inner.is_account_registered(account).await
+    }
 }
 
 #[async_trait]

@@ -21,8 +21,8 @@ use tos_kernel::ModuleValidator;
 use super::{payload::EnergyPayload, ContractDeposit, Role, Transaction, TransactionType};
 use crate::{
     config::{
-        BURN_PER_CONTRACT, COIN_VALUE, MAX_GAS_USAGE_PER_TX, MIN_DELEGATION_AMOUNT, TOS_ASSET,
-        UNO_ASSET,
+        BURN_PER_CONTRACT, COIN_VALUE, FEE_PER_ACCOUNT_CREATION, FEE_PER_MULTISIG_SIGNATURE,
+        MAX_GAS_USAGE_PER_TX, MIN_DELEGATION_AMOUNT, TOS_ASSET, UNO_ASSET,
     },
     contract::ContractProvider,
     crypto::{
@@ -689,6 +689,24 @@ impl Transaction {
                 for transfer in transfers {
                     let asset = transfer.get_asset(); // Returns &Hash
                     let amount = transfer.get_amount();
+
+                    // TOS-Only Fee: Check account creation fee during verification
+                    // This catches insufficient fee errors early (mempool validation)
+                    if *asset == TOS_ASSET {
+                        let destination = transfer.get_destination();
+                        let is_new_account = !state
+                            .is_account_registered(destination)
+                            .await
+                            .map_err(VerificationError::State)?;
+
+                        if is_new_account && amount < FEE_PER_ACCOUNT_CREATION {
+                            return Err(VerificationError::AmountTooSmallForAccountCreation {
+                                amount,
+                                fee: FEE_PER_ACCOUNT_CREATION,
+                            });
+                        }
+                    }
+
                     let current = spending_per_asset.entry(asset).or_insert(0);
                     *current = current
                         .checked_add(amount)
@@ -2073,6 +2091,24 @@ impl Transaction {
                 for transfer in transfers {
                     let asset = transfer.get_asset();
                     let amount = transfer.get_amount();
+
+                    // TOS-Only Fee: Check account creation fee during verification
+                    // This catches insufficient fee errors early (mempool validation)
+                    if *asset == TOS_ASSET {
+                        let destination = transfer.get_destination();
+                        let is_new_account = !state
+                            .is_account_registered(destination)
+                            .await
+                            .map_err(VerificationError::State)?;
+
+                        if is_new_account && amount < FEE_PER_ACCOUNT_CREATION {
+                            return Err(VerificationError::AmountTooSmallForAccountCreation {
+                                amount,
+                                fee: FEE_PER_ACCOUNT_CREATION,
+                            });
+                        }
+                    }
+
                     let current = spending_per_asset.entry(asset).or_insert(0);
                     *current = current
                         .checked_add(amount)
@@ -2602,19 +2638,61 @@ impl Transaction {
         match &self.data {
             TransactionType::Transfers(transfers) => {
                 for transfer in transfers {
-                    // Update receiver balance with plain u64 amount
+                    let destination = transfer.get_destination();
+                    let asset = transfer.get_asset();
+                    let plain_amount = transfer.get_amount();
+
+                    // TOS-Only Fee: Account creation fee (0.1 TOS)
+                    // When sending TOS to a new (unregistered) account, deduct fee from transfer
+                    let amount_to_credit = if *asset == TOS_ASSET {
+                        let is_new_account = !state
+                            .is_account_registered(destination)
+                            .await
+                            .map_err(VerificationError::State)?;
+
+                        if is_new_account {
+                            // Verify transfer amount covers account creation fee
+                            if plain_amount < FEE_PER_ACCOUNT_CREATION {
+                                return Err(VerificationError::AmountTooSmallForAccountCreation {
+                                    amount: plain_amount,
+                                    fee: FEE_PER_ACCOUNT_CREATION,
+                                });
+                            }
+
+                            // Deduct account creation fee from transfer amount
+                            let net_amount = plain_amount - FEE_PER_ACCOUNT_CREATION;
+
+                            // Burn the account creation fee
+                            state
+                                .add_burned_coins(FEE_PER_ACCOUNT_CREATION)
+                                .await
+                                .map_err(VerificationError::State)?;
+
+                            if log::log_enabled!(log::Level::Debug) {
+                                debug!(
+                                    "Account creation fee: {} TOS burned for new account {:?}",
+                                    FEE_PER_ACCOUNT_CREATION as f64 / COIN_VALUE as f64,
+                                    destination
+                                );
+                            }
+
+                            net_amount
+                        } else {
+                            plain_amount
+                        }
+                    } else {
+                        // Non-TOS assets: no account creation fee
+                        plain_amount
+                    };
+
+                    // Update receiver balance with (possibly adjusted) amount
                     let current_balance = state
-                        .get_receiver_balance(
-                            Cow::Borrowed(transfer.get_destination()),
-                            Cow::Borrowed(transfer.get_asset()),
-                        )
+                        .get_receiver_balance(Cow::Borrowed(destination), Cow::Borrowed(asset))
                         .await
                         .map_err(VerificationError::State)?;
 
-                    // Balance simplification: Add plain u64 amount to receiver's balance
-                    let plain_amount = transfer.get_amount();
                     *current_balance = current_balance
-                        .checked_add(plain_amount)
+                        .checked_add(amount_to_credit)
                         .ok_or(VerificationError::Overflow)?;
                 }
             }
@@ -4236,6 +4314,43 @@ impl Transaction {
             .checked_add(self.get_fee_limit())
             .ok_or(VerificationError::Overflow)?;
 
+        // TOS-Only Fee: MultiSig fee (1 TOS per signature)
+        // Charged when transaction has 2+ signatures (main + multisig participants)
+        // Aligned with TRON's MULTI_SIGN_FEE (1 TRX/signature)
+        let multisig_count = self.get_multisig_count();
+        let total_signatures = if multisig_count > 0 {
+            // MultiSig transaction: count = multisig signatures (excluding main signature)
+            // Total signatures = 1 (main) + multisig_count
+            1 + multisig_count
+        } else {
+            // Regular transaction: just main signature
+            1
+        };
+
+        let multisig_fee = if total_signatures >= 2 {
+            // Charge 1 TOS per signature for multisig transactions
+            (total_signatures as u64)
+                .checked_mul(FEE_PER_MULTISIG_SIGNATURE)
+                .ok_or(VerificationError::Overflow)?
+        } else {
+            0
+        };
+
+        if multisig_fee > 0 {
+            let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+            *current = current
+                .checked_add(multisig_fee)
+                .ok_or(VerificationError::Overflow)?;
+
+            if log::log_enabled!(log::Level::Debug) {
+                debug!(
+                    "MultiSig fee: {} TOS for {} signatures",
+                    multisig_fee as f64 / COIN_VALUE as f64,
+                    total_signatures
+                );
+            }
+        }
+
         // Deduct spending from sender balance
         // This matches BLOCKDAG's behavior where balance deduction happens before apply()
         // NOTE: We do NOT call add_sender_output() here because apply() already does that.
@@ -4258,6 +4373,14 @@ impl Transaction {
                     asset
                 );
             }
+        }
+
+        // Burn the multisig fee (TOS-Only)
+        if multisig_fee > 0 {
+            state
+                .add_burned_coins(multisig_fee)
+                .await
+                .map_err(VerificationError::State)?;
         }
 
         self.apply(tx_hash, state).await
