@@ -1489,9 +1489,32 @@ mod tests {
             // Should not overflow (uses u128 internally)
             let limit = energy.calculate_energy_limit(1);
 
-            // With frozen = MAX and weight = 1, limit = MAX * TOTAL_ENERGY_LIMIT / 1
-            // This would overflow without u128, but should work
+            // With frozen = MAX and weight = 1, limit would exceed TOTAL_ENERGY_LIMIT
+            // but is now clamped for safety
             assert!(limit > 0);
+            assert_eq!(
+                limit, TOTAL_ENERGY_LIMIT,
+                "Should be clamped to TOTAL_ENERGY_LIMIT"
+            );
+        }
+
+        #[test]
+        fn test_24_4_energy_limit_clamped_on_corruption() {
+            // Test that energy limit is clamped when effective > total_weight
+            // (state corruption scenario)
+            let mut energy = AccountEnergy::new();
+            energy.frozen_balance = 1_000_000 * COIN_VALUE;
+            energy.acquired_delegated_balance = 1_000_000 * COIN_VALUE;
+            // effective = 2M TOS
+
+            // If total_weight is smaller than effective (corruption),
+            // raw limit would exceed TOTAL_ENERGY_LIMIT
+            let total_weight = 1 * COIN_VALUE; // Only 1 TOS total weight (corrupted)
+
+            let limit = energy.calculate_energy_limit(total_weight);
+
+            // Should be clamped to TOTAL_ENERGY_LIMIT
+            assert_eq!(limit, TOTAL_ENERGY_LIMIT);
         }
     }
 

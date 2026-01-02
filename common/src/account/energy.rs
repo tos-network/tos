@@ -91,13 +91,19 @@ impl AccountEnergy {
     /// Calculate energy limit based on stake proportion
     ///
     /// Formula: (effective_frozen / total_weight) × TOTAL_ENERGY_LIMIT
+    ///
+    /// Safety: Result is clamped to TOTAL_ENERGY_LIMIT to prevent
+    /// exceeding the global limit in case of state corruption.
     pub fn calculate_energy_limit(&self, total_energy_weight: u64) -> u64 {
         if total_energy_weight == 0 {
             return 0;
         }
         let effective = self.effective_frozen_balance();
         // Use u128 to prevent overflow
-        ((effective as u128 * TOTAL_ENERGY_LIMIT as u128) / total_energy_weight as u128) as u64
+        let raw_limit =
+            ((effective as u128 * TOTAL_ENERGY_LIMIT as u128) / total_energy_weight as u128) as u64;
+        // Clamp to TOTAL_ENERGY_LIMIT to handle state corruption
+        raw_limit.min(TOTAL_ENERGY_LIMIT)
     }
 
     /// Calculate available free energy (with 24h decay recovery)
@@ -297,9 +303,10 @@ impl Serializer for AccountEnergy {
         writer.write_u64(&self.free_energy_usage);
         writer.write_u64(&self.latest_free_consume_time);
 
-        // Write unfreezing list
-        writer.write_u8(self.unfreezing_list.len() as u8);
-        for record in &self.unfreezing_list {
+        // Write unfreezing list (capped at MAX_UNFREEZING_LIST_SIZE for safety)
+        let list_len = self.unfreezing_list.len().min(MAX_UNFREEZING_LIST_SIZE);
+        writer.write_u8(list_len as u8);
+        for record in self.unfreezing_list.iter().take(list_len) {
             record.write(writer);
         }
     }
