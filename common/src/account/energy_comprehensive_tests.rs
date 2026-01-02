@@ -2809,7 +2809,10 @@ mod tests {
 
             // Day 0.0: Start - check initial state
             assert_eq!(account.frozen_balance, 0);
-            assert_eq!(account.calculate_free_energy_available(0), FREE_ENERGY_QUOTA);
+            assert_eq!(
+                account.calculate_free_energy_available(0),
+                FREE_ENERGY_QUOTA
+            );
 
             // Day 0.1: Use free quota for transfers (simulate 1,050 energy used)
             let energy_used = 1_050u64;
@@ -2945,8 +2948,10 @@ mod tests {
             }
 
             // Verify totals
-            assert_eq!(total_free_used + total_frozen_used + total_tos_burned / TOS_PER_ENERGY,
-                       10 * energy_per_tx);
+            assert_eq!(
+                total_free_used + total_frozen_used + total_tos_burned / TOS_PER_ENERGY,
+                10 * energy_per_tx
+            );
 
             // First 4 TXs should use free quota (4 × 350 = 1,400 < 1,500)
             assert!(total_free_used >= 1_400);
@@ -3043,9 +3048,8 @@ mod tests {
             let outputs = 1usize;
             let new_accounts = 1usize;
 
-            let energy_required = EnergyFeeCalculator::calculate_energy_cost(
-                tx_size, outputs, new_accounts
-            );
+            let energy_required =
+                EnergyFeeCalculator::calculate_energy_cost(tx_size, outputs, new_accounts);
 
             // 250 + 100 + 25000 = 25,350
             assert_eq!(energy_required, 25_350);
@@ -3221,9 +3225,8 @@ mod tests {
 
             // Verify sum: free + frozen + burned = total
             let burned_energy = result.fee / TOS_PER_ENERGY;
-            let total_from_sources = result.free_energy_used
-                + result.frozen_energy_used
-                + burned_energy;
+            let total_from_sources =
+                result.free_energy_used + result.frozen_energy_used + burned_energy;
 
             assert_eq!(total_from_sources, result.energy_used);
         }
@@ -3408,6 +3411,551 @@ mod tests {
             let after_tx1 = account.calculate_frozen_energy_available(now_ms, total_weight);
             assert!(after_tx1 < initial_available);
             assert_eq!(initial_available - after_tx1, 1_000);
+        }
+    }
+
+    // ============================================================================
+    // SCENARIO 34: INTEGRATION WITH REAL TRANSACTION FLOW
+    // ============================================================================
+
+    /// Scenario 34: Integration with Real Transaction Flow
+    ///
+    /// Tests verify → apply phase separation:
+    /// - 34.1: Complete FreezeTos Transaction Flow
+    /// - 34.2: Failed Verify Does Not Reach Apply
+    /// - 34.3: Apply Phase Consumes Actual Energy
+    mod scenario_34_transaction_flow {
+        use super::*;
+
+        /// Simulates an account state for transaction flow testing
+        #[derive(Clone)]
+        struct AccountState {
+            balance: u64,
+            energy: AccountEnergy,
+        }
+
+        impl AccountState {
+            fn new(initial_balance: u64) -> Self {
+                Self {
+                    balance: initial_balance,
+                    energy: AccountEnergy::new(),
+                }
+            }
+        }
+
+        /// Simulates global state for transaction flow testing
+        #[derive(Clone)]
+        struct GlobalState {
+            total_energy_weight: u64,
+        }
+
+        impl GlobalState {
+            fn new(initial_weight: u64) -> Self {
+                Self {
+                    total_energy_weight: initial_weight,
+                }
+            }
+        }
+
+        /// Result of verify phase
+        struct VerifyResult {
+            success: bool,
+            reserved_fee: u64,
+            error_message: Option<String>,
+        }
+
+        /// Simulates FreezeTos verify phase
+        /// - Checks sufficient balance
+        /// - Reserves fee_limit from balance
+        fn verify_freeze_tos(
+            state: &mut AccountState,
+            freeze_amount: u64,
+            fee_limit: u64,
+        ) -> VerifyResult {
+            // Check balance covers freeze amount + fee_limit
+            let total_required = freeze_amount.saturating_add(fee_limit);
+            if state.balance < total_required {
+                return VerifyResult {
+                    success: false,
+                    reserved_fee: 0,
+                    error_message: Some("Insufficient balance".to_string()),
+                };
+            }
+
+            // Check minimum freeze amount
+            if freeze_amount < COIN_VALUE {
+                return VerifyResult {
+                    success: false,
+                    reserved_fee: 0,
+                    error_message: Some("Minimum freeze is 1 TOS".to_string()),
+                };
+            }
+
+            // Check whole TOS amount
+            if freeze_amount % COIN_VALUE != 0 {
+                return VerifyResult {
+                    success: false,
+                    reserved_fee: 0,
+                    error_message: Some("Must freeze whole TOS".to_string()),
+                };
+            }
+
+            // Reserve fee_limit from balance (verify phase reservation)
+            state.balance -= fee_limit;
+
+            VerifyResult {
+                success: true,
+                reserved_fee: fee_limit,
+                error_message: None,
+            }
+        }
+
+        /// Simulates FreezeTos apply phase
+        /// - Deducts freeze amount from balance
+        /// - Updates frozen_balance
+        /// - Updates global weight
+        /// - Consumes actual energy (0 for FreezeTos)
+        /// - Refunds unused fee_limit
+        fn apply_freeze_tos(
+            state: &mut AccountState,
+            global: &mut GlobalState,
+            freeze_amount: u64,
+            reserved_fee: u64,
+            _now_ms: u64,
+        ) -> TransactionResult {
+            // FreezeTos has zero energy cost (aligned with TRON)
+            let actual_energy_cost = 0u64;
+            let tos_burned = 0u64;
+
+            // Deduct freeze amount from balance
+            state.balance -= freeze_amount;
+
+            // Update frozen balance
+            state.energy.frozen_balance += freeze_amount;
+
+            // Update global weight
+            global.total_energy_weight += freeze_amount;
+
+            // Refund unused fee_limit
+            let refund = reserved_fee.saturating_sub(tos_burned);
+            state.balance += refund;
+
+            TransactionResult {
+                energy_used: actual_energy_cost,
+                free_energy_used: 0,
+                frozen_energy_used: 0,
+                fee: tos_burned,
+            }
+        }
+
+        /// Simulates Transfer verify phase
+        fn verify_transfer(
+            state: &mut AccountState,
+            transfer_amount: u64,
+            fee_limit: u64,
+        ) -> VerifyResult {
+            let total_required = transfer_amount.saturating_add(fee_limit);
+            if state.balance < total_required {
+                return VerifyResult {
+                    success: false,
+                    reserved_fee: 0,
+                    error_message: Some("Insufficient balance".to_string()),
+                };
+            }
+
+            // Reserve fee_limit
+            state.balance -= fee_limit;
+
+            VerifyResult {
+                success: true,
+                reserved_fee: fee_limit,
+                error_message: None,
+            }
+        }
+
+        /// Simulates Transfer apply phase
+        /// - Deducts transfer amount
+        /// - Consumes actual energy (free → frozen → TOS burn)
+        /// - Refunds unused fee_limit
+        fn apply_transfer(
+            state: &mut AccountState,
+            transfer_amount: u64,
+            energy_cost: u64,
+            reserved_fee: u64,
+            now_ms: u64,
+            total_weight: u64,
+        ) -> TransactionResult {
+            // Deduct transfer amount
+            state.balance -= transfer_amount;
+
+            // Energy consumption priority: free → frozen → TOS burn
+            let mut remaining = energy_cost;
+            let mut free_used = 0u64;
+            let mut frozen_used = 0u64;
+            let mut tos_burned = 0u64;
+
+            // 1. Free energy
+            let free_available = state.energy.calculate_free_energy_available(now_ms);
+            if remaining > 0 && free_available > 0 {
+                free_used = remaining.min(free_available);
+                state.energy.consume_free_energy(free_used, now_ms);
+                remaining -= free_used;
+            }
+
+            // 2. Frozen energy
+            let frozen_available = state
+                .energy
+                .calculate_frozen_energy_available(now_ms, total_weight);
+            if remaining > 0 && frozen_available > 0 {
+                frozen_used = remaining.min(frozen_available);
+                state
+                    .energy
+                    .consume_frozen_energy(frozen_used, now_ms, total_weight);
+                remaining -= frozen_used;
+            }
+
+            // 3. TOS burn
+            if remaining > 0 {
+                tos_burned = remaining * TOS_PER_ENERGY;
+                // TOS is already "reserved" from fee_limit, so no additional deduction
+            }
+
+            // Refund unused fee_limit
+            let refund = reserved_fee.saturating_sub(tos_burned);
+            state.balance += refund;
+
+            TransactionResult {
+                energy_used: energy_cost,
+                free_energy_used: free_used,
+                frozen_energy_used: frozen_used,
+                fee: tos_burned,
+            }
+        }
+
+        /// Scenario 34.1: Complete FreezeTos Transaction Flow
+        ///
+        /// Tests full verify → apply flow:
+        /// - After verify: balance - fee_limit reserved, frozen unchanged
+        /// - After apply: frozen updated, global weight updated, unused refunded
+        #[test]
+        fn test_34_1_complete_freeze_tos_flow() {
+            let initial_balance = 10_000 * COIN_VALUE;
+            let freeze_amount = 1_000 * COIN_VALUE;
+            let fee_limit = 100 * COIN_VALUE;
+            let initial_weight = 10_000_000 * COIN_VALUE;
+
+            let mut account = AccountState::new(initial_balance);
+            let mut global = GlobalState::new(initial_weight);
+            let now_ms = 1_000_000u64;
+
+            // Capture initial state
+            let balance_before_verify = account.balance;
+            let frozen_before_verify = account.energy.frozen_balance;
+            let weight_before = global.total_energy_weight;
+
+            // === VERIFY PHASE ===
+            let verify_result = verify_freeze_tos(&mut account, freeze_amount, fee_limit);
+            assert!(verify_result.success, "Verify should succeed");
+            assert_eq!(verify_result.reserved_fee, fee_limit);
+
+            // After verify: balance reduced by fee_limit, frozen unchanged
+            assert_eq!(
+                account.balance,
+                balance_before_verify - fee_limit,
+                "Balance should have fee_limit reserved"
+            );
+            assert_eq!(
+                account.energy.frozen_balance, frozen_before_verify,
+                "Frozen should NOT change in verify phase"
+            );
+            assert_eq!(
+                global.total_energy_weight, weight_before,
+                "Global weight should NOT change in verify phase"
+            );
+
+            // === APPLY PHASE ===
+            let tx_result = apply_freeze_tos(
+                &mut account,
+                &mut global,
+                freeze_amount,
+                verify_result.reserved_fee,
+                now_ms,
+            );
+
+            // FreezeTos has 0 energy cost
+            assert_eq!(tx_result.energy_used, 0);
+            assert_eq!(tx_result.fee, 0);
+
+            // After apply: frozen updated, weight updated
+            assert_eq!(
+                account.energy.frozen_balance,
+                frozen_before_verify + freeze_amount,
+                "Frozen should be updated in apply phase"
+            );
+            assert_eq!(
+                global.total_energy_weight,
+                weight_before + freeze_amount,
+                "Global weight should be updated in apply phase"
+            );
+
+            // Balance should be: initial - freeze_amount (fee_limit fully refunded)
+            assert_eq!(
+                account.balance,
+                initial_balance - freeze_amount,
+                "Balance should only be reduced by freeze amount (fee_limit refunded)"
+            );
+        }
+
+        /// Scenario 34.2: Failed Verify Does Not Reach Apply
+        ///
+        /// Tests that failed verify leaves state unchanged
+        #[test]
+        fn test_34_2_failed_verify_no_state_change() {
+            let initial_balance = 500 * COIN_VALUE;
+            let freeze_amount = 1_000 * COIN_VALUE; // More than balance
+            let fee_limit = 100 * COIN_VALUE;
+            let initial_weight = 10_000_000 * COIN_VALUE;
+
+            let account = AccountState::new(initial_balance);
+            let global = GlobalState::new(initial_weight);
+
+            // Clone for comparison
+            let mut account_try = account.clone();
+
+            // Capture initial state
+            let balance_before = account_try.balance;
+            let frozen_before = account_try.energy.frozen_balance;
+
+            // === VERIFY PHASE (should fail) ===
+            let verify_result = verify_freeze_tos(&mut account_try, freeze_amount, fee_limit);
+            assert!(
+                !verify_result.success,
+                "Verify should fail - insufficient balance"
+            );
+            assert!(verify_result.error_message.is_some());
+
+            // State should be completely unchanged on failed verify
+            assert_eq!(
+                account_try.balance, balance_before,
+                "Balance should be unchanged on failed verify"
+            );
+            assert_eq!(
+                account_try.energy.frozen_balance, frozen_before,
+                "Frozen should be unchanged on failed verify"
+            );
+            assert_eq!(
+                global.total_energy_weight, initial_weight,
+                "Global weight should be unchanged on failed verify"
+            );
+
+            // Apply should NEVER be called after failed verify
+            // (This is enforced by the caller, we just verify state is clean)
+        }
+
+        /// Scenario 34.2b: Failed Verify - Minimum Amount Validation
+        #[test]
+        fn test_34_2b_failed_verify_minimum_amount() {
+            let initial_balance = 10_000 * COIN_VALUE;
+            let freeze_amount = COIN_VALUE / 2; // 0.5 TOS - below minimum
+            let fee_limit = 100 * COIN_VALUE;
+
+            let mut account = AccountState::new(initial_balance);
+            let balance_before = account.balance;
+
+            let verify_result = verify_freeze_tos(&mut account, freeze_amount, fee_limit);
+            assert!(!verify_result.success, "Verify should fail - below minimum");
+            assert_eq!(account.balance, balance_before, "Balance unchanged on fail");
+        }
+
+        /// Scenario 34.2c: Failed Verify - Non-whole TOS Amount
+        #[test]
+        fn test_34_2c_failed_verify_non_whole_tos() {
+            let initial_balance = 10_000 * COIN_VALUE;
+            let freeze_amount = COIN_VALUE + 50_000_000; // 1.5 TOS
+            let fee_limit = 100 * COIN_VALUE;
+
+            let mut account = AccountState::new(initial_balance);
+            let balance_before = account.balance;
+
+            let verify_result = verify_freeze_tos(&mut account, freeze_amount, fee_limit);
+            assert!(!verify_result.success, "Verify should fail - not whole TOS");
+            assert_eq!(account.balance, balance_before, "Balance unchanged on fail");
+        }
+
+        /// Scenario 34.3: Apply Phase Consumes Actual Energy
+        ///
+        /// Tests that apply phase uses actual energy, not fee_limit:
+        /// - Energy used from free → frozen → TOS burn
+        /// - Unused fee_limit is refunded
+        #[test]
+        fn test_34_3_apply_consumes_actual_energy() {
+            let initial_balance = 10_000 * COIN_VALUE;
+            let transfer_amount = 100 * COIN_VALUE;
+            let fee_limit = 1_000 * COIN_VALUE; // Large fee_limit
+            let total_weight = 10_000_000 * COIN_VALUE;
+            let now_ms = 1_000_000u64;
+
+            let mut account = AccountState::new(initial_balance);
+
+            // Setup: Alice has frozen balance for energy
+            account.energy.frozen_balance = 1_000 * COIN_VALUE;
+
+            // Fresh free energy
+            account.energy.free_energy_usage = 0;
+            account.energy.latest_free_consume_time = 0;
+
+            // Calculate energy available
+            let free_available = account.energy.calculate_free_energy_available(now_ms);
+            assert_eq!(
+                free_available, FREE_ENERGY_QUOTA,
+                "Should have full free quota"
+            );
+
+            // Transfer energy cost: size + outputs
+            let energy_cost = 250 + 100; // 350 energy
+
+            // === VERIFY PHASE ===
+            let verify_result = verify_transfer(&mut account, transfer_amount, fee_limit);
+            assert!(verify_result.success);
+            let balance_after_verify = account.balance;
+            assert_eq!(
+                balance_after_verify,
+                initial_balance - fee_limit,
+                "fee_limit should be reserved"
+            );
+
+            // === APPLY PHASE ===
+            let tx_result = apply_transfer(
+                &mut account,
+                transfer_amount,
+                energy_cost,
+                verify_result.reserved_fee,
+                now_ms,
+                total_weight,
+            );
+
+            // Verify actual energy consumption (not fee_limit)
+            assert_eq!(tx_result.energy_used, energy_cost);
+            assert_eq!(tx_result.free_energy_used, energy_cost); // All from free quota
+            assert_eq!(tx_result.frozen_energy_used, 0);
+            assert_eq!(tx_result.fee, 0); // No TOS burned
+
+            // Balance should be: initial - transfer_amount (fee_limit fully refunded)
+            // Because no TOS was burned (energy covered by free quota)
+            assert_eq!(
+                account.balance,
+                initial_balance - transfer_amount,
+                "Balance reduced only by transfer amount"
+            );
+
+            // Verify free energy was consumed
+            assert_eq!(account.energy.free_energy_usage, energy_cost);
+        }
+
+        /// Scenario 34.3b: Apply With Partial TOS Burn
+        ///
+        /// Tests that when energy is insufficient, TOS is burned
+        #[test]
+        fn test_34_3b_apply_with_tos_burn() {
+            let initial_balance = 10_000 * COIN_VALUE;
+            let transfer_amount = 100 * COIN_VALUE;
+            let fee_limit = 1_000 * COIN_VALUE;
+            let total_weight = 10_000_000 * COIN_VALUE;
+            let now_ms = 1_000_000u64;
+
+            let mut account = AccountState::new(initial_balance);
+
+            // Setup: No frozen balance (only free energy)
+            account.energy.frozen_balance = 0;
+            account.energy.free_energy_usage = 0;
+            account.energy.latest_free_consume_time = 0;
+
+            let free_available = FREE_ENERGY_QUOTA; // 1,500
+
+            // Energy cost exceeds free quota
+            let energy_cost = 2_000u64;
+            let energy_from_tos = energy_cost - free_available; // 500
+            let expected_tos_burn = energy_from_tos * TOS_PER_ENERGY; // 50,000 atomic
+
+            // === VERIFY PHASE ===
+            let verify_result = verify_transfer(&mut account, transfer_amount, fee_limit);
+            assert!(verify_result.success);
+
+            // === APPLY PHASE ===
+            let tx_result = apply_transfer(
+                &mut account,
+                transfer_amount,
+                energy_cost,
+                verify_result.reserved_fee,
+                now_ms,
+                total_weight,
+            );
+
+            // Verify energy breakdown
+            assert_eq!(tx_result.energy_used, energy_cost);
+            assert_eq!(tx_result.free_energy_used, free_available);
+            assert_eq!(tx_result.frozen_energy_used, 0); // No frozen energy
+            assert_eq!(tx_result.fee, expected_tos_burn);
+
+            // Balance: initial - transfer - tos_burned
+            // fee_limit was reserved (1,000 TOS), but only 0.0005 TOS (50,000 atomic) was burned
+            // So refund = fee_limit - tos_burned = 1,000 TOS - 0.0005 TOS
+            let expected_balance = initial_balance - transfer_amount - expected_tos_burn;
+            assert_eq!(account.balance, expected_balance);
+        }
+
+        /// Scenario 34.3c: Apply With Full Energy Coverage
+        ///
+        /// Tests frozen energy covering cost after free quota exhausted
+        #[test]
+        fn test_34_3c_apply_frozen_energy_coverage() {
+            let initial_balance = 10_000 * COIN_VALUE;
+            let transfer_amount = 100 * COIN_VALUE;
+            let fee_limit = 1_000 * COIN_VALUE;
+            let total_weight = 10_000_000 * COIN_VALUE;
+            let now_ms = 1_000_000u64;
+
+            let mut account = AccountState::new(initial_balance);
+
+            // Setup: Has frozen balance for energy
+            account.energy.frozen_balance = 1_000 * COIN_VALUE;
+            // 1,000 TOS gives 1,840,000 energy at 10M weight
+
+            // Free quota exhausted
+            account.energy.free_energy_usage = FREE_ENERGY_QUOTA;
+            account.energy.latest_free_consume_time = now_ms;
+
+            let frozen_available = account
+                .energy
+                .calculate_frozen_energy_available(now_ms, total_weight);
+            assert!(frozen_available > 0, "Should have frozen energy");
+
+            // Energy cost covered by frozen energy
+            let energy_cost = 5_000u64;
+            assert!(frozen_available >= energy_cost, "Frozen should cover cost");
+
+            // === VERIFY PHASE ===
+            let verify_result = verify_transfer(&mut account, transfer_amount, fee_limit);
+            assert!(verify_result.success);
+
+            // === APPLY PHASE ===
+            let tx_result = apply_transfer(
+                &mut account,
+                transfer_amount,
+                energy_cost,
+                verify_result.reserved_fee,
+                now_ms,
+                total_weight,
+            );
+
+            // Verify energy breakdown
+            assert_eq!(tx_result.energy_used, energy_cost);
+            assert_eq!(tx_result.free_energy_used, 0); // Free exhausted
+            assert_eq!(tx_result.frozen_energy_used, energy_cost);
+            assert_eq!(tx_result.fee, 0); // No TOS burned
+
+            // Balance: initial - transfer (no TOS burned, fee_limit refunded)
+            assert_eq!(account.balance, initial_balance - transfer_amount);
         }
     }
 }
