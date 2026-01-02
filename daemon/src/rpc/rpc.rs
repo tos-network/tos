@@ -3296,7 +3296,10 @@ async fn estimate_energy<S: Storage>(
     let pubkey = params.address.into_owned().to_public_key();
 
     // Get account energy state
-    let account_energy = storage.get_account_energy(&pubkey).await?.unwrap_or_default();
+    let account_energy = storage
+        .get_account_energy(&pubkey)
+        .await?
+        .unwrap_or_default();
     let global_state = storage.get_global_energy_state().await?;
     let total_energy_weight = global_state.total_energy_weight;
 

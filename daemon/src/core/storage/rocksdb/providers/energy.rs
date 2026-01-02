@@ -212,10 +212,12 @@ impl DelegatedResourceProvider for RocksStorage {
                 let from_bytes = &index_key[32..64];
                 if let Ok(from) = PublicKey::from_bytes(from_bytes) {
                     let delegation_key = build_delegation_key(&from, to);
-                    if let Some(delegation) = self.load_optional_from_disk::<Vec<u8>, DelegatedResource>(
-                        Column::DelegatedResources,
-                        &delegation_key,
-                    )? {
+                    if let Some(delegation) = self
+                        .load_optional_from_disk::<Vec<u8>, DelegatedResource>(
+                            Column::DelegatedResources,
+                            &delegation_key,
+                        )?
+                    {
                         delegations.push(delegation);
                     }
                 }

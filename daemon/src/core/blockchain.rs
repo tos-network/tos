@@ -746,7 +746,9 @@ impl<S: Storage> Blockchain<S> {
                 debug!("Initializing GlobalEnergyState at genesis");
             }
             let global_energy_state = GlobalEnergyState::new();
-            storage.set_global_energy_state(&global_energy_state).await?;
+            storage
+                .set_global_energy_state(&global_energy_state)
+                .await?;
 
             let (genesis_block, genesis_hash) =
                 if let Some(genesis_block) = get_hex_genesis_block(&self.network) {

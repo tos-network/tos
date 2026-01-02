@@ -290,7 +290,10 @@ impl TransactionBuilder {
             }
             TransactionTypeBuilder::Energy(payload) => {
                 // Convert EnergyBuilder to EnergyPayload for size calculation
-                let energy_payload = payload.build();
+                // Use minimum size fallback for invalid builders (will fail at build time anyway)
+                let energy_payload = payload
+                    .build()
+                    .unwrap_or(crate::transaction::payload::EnergyPayload::WithdrawExpireUnfreeze);
 
                 // Payload size
                 size += energy_payload.size();
@@ -797,7 +800,11 @@ impl TransactionBuilder {
                 if let Err(e) = payload.validate() {
                     return Err(GenerationError::State(e.into()));
                 }
-                TransactionType::Energy(payload.build())
+                TransactionType::Energy(
+                    payload
+                        .build()
+                        .map_err(|e| GenerationError::State(e.into()))?,
+                )
             }
             TransactionTypeBuilder::AIMining(ref payload) => {
                 TransactionType::AIMining(payload.clone())

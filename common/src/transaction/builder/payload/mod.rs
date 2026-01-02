@@ -312,33 +312,42 @@ impl EnergyBuilder {
     }
 
     /// Build the EnergyPayload from this builder
-    pub fn build(&self) -> crate::transaction::payload::EnergyPayload {
+    /// Returns an error if required fields are missing for the operation type
+    pub fn build(&self) -> Result<crate::transaction::payload::EnergyPayload, &'static str> {
         use crate::transaction::payload::EnergyPayload;
 
         match self.operation {
-            EnergyOperationType::FreezeTos => EnergyPayload::FreezeTos {
+            EnergyOperationType::FreezeTos => Ok(EnergyPayload::FreezeTos {
                 amount: self.amount.unwrap_or(0),
-            },
-            EnergyOperationType::UnfreezeTos => EnergyPayload::UnfreezeTos {
+            }),
+            EnergyOperationType::UnfreezeTos => Ok(EnergyPayload::UnfreezeTos {
                 amount: self.amount.unwrap_or(0),
-            },
-            EnergyOperationType::WithdrawExpireUnfreeze => EnergyPayload::WithdrawExpireUnfreeze,
-            EnergyOperationType::CancelAllUnfreeze => EnergyPayload::CancelAllUnfreeze,
+            }),
+            EnergyOperationType::WithdrawExpireUnfreeze => {
+                Ok(EnergyPayload::WithdrawExpireUnfreeze)
+            }
+            EnergyOperationType::CancelAllUnfreeze => Ok(EnergyPayload::CancelAllUnfreeze),
             EnergyOperationType::DelegateResource => {
-                // SAFE: validate() ensures receiver is Some for delegate operations
-                EnergyPayload::DelegateResource {
-                    receiver: self.receiver.clone().expect("receiver required"),
+                let receiver = self
+                    .receiver
+                    .clone()
+                    .ok_or("Receiver is required for delegate operations")?;
+                Ok(EnergyPayload::DelegateResource {
+                    receiver,
                     amount: self.amount.unwrap_or(0),
                     lock: self.lock,
                     lock_period: self.lock_period,
-                }
+                })
             }
             EnergyOperationType::UndelegateResource => {
-                // SAFE: validate() ensures receiver is Some for undelegate operations
-                EnergyPayload::UndelegateResource {
-                    receiver: self.receiver.clone().expect("receiver required"),
+                let receiver = self
+                    .receiver
+                    .clone()
+                    .ok_or("Receiver is required for undelegate operations")?;
+                Ok(EnergyPayload::UndelegateResource {
+                    receiver,
                     amount: self.amount.unwrap_or(0),
-                }
+                })
             }
         }
     }

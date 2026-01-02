@@ -75,7 +75,11 @@ impl EnergyTestState {
     }
 
     // Simulate UnfreezeTos operation (adds to queue)
-    fn unfreeze_tos(&mut self, account: &CompressedPublicKey, amount: u64) -> Result<(), &'static str> {
+    fn unfreeze_tos(
+        &mut self,
+        account: &CompressedPublicKey,
+        amount: u64,
+    ) -> Result<(), &'static str> {
         // Capture values before mutable borrow
         let now = self.current_time_ms;
         let topoheight = self.topoheight;
@@ -99,7 +103,10 @@ impl EnergyTestState {
     }
 
     // Simulate WithdrawExpireUnfreeze operation
-    fn withdraw_expire_unfreeze(&mut self, account: &CompressedPublicKey) -> Result<u64, &'static str> {
+    fn withdraw_expire_unfreeze(
+        &mut self,
+        account: &CompressedPublicKey,
+    ) -> Result<u64, &'static str> {
         // Capture time before mutable borrow
         let now = self.current_time_ms;
 
@@ -177,7 +184,8 @@ impl EnergyTestState {
         };
 
         let delegation = DelegatedResource::new(from.clone(), to.clone(), amount, expire_time);
-        self.delegations.insert((from.clone(), to.clone()), delegation);
+        self.delegations
+            .insert((from.clone(), to.clone()), delegation);
 
         Ok(())
     }
@@ -248,12 +256,26 @@ fn test_freeze_tos_updates_global_energy() {
     // Verify results
     assert_eq!(state.global_energy.total_energy_weight, freeze_amount);
     assert_eq!(
-        state.energy_states.get(&alice_pubkey).unwrap().frozen_balance,
+        state
+            .energy_states
+            .get(&alice_pubkey)
+            .unwrap()
+            .frozen_balance,
         freeze_amount
     );
 
-    println!("  Global energy weight after freeze: {}", state.global_energy.total_energy_weight);
-    println!("  Alice frozen balance: {}", state.energy_states.get(&alice_pubkey).unwrap().frozen_balance);
+    println!(
+        "  Global energy weight after freeze: {}",
+        state.global_energy.total_energy_weight
+    );
+    println!(
+        "  Alice frozen balance: {}",
+        state
+            .energy_states
+            .get(&alice_pubkey)
+            .unwrap()
+            .frozen_balance
+    );
     println!("FreezeTos GlobalEnergyState test passed!");
 }
 
@@ -281,9 +303,18 @@ fn test_unfreeze_tos_adds_to_queue() {
     assert_eq!(state.global_energy.total_energy_weight, 50 * COIN_VALUE);
 
     println!("  Unfreezing queue size: {}", energy.unfreezing_list.len());
-    println!("  Unfreeze amount: {}", energy.unfreezing_list[0].unfreeze_amount);
-    println!("  Expire time: {} (current: {})", energy.unfreezing_list[0].unfreeze_expire_time, state.current_time_ms);
-    println!("  Global weight after unfreeze: {}", state.global_energy.total_energy_weight);
+    println!(
+        "  Unfreeze amount: {}",
+        energy.unfreezing_list[0].unfreeze_amount
+    );
+    println!(
+        "  Expire time: {} (current: {})",
+        energy.unfreezing_list[0].unfreeze_expire_time, state.current_time_ms
+    );
+    println!(
+        "  Global weight after unfreeze: {}",
+        state.global_energy.total_energy_weight
+    );
     println!("UnfreezeTos queue test passed!");
 }
 
@@ -380,14 +411,19 @@ fn test_delegate_resource() {
     assert_eq!(alice_energy.frozen_balance, 60 * COIN_VALUE);
     assert_eq!(alice_energy.delegated_frozen_balance, delegate_amount);
     assert_eq!(bob_energy.acquired_delegated_balance, delegate_amount);
-    assert!(state.delegations.contains_key(&(alice_pubkey.clone(), bob_pubkey.clone())));
+    assert!(state
+        .delegations
+        .contains_key(&(alice_pubkey.clone(), bob_pubkey.clone())));
 
     // Verify Bob's effective frozen includes delegation
     let bob_effective = bob_energy.frozen_balance + bob_energy.acquired_delegated_balance;
     assert_eq!(bob_effective, delegate_amount);
 
     println!("  Alice frozen: {}", alice_energy.frozen_balance);
-    println!("  Alice delegated: {}", alice_energy.delegated_frozen_balance);
+    println!(
+        "  Alice delegated: {}",
+        alice_energy.delegated_frozen_balance
+    );
     println!("  Bob acquired: {}", bob_energy.acquired_delegated_balance);
     println!("DelegateResource test passed!");
 }
@@ -428,11 +464,22 @@ fn test_undelegate_resource() {
     assert_eq!(alice_energy.frozen_balance, 100 * COIN_VALUE);
     assert_eq!(alice_energy.delegated_frozen_balance, 0);
     assert_eq!(bob_energy.acquired_delegated_balance, 0);
-    assert!(!state.delegations.contains_key(&(alice_pubkey.clone(), bob_pubkey.clone())));
+    assert!(!state
+        .delegations
+        .contains_key(&(alice_pubkey.clone(), bob_pubkey.clone())));
 
-    println!("  Alice frozen after undelegate: {}", alice_energy.frozen_balance);
-    println!("  Alice delegated after: {}", alice_energy.delegated_frozen_balance);
-    println!("  Bob acquired after: {}", bob_energy.acquired_delegated_balance);
+    println!(
+        "  Alice frozen after undelegate: {}",
+        alice_energy.frozen_balance
+    );
+    println!(
+        "  Alice delegated after: {}",
+        alice_energy.delegated_frozen_balance
+    );
+    println!(
+        "  Bob acquired after: {}",
+        bob_energy.acquired_delegated_balance
+    );
     println!("UndelegateResource test passed!");
 }
 
@@ -453,7 +500,9 @@ fn test_energy_limit_calculation() {
 
     let mut alice_energy = AccountEnergy::new();
     alice_energy.frozen_balance = alice_frozen;
-    state.energy_states.insert(alice_pubkey.clone(), alice_energy.clone());
+    state
+        .energy_states
+        .insert(alice_pubkey.clone(), alice_energy.clone());
 
     // Calculate Alice's energy limit
     let alice_limit = alice_energy.calculate_energy_limit(state.global_energy.total_energy_weight);
@@ -496,7 +545,10 @@ fn test_transaction_result_storage() {
     assert_eq!(stored.frozen_energy_used, 400);
     assert_eq!(stored.auto_burned_energy(), 0); // No auto-burn
 
-    println!("  Stored result: fee={}, energy_used={}", stored.fee, stored.energy_used);
+    println!(
+        "  Stored result: fee={}, energy_used={}",
+        stored.fee, stored.energy_used
+    );
     println!("  Auto-burned energy: {}", stored.auto_burned_energy());
     println!("TransactionResult storage test passed!");
 }
@@ -547,7 +599,11 @@ fn test_delegation_with_lock() {
         .unwrap();
 
     // Copy expire_time before any mutable borrows
-    let expire_time = state.delegations.get(&(alice_pubkey.clone(), bob_pubkey.clone())).unwrap().expire_time;
+    let expire_time = state
+        .delegations
+        .get(&(alice_pubkey.clone(), bob_pubkey.clone()))
+        .unwrap()
+        .expire_time;
 
     // Verify lock
     let is_locked = expire_time > state.current_time_ms;
@@ -609,7 +665,10 @@ fn test_energy_consumption_priority() {
         total_weight,
         now_ms,
     );
-    println!("  After consuming 500 energy: consumed={}, tos_to_burn={}", result.0, result.1);
+    println!(
+        "  After consuming 500 energy: consumed={}, tos_to_burn={}",
+        result.0, result.1
+    );
     assert_eq!(result.1, 0); // No TOS burn needed
     assert_eq!(energy.free_energy_usage, 500);
 
@@ -631,7 +690,10 @@ fn test_24h_linear_recovery() {
     assert!(energy.energy_usage > 0);
 
     let initial_available = energy.calculate_frozen_energy_available(now_ms, total_weight);
-    println!("  Initial available after consumption: {}", initial_available);
+    println!(
+        "  Initial available after consumption: {}",
+        initial_available
+    );
 
     // After 12 hours, should recover ~50%
     let after_12h = now_ms + 12 * 60 * 60 * 1000;

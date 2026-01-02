@@ -311,7 +311,8 @@ mod tests {
         assert_eq!(delegate_locked, restored);
 
         // Test DelegateResource without lock
-        let delegate_unlocked = EnergyPayload::delegate_resource(receiver.clone(), 500_000, false, 0);
+        let delegate_unlocked =
+            EnergyPayload::delegate_resource(receiver.clone(), 500_000, false, 0);
         let bytes = delegate_unlocked.to_bytes();
         let mut reader = crate::serializer::Reader::new(&bytes);
         let restored = EnergyPayload::read(&mut reader).unwrap();
