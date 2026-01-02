@@ -692,6 +692,14 @@ impl<'a> BlockchainVerificationState<'a, TestError> for EdgeCaseTestState {
     ) -> Result<(), TestError> {
         Err(TestError::Unsupported)
     }
+
+    async fn get_delegated_resource(
+        &mut self,
+        _from: &'a CompressedPublicKey,
+        _to: &'a CompressedPublicKey,
+    ) -> Result<Option<tos_common::account::DelegatedResource>, TestError> {
+        Ok(None)
+    }
 }
 
 // ============================================================================
@@ -787,13 +795,7 @@ impl<'a> BlockchainApplyState<'a, DummyContractProvider, TestError> for EdgeCase
         Ok(())
     }
 
-    async fn get_delegated_resource(
-        &mut self,
-        _from: &'a CompressedPublicKey,
-        _to: &'a CompressedPublicKey,
-    ) -> Result<Option<tos_common::account::DelegatedResource>, TestError> {
-        Ok(None)
-    }
+    // Note: get_delegated_resource is inherited from BlockchainVerificationState
 
     async fn set_delegated_resource(
         &mut self,

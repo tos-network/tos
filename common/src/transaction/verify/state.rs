@@ -140,6 +140,26 @@ pub trait BlockchainVerificationState<'a, E> {
     /// true if the account exists (has nonce > 0 or has any balance), false otherwise
     async fn is_account_registered(&self, account: &CompressedPublicKey) -> Result<bool, E>;
 
+    // ===== Stake 2.0 Delegation Methods (Verification Phase) =====
+
+    /// Get a specific delegation from one account to another
+    ///
+    /// This method is available in the verification phase to enable:
+    /// - Lock expiry checking for UndelegateResource
+    /// - Receiver registration validation for batch delegations
+    ///
+    /// # Arguments
+    /// * `from` - The delegator's public key
+    /// * `to` - The receiver's public key
+    ///
+    /// # Returns
+    /// The delegation if it exists, None otherwise
+    async fn get_delegated_resource(
+        &mut self,
+        from: &'a CompressedPublicKey,
+        to: &'a CompressedPublicKey,
+    ) -> Result<Option<crate::account::DelegatedResource>, E>;
+
     /// Set the contract module
     async fn set_contract_module(&mut self, hash: &Hash, module: &'a Module) -> Result<(), E>;
 
@@ -238,20 +258,7 @@ pub trait BlockchainApplyState<'a, P: ContractProvider, E>:
     ) -> Result<(), E>;
 
     // ===== Stake 2.0 Delegation Operations =====
-
-    /// Get a specific delegation from one account to another
-    ///
-    /// # Arguments
-    /// * `from` - The delegator's public key
-    /// * `to` - The receiver's public key
-    ///
-    /// # Returns
-    /// The delegation if it exists, None otherwise
-    async fn get_delegated_resource(
-        &mut self,
-        from: &'a CompressedPublicKey,
-        to: &'a CompressedPublicKey,
-    ) -> Result<Option<crate::account::DelegatedResource>, E>;
+    // Note: get_delegated_resource is inherited from BlockchainVerificationState
 
     /// Set or update a delegation from one account to another
     ///

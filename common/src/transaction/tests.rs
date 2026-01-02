@@ -1510,6 +1510,14 @@ impl<'a> BlockchainVerificationState<'a, TestError> for ChainState {
         // Note: crypto::PublicKey = CompressedPublicKey, so account can be used directly
         Ok(self.accounts.contains_key(account))
     }
+
+    async fn get_delegated_resource(
+        &mut self,
+        _from: &'a CompressedPublicKey,
+        _to: &'a CompressedPublicKey,
+    ) -> Result<Option<crate::account::DelegatedResource>, TestError> {
+        Ok(None)
+    }
 }
 
 impl FeeHelper for AccountStateImpl {

@@ -446,6 +446,14 @@ impl<'a> BlockchainVerificationState<'a, TestError> for TestChainState {
     ) -> Result<(), TestError> {
         Err(TestError::Unsupported)
     }
+
+    async fn get_delegated_resource(
+        &mut self,
+        _from: &'a CompressedPublicKey,
+        _to: &'a CompressedPublicKey,
+    ) -> Result<Option<tos_common::account::DelegatedResource>, TestError> {
+        Ok(None)
+    }
 }
 
 #[async_trait]
@@ -537,13 +545,7 @@ impl<'a> BlockchainApplyState<'a, DummyContractProvider, TestError> for TestChai
         Ok(())
     }
 
-    async fn get_delegated_resource(
-        &mut self,
-        _from: &'a PublicKey,
-        _to: &'a PublicKey,
-    ) -> Result<Option<tos_common::account::DelegatedResource>, TestError> {
-        Ok(None)
-    }
+    // Note: get_delegated_resource is inherited from BlockchainVerificationState
 
     async fn set_delegated_resource(
         &mut self,

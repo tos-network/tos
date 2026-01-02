@@ -646,4 +646,17 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Mempoo
         // Account not registered
         Ok(false)
     }
+
+    /// Get a specific delegation from one account to another
+    ///
+    /// This enables lock expiry checking and receiver validation
+    /// in the verification phase.
+    async fn get_delegated_resource(
+        &mut self,
+        from: &'a CompressedPublicKey,
+        to: &'a CompressedPublicKey,
+    ) -> Result<Option<tos_common::account::DelegatedResource>, BlockchainError> {
+        // Delegate to storage provider
+        self.storage.get_delegated_resource(from, to).await
+    }
 }

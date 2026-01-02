@@ -434,6 +434,14 @@ impl<'a> tos_common::transaction::verify::BlockchainVerificationState<'a, ()>
     ) -> Result<(), ()> {
         Err(())
     }
+
+    async fn get_delegated_resource(
+        &mut self,
+        _from: &'a CompressedPublicKey,
+        _to: &'a CompressedPublicKey,
+    ) -> Result<Option<tos_common::account::DelegatedResource>, ()> {
+        Ok(None)
+    }
 }
 
 // -------------------------------------------------------------------------------------------------

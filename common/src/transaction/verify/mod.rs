@@ -506,11 +506,39 @@ impl Transaction {
                         )));
                     }
                 }
-                EnergyPayload::UndelegateResource { amount, .. } => {
+                EnergyPayload::UndelegateResource { receiver, amount } => {
                     if *amount == 0 {
                         return Err(VerificationError::AnyError(anyhow!(
                             "Undelegate amount must be greater than zero"
                         )));
+                    }
+                    // Check whole-TOS amount (must be multiple of COIN_VALUE)
+                    // This prevents stranding fractional balances that can't be re-delegated
+                    if *amount % COIN_VALUE != 0 {
+                        return Err(VerificationError::AnyError(anyhow!(
+                            "Undelegate amount must be a whole number of TOS"
+                        )));
+                    }
+
+                    // Check delegation exists and lock has expired
+                    let sender = self.get_source();
+                    if let Some(delegation) = state
+                        .get_delegated_resource(sender, receiver)
+                        .await
+                        .map_err(VerificationError::State)?
+                    {
+                        // Check lock has expired (use verification timestamp)
+                        let now_ms = state.get_verification_timestamp() * 1000; // Convert to ms
+                        if delegation.expire_time > now_ms {
+                            return Err(VerificationError::DelegationStillLocked);
+                        }
+
+                        // Check sufficient delegated balance
+                        if delegation.frozen_balance < *amount {
+                            return Err(VerificationError::InsufficientDelegatedBalance);
+                        }
+                    } else {
+                        return Err(VerificationError::DelegationNotFound);
                     }
                 }
                 // === Batch Operations (TOS Innovation) ===
@@ -928,8 +956,6 @@ impl Transaction {
                     EnergyPayload::ActivateAccounts { accounts } => {
                         // ActivateAccounts spends 0.1 TOS per NEW account only (idempotent)
                         // Count only unregistered accounts to match apply phase logic
-                        // BUG-032/BUG-033 FIX: Also create balance entries for unregistered
-                        // accounts so subsequent txs in the same block can see them
                         let mut unregistered_count = 0u64;
                         for account in accounts {
                             let is_registered = state
@@ -937,15 +963,6 @@ impl Transaction {
                                 .await
                                 .map_err(VerificationError::State)?;
                             if !is_registered {
-                                // Create balance entry so this account is visible to
-                                // subsequent transactions in the same block
-                                let _ = state
-                                    .get_receiver_balance(
-                                        Cow::Borrowed(account),
-                                        Cow::Borrowed(&TOS_ASSET),
-                                    )
-                                    .await
-                                    .map_err(VerificationError::State)?;
                                 unregistered_count += 1;
                             }
                         }
@@ -963,8 +980,6 @@ impl Transaction {
                     EnergyPayload::ActivateAndDelegate { items } => {
                         // ActivateAndDelegate spends 0.1 TOS per NEW account only (idempotent)
                         // Count only unregistered accounts to match apply phase logic
-                        // BUG-032/BUG-033 FIX: Also create balance entries for unregistered
-                        // accounts so subsequent txs in the same block can see them
                         let mut unregistered_count = 0u64;
                         for item in items {
                             let is_registered = state
@@ -972,15 +987,6 @@ impl Transaction {
                                 .await
                                 .map_err(VerificationError::State)?;
                             if !is_registered {
-                                // Create balance entry so this account is visible to
-                                // subsequent transactions in the same block
-                                let _ = state
-                                    .get_receiver_balance(
-                                        Cow::Borrowed(&item.account),
-                                        Cow::Borrowed(&TOS_ASSET),
-                                    )
-                                    .await
-                                    .map_err(VerificationError::State)?;
                                 unregistered_count += 1;
                             }
                         }
@@ -1907,9 +1913,261 @@ impl Transaction {
                     .verify()
                     .map_err(|err| VerificationError::ModuleError(format!("{err:#}")))?;
             }
-            TransactionType::Energy(_) => {
-                // Energy transactions don't require special verification beyond basic checks
-            }
+            TransactionType::Energy(payload) => match payload {
+                EnergyPayload::FreezeTos { amount } => {
+                    if *amount == 0 {
+                        return Err(VerificationError::AnyError(anyhow!(
+                            "Freeze amount must be greater than zero"
+                        )));
+                    }
+
+                    if *amount % crate::config::COIN_VALUE != 0 {
+                        return Err(VerificationError::AnyError(anyhow!(
+                            "Freeze amount must be a whole number of TOS"
+                        )));
+                    }
+
+                    if *amount < crate::config::MIN_FREEZE_TOS_AMOUNT {
+                        return Err(VerificationError::AnyError(anyhow!(
+                            "Freeze amount must be at least 1 TOS"
+                        )));
+                    }
+                }
+                EnergyPayload::UnfreezeTos { amount } => {
+                    if *amount == 0 {
+                        return Err(VerificationError::AnyError(anyhow!(
+                            "Unfreeze amount must be greater than zero"
+                        )));
+                    }
+
+                    if *amount % crate::config::COIN_VALUE != 0 {
+                        return Err(VerificationError::AnyError(anyhow!(
+                            "Unfreeze amount must be a whole number of TOS"
+                        )));
+                    }
+
+                    if *amount < crate::config::MIN_UNFREEZE_TOS_AMOUNT {
+                        return Err(VerificationError::AnyError(anyhow!(
+                            "Unfreeze amount must be at least 1 TOS"
+                        )));
+                    }
+                }
+                EnergyPayload::WithdrawExpireUnfreeze | EnergyPayload::CancelAllUnfreeze => {
+                    // No additional validation needed
+                }
+                EnergyPayload::DelegateResource {
+                    receiver,
+                    amount,
+                    lock,
+                    lock_period,
+                } => {
+                    // Check self-delegation
+                    if receiver == self.get_source() {
+                        return Err(VerificationError::AnyError(anyhow!(
+                            "Cannot delegate to self"
+                        )));
+                    }
+                    // Check minimum delegation amount (1 TOS)
+                    if *amount < MIN_DELEGATION_AMOUNT {
+                        return Err(VerificationError::AnyError(anyhow!(
+                            "Delegation amount must be at least 1 TOS ({} atomic units)",
+                            MIN_DELEGATION_AMOUNT
+                        )));
+                    }
+                    // Check whole-TOS amount (must be multiple of COIN_VALUE)
+                    if *amount % COIN_VALUE != 0 {
+                        return Err(VerificationError::AnyError(anyhow!(
+                            "Delegation amount must be a whole number of TOS"
+                        )));
+                    }
+                    if *lock_period > crate::config::MAX_DELEGATE_LOCK_DAYS {
+                        return Err(VerificationError::AnyError(anyhow!(
+                            "Lock period cannot exceed 365 days"
+                        )));
+                    }
+                    // Validate lock/lock_period consistency
+                    if *lock && *lock_period == 0 {
+                        return Err(VerificationError::AnyError(anyhow!(
+                            "lock=true requires lock_period > 0"
+                        )));
+                    }
+                    if !*lock && *lock_period > 0 {
+                        return Err(VerificationError::AnyError(anyhow!(
+                            "lock=false should have lock_period=0 (non-zero value would be ignored)"
+                        )));
+                    }
+                }
+                EnergyPayload::UndelegateResource { receiver, amount } => {
+                    if *amount == 0 {
+                        return Err(VerificationError::AnyError(anyhow!(
+                            "Undelegate amount must be greater than zero"
+                        )));
+                    }
+                    // Check whole-TOS amount (must be multiple of COIN_VALUE)
+                    // This prevents stranding fractional balances that can't be re-delegated
+                    if *amount % COIN_VALUE != 0 {
+                        return Err(VerificationError::AnyError(anyhow!(
+                            "Undelegate amount must be a whole number of TOS"
+                        )));
+                    }
+
+                    // Check delegation exists and lock has expired
+                    let sender = self.get_source();
+                    if let Some(delegation) = state
+                        .get_delegated_resource(sender, receiver)
+                        .await
+                        .map_err(VerificationError::State)?
+                    {
+                        // Check lock has expired (use verification timestamp)
+                        let now_ms = state.get_verification_timestamp() * 1000; // Convert to ms
+                        if delegation.expire_time > now_ms {
+                            return Err(VerificationError::DelegationStillLocked);
+                        }
+
+                        // Check sufficient delegated balance
+                        if delegation.frozen_balance < *amount {
+                            return Err(VerificationError::InsufficientDelegatedBalance);
+                        }
+                    } else {
+                        return Err(VerificationError::DelegationNotFound);
+                    }
+                }
+                // === Batch Operations (TOS Innovation) ===
+                EnergyPayload::ActivateAccounts { accounts } => {
+                    // Validate batch limits
+                    if let Err(e) = payload.validate_batch_limits() {
+                        return Err(VerificationError::AnyError(anyhow!("{}", e)));
+                    }
+                    // Check for duplicates
+                    let mut seen = std::collections::HashSet::new();
+                    for account in accounts {
+                        if !seen.insert(account) {
+                            return Err(VerificationError::AnyError(anyhow!(
+                                "Duplicate account in ActivateAccounts"
+                            )));
+                        }
+                        // Cannot activate self
+                        if account == self.get_source() {
+                            return Err(VerificationError::AnyError(anyhow!(
+                                "Cannot activate self"
+                            )));
+                        }
+                    }
+                }
+                EnergyPayload::BatchDelegateResource { delegations } => {
+                    // Validate batch limits
+                    if let Err(e) = payload.validate_batch_limits() {
+                        return Err(VerificationError::AnyError(anyhow!("{}", e)));
+                    }
+                    // Reject duplicate receivers in batch delegation
+                    let mut seen_receivers = std::collections::HashSet::new();
+                    for item in delegations {
+                        if !seen_receivers.insert(&item.receiver) {
+                            return Err(VerificationError::AnyError(anyhow!(
+                                "Duplicate receiver in BatchDelegateResource"
+                            )));
+                        }
+                        // Check self-delegation
+                        if &item.receiver == self.get_source() {
+                            return Err(VerificationError::AnyError(anyhow!(
+                                "Cannot delegate to self"
+                            )));
+                        }
+                        // Verify receiver account exists before allowing delegation
+                        // (Design constraint: receivers activated in same block aren't visible)
+                        let is_registered = state
+                            .is_account_registered(&item.receiver)
+                            .await
+                            .map_err(VerificationError::State)?;
+                        if !is_registered {
+                            return Err(VerificationError::AnyError(anyhow!(
+                                "Receiver account {:?} is not registered",
+                                &item.receiver
+                            )));
+                        }
+                        // Check minimum delegation amount
+                        if item.amount < MIN_DELEGATION_AMOUNT {
+                            return Err(VerificationError::AnyError(anyhow!(
+                                "Delegation amount must be at least 1 TOS"
+                            )));
+                        }
+                        // Check whole-TOS amount
+                        if item.amount % COIN_VALUE != 0 {
+                            return Err(VerificationError::AnyError(anyhow!(
+                                "Delegation amount must be a whole number of TOS"
+                            )));
+                        }
+                        // Check lock period
+                        if item.lock_period > crate::config::MAX_DELEGATE_LOCK_DAYS {
+                            return Err(VerificationError::AnyError(anyhow!(
+                                "Lock period cannot exceed 365 days"
+                            )));
+                        }
+                        // Validate lock/lock_period consistency
+                        if item.lock && item.lock_period == 0 {
+                            return Err(VerificationError::AnyError(anyhow!(
+                                "lock=true requires lock_period > 0"
+                            )));
+                        }
+                        if !item.lock && item.lock_period > 0 {
+                            return Err(VerificationError::AnyError(anyhow!(
+                                "lock=false should have lock_period=0 (non-zero value would be ignored)"
+                            )));
+                        }
+                    }
+                }
+                EnergyPayload::ActivateAndDelegate { items } => {
+                    // Validate batch limits
+                    if let Err(e) = payload.validate_batch_limits() {
+                        return Err(VerificationError::AnyError(anyhow!("{}", e)));
+                    }
+                    // Check for duplicates
+                    let mut seen = std::collections::HashSet::new();
+                    for item in items {
+                        if !seen.insert(&item.account) {
+                            return Err(VerificationError::AnyError(anyhow!(
+                                "Duplicate account in ActivateAndDelegate"
+                            )));
+                        }
+                        // Cannot activate/delegate to self
+                        if &item.account == self.get_source() {
+                            return Err(VerificationError::AnyError(anyhow!(
+                                "Cannot activate or delegate to self"
+                            )));
+                        }
+                        // If delegating, check amount requirements
+                        if item.delegate_amount > 0 {
+                            if item.delegate_amount < MIN_DELEGATION_AMOUNT {
+                                return Err(VerificationError::AnyError(anyhow!(
+                                    "Delegation amount must be at least 1 TOS"
+                                )));
+                            }
+                            if item.delegate_amount % COIN_VALUE != 0 {
+                                return Err(VerificationError::AnyError(anyhow!(
+                                    "Delegation amount must be a whole number of TOS"
+                                )));
+                            }
+                            // Validate lock/lock_period consistency (only when delegating)
+                            if item.lock && item.lock_period == 0 {
+                                return Err(VerificationError::AnyError(anyhow!(
+                                    "lock=true requires lock_period > 0"
+                                )));
+                            }
+                            if !item.lock && item.lock_period > 0 {
+                                return Err(VerificationError::AnyError(anyhow!(
+                                    "lock=false should have lock_period=0 (non-zero value would be ignored)"
+                                )));
+                            }
+                        }
+                        // Check lock period
+                        if item.lock_period > crate::config::MAX_DELEGATE_LOCK_DAYS {
+                            return Err(VerificationError::AnyError(anyhow!(
+                                "Lock period cannot exceed 365 days"
+                            )));
+                        }
+                    }
+                }
+            },
             TransactionType::AIMining(_) => {
                 // AI Mining transactions don't require special verification beyond basic checks for now
             }
@@ -2397,8 +2655,6 @@ impl Transaction {
                     EnergyPayload::ActivateAccounts { accounts } => {
                         // ActivateAccounts spends 0.1 TOS per NEW account only (idempotent)
                         // Count only unregistered accounts to match apply phase logic
-                        // BUG-032/BUG-033 FIX: Also create balance entries for unregistered
-                        // accounts so subsequent txs in the same block can see them
                         let mut unregistered_count = 0u64;
                         for account in accounts {
                             let is_registered = state
@@ -2406,15 +2662,6 @@ impl Transaction {
                                 .await
                                 .map_err(VerificationError::State)?;
                             if !is_registered {
-                                // Create balance entry so this account is visible to
-                                // subsequent transactions in the same block
-                                let _ = state
-                                    .get_receiver_balance(
-                                        Cow::Borrowed(account),
-                                        Cow::Borrowed(&TOS_ASSET),
-                                    )
-                                    .await
-                                    .map_err(VerificationError::State)?;
                                 unregistered_count += 1;
                             }
                         }
@@ -2432,8 +2679,6 @@ impl Transaction {
                     EnergyPayload::ActivateAndDelegate { items } => {
                         // ActivateAndDelegate spends 0.1 TOS per NEW account only (idempotent)
                         // Count only unregistered accounts to match apply phase logic
-                        // BUG-032/BUG-033 FIX: Also create balance entries for unregistered
-                        // accounts so subsequent txs in the same block can see them
                         let mut unregistered_count = 0u64;
                         for item in items {
                             let is_registered = state
@@ -2441,15 +2686,6 @@ impl Transaction {
                                 .await
                                 .map_err(VerificationError::State)?;
                             if !is_registered {
-                                // Create balance entry so this account is visible to
-                                // subsequent transactions in the same block
-                                let _ = state
-                                    .get_receiver_balance(
-                                        Cow::Borrowed(&item.account),
-                                        Cow::Borrowed(&TOS_ASSET),
-                                    )
-                                    .await
-                                    .map_err(VerificationError::State)?;
                                 unregistered_count += 1;
                             }
                         }
@@ -2833,8 +3069,6 @@ impl Transaction {
                     EnergyPayload::ActivateAccounts { accounts } => {
                         // ActivateAccounts spends 0.1 TOS per NEW account only (idempotent)
                         // Count only unregistered accounts to match apply phase logic
-                        // BUG-032/BUG-033 FIX: Also create balance entries for unregistered
-                        // accounts so subsequent txs in the same block can see them
                         let mut unregistered_count = 0u64;
                         for account in accounts {
                             let is_registered = state
@@ -2842,15 +3076,6 @@ impl Transaction {
                                 .await
                                 .map_err(VerificationError::State)?;
                             if !is_registered {
-                                // Create balance entry so this account is visible to
-                                // subsequent transactions in the same block
-                                let _ = state
-                                    .get_receiver_balance(
-                                        Cow::Borrowed(account),
-                                        Cow::Borrowed(&TOS_ASSET),
-                                    )
-                                    .await
-                                    .map_err(VerificationError::State)?;
                                 unregistered_count += 1;
                             }
                         }
@@ -2868,8 +3093,6 @@ impl Transaction {
                     EnergyPayload::ActivateAndDelegate { items } => {
                         // ActivateAndDelegate spends 0.1 TOS per NEW account only (idempotent)
                         // Count only unregistered accounts to match apply phase logic
-                        // BUG-032/BUG-033 FIX: Also create balance entries for unregistered
-                        // accounts so subsequent txs in the same block can see them
                         let mut unregistered_count = 0u64;
                         for item in items {
                             let is_registered = state
@@ -2877,15 +3100,6 @@ impl Transaction {
                                 .await
                                 .map_err(VerificationError::State)?;
                             if !is_registered {
-                                // Create balance entry so this account is visible to
-                                // subsequent transactions in the same block
-                                let _ = state
-                                    .get_receiver_balance(
-                                        Cow::Borrowed(&item.account),
-                                        Cow::Borrowed(&TOS_ASSET),
-                                    )
-                                    .await
-                                    .map_err(VerificationError::State)?;
                                 unregistered_count += 1;
                             }
                         }
@@ -4979,8 +5193,6 @@ impl Transaction {
                     EnergyPayload::ActivateAccounts { accounts } => {
                         // ActivateAccounts spends 0.1 TOS per NEW account only (idempotent)
                         // Count only unregistered accounts to match apply phase logic
-                        // BUG-032/BUG-033 FIX: Also create balance entries for unregistered
-                        // accounts so subsequent txs in the same block can see them
                         let mut unregistered_count = 0u64;
                         for account in accounts {
                             let is_registered = state
@@ -4988,15 +5200,6 @@ impl Transaction {
                                 .await
                                 .map_err(VerificationError::State)?;
                             if !is_registered {
-                                // Create balance entry so this account is visible to
-                                // subsequent transactions in the same block
-                                let _ = state
-                                    .get_receiver_balance(
-                                        Cow::Borrowed(account),
-                                        Cow::Borrowed(&TOS_ASSET),
-                                    )
-                                    .await
-                                    .map_err(VerificationError::State)?;
                                 unregistered_count += 1;
                             }
                         }
@@ -5014,8 +5217,6 @@ impl Transaction {
                     EnergyPayload::ActivateAndDelegate { items } => {
                         // ActivateAndDelegate spends 0.1 TOS per NEW account only (idempotent)
                         // Count only unregistered accounts to match apply phase logic
-                        // BUG-032/BUG-033 FIX: Also create balance entries for unregistered
-                        // accounts so subsequent txs in the same block can see them
                         let mut unregistered_count = 0u64;
                         for item in items {
                             let is_registered = state
@@ -5023,15 +5224,6 @@ impl Transaction {
                                 .await
                                 .map_err(VerificationError::State)?;
                             if !is_registered {
-                                // Create balance entry so this account is visible to
-                                // subsequent transactions in the same block
-                                let _ = state
-                                    .get_receiver_balance(
-                                        Cow::Borrowed(&item.account),
-                                        Cow::Borrowed(&TOS_ASSET),
-                                    )
-                                    .await
-                                    .map_err(VerificationError::State)?;
                                 unregistered_count += 1;
                             }
                         }

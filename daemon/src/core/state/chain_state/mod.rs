@@ -1181,4 +1181,13 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for ChainS
         // Account not registered
         Ok(false)
     }
+
+    /// Get a specific delegation from one account to another
+    async fn get_delegated_resource(
+        &mut self,
+        from: &'a CompressedPublicKey,
+        to: &'a CompressedPublicKey,
+    ) -> Result<Option<tos_common::account::DelegatedResource>, BlockchainError> {
+        self.storage.get_delegated_resource(from, to).await
+    }
 }

@@ -228,6 +228,15 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError>
         // Delegate to inner ChainState implementation
         self.inner.is_account_registered(account).await
     }
+
+    /// Get a specific delegation from one account to another
+    async fn get_delegated_resource(
+        &mut self,
+        from: &'a CompressedPublicKey,
+        to: &'a CompressedPublicKey,
+    ) -> Result<Option<tos_common::account::DelegatedResource>, BlockchainError> {
+        self.inner.get_delegated_resource(from, to).await
+    }
 }
 
 #[async_trait]
@@ -424,13 +433,7 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for Applicable
         self.inner.storage.set_global_energy_state(&state).await
     }
 
-    async fn get_delegated_resource(
-        &mut self,
-        from: &'a CompressedPublicKey,
-        to: &'a CompressedPublicKey,
-    ) -> Result<Option<tos_common::account::DelegatedResource>, BlockchainError> {
-        self.inner.storage.get_delegated_resource(from, to).await
-    }
+    // Note: get_delegated_resource is inherited from BlockchainVerificationState
 
     async fn set_delegated_resource(
         &mut self,
