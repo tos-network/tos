@@ -22,6 +22,8 @@ mod tests {
         },
         crypto::KeyPair,
         serializer::Serializer,
+        transaction::TransactionResult,
+        utils::energy_fee::EnergyResourceManager,
     };
 
     // Helper constants
@@ -676,8 +678,8 @@ mod tests {
 
         #[test]
         fn test_8_1_basic_delegation() {
-            let from = KeyPair::new().get_public_key().compress();
-            let to = KeyPair::new().get_public_key().compress();
+            let _from = KeyPair::new().get_public_key().compress();
+            let _to = KeyPair::new().get_public_key().compress();
 
             let mut from_energy = AccountEnergy::new();
             from_energy.frozen_balance = 10_000 * COIN_VALUE;
@@ -1169,7 +1171,7 @@ mod tests {
 
             let initial_frozen = energy.frozen_balance;
 
-            let (withdrawn, cancelled) = energy.cancel_all_unfreeze(0);
+            let (_withdrawn, cancelled) = energy.cancel_all_unfreeze(0);
 
             // MUST verify frozen increased by cancelled amount
             assert_eq!(cancelled, 300 * COIN_VALUE);
@@ -1851,6 +1853,293 @@ mod tests {
 
             // Total energy moved, not created
             assert_eq!(alice_limit_after + bob_limit, alice_limit_before);
+        }
+    }
+
+    // ============================================================================
+    // SCENARIO 12: TRANSACTION RESULT (ENERGY CONSUMPTION TRACKING)
+    // ============================================================================
+
+    /// Scenario 12: TransactionResult - Detailed energy consumption breakdown
+    ///
+    /// Tests the TransactionResult structure which tracks:
+    /// - fee: Actual TOS burned (0 if covered by energy)
+    /// - energy_used: Total energy consumed
+    /// - free_energy_used: Energy from free quota
+    /// - frozen_energy_used: Energy from frozen balance
+    mod scenario_12_transaction_result {
+        use super::*;
+
+        /// Scenario 12.1: Full Coverage by Free Quota
+        ///
+        /// Input: required_energy = 1,000, free_available = 1,500, frozen_available = 5,000
+        /// Expected: All energy from free quota, no TOS burned
+        #[test]
+        fn test_12_1_full_coverage_by_free_quota() {
+            let mut account = AccountEnergy::new();
+
+            // Setup: Account has frozen TOS for energy
+            // Need enough frozen to have 5,000+ frozen energy available
+            // Energy = (frozen / total) * 18.4B
+            // For 5,000 energy with 10M total weight: frozen = 5000 * 10M / 18.4B ≈ 2.72 TOS
+            // Use 100 TOS for safety
+            account.frozen_balance = 100 * COIN_VALUE;
+
+            let total_weight = 10_000_000 * COIN_VALUE;
+            let now_ms = 1_000_000u64;
+
+            // Verify available energies
+            let free_available = account.calculate_free_energy_available(now_ms);
+            let frozen_available = account.calculate_frozen_energy_available(now_ms, total_weight);
+
+            // Free quota should be 1,500 (FREE_ENERGY_QUOTA)
+            assert_eq!(free_available, FREE_ENERGY_QUOTA);
+            assert!(
+                frozen_available >= 5_000,
+                "frozen_available = {}",
+                frozen_available
+            );
+
+            // Consume 1,000 energy (less than free quota)
+            let result = EnergyResourceManager::consume_transaction_energy_detailed(
+                &mut account,
+                1_000,
+                total_weight,
+                now_ms,
+            );
+
+            // Verify TransactionResult
+            assert_eq!(result.fee, 0, "No TOS should be burned");
+            assert_eq!(result.energy_used, 1_000);
+            assert_eq!(result.free_energy_used, 1_000);
+            assert_eq!(result.frozen_energy_used, 0);
+
+            // Verify account state updated
+            assert_eq!(account.free_energy_usage, 1_000);
+            assert_eq!(account.energy_usage, 0); // Frozen energy not touched
+        }
+
+        /// Scenario 12.2: Mixed Coverage (Free + Frozen)
+        ///
+        /// Input: required_energy = 5,000, free_available = 1,500, frozen_available = 10,000
+        /// Expected: 1,500 from free, 3,500 from frozen, no TOS burned
+        #[test]
+        fn test_12_2_mixed_coverage_free_plus_frozen() {
+            let mut account = AccountEnergy::new();
+
+            // Setup: Need enough frozen for 10,000+ frozen energy
+            // For 10,000 energy with 10M total: frozen ≈ 5.43 TOS
+            // Use 1,000 TOS for ample margin
+            account.frozen_balance = 1_000 * COIN_VALUE;
+
+            let total_weight = 10_000_000 * COIN_VALUE;
+            let now_ms = 1_000_000u64;
+
+            // Verify available energies
+            let free_available = account.calculate_free_energy_available(now_ms);
+            let frozen_available = account.calculate_frozen_energy_available(now_ms, total_weight);
+
+            assert_eq!(free_available, FREE_ENERGY_QUOTA); // 1,500
+            assert!(
+                frozen_available >= 10_000,
+                "frozen_available = {}",
+                frozen_available
+            );
+
+            // Consume 5,000 energy
+            let result = EnergyResourceManager::consume_transaction_energy_detailed(
+                &mut account,
+                5_000,
+                total_weight,
+                now_ms,
+            );
+
+            // Verify TransactionResult
+            assert_eq!(result.fee, 0, "No TOS should be burned");
+            assert_eq!(result.energy_used, 5_000);
+            assert_eq!(result.free_energy_used, FREE_ENERGY_QUOTA); // 1,500
+            assert_eq!(result.frozen_energy_used, 5_000 - FREE_ENERGY_QUOTA); // 3,500
+
+            // Verify account state
+            assert_eq!(account.free_energy_usage, FREE_ENERGY_QUOTA);
+            assert_eq!(account.energy_usage, 5_000 - FREE_ENERGY_QUOTA);
+        }
+
+        /// Scenario 12.3: Full Coverage with TOS Burn
+        ///
+        /// Input: required_energy = 5,000, free_available = 1,000, frozen_available = 2,000
+        /// Expected: 1,000 free + 2,000 frozen + 2,000 burned (200,000 atomic TOS)
+        #[test]
+        fn test_12_3_full_coverage_with_tos_burn() {
+            let mut account = AccountEnergy::new();
+
+            // Setup: Partially used free quota (500 used, 1,000 remaining)
+            account.free_energy_usage = 500;
+            account.latest_free_consume_time = 1_000_000u64;
+
+            // Setup: Limited frozen energy
+            // For exactly 2,000 frozen energy with 10M total:
+            // frozen = 2000 * 10M * COIN_VALUE / 18.4B = ~1.087 TOS
+            // But also need to account for energy recovery formula
+            // Use minimal amount that gives exactly 2,000 after calculation
+            // Energy limit = (frozen/total) * 18.4B
+            // 2000 = (frozen / 10M) * 18.4B
+            // frozen = 2000 * 10M / 18.4B = 1.087 TOS ≈ 1.087e8 atomic
+            // Round up to ensure we get at least 2,000
+            let frozen_for_2000_energy = ((2_000u128 * 10_000_000u128 * COIN_VALUE as u128)
+                / TOTAL_ENERGY_LIMIT as u128) as u64
+                + 1;
+            account.frozen_balance = frozen_for_2000_energy;
+
+            let total_weight = 10_000_000 * COIN_VALUE;
+            let now_ms = 1_000_000u64;
+
+            // Verify setup - should have limited energy
+            let free_available = account.calculate_free_energy_available(now_ms);
+            let frozen_available = account.calculate_frozen_energy_available(now_ms, total_weight);
+
+            assert_eq!(free_available, 1_000, "Free should be 1,500 - 500 = 1,000");
+            assert!(
+                frozen_available >= 2_000 && frozen_available < 2_100,
+                "frozen_available = {} (expected ~2,000)",
+                frozen_available
+            );
+
+            // Consume 5,000 energy
+            let result = EnergyResourceManager::consume_transaction_energy_detailed(
+                &mut account,
+                5_000,
+                total_weight,
+                now_ms,
+            );
+
+            // Calculate expected values
+            let free_used = 1_000; // All remaining free quota
+            let frozen_used = frozen_available.min(5_000 - free_used);
+            let burned_energy = 5_000 - free_used - frozen_used;
+            let expected_fee = burned_energy * TOS_PER_ENERGY;
+
+            // Verify TransactionResult
+            assert_eq!(result.energy_used, 5_000);
+            assert_eq!(result.free_energy_used, free_used);
+            assert_eq!(result.frozen_energy_used, frozen_used);
+            assert_eq!(result.fee, expected_fee);
+
+            // With ~2000 frozen energy:
+            // 5000 - 1000(free) - 2000(frozen) = 2000 energy to burn
+            // 2000 * 100 = 200,000 atomic TOS
+            assert!(result.fee > 0, "Some TOS should be burned");
+            assert!(
+                result.fee >= 190_000 && result.fee <= 210_000,
+                "fee = {} (expected ~200,000)",
+                result.fee
+            );
+        }
+
+        /// Scenario 12.4: Edge case - Zero energy required
+        #[test]
+        fn test_12_4_zero_energy_required() {
+            let mut account = AccountEnergy::new();
+            account.frozen_balance = 100 * COIN_VALUE;
+
+            let total_weight = 10_000_000 * COIN_VALUE;
+            let now_ms = 1_000_000u64;
+
+            let result = EnergyResourceManager::consume_transaction_energy_detailed(
+                &mut account,
+                0,
+                total_weight,
+                now_ms,
+            );
+
+            assert_eq!(result.fee, 0);
+            assert_eq!(result.energy_used, 0);
+            assert_eq!(result.free_energy_used, 0);
+            assert_eq!(result.frozen_energy_used, 0);
+        }
+
+        /// Scenario 12.5: Edge case - Only TOS burn (no energy available)
+        #[test]
+        fn test_12_5_only_tos_burn() {
+            let mut account = AccountEnergy::new();
+            // Exhaust free quota
+            account.free_energy_usage = FREE_ENERGY_QUOTA;
+            account.latest_free_consume_time = 1_000_000u64;
+            // No frozen balance
+            account.frozen_balance = 0;
+
+            let total_weight = 10_000_000 * COIN_VALUE;
+            let now_ms = 1_000_000u64;
+
+            // Verify no energy available
+            let free_available = account.calculate_free_energy_available(now_ms);
+            let frozen_available = account.calculate_frozen_energy_available(now_ms, total_weight);
+            assert_eq!(free_available, 0);
+            assert_eq!(frozen_available, 0);
+
+            // Consume 1,000 energy - all must be burned
+            let result = EnergyResourceManager::consume_transaction_energy_detailed(
+                &mut account,
+                1_000,
+                total_weight,
+                now_ms,
+            );
+
+            assert_eq!(result.energy_used, 1_000);
+            assert_eq!(result.free_energy_used, 0);
+            assert_eq!(result.frozen_energy_used, 0);
+            assert_eq!(result.fee, 1_000 * TOS_PER_ENERGY); // 100,000 atomic TOS
+        }
+
+        /// Scenario 12.6: TransactionResult helper methods
+        #[test]
+        fn test_12_6_transaction_result_helpers() {
+            let result = TransactionResult {
+                fee: 100_000,
+                energy_used: 3_000,
+                free_energy_used: 1_000,
+                frozen_energy_used: 1_000,
+            };
+
+            // total_energy_from_stake = free + frozen
+            assert_eq!(result.total_energy_from_stake(), 2_000);
+        }
+
+        /// Scenario 12.7: Verify consumption order is correct
+        #[test]
+        fn test_12_7_consumption_priority_order() {
+            // Test that free quota is always consumed before frozen energy
+            let mut account = AccountEnergy::new();
+            account.frozen_balance = 1_000 * COIN_VALUE;
+
+            let total_weight = 10_000_000 * COIN_VALUE;
+            let now_ms = 1_000_000u64;
+
+            // Consume exactly free quota amount
+            let result = EnergyResourceManager::consume_transaction_energy_detailed(
+                &mut account,
+                FREE_ENERGY_QUOTA,
+                total_weight,
+                now_ms,
+            );
+
+            // All should come from free quota
+            assert_eq!(result.free_energy_used, FREE_ENERGY_QUOTA);
+            assert_eq!(result.frozen_energy_used, 0);
+            assert_eq!(result.fee, 0);
+
+            // Now consume more - should use frozen
+            let result2 = EnergyResourceManager::consume_transaction_energy_detailed(
+                &mut account,
+                1_000,
+                total_weight,
+                now_ms,
+            );
+
+            // Free quota exhausted, should use frozen
+            assert_eq!(result2.free_energy_used, 0);
+            assert_eq!(result2.frozen_energy_used, 1_000);
+            assert_eq!(result2.fee, 0);
         }
     }
 }
