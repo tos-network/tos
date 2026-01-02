@@ -1119,8 +1119,11 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for ChainS
     /// Check if an account is registered (exists) on the blockchain
     ///
     /// An account is considered registered if it has ever had a nonce
-    /// (i.e., has sent transactions before) or has any balance.
+    /// (i.e., has sent transactions before) or has any balance record (even zero).
     /// This is used for TOS-Only account creation fee calculation.
+    ///
+    /// Note: Zero-balance accounts created by ActivateAccounts are considered
+    /// registered because they have a balance record in the receiver cache.
     async fn is_account_registered(
         &self,
         account: &CompressedPublicKey,
@@ -1134,12 +1137,11 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for ChainS
             return Ok(true);
         }
 
-        // Check if account has any balance in receiver cache (any asset)
+        // Check if account has any balance record in receiver cache (any asset)
+        // Note: We check for record existence, not balance > 0, because
+        // ActivateAccounts creates zero-balance accounts that should be registered
         if let Some(balances) = self.receiver_balances.get(&Cow::Borrowed(account)) {
-            if balances
-                .values()
-                .any(|versioned_balance| versioned_balance.get_balance() > 0)
-            {
+            if !balances.is_empty() {
                 return Ok(true);
             }
         }
@@ -1152,7 +1154,7 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for ChainS
             return Ok(true);
         }
 
-        // Check storage for any asset balance at current topoheight
+        // Check storage for any asset balance record at current topoheight
         // Collect into Vec to avoid holding iterator across await (Send requirement)
         let assets: Vec<_> = self.storage.get_assets_for(account).await?.collect();
         for asset in assets {
@@ -1161,10 +1163,9 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for ChainS
                 .storage
                 .get_balance_at_maximum_topoheight(account, &asset, self.topoheight)
                 .await?;
-            if let Some((_, versioned_balance)) = balance_result {
-                if versioned_balance.get_balance() > 0 {
-                    return Ok(true);
-                }
+            // Check for record existence, not balance > 0
+            if balance_result.is_some() {
+                return Ok(true);
             }
         }
 
