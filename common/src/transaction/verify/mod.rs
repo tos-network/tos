@@ -155,7 +155,7 @@ impl Transaction {
     ) -> Ciphertext {
         let mut output = Ciphertext::zero();
 
-        // BUG-019 FIX: Removed fee_limit from UNO output
+        // Fees are paid via TOS (Energy consumption), not UNO
         // In Energy model, fees are paid via TOS (Energy consumption), not UNO
         // Fee handling is done in plaintext TOS balance, not encrypted UNO balance
         // OLD CODE (REMOVED):
@@ -470,20 +470,20 @@ impl Transaction {
                     lock_period,
                     ..
                 } => {
-                    // BUG-004: Check self-delegation
+                    // Check self-delegation
                     if receiver == self.get_source() {
                         return Err(VerificationError::AnyError(anyhow!(
                             "Cannot delegate to self"
                         )));
                     }
-                    // BUG-005: Check minimum delegation amount (1 TOS)
+                    // Check minimum delegation amount (1 TOS)
                     if *amount < MIN_DELEGATION_AMOUNT {
                         return Err(VerificationError::AnyError(anyhow!(
                             "Delegation amount must be at least 1 TOS ({} atomic units)",
                             MIN_DELEGATION_AMOUNT
                         )));
                     }
-                    // BUG-006: Check whole-TOS amount (must be multiple of COIN_VALUE)
+                    // Check whole-TOS amount (must be multiple of COIN_VALUE)
                     if *amount % COIN_VALUE != 0 {
                         return Err(VerificationError::AnyError(anyhow!(
                             "Delegation amount must be a whole number of TOS"
@@ -596,7 +596,7 @@ impl Transaction {
                         return Err(VerificationError::InvalidTransferAmount);
                     }
 
-                    // BUG-017 FIX: Shield transfers only support TOS asset
+                    // Shield transfers only support TOS asset
                     // UNO is a single-asset privacy layer for TOS only
                     if *transfer.get_asset() != TOS_ASSET {
                         return Err(VerificationError::AnyError(anyhow!(
@@ -858,7 +858,7 @@ impl Transaction {
         // NOTE: UnfreezeTos does NOT credit balance here. Balance is credited in apply phase
         // only via WithdrawExpireUnfreeze after the 14-day waiting period.
 
-        // BUG-018 FIX: Deduct sender UNO balance for UnoTransfers
+        // Deduct sender UNO balance for UnoTransfers
         // This ensures cached UNO transactions also update balance during verification
         // Previously, only pre_verify_uno updated balance, but cached TXs use verify_dynamic_parts
         if let TransactionType::UnoTransfers(transfers) = &self.data {
@@ -1796,7 +1796,7 @@ impl Transaction {
                         return Err(VerificationError::InvalidTransferAmount);
                     }
 
-                    // BUG-017 FIX: Shield transfers only support TOS asset
+                    // Shield transfers only support TOS asset
                     // UNO is a single-asset privacy layer for TOS only
                     if *transfer.get_asset() != TOS_ASSET {
                         return Err(VerificationError::AnyError(anyhow!(
@@ -2621,7 +2621,7 @@ impl Transaction {
                 .map_err(VerificationError::State)?;
         }
 
-        // BUG-018 FIX: UNO balance spending for UnshieldTransfers and UnoTransfers
+        // UNO balance spending for UnshieldTransfers and UnoTransfers
         // is now handled in verify_dynamic_parts (for cached TXs) and pre_verify_* (for non-cached TXs)
         // Removed duplicate balance update from apply() to prevent double-subtract
         // OLD CODE REMOVED:
@@ -2977,8 +2977,10 @@ impl Transaction {
                             .map_err(VerificationError::State)?
                             .unwrap_or_default();
 
-                        // Check sender has enough frozen balance
-                        if sender_energy.frozen_balance < *amount {
+                        // Check available_for_delegation instead of frozen_balance
+                        // frozen_balance includes already-delegated TOS, so we must check
+                        // available_for_delegation() = frozen_balance - delegated_frozen_balance
+                        if sender_energy.available_for_delegation() < *amount {
                             return Err(VerificationError::InsufficientFrozenBalance);
                         }
 
@@ -3031,11 +3033,13 @@ impl Transaction {
                                 .map_err(VerificationError::State)?;
                         }
 
-                        // Update sender's energy: frozen -> delegated
-                        sender_energy.frozen_balance = sender_energy
-                            .frozen_balance
-                            .checked_sub(*amount)
-                            .ok_or(VerificationError::Underflow)?;
+                        // Only update delegated_frozen_balance, NOT frozen_balance
+                        // frozen_balance represents total frozen TOS (unchanged by delegation)
+                        // delegated_frozen_balance tracks what's delegated out
+                        // effective_frozen_balance = frozen + acquired - delegated
+                        //
+                        // OLD (BUGGY) CODE REMOVED:
+                        // sender_energy.frozen_balance -= amount;  // This caused double-subtract!
                         sender_energy.delegated_frozen_balance = sender_energy
                             .delegated_frozen_balance
                             .checked_add(*amount)
@@ -3121,15 +3125,16 @@ impl Transaction {
                                 .map_err(VerificationError::State)?;
                         }
 
-                        // Update sender's energy: delegated -> frozen
+                        // Only update delegated_frozen_balance, NOT frozen_balance
+                        // frozen_balance represents total frozen TOS (unchanged by delegation/undelegation)
+                        // delegated_frozen_balance tracks what's delegated out
+                        //
+                        // OLD (BUGGY) CODE REMOVED:
+                        // sender_energy.frozen_balance += amount;  // This was the inverse of the delegation bug
                         sender_energy.delegated_frozen_balance = sender_energy
                             .delegated_frozen_balance
                             .checked_sub(*amount)
                             .ok_or(VerificationError::Underflow)?;
-                        sender_energy.frozen_balance = sender_energy
-                            .frozen_balance
-                            .checked_add(*amount)
-                            .ok_or(VerificationError::Overflow)?;
 
                         // Update receiver's energy: remove acquired
                         receiver_energy.acquired_delegated_balance = receiver_energy
@@ -4120,10 +4125,20 @@ impl Transaction {
             .await
             .map_err(VerificationError::State)?;
 
-        // Calculate actual TOS burned (capped by fee_limit)
-        let actual_tos_burned = tx_result.fee.min(fee_limit);
+        // Enforce fee_limit as hard cap
+        // If the required TOS burn exceeds fee_limit, reject the transaction
+        // This prevents underpayment attacks where users set low fee_limit
+        if tx_result.fee > fee_limit {
+            return Err(VerificationError::InsufficientFeeLimit {
+                required: tx_result.fee,
+                provided: fee_limit,
+            });
+        }
 
-        // Add only the actual burned TOS to gas fee (for block rewards)
+        // Calculate actual TOS burned (now always equals tx_result.fee since we checked above)
+        let actual_tos_burned = tx_result.fee;
+
+        // Add the burned TOS to gas fee (for block rewards)
         state
             .add_gas_fee(actual_tos_burned)
             .await

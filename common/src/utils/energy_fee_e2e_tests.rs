@@ -1092,3 +1092,183 @@ mod boundary_tests {
         assert_eq!(cost, 26_600);
     }
 }
+
+// ============================================================================
+// 9. UNO/UNSHIELD FEE CALCULATION REGRESSION TESTS
+// ============================================================================
+// These tests verify that UNO/Unshield fee estimation correctly includes
+// the transfer output count, not just the transaction size.
+//
+// Background: UNO/Unshield fee estimation previously used transfers=0 because
+// the transfer count extraction only handled TransactionTypeBuilder::Transfers,
+// causing severe fee underestimation for privacy transfers.
+
+#[cfg(test)]
+mod uno_fee_regression_tests {
+    use super::*;
+
+    /// Regression: UNO transfer fee must include output count
+    ///
+    /// Before fix: energy_cost = size + 0 × 500 = size only
+    /// After fix:  energy_cost = size + outputs × 500
+    #[test]
+    fn test_uno_transfer_fee_includes_output_count() {
+        let tx_size = 500;
+        let output_count = 10;
+
+        // Calculate expected energy cost with outputs
+        let energy_with_outputs =
+            EnergyFeeCalculator::calculate_uno_transfer_cost(tx_size, output_count);
+
+        // Calculate what incorrect code would produce (transfers=0)
+        let energy_without_outputs = EnergyFeeCalculator::calculate_uno_transfer_cost(tx_size, 0);
+
+        // The difference should be exactly outputs × 500
+        let expected_difference = output_count as u64 * 500;
+        assert_eq!(
+            energy_with_outputs - energy_without_outputs,
+            expected_difference,
+            "UNO fee must include {} energy for {} outputs",
+            expected_difference,
+            output_count
+        );
+
+        // Verify correct total: size + outputs × 500
+        assert_eq!(
+            energy_with_outputs,
+            tx_size as u64 + output_count as u64 * 500,
+            "UNO energy = size ({}) + outputs ({}) × 500 = {}",
+            tx_size,
+            output_count,
+            tx_size as u64 + output_count as u64 * 500
+        );
+    }
+
+    /// Regression: Single output UNO transfer
+    ///
+    /// Even 1 output should add 500 energy, not 0
+    #[test]
+    fn test_uno_single_output_fee() {
+        let tx_size = 300;
+        let output_count = 1;
+
+        let energy = EnergyFeeCalculator::calculate_uno_transfer_cost(tx_size, output_count);
+
+        // 300 + 1 × 500 = 800 energy
+        assert_eq!(energy, 800, "Single UNO output: 300 + 500 = 800 energy");
+
+        // Convert to TOS cost
+        let tos_cost = energy * TOS_PER_ENERGY;
+        assert_eq!(tos_cost, 80_000, "TOS cost: 800 × 100 = 80,000 atomic");
+    }
+
+    /// Regression: Multi-output UNO transfer (batch)
+    ///
+    /// 10-output batch should cost significantly more than size alone
+    #[test]
+    fn test_uno_batch_transfer_fee() {
+        let tx_size = 1000;
+        let output_count = 10;
+
+        let energy = EnergyFeeCalculator::calculate_uno_transfer_cost(tx_size, output_count);
+
+        // 1000 + 10 × 500 = 6000 energy
+        assert_eq!(energy, 6_000, "Batch UNO: 1000 + 5000 = 6000 energy");
+
+        // The output component (5000) is 5x the size component (1000)
+        let size_component = tx_size as u64;
+        let output_component = output_count as u64 * 500;
+        assert!(
+            output_component > size_component,
+            "Output cost ({}) must exceed size cost ({})",
+            output_component,
+            size_component
+        );
+    }
+
+    /// Regression: Unshield transfer fee calculation
+    ///
+    /// Unshield uses same 5x multiplier as UNO
+    #[test]
+    fn test_unshield_transfer_fee_includes_output_count() {
+        let tx_size = 400;
+        let output_count = 5;
+
+        // Unshield uses same calculation as UNO (5x multiplier)
+        let energy = EnergyFeeCalculator::calculate_uno_transfer_cost(tx_size, output_count);
+
+        // 400 + 5 × 500 = 2900 energy
+        assert_eq!(energy, 2_900, "Unshield: 400 + 2500 = 2900 energy");
+    }
+
+    /// Regression: Compare TOS vs UNO fee for same output count
+    ///
+    /// UNO should cost 5x more per output than TOS
+    #[test]
+    fn test_uno_vs_tos_fee_ratio() {
+        let tx_size = 500;
+        let output_count = 5;
+
+        let tos_energy = EnergyFeeCalculator::calculate_transfer_cost(tx_size, output_count);
+        let uno_energy = EnergyFeeCalculator::calculate_uno_transfer_cost(tx_size, output_count);
+
+        // TOS: 500 + 5 × 100 = 1000 energy
+        // UNO: 500 + 5 × 500 = 3000 energy
+        assert_eq!(tos_energy, 1_000);
+        assert_eq!(uno_energy, 3_000);
+
+        // Output cost ratio should be 5x
+        let tos_output_cost = output_count as u64 * 100;
+        let uno_output_cost = output_count as u64 * 500;
+        assert_eq!(
+            uno_output_cost / tos_output_cost,
+            5,
+            "UNO output cost should be 5x TOS"
+        );
+    }
+
+    /// Regression: Fee estimation for fee_limit calculation
+    ///
+    /// This simulates what TransactionBuilder::calculate_fee() should compute
+    #[test]
+    fn test_fee_limit_estimation_for_uno() {
+        let tx_size = 600;
+        let output_count = 8;
+        let new_addresses = 2;
+
+        // Energy cost for UNO transfer
+        let energy_cost = EnergyFeeCalculator::calculate_uno_transfer_cost(tx_size, output_count);
+
+        // Convert to TOS (for auto-burn when no frozen energy)
+        let energy_tos_cost = energy_cost * TOS_PER_ENERGY;
+
+        // Add TOS-Only fees
+        let account_creation_fee = new_addresses as u64 * FEE_PER_ACCOUNT_CREATION;
+
+        let total_fee = energy_tos_cost + account_creation_fee;
+
+        // Verify calculation:
+        // Energy: 600 + 8 × 500 = 4600 energy
+        // TOS for energy: 4600 × 100 = 460,000 atomic
+        // Account creation: 2 × 10,000,000 = 20,000,000 atomic
+        // Total: 20,460,000 atomic
+        assert_eq!(energy_cost, 4_600);
+        assert_eq!(energy_tos_cost, 460_000);
+        assert_eq!(account_creation_fee, 20_000_000);
+        assert_eq!(total_fee, 20_460_000);
+    }
+
+    /// Regression: Zero outputs edge case
+    ///
+    /// Even with 0 outputs, the calculation should work (size only)
+    #[test]
+    fn test_uno_zero_outputs() {
+        let tx_size = 250;
+        let output_count = 0;
+
+        let energy = EnergyFeeCalculator::calculate_uno_transfer_cost(tx_size, output_count);
+
+        // 250 + 0 × 500 = 250 energy
+        assert_eq!(energy, 250, "Zero outputs: size only");
+    }
+}

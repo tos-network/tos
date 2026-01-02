@@ -838,14 +838,14 @@ mod tests {
     }
 
     // ============================================================================
-    // ROUND 14-15 BUG FIX TESTS: Timestamp Binding (Bug #34)
+    // ROUND 14-15: Timestamp Binding Tests
     // ============================================================================
     // These tests verify that approval signatures are properly bound to timestamps,
     // preventing relayers from manipulating verified_at after approvals are signed.
 
     #[test]
     fn test_timestamp_tampering_rejected_set_kyc() {
-        // Bug #34: Signature must bind to verified_at timestamp
+        // Signature must bind to verified_at timestamp
         // Sign with verified_at=T1, but verify with verified_at=T2 should FAIL
         let network = test_network();
         let (committee, keypairs) = create_test_committee(5);

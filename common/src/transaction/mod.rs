@@ -421,7 +421,7 @@ impl Transaction {
     /// - UNO/Shield transfers: size + outputs × 500 (5x for privacy overhead)
     /// - Burn: size + 1,000
     /// - Deploy contract: size + 32,000 + bytecode_size × 10
-    /// - Invoke contract: size (actual cost from execution)
+    /// - Invoke contract: size + max_gas (user-specified gas limit)
     /// - Energy operations: 0 (free)
     pub fn calculate_energy_cost(&self) -> u64 {
         use crate::config::{
@@ -453,9 +453,12 @@ impl Transaction {
                     + ENERGY_COST_CONTRACT_DEPLOY_BASE
                     + bytecode_size * ENERGY_COST_CONTRACT_DEPLOY_PER_BYTE
             }
-            TransactionType::InvokeContract(_) => {
-                // Actual cost determined by execution (CU consumed)
-                base_cost
+            TransactionType::InvokeContract(payload) => {
+                // Use max_gas as energy cost for contract invocation
+                // max_gas is the user-specified gas limit for the contract execution
+                // This ensures heavy contracts pay proportional to their computation
+                // Actual CU consumed is tracked during execution; unused gas is refunded
+                base_cost + payload.max_gas
             }
             // Energy operations are free
             TransactionType::Energy(_) => 0,

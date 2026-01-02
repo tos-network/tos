@@ -588,7 +588,7 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Mempoo
         &self,
         account: &CompressedPublicKey,
     ) -> Result<bool, BlockchainError> {
-        use tos_common::config::{TOS_ASSET, UNO_ASSET};
+        use tos_common::config::UNO_ASSET;
 
         // Note: tos_common::crypto::PublicKey = CompressedPublicKey
         // So we can use account directly
@@ -615,7 +615,8 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Mempoo
         }
 
         // Check storage for any asset balance at current topoheight
-        let assets = self.storage.get_assets_for(account).await?;
+        // Collect into Vec to avoid holding iterator across await (Send requirement)
+        let assets: Vec<_> = self.storage.get_assets_for(account).await?.collect();
         for asset in assets {
             let asset = asset?;
             let balance_result = self

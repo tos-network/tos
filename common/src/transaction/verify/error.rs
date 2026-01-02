@@ -80,4 +80,7 @@ pub enum VerificationError<T> {
     AmountTooSmallForAccountCreation { amount: u64, fee: u64 },
     #[error("Insufficient balance for multisig fee: available {available}, required {required}")]
     InsufficientBalanceForMultisigFee { available: u64, required: u64 },
+    // Energy fee errors
+    #[error("Insufficient fee_limit: required {required} TOS, provided {provided} TOS")]
+    InsufficientFeeLimit { required: u64, provided: u64 },
 }

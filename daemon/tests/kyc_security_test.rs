@@ -108,7 +108,7 @@ mod security_attack_tests {
     use super::*;
 
     /// Test: Signature replay attack - use valid approvals with modified config
-    /// Bug #1: RegisterCommittee approvals did not bind to committee configuration
+    /// Verifies: RegisterCommittee approvals bind to committee configuration
     #[test]
     fn test_security_config_hash_prevents_member_swap() {
         // Create two different member lists
@@ -194,7 +194,7 @@ mod security_attack_tests {
     }
 
     /// Test: Duplicate approval attack - same approver counted multiple times
-    /// Bug #4: Stateful approval verification counts duplicate approvers
+    /// Verifies: Stateful approval verification detects duplicate approvers
     #[test]
     fn test_security_duplicate_approvals_detected() {
         let (committee, keypairs) = create_test_committee(
@@ -279,7 +279,7 @@ mod boundary_tests {
     use super::*;
 
     /// Test: Transfer KYC to committee with insufficient max_level
-    /// Bug #2: TransferKyc does not enforce destination committee max_kyc_level
+    /// Verifies: TransferKyc enforces destination committee max_kyc_level
     #[test]
     fn test_boundary_transfer_level_exceeds_destination_max() {
         // Source committee: max_kyc_level = 1000
@@ -576,7 +576,7 @@ mod state_machine_tests {
     }
 
     /// Test: Dissolved committee cannot issue EmergencySuspend
-    /// Bug #3: Dissolved committees can still issue EmergencySuspend approvals
+    /// Verifies: Dissolved committees cannot issue EmergencySuspend approvals
     #[test]
     fn test_state_dissolved_committee_cannot_emergency_suspend() {
         let (committee, keypairs) = create_test_committee(
@@ -951,7 +951,7 @@ mod determinism_tests {
     use super::*;
 
     /// Test: Config hash is order-independent for members
-    /// Bug #5: Member list order-sensitive
+    /// Verifies: Member list order does not affect config hash
     #[test]
     fn test_determinism_config_hash_order_independent() {
         let kp1 = KeyPair::new();

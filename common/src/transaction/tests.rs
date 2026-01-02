@@ -1204,7 +1204,7 @@ async fn test_transfer_extra_data_limits() {
 }
 
 // Test UnfreezeTos does NOT credit balance immediately (Stake 2.0 behavior)
-// BUG-002 FIX: UnfreezeTos adds to unfreezing queue, NOT immediate balance credit
+// UnfreezeTos adds to unfreezing queue, NOT immediate balance credit
 // Balance is only credited via WithdrawExpireUnfreeze after 14-day waiting period
 #[tokio::test]
 async fn test_unfreeze_tos_balance_refund() {
@@ -1306,11 +1306,11 @@ async fn test_unfreeze_tos_balance_refund() {
         "Balance should be initial - fee_limit (refund happens in apply, not verify)"
     );
 
-    // CRITICAL: Verify unfreeze amount is NOT credited to balance (Stake 2.0 BUG-002 fix)
+    // CRITICAL: Verify unfreeze amount is NOT credited to balance (Stake 2.0 behavior)
     let old_wrong_balance = initial_balance + _unfreeze_amount - tx_fee;
     assert_ne!(
         *alice_balance_after_unfreeze, old_wrong_balance,
-        "BUG-002: UnfreezeTos should NOT credit balance immediately"
+        "UnfreezeTos should NOT credit balance immediately"
     );
 
     println!("UnfreezeTos test passed: Stake 2.0 queue behavior verified");

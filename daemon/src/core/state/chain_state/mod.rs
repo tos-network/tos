@@ -1153,7 +1153,8 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for ChainS
         }
 
         // Check storage for any asset balance at current topoheight
-        let assets = self.storage.get_assets_for(account).await?;
+        // Collect into Vec to avoid holding iterator across await (Send requirement)
+        let assets: Vec<_> = self.storage.get_assets_for(account).await?.collect();
         for asset in assets {
             let asset = asset?;
             let balance_result = self
