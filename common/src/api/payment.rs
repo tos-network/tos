@@ -685,7 +685,7 @@ mod tests {
     fn test_payment_request_to_uri() {
         let addr: Address = "tst12zacnuun3lkv5kxzn2jy8l28d0zft7rqhyxlz2v6h6u23xmruy7sqm0d38u"
             .parse()
-            .unwrap();
+            .expect("test");
 
         let request = PaymentRequest::new("order-123", addr.clone())
             .with_amount(1_000_000_000)
@@ -704,7 +704,7 @@ mod tests {
     fn test_payment_request_from_uri() {
         let uri = "tos://pay?to=tst12zacnuun3lkv5kxzn2jy8l28d0zft7rqhyxlz2v6h6u23xmruy7sqm0d38u&amount=1000000000&memo=Coffee&id=order-123";
 
-        let request = PaymentRequest::from_uri(uri).unwrap();
+        let request = PaymentRequest::from_uri(uri).expect("test");
         assert_eq!(request.amount, Some(1_000_000_000));
         assert_eq!(request.memo.as_deref(), Some("Coffee"));
         assert_eq!(request.payment_id.as_ref(), "order-123");
@@ -714,7 +714,7 @@ mod tests {
     fn test_payment_request_roundtrip() {
         let addr: Address = "tst12zacnuun3lkv5kxzn2jy8l28d0zft7rqhyxlz2v6h6u23xmruy7sqm0d38u"
             .parse()
-            .unwrap();
+            .expect("test");
 
         let original = PaymentRequest::new("test-123", addr)
             .with_amount(5_000_000_000)
@@ -722,7 +722,7 @@ mod tests {
             .with_expires_at(1700000000);
 
         let uri = original.to_uri();
-        let parsed = PaymentRequest::from_uri(&uri).unwrap();
+        let parsed = PaymentRequest::from_uri(&uri).expect("test");
 
         assert_eq!(original.amount, parsed.amount);
         assert_eq!(original.memo.as_deref(), parsed.memo.as_deref());
@@ -734,7 +734,7 @@ mod tests {
     fn test_payment_expiration() {
         let addr: Address = "tst12zacnuun3lkv5kxzn2jy8l28d0zft7rqhyxlz2v6h6u23xmruy7sqm0d38u"
             .parse()
-            .unwrap();
+            .expect("test");
 
         // Expired payment
         let expired = PaymentRequest::new("expired", addr.clone()).with_expires_at(1);
@@ -767,13 +767,13 @@ mod tests {
         let payment_id = "pr_123456_abcdef";
         let memo = Some("Coffee order");
 
-        let encoded = encode_payment_extra_data(payment_id, memo).unwrap();
+        let encoded = encode_payment_extra_data(payment_id, memo).expect("test");
 
         // Check type byte
         assert_eq!(encoded[0], PAYMENT_EXTRA_DATA_TYPE);
 
         // Decode and verify
-        let (decoded_id, decoded_memo) = decode_payment_extra_data(&encoded).unwrap();
+        let (decoded_id, decoded_memo) = decode_payment_extra_data(&encoded).expect("test");
         assert_eq!(decoded_id, payment_id);
         assert_eq!(decoded_memo.as_deref(), memo);
     }
@@ -782,8 +782,8 @@ mod tests {
     fn test_encode_decode_without_memo() {
         let payment_id = "order-789";
 
-        let encoded = encode_payment_extra_data(payment_id, None).unwrap();
-        let (decoded_id, decoded_memo) = decode_payment_extra_data(&encoded).unwrap();
+        let encoded = encode_payment_extra_data(payment_id, None).expect("test");
+        let (decoded_id, decoded_memo) = decode_payment_extra_data(&encoded).expect("test");
 
         assert_eq!(decoded_id, payment_id);
         assert!(decoded_memo.is_none());
@@ -792,7 +792,7 @@ mod tests {
     #[test]
     fn test_matches_payment_id() {
         let payment_id = "test-payment-001";
-        let encoded = encode_payment_extra_data(payment_id, Some("memo")).unwrap();
+        let encoded = encode_payment_extra_data(payment_id, Some("memo")).expect("test");
 
         assert!(matches_payment_id(&encoded, "test-payment-001"));
         assert!(!matches_payment_id(&encoded, "wrong-id"));
@@ -824,7 +824,7 @@ mod tests {
         // Very long memo that would exceed limit
         let long_memo = "x".repeat(200);
 
-        let encoded = encode_payment_extra_data(payment_id, Some(&long_memo)).unwrap();
+        let encoded = encode_payment_extra_data(payment_id, Some(&long_memo)).expect("test");
         // Should be truncated to MAX_EXTRA_DATA_SIZE
         assert!(encoded.len() <= MAX_EXTRA_DATA_SIZE);
     }

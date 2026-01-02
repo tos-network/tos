@@ -3804,10 +3804,10 @@ mod tests {
     #[test]
     fn test_is_local_address() {
         assert!(is_local_address(
-            &SocketAddr::from_str("172.20.0.1:2125").unwrap()
+            &SocketAddr::from_str("172.20.0.1:2125").expect("test")
         ));
         assert!(!is_local_address(
-            &SocketAddr::from_str("1.1.1.1:2125").unwrap()
+            &SocketAddr::from_str("1.1.1.1:2125").expect("test")
         ));
     }
 }

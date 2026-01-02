@@ -489,8 +489,9 @@ mod tests {
         };
 
         // Test serde serialization roundtrip
-        let json = serde_json::to_string(&builder).unwrap();
-        let restored: UnoTransferBuilder = serde_json::from_str(&json).unwrap();
+        let json = serde_json::to_string(&builder).expect("test");
+        let restored: UnoTransferBuilder =
+            serde_json::from_str(&json).expect("JSON parsing should succeed");
 
         assert_eq!(builder.asset, restored.asset);
         assert_eq!(builder.amount, restored.amount);
@@ -597,8 +598,9 @@ mod tests {
         let builder = ShieldTransferBuilder::new(TOS_ASSET, 12345, create_test_address());
 
         // Test serde serialization roundtrip
-        let json = serde_json::to_string(&builder).unwrap();
-        let restored: ShieldTransferBuilder = serde_json::from_str(&json).unwrap();
+        let json = serde_json::to_string(&builder).expect("test");
+        let restored: ShieldTransferBuilder =
+            serde_json::from_str(&json).expect("JSON parsing should succeed");
 
         assert_eq!(builder.asset, restored.asset);
         assert_eq!(builder.amount, restored.amount);
@@ -643,8 +645,9 @@ mod tests {
         let builder = UnshieldTransferBuilder::new(TOS_ASSET, 54321, create_test_address());
 
         // Test serde serialization roundtrip
-        let json = serde_json::to_string(&builder).unwrap();
-        let restored: UnshieldTransferBuilder = serde_json::from_str(&json).unwrap();
+        let json = serde_json::to_string(&builder).expect("test");
+        let restored: UnshieldTransferBuilder =
+            serde_json::from_str(&json).expect("JSON parsing should succeed");
 
         assert_eq!(builder.asset, restored.asset);
         assert_eq!(builder.amount, restored.amount);

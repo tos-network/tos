@@ -58,9 +58,7 @@ impl EnergyTestState {
     }
 
     fn get_or_create_energy(&mut self, account: &CompressedPublicKey) -> &mut AccountEnergy {
-        self.energy_states
-            .entry(account.clone())
-            .or_insert_with(AccountEnergy::new)
+        self.energy_states.entry(account.clone()).or_default()
     }
 
     fn advance_time(&mut self, ms: u64) {
@@ -223,10 +221,8 @@ impl EnergyTestState {
         // Update or remove delegation
         if delegation_balance == amount {
             self.delegations.remove(&(from.clone(), to.clone()));
-        } else {
-            if let Some(d) = self.delegations.get_mut(&(from.clone(), to.clone())) {
-                d.frozen_balance -= amount;
-            }
+        } else if let Some(d) = self.delegations.get_mut(&(from.clone(), to.clone())) {
+            d.frozen_balance -= amount;
         }
 
         Ok(())
@@ -566,11 +562,11 @@ fn test_unfreeze_queue_max_32() {
 
     // Add 32 unfreeze entries (max allowed)
     for _ in 0..32 {
-        state.unfreeze_tos(&alice_pubkey, 1 * COIN_VALUE).unwrap();
+        state.unfreeze_tos(&alice_pubkey, COIN_VALUE).unwrap();
     }
 
     // 33rd should fail
-    let result = state.unfreeze_tos(&alice_pubkey, 1 * COIN_VALUE);
+    let result = state.unfreeze_tos(&alice_pubkey, COIN_VALUE);
     assert!(result.is_err());
     assert_eq!(result.unwrap_err(), "Unfreeze queue full (max 32)");
 

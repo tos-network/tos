@@ -101,7 +101,7 @@ mod tests {
             }
 
             let mut reader = Reader::new(&bytes);
-            let decoded = ScheduledExecutionStatus::read(&mut reader).unwrap();
+            let decoded = ScheduledExecutionStatus::read(&mut reader).expect("test");
             assert_eq!(status, decoded);
         }
     }

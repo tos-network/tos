@@ -150,7 +150,7 @@ mod tests {
         // Hard fork uses testnet hashrate (10 KH/s) for gradual ramp-up
         // 10 KH/s * 3s = 10,000 * 3,000 / 1000 = 30,000
         assert_eq!(
-            get_difficulty_at_hard_fork(&Network::Mainnet, BlockVersion::Nobunaga).unwrap(),
+            get_difficulty_at_hard_fork(&Network::Mainnet, BlockVersion::Nobunaga).expect("test"),
             Difficulty::from_u64(3 * TESTNET_MINIMUM_HASHRATE)
         );
 

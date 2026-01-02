@@ -239,7 +239,7 @@ mod tests {
         let mut context = Context::new();
         context.store(TxVersion::T0);
         let mut reader = Reader::with_context(&bytes, context);
-        let restored = UnoTransferPayload::read(&mut reader).unwrap();
+        let restored = UnoTransferPayload::read(&mut reader).expect("test");
 
         // Verify fields match
         assert_eq!(payload.get_asset(), restored.get_asset());

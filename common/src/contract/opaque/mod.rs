@@ -106,7 +106,7 @@ mod tests {
         let opaque = OpaqueWrapper::new(address.clone());
         let v = json!(opaque);
 
-        let opaque: OpaqueWrapper = serde_json::from_value(v).unwrap();
+        let opaque: OpaqueWrapper = serde_json::from_value(v).expect("test");
         let address2: Address = opaque.into_inner().expect("Failed to unwrap");
 
         assert_eq!(address, address2);
@@ -120,7 +120,7 @@ mod tests {
         let opaque = OpaqueWrapper::new(hash.clone());
         let v = json!(opaque);
 
-        let opaque: OpaqueWrapper = serde_json::from_value(v).unwrap();
+        let opaque: OpaqueWrapper = serde_json::from_value(v).expect("test");
         let hash2: Hash = opaque.into_inner().expect("Failed to unwrap");
 
         assert_eq!(hash, hash2);

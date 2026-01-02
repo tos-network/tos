@@ -260,7 +260,7 @@ mod tests {
         for payload in payloads {
             let bytes = payload.to_bytes();
             let mut reader = crate::serializer::Reader::new(&bytes);
-            let restored = EnergyPayload::read(&mut reader).unwrap();
+            let restored = EnergyPayload::read(&mut reader).expect("test");
             assert_eq!(payload, restored);
         }
     }
@@ -307,7 +307,7 @@ mod tests {
             EnergyPayload::delegate_resource(receiver.clone(), 1_000_000, true, 90);
         let bytes = delegate_locked.to_bytes();
         let mut reader = crate::serializer::Reader::new(&bytes);
-        let restored = EnergyPayload::read(&mut reader).unwrap();
+        let restored = EnergyPayload::read(&mut reader).expect("test");
         assert_eq!(delegate_locked, restored);
 
         // Test DelegateResource without lock
@@ -315,14 +315,14 @@ mod tests {
             EnergyPayload::delegate_resource(receiver.clone(), 500_000, false, 0);
         let bytes = delegate_unlocked.to_bytes();
         let mut reader = crate::serializer::Reader::new(&bytes);
-        let restored = EnergyPayload::read(&mut reader).unwrap();
+        let restored = EnergyPayload::read(&mut reader).expect("test");
         assert_eq!(delegate_unlocked, restored);
 
         // Test UndelegateResource
         let undelegate = EnergyPayload::undelegate_resource(receiver, 250_000);
         let bytes = undelegate.to_bytes();
         let mut reader = crate::serializer::Reader::new(&bytes);
-        let restored = EnergyPayload::read(&mut reader).unwrap();
+        let restored = EnergyPayload::read(&mut reader).expect("test");
         assert_eq!(undelegate, restored);
     }
 

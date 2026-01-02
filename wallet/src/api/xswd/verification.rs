@@ -136,7 +136,7 @@ mod tests {
     fn test_valid_signature_verification() {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .expect("test")
             .as_secs();
 
         let app_data = create_test_app_data(now);
@@ -148,7 +148,7 @@ mod tests {
         // Create app data with timestamp 10 minutes in the past
         let old_timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .expect("test")
             .as_secs()
             - 600;
 
@@ -164,7 +164,7 @@ mod tests {
         // Create app data with timestamp 10 minutes in the future
         let future_timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .expect("test")
             .as_secs()
             + 600;
 
@@ -179,7 +179,7 @@ mod tests {
     fn test_tampered_signature_fails() {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .expect("test")
             .as_secs();
 
         let app_data = create_test_app_data(now);
@@ -210,7 +210,7 @@ mod tests {
     fn test_tampered_field_fails() {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .expect("test")
             .as_secs();
 
         let app_data = create_test_app_data(now);
@@ -239,7 +239,7 @@ mod tests {
     fn test_invalid_public_key_fails() {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .expect("test")
             .as_secs();
 
         let app_data = create_test_app_data(now);

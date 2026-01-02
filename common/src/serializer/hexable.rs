@@ -82,15 +82,16 @@ mod tests {
         };
         let hexable = Hexable::from(test.clone());
 
-        let hex = serde_json::to_string(&hexable).unwrap();
-        let hexable: Hexable<Test> = serde_json::from_str(&hex).unwrap();
+        let hex = serde_json::to_string(&hexable).expect("test");
+        let hexable: Hexable<Test> =
+            serde_json::from_str(&hex).expect("JSON parsing should succeed");
         assert_eq!(*hexable, test);
     }
 
     #[test]
     fn test_from_json() {
         let test = r#"{"a":42,"b":"hello"}"#;
-        let test2: Test = serde_json::from_str(test).unwrap();
+        let test2: Test = serde_json::from_str(test).expect("JSON parsing should succeed");
         assert_eq!(
             test2,
             Test {
@@ -107,7 +108,7 @@ mod tests {
             b: "hello".to_string(),
         };
         let hex = test.to_hex();
-        let hexable: Hexable<Test> = serde_json::from_str(&format!("\"{}\"", hex)).unwrap();
+        let hexable: Hexable<Test> = serde_json::from_str(&format!("\"{}\"", hex)).expect("test");
         assert_eq!(*hexable, test);
     }
 }

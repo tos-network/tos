@@ -804,14 +804,14 @@ mod tests {
     #[test]
     fn test_rocks_db_iterator_behavior() {
         // Create a temporary RocksDB instance
-        let tmp_dir = TempDir::new("rocksdb-iterator").unwrap();
+        let tmp_dir = TempDir::new("rocksdb-iterator").expect("test");
 
         let mut opts = Options::default();
         opts.create_if_missing(true);
         opts.create_missing_column_families(true);
         opts.set_prefix_extractor(SliceTransform::create_fixed_prefix(8));
 
-        let db = DB::open(&opts, tmp_dir.path()).unwrap();
+        let db = DB::open(&opts, tmp_dir.path()).expect("test");
 
         // Helper to encode a u64 prefix + suffix
         fn make_key(prefix: u64, suffix: &[u8]) -> Vec<u8> {
@@ -821,9 +821,9 @@ mod tests {
         }
 
         // Insert three test entries
-        db.put(make_key(0, b"zero"), b"value0").unwrap();
-        db.put(make_key(1, b"aaaa"), b"value1").unwrap();
-        db.put(make_key(2, b"bbbb"), b"value2").unwrap();
+        db.put(make_key(0, b"zero"), b"value0").expect("test");
+        db.put(make_key(1, b"aaaa"), b"value1").expect("test");
+        db.put(make_key(2, b"bbbb"), b"value2").expect("test");
 
         // First test: iterator on range
         {
@@ -834,7 +834,7 @@ mod tests {
             let results: Vec<(Vec<u8>, Vec<u8>)> = iter
                 .filter_map_ok(|(k, v)| Some((k.to_vec(), v.to_vec())))
                 .collect::<Result<Vec<_>, _>>()
-                .unwrap();
+                .expect("test");
 
             // Extract prefixes for checking
             let prefixes: Vec<u64> = results
@@ -861,7 +861,7 @@ mod tests {
             let results: Vec<(Vec<u8>, Vec<u8>)> = iter
                 .filter_map_ok(|(k, v)| Some((k.to_vec(), v.to_vec())))
                 .collect::<Result<Vec<_>, _>>()
-                .unwrap();
+                .expect("test");
 
             // Extract prefixes for checking
             let prefixes: Vec<u64> = results
@@ -889,7 +889,7 @@ mod tests {
             let results: Vec<(Vec<u8>, Vec<u8>)> = iter
                 .filter_map_ok(|(k, v)| Some((k.to_vec(), v.to_vec())))
                 .collect::<Result<Vec<_>, _>>()
-                .unwrap();
+                .expect("test");
 
             // Extract prefixes for checking
             let prefixes: Vec<u64> = results

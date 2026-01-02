@@ -398,7 +398,7 @@ mod tests {
         let result = adapter.has_kyc(&user);
 
         assert!(result.is_ok());
-        assert!(result.unwrap());
+        assert!(result.expect("test"));
     }
 
     #[test]
@@ -410,7 +410,7 @@ mod tests {
         let result = adapter.has_kyc(&user);
 
         assert!(result.is_ok());
-        assert!(!result.unwrap());
+        assert!(!result.expect("test"));
     }
 
     #[test]
@@ -422,7 +422,7 @@ mod tests {
         let result = adapter.get_kyc(&user);
 
         assert!(result.is_ok());
-        assert!(result.unwrap().is_none());
+        assert!(result.expect("test").is_none());
     }
 
     #[test]
@@ -438,10 +438,10 @@ mod tests {
         let result = adapter.get_kyc(&user);
 
         assert!(result.is_ok());
-        let data = result.unwrap();
+        let data = result.expect("test");
         assert!(data.is_some());
 
-        let tako_data = data.unwrap();
+        let tako_data = data.expect("test");
         assert_eq!(tako_data.level, 31);
         assert_eq!(tako_data.tier, 2); // Level 31 = Tier 2 (Standard)
         assert_eq!(tako_data.status, 0); // Active
@@ -460,7 +460,7 @@ mod tests {
         let result = adapter.get_kyc_level(&user);
 
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), 255);
+        assert_eq!(result.expect("test"), 255);
     }
 
     #[test]
@@ -475,7 +475,7 @@ mod tests {
         let result = adapter.get_kyc_tier(&user);
 
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), 4);
+        assert_eq!(result.expect("test"), 4);
     }
 
     #[test]
@@ -490,7 +490,7 @@ mod tests {
         let result = adapter.is_kyc_valid(&user, 1000000);
 
         assert!(result.is_ok());
-        assert!(result.unwrap());
+        assert!(result.expect("test"));
     }
 
     #[test]
@@ -505,7 +505,7 @@ mod tests {
         let result = adapter.meets_kyc_level(&user, 31);
 
         assert!(result.is_ok());
-        assert!(result.unwrap());
+        assert!(result.expect("test"));
     }
 
     #[test]

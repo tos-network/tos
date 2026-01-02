@@ -219,18 +219,18 @@ mod tests {
     fn test_languages() {
         let (_, key) = KeyPair::new().split();
         for language in super::LANGUAGES.iter() {
-            let words = super::key_to_words_with_language(&key, language).unwrap();
-            let nkey = super::words_to_key(&words).unwrap();
+            let words = super::key_to_words_with_language(&key, language).expect("test");
+            let nkey = super::words_to_key(&words).expect("test");
             assert_eq!(key.as_scalar(), nkey.as_scalar());
 
-            let mut words2 = super::key_to_words_with_language(&nkey, language).unwrap();
+            let mut words2 = super::key_to_words_with_language(&nkey, language).expect("test");
             assert_eq!(words, words2);
 
             // Also test with 24 words only
             words2.pop();
             assert_eq!(words2.len(), 24);
 
-            let nkey = super::words_to_key(&words2).unwrap();
+            let nkey = super::words_to_key(&words2).expect("test");
             assert_eq!(key.as_scalar(), nkey.as_scalar());
         }
     }

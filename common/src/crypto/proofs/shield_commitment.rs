@@ -348,7 +348,7 @@ mod tests {
 
         // Deserialize
         let mut reader = Reader::new(&bytes);
-        let restored = ShieldCommitmentProof::read(&mut reader).unwrap();
+        let restored = ShieldCommitmentProof::read(&mut reader).expect("test");
 
         // Verify size matches
         assert_eq!(proof.size(), bytes.len());

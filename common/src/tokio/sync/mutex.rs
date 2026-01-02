@@ -117,7 +117,7 @@ mod tests {
         let mutex = Mutex::new(42);
         let guard = mutex.lock().await;
         {
-            let location = mutex.last_location.lock().unwrap();
+            let location = mutex.last_location.lock().expect("test");
             assert!(location.is_some());
         }
         assert_eq!(*guard, 42);

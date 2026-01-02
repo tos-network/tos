@@ -519,7 +519,7 @@ mod tests {
 
         // Serialize and deserialize
         let bytes = module.to_bytes();
-        let deserialized = Module::from_bytes(&bytes).unwrap();
+        let deserialized = Module::from_bytes(&bytes).expect("deserialization should succeed");
 
         // Verify deserialized module
         assert!(deserialized.has_bytecode());
@@ -533,7 +533,7 @@ mod tests {
     #[track_caller]
     fn test_serde_cell(cell: ValueCell) {
         let bytes = cell.to_bytes();
-        let v = ValueCell::from_bytes(&bytes).unwrap();
+        let v = ValueCell::from_bytes(&bytes).expect("deserialization should succeed");
 
         assert_eq!(v, cell);
     }

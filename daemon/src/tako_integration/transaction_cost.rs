@@ -176,7 +176,7 @@ mod tests {
 
     #[test]
     fn test_estimate_transaction_cost_no_contract_no_precompile() {
-        let cost = estimate_transaction_cost(None, &[]).unwrap();
+        let cost = estimate_transaction_cost(None, &[]).expect("test");
 
         assert_eq!(cost.base_cost, BASE_TRANSACTION_COST);
         assert_eq!(cost.contract_cost, 0);
@@ -188,7 +188,7 @@ mod tests {
     fn test_estimate_transaction_cost_with_contract() {
         let bytecode = vec![0u8; 10_000]; // 10 KB contract
 
-        let cost = estimate_transaction_cost(Some(&bytecode), &[]).unwrap();
+        let cost = estimate_transaction_cost(Some(&bytecode), &[]).expect("test");
 
         assert_eq!(cost.base_cost, BASE_TRANSACTION_COST);
         assert_eq!(cost.contract_cost, 10 * CONTRACT_COST_PER_KB);
@@ -206,7 +206,7 @@ mod tests {
 
         let precompiles = vec![(&ed25519_id, instruction_data.as_slice())];
 
-        let cost = estimate_transaction_cost(None, &precompiles).unwrap();
+        let cost = estimate_transaction_cost(None, &precompiles).expect("test");
 
         assert_eq!(cost.base_cost, BASE_TRANSACTION_COST);
         assert_eq!(cost.contract_cost, 0);
@@ -246,7 +246,7 @@ mod tests {
             (&bls_id, bls_data.as_slice()),
         ];
 
-        let cost = estimate_transaction_cost(Some(&bytecode), &precompiles).unwrap();
+        let cost = estimate_transaction_cost(Some(&bytecode), &precompiles).expect("test");
 
         // Expected costs:
         // Base: 5,000

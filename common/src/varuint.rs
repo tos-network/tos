@@ -298,15 +298,15 @@ mod tests {
         let compact: VarUint = U256::from_big_endian(&bytes).into();
         let bytes = compact.to_bytes();
         assert_eq!(bytes.len() - 1, expected_size); // - 1 for byte len
-        let compact2 = VarUint::read(&mut Reader::new(&bytes)).unwrap();
+        let compact2 = VarUint::read(&mut Reader::new(&bytes)).expect("test");
         assert_eq!(compact.as_ref(), compact2.as_ref());
     }
 
     #[test]
     fn test_json_serde() {
         let compact: VarUint = U256::from(123456).into();
-        let json = serde_json::to_string(&compact).unwrap();
-        let compact2: VarUint = serde_json::from_str(&json).unwrap();
+        let json = serde_json::to_string(&compact).expect("test");
+        let compact2: VarUint = serde_json::from_str(&json).expect("JSON parsing should succeed");
         assert_eq!(compact.as_ref(), compact2.as_ref());
         assert!(json.contains("123456"));
     }
@@ -315,7 +315,7 @@ mod tests {
     fn test_serde_deserde() {
         let difficulty = VarUint::from(71135336520u64);
         let bytes = difficulty.to_bytes();
-        let difficulty2 = VarUint::read(&mut Reader::new(&bytes)).unwrap();
+        let difficulty2 = VarUint::read(&mut Reader::new(&bytes)).expect("test");
         assert_eq!(difficulty, difficulty2);
         assert_eq!(difficulty.to_string(), "71135336520");
     }

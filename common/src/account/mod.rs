@@ -220,7 +220,7 @@ mod tests {
         assert!(matches!(cache, CiphertextCache::Compressed(_)));
 
         // Decompress and verify state transition
-        let decompressed = cache.decompressed().unwrap();
+        let decompressed = cache.decompressed().expect("test");
         assert_eq!(decompressed.compress(), compressed);
 
         // After decompression, should be in Both state
@@ -233,7 +233,7 @@ mod tests {
         let mut cache = CiphertextCache::Decompressed(ct.clone());
 
         // Should be able to get decompressed directly
-        let decompressed = cache.decompressed().unwrap();
+        let decompressed = cache.decompressed().expect("test");
         assert_eq!(decompressed.compress(), ct.compress());
 
         // After compress(), should transition to Both
@@ -248,7 +248,7 @@ mod tests {
         let mut cache = CiphertextCache::Both(compressed.clone(), ct.clone(), false);
 
         // computable() should mark as dirty
-        let _ = cache.computable().unwrap();
+        let _ = cache.computable().expect("test");
         assert!(matches!(cache, CiphertextCache::Both(_, _, true)));
     }
 
@@ -260,7 +260,7 @@ mod tests {
 
         // Mark as dirty by calling computable
         {
-            let computable = cache.computable().unwrap();
+            let computable = cache.computable().expect("test");
 
             // Modify the ciphertext (add zero to it)
             let ct2 = create_test_ciphertext(0);
@@ -287,7 +287,7 @@ mod tests {
         let mut cache = CiphertextCache::Decompressed(ct.clone());
 
         // both() should transition to Both state
-        let (c, d) = cache.both().unwrap();
+        let (c, d) = cache.both().expect("test");
         assert_eq!(c, &ct.compress());
         assert_eq!(d.compress(), ct.compress());
         assert!(matches!(cache, CiphertextCache::Both(_, _, false)));
@@ -300,17 +300,17 @@ mod tests {
 
         // Test take from Compressed
         let cache = CiphertextCache::Compressed(compressed.clone());
-        let taken = cache.take_ciphertext().unwrap();
+        let taken = cache.take_ciphertext().expect("test");
         assert_eq!(taken.compress(), compressed);
 
         // Test take from Decompressed
         let cache = CiphertextCache::Decompressed(ct.clone());
-        let taken = cache.take_ciphertext().unwrap();
+        let taken = cache.take_ciphertext().expect("test");
         assert_eq!(taken.compress(), ct.compress());
 
         // Test take from Both
         let cache = CiphertextCache::Both(compressed.clone(), ct.clone(), false);
-        let taken = cache.take_ciphertext().unwrap();
+        let taken = cache.take_ciphertext().expect("test");
         assert_eq!(taken.compress(), compressed);
     }
 
@@ -326,7 +326,7 @@ mod tests {
 
         // Deserialize
         let mut reader = Reader::new(&bytes);
-        let restored = CiphertextCache::read(&mut reader).unwrap();
+        let restored = CiphertextCache::read(&mut reader).expect("test");
 
         // Restored should be Compressed variant
         assert!(matches!(restored, CiphertextCache::Compressed(_)));

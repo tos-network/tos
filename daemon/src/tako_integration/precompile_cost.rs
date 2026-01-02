@@ -217,7 +217,7 @@ mod tests {
         // 2 signatures
         let instruction_data = vec![2u8, 0]; // num_signatures=2, padding
 
-        let cost = estimate_single_precompile_cost(&program_id, &instruction_data).unwrap();
+        let cost = estimate_single_precompile_cost(&program_id, &instruction_data).expect("test");
         assert_eq!(cost, 2 * costs::ED25519_COST);
     }
 
@@ -231,7 +231,7 @@ mod tests {
         // 3 signatures
         let instruction_data = vec![3u8];
 
-        let cost = estimate_single_precompile_cost(&program_id, &instruction_data).unwrap();
+        let cost = estimate_single_precompile_cost(&program_id, &instruction_data).expect("test");
         assert_eq!(cost, 3 * costs::SECP256K1_COST);
     }
 
@@ -245,7 +245,7 @@ mod tests {
         // 1 signature
         let instruction_data = vec![1u8, 0]; // num_signatures=1, padding
 
-        let cost = estimate_single_precompile_cost(&program_id, &instruction_data).unwrap();
+        let cost = estimate_single_precompile_cost(&program_id, &instruction_data).expect("test");
         assert_eq!(cost, costs::SECP256R1_COST);
     }
 
@@ -276,7 +276,7 @@ mod tests {
             (&regular_program_id, regular_data.as_slice()),
         ];
 
-        let cost = estimate_transaction_precompile_cost(&instructions).unwrap();
+        let cost = estimate_transaction_precompile_cost(&instructions).expect("test");
 
         // Expected: 2 * ED25519 + 1 * secp256k1
         let expected = 2 * costs::ED25519_COST + costs::SECP256K1_COST;
@@ -298,7 +298,7 @@ mod tests {
         let contract_cost = 10_000u64;
         let total = estimator
             .estimate_total_cost(&instructions, contract_cost)
-            .unwrap();
+            .expect("test");
 
         // Expected: base (5,000) + contract (10,000) + precompile (2,280)
         assert_eq!(total, 5_000 + 10_000 + costs::ED25519_COST);
@@ -312,7 +312,7 @@ mod tests {
         ];
         let instruction_data = vec![];
 
-        let cost = estimate_single_precompile_cost(&program_id, &instruction_data).unwrap();
+        let cost = estimate_single_precompile_cost(&program_id, &instruction_data).expect("test");
         assert_eq!(cost, 0);
     }
 
@@ -324,7 +324,7 @@ mod tests {
         ];
         let instruction_data = vec![0u8, 0]; // num_signatures=0
 
-        let cost = estimate_single_precompile_cost(&program_id, &instruction_data).unwrap();
+        let cost = estimate_single_precompile_cost(&program_id, &instruction_data).expect("test");
         assert_eq!(cost, 0);
     }
 
@@ -338,7 +338,7 @@ mod tests {
         // 3 signatures
         let instruction_data = vec![3u8];
 
-        let cost = estimate_single_precompile_cost(&program_id, &instruction_data).unwrap();
+        let cost = estimate_single_precompile_cost(&program_id, &instruction_data).expect("test");
         assert_eq!(cost, 3 * costs::SCHNORR_RISTRETTO_COST);
     }
 
@@ -352,7 +352,7 @@ mod tests {
         // 2-of-3 threshold: threshold=2, num_keys=3
         let instruction_data = vec![2u8, 3];
 
-        let cost = estimate_single_precompile_cost(&program_id, &instruction_data).unwrap();
+        let cost = estimate_single_precompile_cost(&program_id, &instruction_data).expect("test");
         // Expected: BASE_COST + (threshold × PER_SIGNATURE_COST)
         let expected =
             costs::THRESHOLD_MULTISIG_BASE_COST + 2 * costs::THRESHOLD_MULTISIG_PER_SIGNATURE_COST;
@@ -370,7 +370,7 @@ mod tests {
         // 10 signers
         let instruction_data = vec![10u8];
 
-        let cost = estimate_single_precompile_cost(&program_id, &instruction_data).unwrap();
+        let cost = estimate_single_precompile_cost(&program_id, &instruction_data).expect("test");
         // Expected: BASE_COST + (num_signers × PER_SIGNER_COST)
         let expected =
             costs::BLS_FAST_AGGREGATE_BASE_COST + 10 * costs::BLS_FAST_AGGREGATE_PER_SIGNER_COST;
@@ -423,7 +423,7 @@ mod tests {
             (&bls_program_id, bls_data.as_slice()),
         ];
 
-        let cost = estimate_transaction_precompile_cost(&instructions).unwrap();
+        let cost = estimate_transaction_precompile_cost(&instructions).expect("test");
 
         // Expected costs:
         // Ed25519: 2,280

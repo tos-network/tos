@@ -263,7 +263,7 @@ mod tests {
     fn test_compressed_ciphertext_zero() {
         let ciphertext = Ciphertext::zero();
         let compressed = ciphertext.compress();
-        let decompressed = compressed.decompress().unwrap();
+        let decompressed = compressed.decompress().expect("test");
 
         assert_eq!(ciphertext, decompressed);
     }
@@ -273,7 +273,7 @@ mod tests {
         let ciphertext = Ciphertext::zero();
         let json = json!(ciphertext);
 
-        let deserialized: Ciphertext = serde_json::from_value(json).unwrap();
+        let deserialized: Ciphertext = serde_json::from_value(json).expect("test");
         assert_eq!(ciphertext, deserialized);
     }
 }

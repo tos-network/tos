@@ -675,7 +675,7 @@ mod tests {
 
         // Should pass because kyc_threshold defaults to 1
         assert!(result.is_ok());
-        let result = result.unwrap();
+        let result = result.expect("test");
         assert_eq!(result.valid_count, 2);
         assert!(result.threshold_met);
     }
@@ -1056,7 +1056,7 @@ mod tests {
         );
 
         assert!(result.is_ok());
-        let result = result.unwrap();
+        let result = result.expect("test");
         assert_eq!(result.valid_count, 3);
     }
 }

@@ -240,7 +240,7 @@ mod tests {
 
         // Deserialize
         let mut reader = Reader::new(&buffer);
-        let deserialized = BindReferrerPayload::read(&mut reader).unwrap();
+        let deserialized = BindReferrerPayload::read(&mut reader).expect("test");
 
         assert_eq!(payload.get_referrer(), deserialized.get_referrer());
     }
@@ -267,7 +267,7 @@ mod tests {
 
         // Deserialize
         let mut reader = Reader::new(&buffer);
-        let deserialized = BatchReferralRewardPayload::read(&mut reader).unwrap();
+        let deserialized = BatchReferralRewardPayload::read(&mut reader).expect("test");
 
         assert_eq!(payload.get_levels(), deserialized.get_levels());
         assert_eq!(payload.get_ratios(), deserialized.get_ratios());

@@ -362,7 +362,7 @@ mod tests {
         let payload =
             CallbackPayload::payment_received("pr_abc123".to_string(), Hash::zero(), 1000000000, 1);
 
-        let json = serde_json::to_string(&payload).unwrap();
+        let json = serde_json::to_string(&payload).expect("test");
         assert!(json.contains("payment_received"));
         assert!(json.contains("pr_abc123"));
         assert!(json.contains("1000000000"));

@@ -337,7 +337,7 @@ mod tests {
     fn test_versioned_uno_balance_zero() {
         let mut zero = VersionedUnoBalance::zero();
         zero.set_balance_type(BalanceType::Input);
-        let zero_bis = VersionedUnoBalance::from_bytes(&zero.to_bytes()).unwrap();
+        let zero_bis = VersionedUnoBalance::from_bytes(&zero.to_bytes()).expect("test");
         assert_eq!(zero, zero_bis);
     }
 
@@ -346,7 +346,7 @@ mod tests {
         let mut zero = VersionedUnoBalance::zero();
         zero.set_balance_type(BalanceType::Input);
         zero.set_previous_topoheight(Some(42));
-        let zero_bis = VersionedUnoBalance::from_bytes(&zero.to_bytes()).unwrap();
+        let zero_bis = VersionedUnoBalance::from_bytes(&zero.to_bytes()).expect("test");
         assert_eq!(zero, zero_bis);
     }
 
@@ -354,7 +354,7 @@ mod tests {
     fn test_versioned_uno_balance_output() {
         let mut zero = VersionedUnoBalance::zero();
         zero.set_balance_type(BalanceType::Output);
-        let zero_bis = VersionedUnoBalance::from_bytes(&zero.to_bytes()).unwrap();
+        let zero_bis = VersionedUnoBalance::from_bytes(&zero.to_bytes()).expect("test");
         assert_eq!(zero, zero_bis);
     }
 
@@ -363,7 +363,7 @@ mod tests {
         let mut zero = VersionedUnoBalance::zero();
         zero.set_balance_type(BalanceType::Both);
         zero.set_output_balance(Some(CiphertextCache::Decompressed(Ciphertext::zero())));
-        let zero_bis = VersionedUnoBalance::from_bytes(&zero.to_bytes()).unwrap();
+        let zero_bis = VersionedUnoBalance::from_bytes(&zero.to_bytes()).expect("test");
         assert_eq!(zero, zero_bis);
     }
 
@@ -373,7 +373,7 @@ mod tests {
         zero.set_balance_type(BalanceType::Both);
         zero.set_output_balance(Some(CiphertextCache::Decompressed(Ciphertext::zero())));
         zero.set_previous_topoheight(Some(42));
-        let zero_bis = VersionedUnoBalance::from_bytes(&zero.to_bytes()).unwrap();
+        let zero_bis = VersionedUnoBalance::from_bytes(&zero.to_bytes()).expect("test");
         assert_eq!(zero, zero_bis);
     }
 
@@ -387,7 +387,7 @@ mod tests {
         };
 
         let bytes = balance.to_bytes();
-        let restored = UnoBalance::from_bytes(&bytes).unwrap();
+        let restored = UnoBalance::from_bytes(&bytes).expect("deserialization should succeed");
 
         assert_eq!(restored.topoheight, 100);
         assert!(restored.output_balance.is_none());
@@ -402,7 +402,8 @@ mod tests {
         };
 
         let bytes = summary.to_bytes();
-        let restored = UnoAccountSummary::from_bytes(&bytes).unwrap();
+        let restored =
+            UnoAccountSummary::from_bytes(&bytes).expect("deserialization should succeed");
 
         assert_eq!(restored.output_topoheight, Some(50));
         assert_eq!(restored.stable_topoheight, 100);
@@ -442,6 +443,6 @@ mod tests {
         assert_eq!(balance_type, BalanceType::Output);
         assert_eq!(prev_topo, Some(42));
         // final_balance should be zero ciphertext
-        let _ = final_balance.take_ciphertext().unwrap();
+        let _ = final_balance.take_ciphertext().expect("test");
     }
 }

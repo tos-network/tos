@@ -558,7 +558,7 @@ mod tests {
         assert_eq!(energy.frozen_balance, 1000);
 
         // Start unfreeze
-        energy.start_unfreeze(500, now_ms).unwrap();
+        energy.start_unfreeze(500, now_ms).expect("test");
         assert_eq!(energy.frozen_balance, 500);
         assert_eq!(energy.unfreezing_list.len(), 1);
         assert_eq!(energy.unfreezing_list[0].unfreeze_amount, 500);
@@ -580,7 +580,7 @@ mod tests {
 
         // Fill up the queue
         for i in 0..MAX_UNFREEZING_LIST_SIZE {
-            energy.start_unfreeze(1, i as u64).unwrap();
+            energy.start_unfreeze(1, i as u64).expect("test");
         }
 
         // Queue is now full
@@ -598,8 +598,8 @@ mod tests {
         let now_ms = 0u64;
 
         // Start multiple unfreezes
-        energy.start_unfreeze(100, now_ms).unwrap();
-        energy.start_unfreeze(200, now_ms + 1000).unwrap();
+        energy.start_unfreeze(100, now_ms).expect("test");
+        energy.start_unfreeze(200, now_ms + 1000).expect("test");
 
         let after_14_days = now_ms + (UNFREEZE_DELAY_DAYS as u64 * 24 * 60 * 60 * 1000);
 
@@ -658,7 +658,7 @@ mod tests {
 
         let bytes = energy.to_bytes();
         let mut reader = crate::serializer::Reader::new(&bytes);
-        let restored = AccountEnergy::read(&mut reader).unwrap();
+        let restored = AccountEnergy::read(&mut reader).expect("test");
 
         assert_eq!(energy.frozen_balance, restored.frozen_balance);
         assert_eq!(energy.energy_usage, restored.energy_usage);
@@ -674,7 +674,7 @@ mod tests {
 
         let bytes = state.to_bytes();
         let mut reader = crate::serializer::Reader::new(&bytes);
-        let restored = GlobalEnergyState::read(&mut reader).unwrap();
+        let restored = GlobalEnergyState::read(&mut reader).expect("test");
 
         assert_eq!(state.total_energy_limit, restored.total_energy_limit);
         assert_eq!(state.total_energy_weight, restored.total_energy_weight);
@@ -692,7 +692,7 @@ mod tests {
         let delegation = DelegatedResource::new(from.clone(), to.clone(), 1_000_000, 0);
         let bytes = delegation.to_bytes();
         let mut reader = crate::serializer::Reader::new(&bytes);
-        let restored = DelegatedResource::read(&mut reader).unwrap();
+        let restored = DelegatedResource::read(&mut reader).expect("test");
 
         assert_eq!(delegation.from, restored.from);
         assert_eq!(delegation.to, restored.to);
@@ -703,7 +703,7 @@ mod tests {
         let locked_delegation = DelegatedResource::new(from, to, 500_000, 1_000_000_000);
         let bytes = locked_delegation.to_bytes();
         let mut reader = crate::serializer::Reader::new(&bytes);
-        let restored = DelegatedResource::read(&mut reader).unwrap();
+        let restored = DelegatedResource::read(&mut reader).expect("test");
 
         assert_eq!(locked_delegation.frozen_balance, restored.frozen_balance);
         assert_eq!(locked_delegation.expire_time, restored.expire_time);
@@ -750,7 +750,7 @@ mod tests {
 
         let bytes = energy.to_bytes();
         let mut reader = crate::serializer::Reader::new(&bytes);
-        let restored = AccountEnergy::read(&mut reader).unwrap();
+        let restored = AccountEnergy::read(&mut reader).expect("test");
 
         assert_eq!(energy.frozen_balance, restored.frozen_balance);
         assert_eq!(

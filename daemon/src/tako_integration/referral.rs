@@ -457,7 +457,7 @@ mod tests {
         let result = adapter.has_referrer(&user);
 
         assert!(result.is_ok());
-        assert!(result.unwrap());
+        assert!(result.expect("test"));
     }
 
     #[test]
@@ -469,12 +469,12 @@ mod tests {
         let result = adapter.get_referrer(&user);
 
         assert!(result.is_ok());
-        assert!(result.unwrap().is_none());
+        assert!(result.expect("test").is_none());
     }
 
     #[test]
     fn test_get_referrer_some() {
-        let referrer_pk = PublicKey::from_bytes(&[2u8; 32]).unwrap();
+        let referrer_pk = PublicKey::from_bytes(&[2u8; 32]).expect("test");
         let mut provider = MockReferralProvider {
             referrer: Some(referrer_pk.clone()),
             ..Default::default()
@@ -485,15 +485,15 @@ mod tests {
         let result = adapter.get_referrer(&user);
 
         assert!(result.is_ok());
-        let referrer = result.unwrap();
+        let referrer = result.expect("test");
         assert!(referrer.is_some());
-        assert_eq!(referrer.unwrap(), *referrer_pk.as_bytes());
+        assert_eq!(referrer.expect("test"), *referrer_pk.as_bytes());
     }
 
     #[test]
     fn test_get_uplines() {
-        let upline1 = PublicKey::from_bytes(&[2u8; 32]).unwrap();
-        let upline2 = PublicKey::from_bytes(&[3u8; 32]).unwrap();
+        let upline1 = PublicKey::from_bytes(&[2u8; 32]).expect("test");
+        let upline2 = PublicKey::from_bytes(&[3u8; 32]).expect("test");
         let mut provider = MockReferralProvider {
             uplines: vec![upline1.clone(), upline2.clone()],
             ..Default::default()
@@ -504,7 +504,7 @@ mod tests {
         let result = adapter.get_uplines(&user, 3);
 
         assert!(result.is_ok());
-        let (uplines, levels) = result.unwrap();
+        let (uplines, levels) = result.expect("test");
         assert_eq!(uplines.len(), 2);
         assert_eq!(levels, 2);
         assert_eq!(uplines[0], *upline1.as_bytes());
@@ -523,7 +523,7 @@ mod tests {
         let result = adapter.get_direct_referrals_count(&user);
 
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), 42);
+        assert_eq!(result.expect("test"), 42);
     }
 
     #[test]
@@ -538,7 +538,7 @@ mod tests {
         let result = adapter.get_team_size(&user);
 
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), 1000);
+        assert_eq!(result.expect("test"), 1000);
     }
 
     #[test]
@@ -553,7 +553,7 @@ mod tests {
         let result = adapter.get_level(&user);
 
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), 5);
+        assert_eq!(result.expect("test"), 5);
     }
 
     #[test]
@@ -569,6 +569,6 @@ mod tests {
         let result = adapter.is_downline(&ancestor, &descendant, 10);
 
         assert!(result.is_ok());
-        assert!(result.unwrap());
+        assert!(result.expect("test"));
     }
 }

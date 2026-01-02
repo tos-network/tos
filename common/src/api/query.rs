@@ -305,7 +305,7 @@ mod tests {
         assert!(query.verify(&DataValue::String("hello".to_string())));
         assert!(!query.verify(&DataValue::U8(5)));
 
-        let query = QueryValue::Matches(Regex::new(r"^\d{3}-\d{3}-\d{4}$").unwrap());
+        let query = QueryValue::Matches(Regex::new(r"^\d{3}-\d{3}-\d{4}$").expect("test"));
         assert!(query.verify(&DataValue::String("123-456-7890".to_string())));
         assert!(!query.verify(&DataValue::String("hello".to_string())));
     }

@@ -1078,7 +1078,7 @@ mod tests {
         let bytes = [seed; 32];
         CompressedPublicKey::from_bytes(&bytes).unwrap_or_else(|_| {
             // If invalid, create a valid one from curve25519
-            CompressedPublicKey::from_bytes(&[1u8; 32]).unwrap()
+            CompressedPublicKey::from_bytes(&[1u8; 32]).expect("test assertion")
         })
     }
 
@@ -1100,7 +1100,7 @@ mod tests {
         let sig_bytes = [seed; 64];
         let signature = Signature::from_bytes(&sig_bytes).unwrap_or_else(|_| {
             // Fallback to default bytes if invalid
-            Signature::from_bytes(&[0u8; 64]).unwrap()
+            Signature::from_bytes(&[0u8; 64]).expect("test assertion")
         });
 
         CommitteeApproval::new(create_test_pubkey(seed), signature, now)

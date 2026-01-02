@@ -227,7 +227,7 @@ mod tests {
 
         // Deserialize
         let mut reader = Reader::new(&bytes);
-        let restored = ShieldTransferPayload::read(&mut reader).unwrap();
+        let restored = ShieldTransferPayload::read(&mut reader).expect("test");
 
         // Verify fields match
         assert_eq!(payload.get_asset(), restored.get_asset());
@@ -303,7 +303,7 @@ mod tests {
         // Verify serialization roundtrip with extra data
         let bytes = payload.to_bytes();
         let mut reader = Reader::new(&bytes);
-        let restored = ShieldTransferPayload::read(&mut reader).unwrap();
+        let restored = ShieldTransferPayload::read(&mut reader).expect("test");
         assert!(restored.get_extra_data().is_some());
     }
 }

@@ -88,9 +88,9 @@ mod tests {
     #[test]
     fn test_serde() {
         let signature = Signature::new(Scalar::from(1u64), Scalar::from(2u64));
-        let v = serde_json::to_value(&signature).unwrap();
+        let v = serde_json::to_value(&signature).expect("test");
 
-        let signature2: Signature = serde_json::from_value(v).unwrap();
+        let signature2: Signature = serde_json::from_value(v).expect("test");
 
         assert_eq!(signature, signature2);
     }
