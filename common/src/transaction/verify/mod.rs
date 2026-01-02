@@ -893,8 +893,19 @@ impl Transaction {
                         // DelegateResource uses frozen balance, not direct TOS spending
                     }
                     EnergyPayload::ActivateAccounts { accounts } => {
-                        // ActivateAccounts spends 0.1 TOS per account as activation fee
-                        let total_fee = (accounts.len() as u64)
+                        // ActivateAccounts spends 0.1 TOS per NEW account only (idempotent)
+                        // Count only unregistered accounts to match apply phase logic
+                        let mut unregistered_count = 0u64;
+                        for account in accounts {
+                            let is_registered = state
+                                .is_account_registered(account)
+                                .await
+                                .map_err(VerificationError::State)?;
+                            if !is_registered {
+                                unregistered_count += 1;
+                            }
+                        }
+                        let total_fee = unregistered_count
                             .checked_mul(FEE_PER_ACCOUNT_CREATION)
                             .ok_or(VerificationError::Overflow)?;
                         let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
@@ -906,8 +917,19 @@ impl Transaction {
                         // BatchDelegateResource uses frozen balance for delegation
                     }
                     EnergyPayload::ActivateAndDelegate { items } => {
-                        // ActivateAndDelegate spends 0.1 TOS per account as activation fee
-                        let total_fee = (items.len() as u64)
+                        // ActivateAndDelegate spends 0.1 TOS per NEW account only (idempotent)
+                        // Count only unregistered accounts to match apply phase logic
+                        let mut unregistered_count = 0u64;
+                        for item in items {
+                            let is_registered = state
+                                .is_account_registered(&item.account)
+                                .await
+                                .map_err(VerificationError::State)?;
+                            if !is_registered {
+                                unregistered_count += 1;
+                            }
+                        }
+                        let total_fee = unregistered_count
                             .checked_mul(FEE_PER_ACCOUNT_CREATION)
                             .ok_or(VerificationError::Overflow)?;
                         let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
@@ -2318,8 +2340,19 @@ impl Transaction {
                         // DelegateResource uses frozen balance, not direct TOS spending
                     }
                     EnergyPayload::ActivateAccounts { accounts } => {
-                        // ActivateAccounts spends 0.1 TOS per account as activation fee
-                        let total_fee = (accounts.len() as u64)
+                        // ActivateAccounts spends 0.1 TOS per NEW account only (idempotent)
+                        // Count only unregistered accounts to match apply phase logic
+                        let mut unregistered_count = 0u64;
+                        for account in accounts {
+                            let is_registered = state
+                                .is_account_registered(account)
+                                .await
+                                .map_err(VerificationError::State)?;
+                            if !is_registered {
+                                unregistered_count += 1;
+                            }
+                        }
+                        let total_fee = unregistered_count
                             .checked_mul(FEE_PER_ACCOUNT_CREATION)
                             .ok_or(VerificationError::Overflow)?;
                         let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
@@ -2331,8 +2364,19 @@ impl Transaction {
                         // BatchDelegateResource uses frozen balance for delegation
                     }
                     EnergyPayload::ActivateAndDelegate { items } => {
-                        // ActivateAndDelegate spends 0.1 TOS per account as activation fee
-                        let total_fee = (items.len() as u64)
+                        // ActivateAndDelegate spends 0.1 TOS per NEW account only (idempotent)
+                        // Count only unregistered accounts to match apply phase logic
+                        let mut unregistered_count = 0u64;
+                        for item in items {
+                            let is_registered = state
+                                .is_account_registered(&item.account)
+                                .await
+                                .map_err(VerificationError::State)?;
+                            if !is_registered {
+                                unregistered_count += 1;
+                            }
+                        }
+                        let total_fee = unregistered_count
                             .checked_mul(FEE_PER_ACCOUNT_CREATION)
                             .ok_or(VerificationError::Overflow)?;
                         let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
@@ -2710,8 +2754,19 @@ impl Transaction {
                         // DelegateResource uses frozen balance, not direct TOS spending
                     }
                     EnergyPayload::ActivateAccounts { accounts } => {
-                        // ActivateAccounts spends 0.1 TOS per account as activation fee
-                        let total_fee = (accounts.len() as u64)
+                        // ActivateAccounts spends 0.1 TOS per NEW account only (idempotent)
+                        // Count only unregistered accounts to match apply phase logic
+                        let mut unregistered_count = 0u64;
+                        for account in accounts {
+                            let is_registered = state
+                                .is_account_registered(account)
+                                .await
+                                .map_err(VerificationError::State)?;
+                            if !is_registered {
+                                unregistered_count += 1;
+                            }
+                        }
+                        let total_fee = unregistered_count
                             .checked_mul(FEE_PER_ACCOUNT_CREATION)
                             .ok_or(VerificationError::Overflow)?;
                         let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
@@ -2723,8 +2778,19 @@ impl Transaction {
                         // BatchDelegateResource uses frozen balance for delegation
                     }
                     EnergyPayload::ActivateAndDelegate { items } => {
-                        // ActivateAndDelegate spends 0.1 TOS per account as activation fee
-                        let total_fee = (items.len() as u64)
+                        // ActivateAndDelegate spends 0.1 TOS per NEW account only (idempotent)
+                        // Count only unregistered accounts to match apply phase logic
+                        let mut unregistered_count = 0u64;
+                        for item in items {
+                            let is_registered = state
+                                .is_account_registered(&item.account)
+                                .await
+                                .map_err(VerificationError::State)?;
+                            if !is_registered {
+                                unregistered_count += 1;
+                            }
+                        }
+                        let total_fee = unregistered_count
                             .checked_mul(FEE_PER_ACCOUNT_CREATION)
                             .ok_or(VerificationError::Overflow)?;
                         let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
@@ -4812,8 +4878,19 @@ impl Transaction {
                         // DelegateResource uses frozen balance, not direct TOS spending
                     }
                     EnergyPayload::ActivateAccounts { accounts } => {
-                        // ActivateAccounts spends 0.1 TOS per account as activation fee
-                        let total_fee = (accounts.len() as u64)
+                        // ActivateAccounts spends 0.1 TOS per NEW account only (idempotent)
+                        // Count only unregistered accounts to match apply phase logic
+                        let mut unregistered_count = 0u64;
+                        for account in accounts {
+                            let is_registered = state
+                                .is_account_registered(account)
+                                .await
+                                .map_err(VerificationError::State)?;
+                            if !is_registered {
+                                unregistered_count += 1;
+                            }
+                        }
+                        let total_fee = unregistered_count
                             .checked_mul(FEE_PER_ACCOUNT_CREATION)
                             .ok_or(VerificationError::Overflow)?;
                         let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
@@ -4825,8 +4902,19 @@ impl Transaction {
                         // BatchDelegateResource uses frozen balance for delegation
                     }
                     EnergyPayload::ActivateAndDelegate { items } => {
-                        // ActivateAndDelegate spends 0.1 TOS per account as activation fee
-                        let total_fee = (items.len() as u64)
+                        // ActivateAndDelegate spends 0.1 TOS per NEW account only (idempotent)
+                        // Count only unregistered accounts to match apply phase logic
+                        let mut unregistered_count = 0u64;
+                        for item in items {
+                            let is_registered = state
+                                .is_account_registered(&item.account)
+                                .await
+                                .map_err(VerificationError::State)?;
+                            if !is_registered {
+                                unregistered_count += 1;
+                            }
+                        }
+                        let total_fee = unregistered_count
                             .checked_mul(FEE_PER_ACCOUNT_CREATION)
                             .ok_or(VerificationError::Overflow)?;
                         let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
