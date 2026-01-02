@@ -2780,4 +2780,634 @@ mod tests {
             assert_eq!(available, 0, "Frozen energy should be exhausted");
         }
     }
+
+    // ============================================================================
+    // SCENARIO 16: INTEGRATION SCENARIOS (USER JOURNEYS)
+    // ============================================================================
+
+    /// Scenario 16: Integration Scenarios - Complete user journeys
+    ///
+    /// Tests multi-step operations simulating real user workflows:
+    /// - 16.1: New user journey (freeze, use, unfreeze, withdraw)
+    /// - 16.2: Delegation flow (delegate, use, undelegate)
+    /// - 16.3: High-frequency trading with auto-burn
+    mod scenario_16_integration {
+        use super::*;
+
+        /// Scenario 16.1: Complete New User Journey
+        ///
+        /// Timeline:
+        /// Day 0: Start with 10 TOS, use free quota, freeze 5 TOS
+        /// Day 1: Free quota recovered
+        /// Day 15: Unfreeze 2 TOS
+        /// Day 29: Withdraw unfrozen TOS
+        #[test]
+        fn test_16_1_new_user_journey() {
+            let total_weight = 10_000_000 * COIN_VALUE;
+            let mut account = AccountEnergy::new();
+            let mut balance = 10 * COIN_VALUE;
+
+            // Day 0.0: Start - check initial state
+            assert_eq!(account.frozen_balance, 0);
+            assert_eq!(account.calculate_free_energy_available(0), FREE_ENERGY_QUOTA);
+
+            // Day 0.1: Use free quota for transfers (simulate 1,050 energy used)
+            let energy_used = 1_050u64;
+            account.consume_free_energy(energy_used, MS_PER_DAY / 10);
+            assert_eq!(account.free_energy_usage, energy_used);
+            let free_remaining = account.calculate_free_energy_available(MS_PER_DAY / 10);
+            assert_eq!(free_remaining, FREE_ENERGY_QUOTA - energy_used); // 450
+
+            // Day 0.2: Freeze 5 TOS
+            let freeze_amount = 5 * COIN_VALUE;
+            balance -= freeze_amount;
+            account.frozen_balance = freeze_amount;
+            assert_eq!(balance, 5 * COIN_VALUE);
+            assert_eq!(account.frozen_balance, 5 * COIN_VALUE);
+
+            // Verify energy limit after freeze
+            let energy_limit = account.calculate_energy_limit(total_weight);
+            assert!(energy_limit > 0, "Should have energy limit after freeze");
+
+            // Day 1.0: Free quota recovered (24h after consumption at MS_PER_DAY/10)
+            let consumption_time = MS_PER_DAY / 10;
+            let day1_ms = consumption_time + MS_PER_DAY; // Full 24h recovery window
+            let free_day1 = account.calculate_free_energy_available(day1_ms);
+            assert_eq!(free_day1, FREE_ENERGY_QUOTA); // Fully recovered
+
+            // Day 15.0: Unfreeze 2 TOS
+            let day15_ms = 15 * MS_PER_DAY;
+            let unfreeze_amount = 2 * COIN_VALUE;
+            account.start_unfreeze(unfreeze_amount, day15_ms).unwrap();
+
+            assert_eq!(account.frozen_balance, 3 * COIN_VALUE);
+            assert_eq!(account.unfreezing_list.len(), 1);
+            assert_eq!(account.unfreezing_list[0].unfreeze_amount, unfreeze_amount);
+
+            // Day 29.0: Withdraw (after 14-day waiting period)
+            let day29_ms = 29 * MS_PER_DAY;
+            let withdrawn = account.withdraw_expired_unfreeze(day29_ms);
+
+            assert_eq!(withdrawn, unfreeze_amount);
+            balance += withdrawn;
+            assert_eq!(balance, 7 * COIN_VALUE);
+            assert_eq!(account.frozen_balance, 3 * COIN_VALUE);
+            assert!(account.unfreezing_list.is_empty());
+        }
+
+        /// Scenario 16.2: Delegation Flow
+        ///
+        /// Alice delegates to Bob, Bob uses energy, Alice undelegates
+        #[test]
+        fn test_16_2_delegation_flow() {
+            let total_weight = 10_000_000 * COIN_VALUE;
+
+            // Alice freezes 10,000 TOS
+            let mut alice = AccountEnergy::new();
+            alice.frozen_balance = 10_000 * COIN_VALUE;
+
+            let mut bob = AccountEnergy::new();
+
+            // Step 1: Verify Alice's initial energy
+            let alice_initial_energy = alice.calculate_energy_limit(total_weight);
+            assert!(alice_initial_energy > 0);
+
+            // Step 2: Alice delegates 5,000 TOS to Bob (simulated)
+            let delegate_amount = 5_000 * COIN_VALUE;
+            alice.delegated_frozen_balance = delegate_amount;
+            bob.acquired_delegated_balance = delegate_amount;
+
+            // Verify effective balances
+            assert_eq!(alice.effective_frozen_balance(), 5_000 * COIN_VALUE);
+            assert_eq!(bob.effective_frozen_balance(), 5_000 * COIN_VALUE);
+
+            // Verify Bob now has energy
+            let bob_energy = bob.calculate_energy_limit(total_weight);
+            assert!(bob_energy > 0);
+
+            // Step 3: Bob uses some energy
+            let bob_usage = 500_000u64;
+            bob.consume_frozen_energy(bob_usage, 1_000_000, total_weight);
+            assert_eq!(bob.energy_usage, bob_usage);
+
+            // Step 4: Alice undelegates 2,000 TOS
+            let undelegate_amount = 2_000 * COIN_VALUE;
+            alice.delegated_frozen_balance -= undelegate_amount;
+            bob.acquired_delegated_balance -= undelegate_amount;
+
+            // Verify updated effective balances
+            assert_eq!(alice.effective_frozen_balance(), 7_000 * COIN_VALUE);
+            assert_eq!(bob.effective_frozen_balance(), 3_000 * COIN_VALUE);
+        }
+
+        /// Scenario 16.3: High-Frequency Trading with Auto-Burn
+        ///
+        /// 10 transactions consuming energy until TOS burn required
+        #[test]
+        fn test_16_3_high_frequency_trading() {
+            let total_weight = 10_000_000 * COIN_VALUE;
+
+            // Setup: 1 TOS frozen (gives ~1,840 energy), 100 TOS balance
+            // 10 TXs × 350 = 3,500 energy needed
+            // Free: 1,500 → Frozen: 1,840 → TOS burn: 160 energy × 100 = 16,000 atomic
+            let mut account = AccountEnergy::new();
+            account.frozen_balance = 1 * COIN_VALUE;
+            let mut balance = 100 * COIN_VALUE;
+
+            let now_ms = 1_000_000u64;
+            let energy_per_tx = 350u64; // size + output cost
+
+            // Track totals
+            let mut total_free_used = 0u64;
+            let mut total_frozen_used = 0u64;
+            let mut total_tos_burned = 0u64;
+
+            // Execute 10 transactions
+            for _ in 1..=10 {
+                let result = EnergyResourceManager::consume_transaction_energy_detailed(
+                    &mut account,
+                    energy_per_tx,
+                    total_weight,
+                    now_ms,
+                );
+
+                total_free_used += result.free_energy_used;
+                total_frozen_used += result.frozen_energy_used;
+                total_tos_burned += result.fee;
+
+                // Deduct burned TOS from balance
+                if result.fee > 0 {
+                    balance = balance.saturating_sub(result.fee);
+                }
+
+                // Verify transaction succeeded
+                assert_eq!(result.energy_used, energy_per_tx);
+            }
+
+            // Verify totals
+            assert_eq!(total_free_used + total_frozen_used + total_tos_burned / TOS_PER_ENERGY,
+                       10 * energy_per_tx);
+
+            // First 4 TXs should use free quota (4 × 350 = 1,400 < 1,500)
+            assert!(total_free_used >= 1_400);
+
+            // Some TOS should be burned for later TXs
+            assert!(total_tos_burned > 0, "Later TXs should burn TOS");
+        }
+    }
+
+    // ============================================================================
+    // SCENARIO 18: RPC VALIDATION (RESPONSE FORMAT)
+    // ============================================================================
+
+    /// Scenario 18: RPC Validation - Verify data for RPC responses
+    ///
+    /// Tests the calculations that would go into RPC responses:
+    /// - 18.1: Account energy info calculations
+    /// - 18.2: Energy estimation calculations
+    mod scenario_18_rpc_validation {
+        use super::*;
+
+        /// Scenario 18.1: Account Energy Info Calculation
+        ///
+        /// Verifies all fields that would be in get_account_energy response
+        #[test]
+        fn test_18_1_account_energy_info() {
+            let total_weight = 10_000_000 * COIN_VALUE;
+
+            let mut account = AccountEnergy::new();
+            account.frozen_balance = 5_000 * COIN_VALUE;
+            account.delegated_frozen_balance = 1_000 * COIN_VALUE;
+            account.acquired_delegated_balance = 2_000 * COIN_VALUE;
+            account.energy_usage = 100_000;
+            account.latest_consume_time = 12 * 60 * 60 * 1000; // 12 hours ago
+            account.free_energy_usage = 500;
+            account.latest_free_consume_time = 6 * 60 * 60 * 1000; // 6 hours ago
+
+            // Add unfreezing entries
+            account.unfreezing_list.push(UnfreezingRecord {
+                unfreeze_amount: 100 * COIN_VALUE,
+                unfreeze_expire_time: 0, // Expired
+            });
+            account.unfreezing_list.push(UnfreezingRecord {
+                unfreeze_amount: 200 * COIN_VALUE,
+                unfreeze_expire_time: u64::MAX, // Not expired
+            });
+
+            let now_ms = 24 * 60 * 60 * 1000; // 24 hours
+
+            // Calculate all RPC fields
+            let energy_limit = account.calculate_energy_limit(total_weight);
+            let energy_available = account.calculate_frozen_energy_available(now_ms, total_weight);
+            let free_available = account.calculate_free_energy_available(now_ms);
+            let effective_frozen = account.effective_frozen_balance();
+            let withdrawable = account.withdrawable_amount(now_ms);
+            let total_unfreezing = account.total_unfreezing();
+
+            // Verify calculations
+            // effective = 5000 + 2000 - 1000 = 6000 TOS
+            assert_eq!(effective_frozen, 6_000 * COIN_VALUE);
+
+            // Energy limit based on effective frozen
+            assert!(energy_limit > 0);
+
+            // Energy available (after 12h recovery, should have recovered half)
+            assert!(energy_available > 0);
+            assert!(energy_available <= energy_limit);
+
+            // Free energy (after 6h, should have recovered 1/4)
+            assert!(free_available > 0);
+            assert!(free_available <= FREE_ENERGY_QUOTA);
+
+            // Withdrawable = first entry (expired)
+            assert_eq!(withdrawable, 100 * COIN_VALUE);
+
+            // Total unfreezing = both entries
+            assert_eq!(total_unfreezing, 300 * COIN_VALUE);
+        }
+
+        /// Scenario 18.2: Energy Estimation Calculation
+        ///
+        /// Verifies estimate_energy would return correct values
+        #[test]
+        fn test_18_2_energy_estimation() {
+            let total_weight = 10_000_000 * COIN_VALUE;
+
+            let mut account = AccountEnergy::new();
+            account.frozen_balance = 100 * COIN_VALUE;
+
+            let now_ms = 1_000_000u64;
+
+            // Transaction: Simple transfer, 1 output, new account
+            let tx_size = 250usize;
+            let outputs = 1usize;
+            let new_accounts = 1usize;
+
+            let energy_required = EnergyFeeCalculator::calculate_energy_cost(
+                tx_size, outputs, new_accounts
+            );
+
+            // 250 + 100 + 25000 = 25,350
+            assert_eq!(energy_required, 25_350);
+
+            // Available energy
+            let free_available = account.calculate_free_energy_available(now_ms);
+            let frozen_available = account.calculate_frozen_energy_available(now_ms, total_weight);
+            let total_available = free_available + frozen_available;
+
+            // Estimated fee if energy insufficient
+            let energy_shortfall = energy_required.saturating_sub(total_available);
+            let estimated_fee = energy_shortfall * TOS_PER_ENERGY;
+
+            // Verify estimation
+            assert!(energy_required > 0);
+            if total_available >= energy_required {
+                assert_eq!(estimated_fee, 0);
+            } else {
+                assert!(estimated_fee > 0);
+            }
+        }
+
+        /// Scenario 18.3: Global Energy State Info
+        #[test]
+        fn test_18_3_global_energy_state_info() {
+            let global = GlobalEnergyState::new();
+
+            // Verify default values
+            assert_eq!(global.total_energy_limit, TOTAL_ENERGY_LIMIT);
+            assert_eq!(global.total_energy_weight, 0);
+
+            // Simulate weight updates
+            let mut global = GlobalEnergyState::new();
+            global.add_weight(1_000_000 * COIN_VALUE, 1);
+
+            assert_eq!(global.total_energy_weight, 1_000_000 * COIN_VALUE);
+        }
+    }
+
+    // ============================================================================
+    // SCENARIO 21: ENERGY CONSUMPTION & REFUND
+    // ============================================================================
+
+    /// Scenario 21: Energy Consumption & Refund
+    ///
+    /// Tests fee_limit reservation vs actual consumption:
+    /// - 21.1: Actual consumption vs fee_limit
+    /// - 21.2: Refund mechanism
+    /// - 21.3: TransactionResult accuracy
+    mod scenario_21_energy_consumption_refund {
+        use super::*;
+
+        /// Scenario 21.1: Energy Consumption vs fee_limit
+        ///
+        /// Verify only actual energy/TOS is consumed, not full fee_limit
+        #[test]
+        fn test_21_1_1_full_coverage_no_burn() {
+            let total_weight = 10_000_000 * COIN_VALUE;
+            let mut account = AccountEnergy::new();
+            account.frozen_balance = 100 * COIN_VALUE;
+
+            let now_ms = 1_000_000u64;
+            let fee_limit = 100_000u64; // Reserved
+            let energy_required = 500u64;
+
+            // Consume energy
+            let result = EnergyResourceManager::consume_transaction_energy_detailed(
+                &mut account,
+                energy_required,
+                total_weight,
+                now_ms,
+            );
+
+            // Actual TOS burned should be 0 (covered by free quota)
+            assert_eq!(result.fee, 0);
+            assert_eq!(result.energy_used, 500);
+            assert_eq!(result.free_energy_used, 500);
+
+            // Refund = fee_limit - actual = 100,000 - 0 = 100,000
+            let refund = fee_limit - result.fee;
+            assert_eq!(refund, fee_limit);
+        }
+
+        /// Scenario 21.1.2: Mixed coverage, no TOS burn
+        #[test]
+        fn test_21_1_2_mixed_coverage_no_burn() {
+            let total_weight = 10_000_000 * COIN_VALUE;
+            let mut account = AccountEnergy::new();
+            account.frozen_balance = 100 * COIN_VALUE;
+
+            let now_ms = 1_000_000u64;
+            let _fee_limit = 100_000u64; // For future use with fee_limit handling
+            let energy_required = 2_000u64;
+
+            let result = EnergyResourceManager::consume_transaction_energy_detailed(
+                &mut account,
+                energy_required,
+                total_weight,
+                now_ms,
+            );
+
+            // 1,500 from free + 500 from frozen = 2,000
+            assert_eq!(result.fee, 0);
+            assert_eq!(result.free_energy_used, FREE_ENERGY_QUOTA);
+            assert_eq!(result.frozen_energy_used, 500);
+        }
+
+        /// Scenario 21.1.3: Partial TOS burn required
+        #[test]
+        fn test_21_1_3_partial_tos_burn() {
+            let total_weight = 10_000_000 * COIN_VALUE;
+            let mut account = AccountEnergy::new();
+
+            // Limited frozen energy
+            let frozen_for_5000 = ((5_000u128 * 10_000_000u128 * COIN_VALUE as u128)
+                / TOTAL_ENERGY_LIMIT as u128) as u64;
+            account.frozen_balance = frozen_for_5000;
+
+            let now_ms = 1_000_000u64;
+            let energy_required = 10_000u64;
+
+            let result = EnergyResourceManager::consume_transaction_energy_detailed(
+                &mut account,
+                energy_required,
+                total_weight,
+                now_ms,
+            );
+
+            // Need 10,000 - 1,500 (free) - ~5,000 (frozen) = ~3,500 from TOS
+            assert!(result.fee > 0, "Should burn TOS");
+            assert_eq!(result.free_energy_used, FREE_ENERGY_QUOTA);
+            assert!(result.frozen_energy_used > 0);
+        }
+
+        /// Scenario 21.2: Refund Mechanism
+        #[test]
+        fn test_21_2_refund_calculation() {
+            // Test refund = fee_limit - actual_fee
+            let fee_limit = 1_000_000u64;
+
+            // Case 1: No actual fee
+            let actual_fee_1 = 0u64;
+            let refund_1 = fee_limit - actual_fee_1;
+            assert_eq!(refund_1, 1_000_000);
+
+            // Case 2: Partial fee
+            let actual_fee_2 = 100_000u64;
+            let refund_2 = fee_limit - actual_fee_2;
+            assert_eq!(refund_2, 900_000);
+
+            // Case 3: Full fee used
+            let actual_fee_3 = 1_000_000u64;
+            let refund_3 = fee_limit - actual_fee_3;
+            assert_eq!(refund_3, 0);
+        }
+
+        /// Scenario 21.3: TransactionResult Sum Verification
+        #[test]
+        fn test_21_3_transaction_result_sum() {
+            let total_weight = 10_000_000 * COIN_VALUE;
+            let mut account = AccountEnergy::new();
+            account.frozen_balance = 10 * COIN_VALUE; // Limited
+
+            let now_ms = 1_000_000u64;
+            let energy_required = 5_000u64;
+
+            let result = EnergyResourceManager::consume_transaction_energy_detailed(
+                &mut account,
+                energy_required,
+                total_weight,
+                now_ms,
+            );
+
+            // Verify sum: free + frozen + burned = total
+            let burned_energy = result.fee / TOS_PER_ENERGY;
+            let total_from_sources = result.free_energy_used
+                + result.frozen_energy_used
+                + burned_energy;
+
+            assert_eq!(total_from_sources, result.energy_used);
+        }
+    }
+
+    // ============================================================================
+    // SCENARIO 25: PHASE SEPARATION (VERIFY VS APPLY)
+    // ============================================================================
+
+    /// Scenario 25: Phase Separation
+    ///
+    /// Tests the conceptual separation between verify and apply phases:
+    /// - 25.1: Verify phase only reserves
+    /// - 25.2: Apply phase finalizes
+    mod scenario_25_phase_separation {
+        use super::*;
+
+        /// Scenario 25.1: Verify Phase Concepts
+        ///
+        /// Documents what verify phase should/shouldn't do
+        #[test]
+        fn test_25_1_verify_phase_concepts() {
+            // Verify phase should:
+            // 1. Check balance >= fee_limit (reserve)
+            // 2. Check frozen_balance for unfreeze operations
+            // 3. NOT update energy usage
+            // 4. NOT finalize state changes
+
+            let account = AccountEnergy::new();
+
+            // Verify-phase checks are read-only
+            let _limit = account.calculate_energy_limit(10_000_000 * COIN_VALUE);
+            let _available = account.calculate_free_energy_available(1_000_000);
+
+            // Account unchanged after reads
+            assert_eq!(account.energy_usage, 0);
+            assert_eq!(account.free_energy_usage, 0);
+        }
+
+        /// Scenario 25.2: Apply Phase State Changes
+        ///
+        /// Verify state changes only happen in apply
+        #[test]
+        fn test_25_2_apply_phase_state_changes() {
+            let mut account = AccountEnergy::new();
+            let initial_frozen = 0u64;
+
+            // Simulate apply phase for FreezeTos
+            let freeze_amount = 1_000 * COIN_VALUE;
+            account.frozen_balance += freeze_amount;
+
+            assert_eq!(account.frozen_balance, freeze_amount);
+            assert_ne!(account.frozen_balance, initial_frozen);
+        }
+
+        /// Scenario 25.3: Energy Not Consumed Until Apply
+        #[test]
+        fn test_25_3_energy_consumed_in_apply() {
+            let total_weight = 10_000_000 * COIN_VALUE;
+            let mut account = AccountEnergy::new();
+            account.frozen_balance = 100 * COIN_VALUE;
+
+            let now_ms = 1_000_000u64;
+
+            // "Verify" - just check availability (read-only)
+            let available_before = account.calculate_frozen_energy_available(now_ms, total_weight);
+            assert!(available_before > 0);
+
+            // Energy not consumed yet
+            assert_eq!(account.energy_usage, 0);
+
+            // "Apply" - actually consume energy
+            account.consume_frozen_energy(1_000, now_ms, total_weight);
+
+            // Now energy is consumed
+            assert_eq!(account.energy_usage, 1_000);
+        }
+    }
+
+    // ============================================================================
+    // SCENARIO 30: CONCURRENT OPERATION ISOLATION
+    // ============================================================================
+
+    /// Scenario 30: Concurrent Operation Isolation
+    ///
+    /// Tests ordering and state isolation for concurrent operations:
+    /// - 30.1: Multiple transactions same block
+    /// - 30.2: Delegation race condition
+    /// - 30.3: Queue limit enforcement
+    mod scenario_30_concurrent_operations {
+        use super::*;
+
+        /// Scenario 30.1: Sequential State Updates
+        ///
+        /// Simulates multiple TXs in same block seeing cumulative state
+        #[test]
+        fn test_30_1_sequential_state_updates() {
+            let mut account = AccountEnergy::new();
+            account.frozen_balance = 0;
+
+            // TX1: FreezeTos(1,000)
+            account.frozen_balance += 1_000 * COIN_VALUE;
+            assert_eq!(account.frozen_balance, 1_000 * COIN_VALUE);
+
+            // TX2: FreezeTos(2,000) - sees TX1 result
+            account.frozen_balance += 2_000 * COIN_VALUE;
+            assert_eq!(account.frozen_balance, 3_000 * COIN_VALUE);
+
+            // TX3: UnfreezeTos(500) - sees TX1 + TX2 result
+            account.start_unfreeze(500 * COIN_VALUE, 1_000_000).unwrap();
+            assert_eq!(account.frozen_balance, 2_500 * COIN_VALUE);
+            assert_eq!(account.unfreezing_list.len(), 1);
+        }
+
+        /// Scenario 30.2: Delegation Prevents Over-Delegation
+        ///
+        /// Second delegation should fail if insufficient frozen
+        #[test]
+        fn test_30_2_delegation_race_prevention() {
+            let mut account = AccountEnergy::new();
+            account.frozen_balance = 5_000 * COIN_VALUE;
+            account.delegated_frozen_balance = 0;
+
+            // TX1: Delegate 3,000 to Bob
+            let delegate_1 = 3_000 * COIN_VALUE;
+            let available_1 = account.frozen_balance - account.delegated_frozen_balance;
+            assert!(delegate_1 <= available_1);
+            account.delegated_frozen_balance += delegate_1;
+
+            // TX2: Delegate 3,000 to Carol (should fail)
+            let delegate_2 = 3_000 * COIN_VALUE;
+            let available_2 = account.frozen_balance - account.delegated_frozen_balance;
+            assert_eq!(available_2, 2_000 * COIN_VALUE);
+            assert!(delegate_2 > available_2, "TX2 should fail - insufficient");
+
+            // Only first delegation succeeded
+            assert_eq!(account.delegated_frozen_balance, 3_000 * COIN_VALUE);
+        }
+
+        /// Scenario 30.3: Queue Limit Enforced Across Concurrent Unfreezes
+        #[test]
+        fn test_30_3_queue_limit_enforcement() {
+            let mut account = AccountEnergy::new();
+            account.frozen_balance = 100_000 * COIN_VALUE;
+
+            // Fill queue to 31 entries
+            for i in 0..31 {
+                account.unfreezing_list.push(UnfreezingRecord {
+                    unfreeze_amount: 100 * COIN_VALUE,
+                    unfreeze_expire_time: 1_000_000 + i as u64,
+                });
+            }
+            assert_eq!(account.unfreezing_list.len(), 31);
+
+            // TX1: UnfreezeTos(100) - succeeds, queue = 32
+            let result1 = account.start_unfreeze(100 * COIN_VALUE, 2_000_000);
+            assert!(result1.is_ok());
+            assert_eq!(account.unfreezing_list.len(), 32);
+
+            // TX2: UnfreezeTos(100) - fails, queue full
+            let result2 = account.start_unfreeze(100 * COIN_VALUE, 2_000_001);
+            assert!(result2.is_err());
+            assert_eq!(account.unfreezing_list.len(), 32);
+        }
+
+        /// Scenario 30.4: Energy Consumption Isolation
+        #[test]
+        fn test_30_4_energy_consumption_isolation() {
+            let total_weight = 10_000_000 * COIN_VALUE;
+            let mut account = AccountEnergy::new();
+            account.frozen_balance = 100 * COIN_VALUE;
+
+            let now_ms = 1_000_000u64;
+
+            // Get initial available
+            let initial_available = account.calculate_frozen_energy_available(now_ms, total_weight);
+
+            // TX1 consumes 1,000
+            account.consume_frozen_energy(1_000, now_ms, total_weight);
+
+            // TX2 sees reduced availability
+            let after_tx1 = account.calculate_frozen_energy_available(now_ms, total_weight);
+            assert!(after_tx1 < initial_available);
+            assert_eq!(initial_available - after_tx1, 1_000);
+        }
+    }
 }
