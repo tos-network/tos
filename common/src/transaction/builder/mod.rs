@@ -457,18 +457,10 @@ impl TransactionBuilder {
     pub fn get_transaction_cost(&self, fee_limit: u64, asset: &Hash) -> u64 {
         let mut cost = 0;
 
-        // Stake 2.0: fee_limit is added to cost for TOS asset
-        // This represents the max possible cost (actual may be less)
-        let should_apply_fees = true;
-
-        let fee_asset = if matches!(self.data, TransactionTypeBuilder::UnoTransfers(_)) {
-            &UNO_ASSET
-        } else {
-            &TOS_ASSET
-        };
-
-        if *asset == *fee_asset && should_apply_fees {
-            // Fees are applied to the fee asset (TOS or UNO).
+        // BUG-019 FIX: fee_limit is ALWAYS added to TOS cost, not UNO
+        // In Energy model, fees are paid via TOS (Energy consumption)
+        // UNO transfers spend from encrypted balance for amounts, but fees from TOS
+        if *asset == TOS_ASSET {
             cost += fee_limit;
         }
 
