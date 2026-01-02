@@ -1190,4 +1190,19 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for ChainS
     ) -> Result<Option<tos_common::account::DelegatedResource>, BlockchainError> {
         self.storage.get_delegated_resource(from, to).await
     }
+
+    /// Record a pending undelegation (no-op for ChainState)
+    ///
+    /// ChainState is used during block verification where transactions
+    /// are processed sequentially in the apply phase. Pending undelegation
+    /// tracking is only needed for mempool verification.
+    async fn record_pending_undelegation(
+        &mut self,
+        _from: &'a CompressedPublicKey,
+        _to: &'a CompressedPublicKey,
+        _amount: u64,
+    ) -> Result<(), BlockchainError> {
+        // No-op for block verification - apply phase handles state changes
+        Ok(())
+    }
 }

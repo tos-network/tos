@@ -442,6 +442,15 @@ impl<'a> tos_common::transaction::verify::BlockchainVerificationState<'a, ()>
     ) -> Result<Option<tos_common::account::DelegatedResource>, ()> {
         Ok(None)
     }
+
+    async fn record_pending_undelegation(
+        &mut self,
+        _from: &'a CompressedPublicKey,
+        _to: &'a CompressedPublicKey,
+        _amount: u64,
+    ) -> Result<(), ()> {
+        Ok(())
+    }
 }
 
 // -------------------------------------------------------------------------------------------------

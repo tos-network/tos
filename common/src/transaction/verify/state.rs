@@ -153,12 +153,31 @@ pub trait BlockchainVerificationState<'a, E> {
     /// * `to` - The receiver's public key
     ///
     /// # Returns
-    /// The delegation if it exists, None otherwise
+    /// The delegation if it exists, None otherwise.
+    /// The returned frozen_balance accounts for any pending
+    /// undelegations that haven't been applied yet.
     async fn get_delegated_resource(
         &mut self,
         from: &'a CompressedPublicKey,
         to: &'a CompressedPublicKey,
     ) -> Result<Option<crate::account::DelegatedResource>, E>;
+
+    /// Record a pending undelegation amount
+    ///
+    /// Called after UndelegateResource verification passes to track
+    /// the amount being undelegated. Subsequent transactions will see
+    /// reduced delegation balance via get_delegated_resource.
+    ///
+    /// # Arguments
+    /// * `from` - The delegator's public key
+    /// * `to` - The receiver's public key
+    /// * `amount` - The amount being undelegated
+    async fn record_pending_undelegation(
+        &mut self,
+        from: &'a CompressedPublicKey,
+        to: &'a CompressedPublicKey,
+        amount: u64,
+    ) -> Result<(), E>;
 
     /// Set the contract module
     async fn set_contract_module(&mut self, hash: &Hash, module: &'a Module) -> Result<(), E>;

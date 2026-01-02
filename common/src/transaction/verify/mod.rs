@@ -537,6 +537,12 @@ impl Transaction {
                         if delegation.frozen_balance < *amount {
                             return Err(VerificationError::InsufficientDelegatedBalance);
                         }
+
+                        // Record pending undelegation for subsequent TX verification
+                        state
+                            .record_pending_undelegation(sender, receiver, *amount)
+                            .await
+                            .map_err(VerificationError::State)?;
                     } else {
                         return Err(VerificationError::DelegationNotFound);
                     }
@@ -582,18 +588,10 @@ impl Transaction {
                                 "Cannot delegate to self"
                             )));
                         }
-                        // Verify receiver account exists before allowing delegation
-                        // This prevents tx from entering mempool if receiver doesn't exist
-                        let is_registered = state
-                            .is_account_registered(&item.receiver)
-                            .await
-                            .map_err(VerificationError::State)?;
-                        if !is_registered {
-                            return Err(VerificationError::AnyError(anyhow!(
-                                "Receiver account {:?} is not registered",
-                                &item.receiver
-                            )));
-                        }
+                        // NOTE: Receiver registration check removed (BUG-041 fix)
+                        // Consistent with single DelegateResource which doesn't require
+                        // receiver to be registered. Receivers are implicitly created
+                        // when they receive delegation (similar to XELIS model).
                         // Check minimum delegation amount
                         if item.amount < MIN_DELEGATION_AMOUNT {
                             return Err(VerificationError::AnyError(anyhow!(
@@ -2028,6 +2026,12 @@ impl Transaction {
                         if delegation.frozen_balance < *amount {
                             return Err(VerificationError::InsufficientDelegatedBalance);
                         }
+
+                        // Record pending undelegation for subsequent TX verification
+                        state
+                            .record_pending_undelegation(sender, receiver, *amount)
+                            .await
+                            .map_err(VerificationError::State)?;
                     } else {
                         return Err(VerificationError::DelegationNotFound);
                     }
@@ -2073,18 +2077,10 @@ impl Transaction {
                                 "Cannot delegate to self"
                             )));
                         }
-                        // Verify receiver account exists before allowing delegation
-                        // (Design constraint: receivers activated in same block aren't visible)
-                        let is_registered = state
-                            .is_account_registered(&item.receiver)
-                            .await
-                            .map_err(VerificationError::State)?;
-                        if !is_registered {
-                            return Err(VerificationError::AnyError(anyhow!(
-                                "Receiver account {:?} is not registered",
-                                &item.receiver
-                            )));
-                        }
+                        // NOTE: Receiver registration check removed (BUG-041 fix)
+                        // Consistent with single DelegateResource which doesn't require
+                        // receiver to be registered. Receivers are implicitly created
+                        // when they receive delegation (similar to XELIS model).
                         // Check minimum delegation amount
                         if item.amount < MIN_DELEGATION_AMOUNT {
                             return Err(VerificationError::AnyError(anyhow!(
@@ -3813,20 +3809,11 @@ impl Transaction {
                         for delegation_item in delegations {
                             let receiver = &delegation_item.receiver;
 
-                            // Check receiver exists
-                            let is_registered = state
-                                .is_account_registered(receiver)
-                                .await
-                                .map_err(VerificationError::State)?;
+                            // NOTE: Registration check removed (BUG-041 fix)
+                            // Receivers are implicitly created when they receive delegation.
+                            // Energy state will be created via get_account_energy if needed.
 
-                            if !is_registered {
-                                return Err(VerificationError::AnyError(anyhow!(
-                                    "Receiver account {:?} is not registered",
-                                    receiver
-                                )));
-                            }
-
-                            // Get receiver's energy
+                            // Get receiver's energy (creates default if not exists)
                             let mut receiver_energy = state
                                 .get_account_energy(receiver)
                                 .await

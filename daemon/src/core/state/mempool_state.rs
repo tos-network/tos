@@ -52,6 +52,9 @@ pub struct MempoolState<'a, S: Storage> {
     topoheight: TopoHeight,
     // Block header version
     block_version: BlockVersion,
+    // Pending undelegation amounts: (from, to) -> amount
+    // Tracks undelegations that passed verification but not yet applied
+    pending_undelegations: HashMap<(CompressedPublicKey, CompressedPublicKey), u64>,
 }
 
 impl<'a, S: Storage> MempoolState<'a, S> {
@@ -76,6 +79,7 @@ impl<'a, S: Storage> MempoolState<'a, S> {
             stable_topoheight,
             topoheight,
             block_version,
+            pending_undelegations: HashMap::new(),
         }
     }
 
@@ -650,13 +654,43 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Mempoo
     /// Get a specific delegation from one account to another
     ///
     /// This enables lock expiry checking and receiver validation
-    /// in the verification phase.
+    /// in the verification phase. Returns delegation with frozen_balance
+    /// reduced by any pending undelegation amounts.
     async fn get_delegated_resource(
         &mut self,
         from: &'a CompressedPublicKey,
         to: &'a CompressedPublicKey,
     ) -> Result<Option<tos_common::account::DelegatedResource>, BlockchainError> {
-        // Delegate to storage provider
-        self.storage.get_delegated_resource(from, to).await
+        // Get delegation from storage
+        let delegation = self.storage.get_delegated_resource(from, to).await?;
+
+        // Adjust for pending undelegations
+        match delegation {
+            Some(mut d) => {
+                let key = (from.clone(), to.clone());
+                if let Some(&pending_amount) = self.pending_undelegations.get(&key) {
+                    // Reduce frozen_balance by pending undelegation amount
+                    d.frozen_balance = d.frozen_balance.saturating_sub(pending_amount);
+                }
+                Ok(Some(d))
+            }
+            None => Ok(None),
+        }
+    }
+
+    /// Record a pending undelegation amount
+    ///
+    /// Called after UndelegateResource verification passes to track
+    /// the amount being undelegated. Subsequent transactions will see
+    /// reduced delegation balance via get_delegated_resource.
+    async fn record_pending_undelegation(
+        &mut self,
+        from: &'a CompressedPublicKey,
+        to: &'a CompressedPublicKey,
+        amount: u64,
+    ) -> Result<(), BlockchainError> {
+        let key = (from.clone(), to.clone());
+        *self.pending_undelegations.entry(key).or_insert(0) += amount;
+        Ok(())
     }
 }

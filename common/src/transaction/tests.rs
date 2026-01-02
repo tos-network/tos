@@ -1518,6 +1518,16 @@ impl<'a> BlockchainVerificationState<'a, TestError> for ChainState {
     ) -> Result<Option<crate::account::DelegatedResource>, TestError> {
         Ok(None)
     }
+
+    async fn record_pending_undelegation(
+        &mut self,
+        _from: &'a CompressedPublicKey,
+        _to: &'a CompressedPublicKey,
+        _amount: u64,
+    ) -> Result<(), TestError> {
+        // No-op for test state
+        Ok(())
+    }
 }
 
 impl FeeHelper for AccountStateImpl {

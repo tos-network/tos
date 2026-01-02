@@ -237,6 +237,18 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError>
     ) -> Result<Option<tos_common::account::DelegatedResource>, BlockchainError> {
         self.inner.get_delegated_resource(from, to).await
     }
+
+    /// Record a pending undelegation (delegates to inner)
+    async fn record_pending_undelegation(
+        &mut self,
+        from: &'a CompressedPublicKey,
+        to: &'a CompressedPublicKey,
+        amount: u64,
+    ) -> Result<(), BlockchainError> {
+        self.inner
+            .record_pending_undelegation(from, to, amount)
+            .await
+    }
 }
 
 #[async_trait]

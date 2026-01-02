@@ -555,6 +555,16 @@ impl<'a> BlockchainVerificationState<'a, TestError> for BatchTestChainState {
             .get(&(from.clone(), to.clone()))
             .cloned())
     }
+
+    async fn record_pending_undelegation(
+        &mut self,
+        _from: &'a CompressedPublicKey,
+        _to: &'a CompressedPublicKey,
+        _amount: u64,
+    ) -> Result<(), TestError> {
+        // No-op for test state - delegation changes happen in apply phase
+        Ok(())
+    }
 }
 
 // =============================================================================
@@ -1923,10 +1933,11 @@ mod mixed_activation_tests {
 mod receiver_registration_tests {
     use super::*;
 
-    /// BatchDelegateResource should reject unregistered receivers.
-    /// The transaction should fail during verification/apply.
+    /// BatchDelegateResource accepts unregistered receivers (BUG-041 fix).
+    /// Receivers are implicitly created when they receive delegation,
+    /// similar to XELIS's implicit account creation model.
     #[tokio::test]
-    async fn test_batch_delegate_rejects_unregistered_receiver() {
+    async fn test_batch_delegate_accepts_unregistered_receiver() {
         let sender_keypair = create_keypair();
         let sender = sender_keypair.get_public_key();
         let sender_compressed = sender.compress();
@@ -1946,7 +1957,7 @@ mod receiver_registration_tests {
         };
         chain_state.set_account_energy_state(&sender_compressed, sender_energy);
 
-        // NOTE: We intentionally do NOT register the receiver
+        // Receiver is intentionally NOT registered
         assert!(!chain_state.is_registered(&unregistered_receiver));
 
         let delegations = vec![BatchDelegationItem {
@@ -1965,26 +1976,26 @@ mod receiver_registration_tests {
         let tx = Arc::new(tx);
         let tx_hash = tx.hash();
 
-        // Transaction should fail due to unregistered receiver
+        // Transaction should succeed - unregistered receivers are now accepted
         let result = tx.apply_without_verify(&tx_hash, &mut chain_state).await;
 
         assert!(
-            result.is_err(),
-            "Transaction should fail for unregistered receiver"
+            result.is_ok(),
+            "Transaction should succeed for unregistered receiver (BUG-041 fix): {:?}",
+            result.unwrap_err()
         );
 
-        let error_message = format!("{:?}", result.unwrap_err());
-        assert!(
-            error_message.contains("not registered"),
-            "Error should mention receiver not registered: {}",
-            error_message
-        );
+        // Verify delegation was created
+        let delegation = chain_state
+            .get_delegation(&sender_compressed, &unregistered_receiver)
+            .expect("Delegation should exist");
+        assert_eq!(delegation.frozen_balance, 10 * COIN_VALUE);
     }
 
     /// BatchDelegateResource with mixed registered/unregistered receivers
-    /// should fail if ANY receiver is unregistered.
+    /// should succeed for all (BUG-041 fix).
     #[tokio::test]
-    async fn test_batch_delegate_rejects_mixed_receivers() {
+    async fn test_batch_delegate_accepts_mixed_receivers() {
         let sender_keypair = create_keypair();
         let sender = sender_keypair.get_public_key();
         let sender_compressed = sender.compress();
@@ -2031,13 +2042,25 @@ mod receiver_registration_tests {
         let tx = Arc::new(tx);
         let tx_hash = tx.hash();
 
-        // Transaction should fail due to unregistered receiver
+        // Transaction should succeed for all receivers (BUG-041 fix)
         let result = tx.apply_without_verify(&tx_hash, &mut chain_state).await;
 
         assert!(
-            result.is_err(),
-            "Transaction should fail when any receiver is unregistered"
+            result.is_ok(),
+            "Transaction should succeed for mixed receivers (BUG-041 fix): {:?}",
+            result.unwrap_err()
         );
+
+        // Verify both delegations were created
+        let delegation1 = chain_state
+            .get_delegation(&sender_compressed, &registered_receiver)
+            .expect("Delegation to registered receiver should exist");
+        assert_eq!(delegation1.frozen_balance, 10 * COIN_VALUE);
+
+        let delegation2 = chain_state
+            .get_delegation(&sender_compressed, &unregistered_receiver)
+            .expect("Delegation to unregistered receiver should exist");
+        assert_eq!(delegation2.frozen_balance, 10 * COIN_VALUE);
     }
 
     /// BatchDelegateResource with all registered receivers should succeed.

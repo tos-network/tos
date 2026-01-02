@@ -454,6 +454,15 @@ impl<'a> BlockchainVerificationState<'a, TestError> for TestChainState {
     ) -> Result<Option<tos_common::account::DelegatedResource>, TestError> {
         Ok(None)
     }
+
+    async fn record_pending_undelegation(
+        &mut self,
+        _from: &'a CompressedPublicKey,
+        _to: &'a CompressedPublicKey,
+        _amount: u64,
+    ) -> Result<(), TestError> {
+        Ok(())
+    }
 }
 
 #[async_trait]
