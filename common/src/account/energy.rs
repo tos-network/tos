@@ -65,6 +65,22 @@ impl AccountEnergy {
         Self::default()
     }
 
+    /// Validate delegation invariants
+    ///
+    /// Returns true if the state is valid:
+    /// - delegated_frozen_balance <= frozen_balance (can't delegate more than frozen)
+    ///
+    /// This should be called during verify/apply phases to detect invalid states.
+    pub fn is_delegation_valid(&self) -> bool {
+        self.delegated_frozen_balance <= self.frozen_balance
+    }
+
+    /// Get the maximum amount that can be delegated (frozen - already delegated)
+    pub fn available_for_delegation(&self) -> u64 {
+        self.frozen_balance
+            .saturating_sub(self.delegated_frozen_balance)
+    }
+
     /// Calculate effective frozen balance (own + acquired - delegated)
     pub fn effective_frozen_balance(&self) -> u64 {
         self.frozen_balance
@@ -244,7 +260,9 @@ impl AccountEnergy {
 
     /// Get total amount in unfreezing queue
     pub fn total_unfreezing(&self) -> u64 {
-        self.unfreezing_list.iter().map(|r| r.unfreeze_amount).sum()
+        self.unfreezing_list
+            .iter()
+            .fold(0u64, |acc, r| acc.saturating_add(r.unfreeze_amount))
     }
 
     /// Get amount that can be withdrawn now (expired entries)
@@ -252,8 +270,7 @@ impl AccountEnergy {
         self.unfreezing_list
             .iter()
             .filter(|r| r.unfreeze_expire_time <= now_ms)
-            .map(|r| r.unfreeze_amount)
-            .sum()
+            .fold(0u64, |acc, r| acc.saturating_add(r.unfreeze_amount))
     }
 }
 

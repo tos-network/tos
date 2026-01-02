@@ -688,14 +688,21 @@ mod tests {
 
             let delegate_amount = 1_000 * COIN_VALUE;
 
-            // Simulate delegation
-            from_energy.frozen_balance -= delegate_amount;
+            // Simulate delegation:
+            // - frozen_balance stays unchanged (TOS remains frozen)
+            // - delegated_frozen_balance tracks what's delegated out
+            // - effective = frozen + acquired - delegated = 10,000 + 0 - 1,000 = 9,000
             from_energy.delegated_frozen_balance += delegate_amount;
             to_energy.acquired_delegated_balance += delegate_amount;
 
-            assert_eq!(from_energy.frozen_balance, 9_000 * COIN_VALUE);
+            // frozen_balance unchanged - TOS is still frozen
+            assert_eq!(from_energy.frozen_balance, 10_000 * COIN_VALUE);
             assert_eq!(from_energy.delegated_frozen_balance, delegate_amount);
             assert_eq!(to_energy.acquired_delegated_balance, delegate_amount);
+
+            // Verify effective frozen balance calculation
+            assert_eq!(from_energy.effective_frozen_balance(), 9_000 * COIN_VALUE);
+            assert_eq!(to_energy.effective_frozen_balance(), 1_000 * COIN_VALUE);
         }
 
         #[test]
@@ -755,20 +762,31 @@ mod tests {
             let mut from_energy = AccountEnergy::new();
             from_energy.frozen_balance = 5_000 * COIN_VALUE;
             from_energy.delegated_frozen_balance = 3_000 * COIN_VALUE;
+            // effective = 5,000 + 0 - 3,000 = 2,000
 
             let mut to_energy = AccountEnergy::new();
             to_energy.acquired_delegated_balance = 3_000 * COIN_VALUE;
+            // effective = 0 + 3,000 - 0 = 3,000
 
             let undelegate_amount = 1_000 * COIN_VALUE;
 
-            // Simulate undelegation
+            // Simulate undelegation:
+            // - frozen_balance stays unchanged (TOS was never reduced during delegation)
+            // - delegated_frozen_balance decreases
+            // - acquired_delegated_balance decreases
             from_energy.delegated_frozen_balance -= undelegate_amount;
-            from_energy.frozen_balance += undelegate_amount;
             to_energy.acquired_delegated_balance -= undelegate_amount;
 
-            assert_eq!(from_energy.frozen_balance, 6_000 * COIN_VALUE);
+            // frozen_balance unchanged
+            assert_eq!(from_energy.frozen_balance, 5_000 * COIN_VALUE);
             assert_eq!(from_energy.delegated_frozen_balance, 2_000 * COIN_VALUE);
             assert_eq!(to_energy.acquired_delegated_balance, 2_000 * COIN_VALUE);
+
+            // Verify effective frozen balance calculation
+            // from: 5,000 + 0 - 2,000 = 3,000 (gained 1,000 effective)
+            // to: 0 + 2,000 - 0 = 2,000 (lost 1,000 effective)
+            assert_eq!(from_energy.effective_frozen_balance(), 3_000 * COIN_VALUE);
+            assert_eq!(to_energy.effective_frozen_balance(), 2_000 * COIN_VALUE);
         }
 
         #[test]
@@ -776,18 +794,29 @@ mod tests {
             let mut from_energy = AccountEnergy::new();
             from_energy.frozen_balance = 5_000 * COIN_VALUE;
             from_energy.delegated_frozen_balance = 3_000 * COIN_VALUE;
+            // effective = 5,000 - 3,000 = 2,000
 
             let mut to_energy = AccountEnergy::new();
             to_energy.acquired_delegated_balance = 3_000 * COIN_VALUE;
+            // effective = 3,000
 
-            // Undelegate all
-            from_energy.frozen_balance += from_energy.delegated_frozen_balance;
-            to_energy.acquired_delegated_balance = 0;
+            // Undelegate all:
+            // - frozen_balance stays unchanged
+            // - delegated_frozen_balance becomes 0
+            // - acquired_delegated_balance becomes 0
             from_energy.delegated_frozen_balance = 0;
+            to_energy.acquired_delegated_balance = 0;
 
-            assert_eq!(from_energy.frozen_balance, 8_000 * COIN_VALUE);
+            // frozen_balance unchanged
+            assert_eq!(from_energy.frozen_balance, 5_000 * COIN_VALUE);
             assert_eq!(from_energy.delegated_frozen_balance, 0);
             assert_eq!(to_energy.acquired_delegated_balance, 0);
+
+            // Verify effective frozen balance
+            // from: 5,000 + 0 - 0 = 5,000 (full frozen balance restored)
+            // to: 0 + 0 - 0 = 0 (no more delegated energy)
+            assert_eq!(from_energy.effective_frozen_balance(), 5_000 * COIN_VALUE);
+            assert_eq!(to_energy.effective_frozen_balance(), 0);
         }
 
         #[test]
@@ -1315,6 +1344,37 @@ mod tests {
 
             // This test documents the consistency requirement
             assert_eq!(MIN_DELEGATION_AMOUNT, COIN_VALUE);
+        }
+
+        #[test]
+        fn test_22_5_delegation_invariant_validation() {
+            // Test is_delegation_valid() invariant check
+            let mut energy = AccountEnergy::new();
+            energy.frozen_balance = 1_000 * COIN_VALUE;
+
+            // Valid: no delegation
+            assert!(energy.is_delegation_valid());
+            assert_eq!(energy.available_for_delegation(), 1_000 * COIN_VALUE);
+
+            // Valid: partial delegation
+            energy.delegated_frozen_balance = 500 * COIN_VALUE;
+            assert!(energy.is_delegation_valid());
+            assert_eq!(energy.available_for_delegation(), 500 * COIN_VALUE);
+
+            // Valid: full delegation
+            energy.delegated_frozen_balance = 1_000 * COIN_VALUE;
+            assert!(energy.is_delegation_valid());
+            assert_eq!(energy.available_for_delegation(), 0);
+
+            // Invalid: over-delegation (would be caught at verify/apply)
+            energy.delegated_frozen_balance = 1_001 * COIN_VALUE;
+            assert!(!energy.is_delegation_valid());
+            // saturating_sub prevents underflow
+            assert_eq!(energy.available_for_delegation(), 0);
+
+            // Verify effective_frozen_balance handles invalid state gracefully
+            // Uses saturating_sub so doesn't panic, but returns 0
+            assert_eq!(energy.effective_frozen_balance(), 0);
         }
     }
 
