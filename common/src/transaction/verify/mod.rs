@@ -529,7 +529,7 @@ impl Transaction {
                     if let Err(e) = payload.validate_batch_limits() {
                         return Err(VerificationError::AnyError(anyhow!("{}", e)));
                     }
-                    // BUG-026 FIX: Check for duplicate receivers
+                    // Reject duplicate receivers in batch delegation
                     let mut seen_receivers = std::collections::HashSet::new();
                     for item in delegations {
                         if !seen_receivers.insert(&item.receiver) {
@@ -541,6 +541,18 @@ impl Transaction {
                         if &item.receiver == self.get_source() {
                             return Err(VerificationError::AnyError(anyhow!(
                                 "Cannot delegate to self"
+                            )));
+                        }
+                        // Verify receiver account exists before allowing delegation
+                        // This prevents tx from entering mempool if receiver doesn't exist
+                        let is_registered = state
+                            .is_account_registered(&item.receiver)
+                            .await
+                            .map_err(VerificationError::State)?;
+                        if !is_registered {
+                            return Err(VerificationError::AnyError(anyhow!(
+                                "Receiver account {:?} is not registered",
+                                &item.receiver
                             )));
                         }
                         // Check minimum delegation amount
@@ -3331,11 +3343,13 @@ impl Transaction {
                     }
                     EnergyPayload::ActivateAccounts { accounts } => {
                         if log::log_enabled!(log::Level::Debug) {
-                            debug!("ActivateAccounts: Activating {} accounts", accounts.len());
+                            debug!("ActivateAccounts: Processing {} accounts", accounts.len());
                         }
 
-                        // Each account costs 0.1 TOS activation fee
-                        // Fee spending is already tracked via spending_per_asset
+                        // Skip already-activated accounts (idempotent operation)
+                        // Only charge fees for accounts that are actually activated
+                        let mut activated_count = 0u64;
+
                         for account in accounts {
                             // Check if account is already registered
                             let is_registered = state
@@ -3344,10 +3358,11 @@ impl Transaction {
                                 .map_err(VerificationError::State)?;
 
                             if is_registered {
-                                return Err(VerificationError::AnyError(anyhow!(
-                                    "Account {:?} is already registered",
-                                    account
-                                )));
+                                // Skip already-activated accounts (as per spec)
+                                if log::log_enabled!(log::Level::Debug) {
+                                    debug!("Skipping already-activated account: {:?}", account);
+                                }
+                                continue;
                             }
 
                             // Create the account with zero balance
@@ -3362,24 +3377,29 @@ impl Transaction {
                             // Balance stays at 0 - we're just activating the account
                             let _ = balance;
 
+                            activated_count += 1;
+
                             if log::log_enabled!(log::Level::Debug) {
                                 debug!("Activated account: {:?}", account);
                             }
                         }
 
-                        // Burn the total activation fee
-                        let total_fee = (accounts.len() as u64)
+                        // Burn fee only for actually activated accounts
+                        let total_fee = activated_count
                             .checked_mul(FEE_PER_ACCOUNT_CREATION)
                             .ok_or(VerificationError::Overflow)?;
 
-                        state
-                            .add_burned_coins(total_fee)
-                            .await
-                            .map_err(VerificationError::State)?;
+                        if total_fee > 0 {
+                            state
+                                .add_burned_coins(total_fee)
+                                .await
+                                .map_err(VerificationError::State)?;
+                        }
 
                         if log::log_enabled!(log::Level::Debug) {
                             debug!(
-                                "ActivateAccounts complete: {} accounts activated, {} TOS burned",
+                                "ActivateAccounts complete: {} accounts activated (of {} requested), {} TOS burned",
+                                activated_count,
                                 accounts.len(),
                                 total_fee as f64 / COIN_VALUE as f64
                             );
@@ -3458,8 +3478,8 @@ impl Transaction {
                                         .frozen_balance
                                         .checked_add(delegation_item.amount)
                                         .ok_or(VerificationError::Overflow)?;
-                                    // BUG-027 FIX: Preserve the longer lock period
-                                    // This protects receivers from having their lock shortened
+                                    // Preserve the longer lock period (protect receiver)
+                                    // New delegations cannot shorten existing lock periods
                                     let expire = existing.expire_time.max(new_expire_time);
                                     (balance, expire)
                                 }
@@ -3503,7 +3523,7 @@ impl Transaction {
                     }
                     EnergyPayload::ActivateAndDelegate { items } => {
                         if log::log_enabled!(log::Level::Debug) {
-                            debug!("ActivateAndDelegate: {} items", items.len());
+                            debug!("ActivateAndDelegate: Processing {} items", items.len());
                         }
 
                         let sender = self.get_source();
@@ -3516,11 +3536,7 @@ impl Transaction {
                             .map_err(VerificationError::State)?
                             .unwrap_or_default();
 
-                        // Calculate totals
-                        let total_activation_fee = (items.len() as u64)
-                            .checked_mul(FEE_PER_ACCOUNT_CREATION)
-                            .ok_or(VerificationError::Overflow)?;
-
+                        // Calculate total delegation (needed for frozen balance check)
                         let total_delegation: u64 = items
                             .iter()
                             .map(|d| d.delegate_amount)
@@ -3534,7 +3550,11 @@ impl Transaction {
                             return Err(VerificationError::InsufficientFrozenBalance);
                         }
 
-                        // Process each item: activate account and delegate
+                        // BUG-028 FIX: Track actual activations for fee calculation
+                        let mut activated_count = 0u64;
+                        let mut actual_delegation = 0u64;
+
+                        // Process each item: activate account (if not registered) and delegate
                         for item in items {
                             let account = &item.account;
 
@@ -3544,27 +3564,33 @@ impl Transaction {
                                 .await
                                 .map_err(VerificationError::State)?;
 
-                            if is_registered {
-                                return Err(VerificationError::AnyError(anyhow!(
-                                    "Account {:?} is already registered",
+                            if !is_registered {
+                                // Activate the account by creating balance entry
+                                let balance = state
+                                    .get_receiver_balance(
+                                        Cow::Borrowed(account),
+                                        Cow::Borrowed(&TOS_ASSET),
+                                    )
+                                    .await
+                                    .map_err(VerificationError::State)?;
+                                // Balance stays at 0 - we're just activating the account
+                                let _ = balance;
+
+                                activated_count += 1;
+
+                                if log::log_enabled!(log::Level::Debug) {
+                                    debug!("Activated account: {:?}", account);
+                                }
+                            } else if log::log_enabled!(log::Level::Debug) {
+                                debug!(
+                                    "Skipping activation for already-registered account: {:?}",
                                     account
-                                )));
+                                );
                             }
 
-                            // Activate the account by creating balance entry
-                            let balance = state
-                                .get_receiver_balance(
-                                    Cow::Borrowed(account),
-                                    Cow::Borrowed(&TOS_ASSET),
-                                )
-                                .await
-                                .map_err(VerificationError::State)?;
-                            // Balance stays at 0 - we're just activating the account
-                            let _ = balance;
-
-                            // Create delegation if amount > 0
+                            // Create delegation if amount > 0 (for both new and existing accounts)
                             if item.delegate_amount > 0 {
-                                // Create account energy for receiver
+                                // Get/create account energy for receiver
                                 let mut receiver_energy = state
                                     .get_account_energy(account)
                                     .await
@@ -3572,7 +3598,7 @@ impl Transaction {
                                     .unwrap_or_default();
 
                                 // Calculate expiry time (use saturating_add for safety)
-                                let expire_time = if item.lock {
+                                let new_expire_time = if item.lock {
                                     now_ms.saturating_add(
                                         (item.lock_period as u64).saturating_mul(86_400_000),
                                     )
@@ -3580,11 +3606,30 @@ impl Transaction {
                                     0
                                 };
 
-                                // Create delegation record
+                                // Check for existing delegation and preserve longer lock
+                                let existing_delegation = state
+                                    .get_delegated_resource(sender, account)
+                                    .await
+                                    .map_err(VerificationError::State)?;
+
+                                let (frozen_balance, expire_time) = match existing_delegation {
+                                    Some(existing) => {
+                                        let balance = existing
+                                            .frozen_balance
+                                            .checked_add(item.delegate_amount)
+                                            .ok_or(VerificationError::Overflow)?;
+                                        // Preserve longer lock period
+                                        let expire = existing.expire_time.max(new_expire_time);
+                                        (balance, expire)
+                                    }
+                                    None => (item.delegate_amount, new_expire_time),
+                                };
+
+                                // Create/update delegation record
                                 let delegation_record = crate::account::DelegatedResource {
                                     from: sender.clone(),
                                     to: account.clone(),
-                                    frozen_balance: item.delegate_amount,
+                                    frozen_balance,
                                     expire_time,
                                 };
 
@@ -3603,31 +3648,44 @@ impl Transaction {
                                     .set_account_energy(account, receiver_energy)
                                     .await
                                     .map_err(VerificationError::State)?;
+
+                                actual_delegation = actual_delegation
+                                    .checked_add(item.delegate_amount)
+                                    .ok_or(VerificationError::Overflow)?;
                             }
                         }
 
-                        // Burn total activation fee
-                        state
-                            .add_burned_coins(total_activation_fee)
-                            .await
-                            .map_err(VerificationError::State)?;
-
-                        // Update sender's delegated balance
-                        sender_energy.delegated_frozen_balance = sender_energy
-                            .delegated_frozen_balance
-                            .checked_add(total_delegation)
+                        // Burn fee only for actually activated accounts
+                        let total_activation_fee = activated_count
+                            .checked_mul(FEE_PER_ACCOUNT_CREATION)
                             .ok_or(VerificationError::Overflow)?;
 
-                        state
-                            .set_account_energy(sender, sender_energy)
-                            .await
-                            .map_err(VerificationError::State)?;
+                        if total_activation_fee > 0 {
+                            state
+                                .add_burned_coins(total_activation_fee)
+                                .await
+                                .map_err(VerificationError::State)?;
+                        }
+
+                        // Update sender's delegated balance
+                        if actual_delegation > 0 {
+                            sender_energy.delegated_frozen_balance = sender_energy
+                                .delegated_frozen_balance
+                                .checked_add(actual_delegation)
+                                .ok_or(VerificationError::Overflow)?;
+
+                            state
+                                .set_account_energy(sender, sender_energy)
+                                .await
+                                .map_err(VerificationError::State)?;
+                        }
 
                         if log::log_enabled!(log::Level::Debug) {
                             debug!(
-                                "ActivateAndDelegate complete: {} accounts, {} TOS delegated",
+                                "ActivateAndDelegate complete: {} activated (of {}), {} TOS delegated",
+                                activated_count,
                                 items.len(),
-                                total_delegation as f64 / COIN_VALUE as f64
+                                actual_delegation as f64 / COIN_VALUE as f64
                             );
                         }
                     }
