@@ -67,7 +67,7 @@ mod tests {
         #[test]
         fn test_1_1_3_basic_energy_1_tos_in_10m() {
             let mut energy = AccountEnergy::new();
-            energy.frozen_balance = 1 * COIN_VALUE;
+            energy.frozen_balance = COIN_VALUE; // 1 TOS
 
             let total_weight = 10_000_000 * COIN_VALUE;
             let limit = energy.calculate_energy_limit(total_weight);
@@ -405,7 +405,7 @@ mod tests {
         #[test]
         fn test_4_1_2_freeze_minimum() {
             let mut energy = AccountEnergy::new();
-            let freeze_amount = 1 * COIN_VALUE; // 1 TOS minimum
+            let freeze_amount = COIN_VALUE; // 1 TOS minimum
 
             energy.freeze(freeze_amount);
 
@@ -1316,7 +1316,7 @@ mod tests {
         #[test]
         fn test_22_3_whole_tos_validation() {
             // Delegation must be whole TOS (multiple of COIN_VALUE)
-            let valid_amounts = [1 * COIN_VALUE, 2 * COIN_VALUE, 100 * COIN_VALUE];
+            let valid_amounts = [COIN_VALUE, 2 * COIN_VALUE, 100 * COIN_VALUE];
 
             for amount in valid_amounts {
                 assert_eq!(amount % COIN_VALUE, 0, "Amount {} is not whole TOS", amount);
@@ -1445,7 +1445,7 @@ mod tests {
 
             // Extreme timestamp near u64::MAX
             let now_ms = u64::MAX - 1000;
-            let result = energy.start_unfreeze(1 * COIN_VALUE, now_ms);
+            let result = energy.start_unfreeze(COIN_VALUE, now_ms); // 1 TOS
 
             // Should succeed without panic
             assert!(result.is_ok());
@@ -1509,7 +1509,7 @@ mod tests {
 
             // If total_weight is smaller than effective (corruption),
             // raw limit would exceed TOTAL_ENERGY_LIMIT
-            let total_weight = 1 * COIN_VALUE; // Only 1 TOS total weight (corrupted)
+            let total_weight = COIN_VALUE; // Only 1 TOS total weight (corrupted)
 
             let limit = energy.calculate_energy_limit(total_weight);
 
@@ -2097,7 +2097,7 @@ mod tests {
 
             assert_eq!(free_available, 1_000, "Free should be 1,500 - 500 = 1,000");
             assert!(
-                frozen_available >= 2_000 && frozen_available < 2_100,
+                (2_000..2_100).contains(&frozen_available),
                 "frozen_available = {} (expected ~2,000)",
                 frozen_available
             );
@@ -3040,7 +3040,7 @@ mod tests {
             // 10 TXs × 350 = 3,500 energy needed
             // Free: 1,500 → Frozen: 1,840 → TOS burn: 160 energy × 100 = 16,000 atomic
             let mut account = AccountEnergy::new();
-            account.frozen_balance = 1 * COIN_VALUE;
+            account.frozen_balance = COIN_VALUE; // 1 TOS
             let mut balance = 100 * COIN_VALUE;
 
             let now_ms = 1_000_000u64;
@@ -3618,7 +3618,7 @@ mod tests {
             }
 
             // Check whole TOS amount
-            if freeze_amount % COIN_VALUE != 0 {
+            if !freeze_amount.is_multiple_of(COIN_VALUE) {
                 return VerifyResult {
                     success: false,
                     reserved_fee: 0,

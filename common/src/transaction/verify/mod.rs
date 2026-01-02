@@ -866,7 +866,10 @@ impl Transaction {
                 .map_err(VerificationError::State)?;
 
             if log::log_enabled!(log::Level::Trace) {
-                trace!("verify_dynamic_parts: UnoTransfer deducting from UNO balance for source {:?}", self.source);
+                trace!(
+                    "verify_dynamic_parts: UnoTransfer deducting from UNO balance for source {:?}",
+                    self.source
+                );
             }
 
             *sender_uno_balance -= &output;
