@@ -529,7 +529,14 @@ impl Transaction {
                     if let Err(e) = payload.validate_batch_limits() {
                         return Err(VerificationError::AnyError(anyhow!("{}", e)));
                     }
+                    // BUG-026 FIX: Check for duplicate receivers
+                    let mut seen_receivers = std::collections::HashSet::new();
                     for item in delegations {
+                        if !seen_receivers.insert(&item.receiver) {
+                            return Err(VerificationError::AnyError(anyhow!(
+                                "Duplicate receiver in BatchDelegateResource"
+                            )));
+                        }
                         // Check self-delegation
                         if &item.receiver == self.get_source() {
                             return Err(VerificationError::AnyError(anyhow!(
@@ -3160,10 +3167,11 @@ impl Transaction {
                             .map_err(VerificationError::State)?
                             .unwrap_or_default();
 
-                        // Calculate lock expire time
+                        // Calculate lock expire time (use saturating_add for safety)
                         let now_ms = state.get_block().get_timestamp();
                         let expire_time = if *lock {
-                            now_ms + (*lock_period as u64) * 86_400_000 // days to ms
+                            now_ms.saturating_add((*lock_period as u64).saturating_mul(86_400_000))
+                        // days to ms
                         } else {
                             0
                         };
@@ -3428,9 +3436,11 @@ impl Transaction {
                                 .map_err(VerificationError::State)?
                                 .unwrap_or_default();
 
-                            // Calculate expiry time
-                            let expire_time = if delegation_item.lock {
-                                now_ms + (delegation_item.lock_period as u64) * 86_400_000
+                            // Calculate new expiry time from this delegation item
+                            let new_expire_time = if delegation_item.lock {
+                                now_ms.saturating_add(
+                                    (delegation_item.lock_period as u64).saturating_mul(86_400_000),
+                                )
                             } else {
                                 0
                             };
@@ -3441,19 +3451,26 @@ impl Transaction {
                                 .await
                                 .map_err(VerificationError::State)?;
 
-                            let new_frozen_balance = match existing_delegation {
-                                Some(existing) => existing
-                                    .frozen_balance
-                                    .checked_add(delegation_item.amount)
-                                    .ok_or(VerificationError::Overflow)?,
-                                None => delegation_item.amount,
+                            let (new_frozen_balance, final_expire_time) = match existing_delegation
+                            {
+                                Some(existing) => {
+                                    let balance = existing
+                                        .frozen_balance
+                                        .checked_add(delegation_item.amount)
+                                        .ok_or(VerificationError::Overflow)?;
+                                    // BUG-027 FIX: Preserve the longer lock period
+                                    // This protects receivers from having their lock shortened
+                                    let expire = existing.expire_time.max(new_expire_time);
+                                    (balance, expire)
+                                }
+                                None => (delegation_item.amount, new_expire_time),
                             };
 
                             let delegation_record = crate::account::DelegatedResource {
                                 from: sender.clone(),
                                 to: receiver.clone(),
                                 frozen_balance: new_frozen_balance,
-                                expire_time,
+                                expire_time: final_expire_time,
                             };
 
                             state
@@ -3554,9 +3571,11 @@ impl Transaction {
                                     .map_err(VerificationError::State)?
                                     .unwrap_or_default();
 
-                                // Calculate expiry time
+                                // Calculate expiry time (use saturating_add for safety)
                                 let expire_time = if item.lock {
-                                    now_ms + (item.lock_period as u64) * 86_400_000
+                                    now_ms.saturating_add(
+                                        (item.lock_period as u64).saturating_mul(86_400_000),
+                                    )
                                 } else {
                                     0
                                 };
