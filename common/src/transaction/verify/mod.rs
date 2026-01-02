@@ -3227,8 +3227,7 @@ impl Transaction {
                         // delegated_frozen_balance tracks what's delegated out
                         // effective_frozen_balance = frozen + acquired - delegated
                         //
-                        // OLD (BUGGY) CODE REMOVED:
-                        // sender_energy.frozen_balance -= amount;  // This caused double-subtract!
+                        // REMOVED: sender_energy.frozen_balance -= amount (incorrect double-subtract)
                         sender_energy.delegated_frozen_balance = sender_energy
                             .delegated_frozen_balance
                             .checked_add(*amount)
@@ -3318,8 +3317,7 @@ impl Transaction {
                         // frozen_balance represents total frozen TOS (unchanged by delegation/undelegation)
                         // delegated_frozen_balance tracks what's delegated out
                         //
-                        // OLD (BUGGY) CODE REMOVED:
-                        // sender_energy.frozen_balance += amount;  // This was the inverse of the delegation bug
+                        // REMOVED: sender_energy.frozen_balance += amount (incorrect inverse operation)
                         sender_energy.delegated_frozen_balance = sender_energy
                             .delegated_frozen_balance
                             .checked_sub(*amount)
@@ -3550,7 +3548,7 @@ impl Transaction {
                             return Err(VerificationError::InsufficientFrozenBalance);
                         }
 
-                        // BUG-028 FIX: Track actual activations for fee calculation
+                        // Track actual activations for fee calculation (skip already-active accounts)
                         let mut activated_count = 0u64;
                         let mut actual_delegation = 0u64;
 
