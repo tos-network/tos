@@ -1590,6 +1590,564 @@ mod validation_tests {
 }
 
 // =============================================================================
+// Mixed Account Activation Tests (Activated + Non-Activated)
+// =============================================================================
+
+mod mixed_activation_tests {
+    use super::*;
+
+    /// ActivateAccounts should skip already-activated accounts
+    /// instead of returning an error. Only charge fees for newly activated accounts.
+    #[tokio::test]
+    async fn test_activate_accounts_skips_already_activated() {
+        let sender_keypair = create_keypair();
+        let sender = sender_keypair.get_public_key();
+        let sender_compressed = sender.compress();
+
+        // Create 5 accounts: 2 already activated, 3 new
+        let all_accounts = create_test_accounts(5);
+        let already_activated = &all_accounts[0..2];
+        let new_accounts = &all_accounts[2..5];
+
+        let mut chain_state = BatchTestChainState::new();
+        chain_state.register_account(&sender_compressed);
+        chain_state.set_balance(sender, 100 * COIN_VALUE);
+        chain_state.set_nonce(sender, 0);
+
+        // Pre-register 2 accounts
+        for account in already_activated {
+            chain_state.register_account(account);
+        }
+
+        // Verify pre-conditions
+        assert!(chain_state.is_registered(&already_activated[0]));
+        assert!(chain_state.is_registered(&already_activated[1]));
+        assert!(!chain_state.is_registered(&new_accounts[0]));
+        assert!(!chain_state.is_registered(&new_accounts[1]));
+        assert!(!chain_state.is_registered(&new_accounts[2]));
+
+        let tx = create_energy_transaction(
+            &sender_keypair,
+            EnergyPayload::activate_accounts(all_accounts.clone()),
+            0,
+        );
+
+        let tx = Arc::new(tx);
+        let tx_hash = tx.hash();
+
+        // Should succeed even though 2 accounts are already activated
+        let result = tx.apply_without_verify(&tx_hash, &mut chain_state).await;
+
+        assert!(
+            result.is_ok(),
+            "Transaction should succeed with mixed accounts: {:?}",
+            result
+        );
+
+        // All accounts should now be registered
+        for account in &all_accounts {
+            assert!(
+                chain_state.is_registered(account),
+                "Account should be registered"
+            );
+        }
+
+        // Fee should only be burned for 3 NEW accounts (not 5)
+        let expected_burned = FEE_PER_ACCOUNT_CREATION * 3;
+        assert_eq!(
+            chain_state.get_burned(),
+            expected_burned,
+            "Fee should only be charged for newly activated accounts"
+        );
+    }
+
+    /// ActivateAccounts with all accounts already activated
+    /// should succeed with zero fee burned.
+    #[tokio::test]
+    async fn test_activate_accounts_all_already_activated() {
+        let sender_keypair = create_keypair();
+        let sender = sender_keypair.get_public_key();
+        let sender_compressed = sender.compress();
+
+        let accounts = create_test_accounts(3);
+
+        let mut chain_state = BatchTestChainState::new();
+        chain_state.register_account(&sender_compressed);
+        chain_state.set_balance(sender, 100 * COIN_VALUE);
+        chain_state.set_nonce(sender, 0);
+
+        // Pre-register ALL accounts
+        for account in &accounts {
+            chain_state.register_account(account);
+        }
+
+        let tx = create_energy_transaction(
+            &sender_keypair,
+            EnergyPayload::activate_accounts(accounts.clone()),
+            0,
+        );
+
+        let tx = Arc::new(tx);
+        let tx_hash = tx.hash();
+
+        // Should succeed (no-op for already activated accounts)
+        let result = tx.apply_without_verify(&tx_hash, &mut chain_state).await;
+
+        assert!(
+            result.is_ok(),
+            "Transaction should succeed even if all accounts are already activated: {:?}",
+            result
+        );
+
+        // Zero fee should be burned (no new activations)
+        assert_eq!(
+            chain_state.get_burned(),
+            0,
+            "No fee should be burned when all accounts are already activated"
+        );
+    }
+
+    /// ActivateAndDelegate should work with mixed new/existing accounts
+    /// - New accounts: activate + delegate (charge activation fee)
+    /// - Existing accounts: delegate only (no activation fee)
+    #[tokio::test]
+    async fn test_activate_and_delegate_mixed_accounts() {
+        let sender_keypair = create_keypair();
+        let sender = sender_keypair.get_public_key();
+        let sender_compressed = sender.compress();
+
+        // Create 4 accounts: 2 existing, 2 new
+        let all_accounts = create_test_accounts(4);
+        let existing_accounts = &all_accounts[0..2];
+        let _new_accounts = &all_accounts[2..4];
+
+        let mut chain_state = BatchTestChainState::new();
+        chain_state.register_account(&sender_compressed);
+        chain_state.set_balance(sender, 200 * COIN_VALUE);
+        chain_state.set_nonce(sender, 0);
+
+        // Sender needs frozen balance for delegation
+        let sender_energy = AccountEnergy {
+            frozen_balance: 100 * COIN_VALUE,
+            ..Default::default()
+        };
+        chain_state.set_account_energy_state(&sender_compressed, sender_energy);
+
+        // Pre-register 2 accounts (existing)
+        for account in existing_accounts {
+            chain_state.register_account(account);
+        }
+
+        // Create items for all 4 accounts
+        let items: Vec<ActivateDelegateItem> = all_accounts
+            .iter()
+            .enumerate()
+            .map(|(i, account)| ActivateDelegateItem {
+                account: account.clone(),
+                delegate_amount: (i as u64 + 1) * COIN_VALUE, // 1, 2, 3, 4 TOS
+                lock: false,
+                lock_period: 0,
+            })
+            .collect();
+
+        let total_delegation: u64 = items.iter().map(|i| i.delegate_amount).sum();
+
+        let tx = create_energy_transaction(
+            &sender_keypair,
+            EnergyPayload::activate_and_delegate(items),
+            0,
+        );
+
+        let tx = Arc::new(tx);
+        let tx_hash = tx.hash();
+
+        // Should succeed
+        let result = tx.apply_without_verify(&tx_hash, &mut chain_state).await;
+
+        assert!(
+            result.is_ok(),
+            "Transaction should succeed with mixed accounts: {:?}",
+            result
+        );
+
+        // All accounts should be registered
+        for account in &all_accounts {
+            assert!(chain_state.is_registered(account));
+        }
+
+        // Fee should only be burned for 2 NEW accounts (not 4)
+        let expected_burned = FEE_PER_ACCOUNT_CREATION * 2;
+        assert_eq!(
+            chain_state.get_burned(),
+            expected_burned,
+            "Fee should only be charged for newly activated accounts"
+        );
+
+        // All delegations should be created (both existing and new accounts)
+        for (i, account) in all_accounts.iter().enumerate() {
+            let delegation = chain_state.get_delegation(&sender_compressed, account);
+            assert!(
+                delegation.is_some(),
+                "Delegation should exist for account {}",
+                i
+            );
+            assert_eq!(
+                delegation.unwrap().frozen_balance,
+                (i as u64 + 1) * COIN_VALUE
+            );
+        }
+
+        // Verify sender's total delegated balance
+        let sender_energy = chain_state
+            .get_account_energy_state(&sender_compressed)
+            .unwrap();
+        assert_eq!(sender_energy.delegated_frozen_balance, total_delegation);
+    }
+
+    /// ActivateAndDelegate with all accounts already existing
+    /// should succeed with zero activation fee (delegation only).
+    #[tokio::test]
+    async fn test_activate_and_delegate_all_existing_accounts() {
+        let sender_keypair = create_keypair();
+        let sender = sender_keypair.get_public_key();
+        let sender_compressed = sender.compress();
+
+        let accounts = create_test_accounts(3);
+
+        let mut chain_state = BatchTestChainState::new();
+        chain_state.register_account(&sender_compressed);
+        chain_state.set_balance(sender, 100 * COIN_VALUE);
+        chain_state.set_nonce(sender, 0);
+
+        // Sender needs frozen balance for delegation
+        let sender_energy = AccountEnergy {
+            frozen_balance: 50 * COIN_VALUE,
+            ..Default::default()
+        };
+        chain_state.set_account_energy_state(&sender_compressed, sender_energy);
+
+        // Pre-register ALL accounts
+        for account in &accounts {
+            chain_state.register_account(account);
+        }
+
+        let items: Vec<ActivateDelegateItem> = accounts
+            .iter()
+            .map(|account| ActivateDelegateItem {
+                account: account.clone(),
+                delegate_amount: 5 * COIN_VALUE,
+                lock: false,
+                lock_period: 0,
+            })
+            .collect();
+
+        let tx = create_energy_transaction(
+            &sender_keypair,
+            EnergyPayload::activate_and_delegate(items),
+            0,
+        );
+
+        let tx = Arc::new(tx);
+        let tx_hash = tx.hash();
+
+        let result = tx.apply_without_verify(&tx_hash, &mut chain_state).await;
+
+        assert!(result.is_ok(), "Transaction should succeed: {:?}", result);
+
+        // Zero activation fee (all accounts were already activated)
+        assert_eq!(
+            chain_state.get_burned(),
+            0,
+            "No activation fee should be burned for existing accounts"
+        );
+
+        // All delegations should exist
+        for account in &accounts {
+            let delegation = chain_state.get_delegation(&sender_compressed, account);
+            assert!(delegation.is_some());
+            assert_eq!(delegation.unwrap().frozen_balance, 5 * COIN_VALUE);
+        }
+    }
+
+    /// ActivateAndDelegate with zero delegation to existing account
+    /// should skip delegation but not charge activation fee.
+    #[tokio::test]
+    async fn test_activate_and_delegate_zero_delegation_existing_account() {
+        let sender_keypair = create_keypair();
+        let sender = sender_keypair.get_public_key();
+        let sender_compressed = sender.compress();
+
+        let existing_account = KeyPair::new().get_public_key().compress();
+
+        let mut chain_state = BatchTestChainState::new();
+        chain_state.register_account(&sender_compressed);
+        chain_state.register_account(&existing_account);
+        chain_state.set_balance(sender, 100 * COIN_VALUE);
+        chain_state.set_nonce(sender, 0);
+
+        let items = vec![ActivateDelegateItem {
+            account: existing_account.clone(),
+            delegate_amount: 0, // No delegation
+            lock: false,
+            lock_period: 0,
+        }];
+
+        let tx = create_energy_transaction(
+            &sender_keypair,
+            EnergyPayload::activate_and_delegate(items),
+            0,
+        );
+
+        let tx = Arc::new(tx);
+        let tx_hash = tx.hash();
+
+        let result = tx.apply_without_verify(&tx_hash, &mut chain_state).await;
+
+        assert!(result.is_ok(), "Transaction should succeed: {:?}", result);
+
+        // No fee burned (existing account, zero delegation)
+        assert_eq!(chain_state.get_burned(), 0);
+
+        // No delegation created
+        let delegation = chain_state.get_delegation(&sender_compressed, &existing_account);
+        assert!(delegation.is_none());
+    }
+}
+
+// =============================================================================
+// Receiver Registration Check Tests (Verify Phase Validation)
+// =============================================================================
+
+mod receiver_registration_tests {
+    use super::*;
+
+    /// BatchDelegateResource should reject unregistered receivers.
+    /// The transaction should fail during verification/apply.
+    #[tokio::test]
+    async fn test_batch_delegate_rejects_unregistered_receiver() {
+        let sender_keypair = create_keypair();
+        let sender = sender_keypair.get_public_key();
+        let sender_compressed = sender.compress();
+
+        // Create unregistered receiver
+        let unregistered_receiver = KeyPair::new().get_public_key().compress();
+
+        let mut chain_state = BatchTestChainState::new();
+        chain_state.register_account(&sender_compressed);
+        chain_state.set_balance(sender, 100 * COIN_VALUE);
+        chain_state.set_nonce(sender, 0);
+
+        // Sender needs frozen balance for delegation
+        let sender_energy = AccountEnergy {
+            frozen_balance: 50 * COIN_VALUE,
+            ..Default::default()
+        };
+        chain_state.set_account_energy_state(&sender_compressed, sender_energy);
+
+        // NOTE: We intentionally do NOT register the receiver
+        assert!(!chain_state.is_registered(&unregistered_receiver));
+
+        let delegations = vec![BatchDelegationItem {
+            receiver: unregistered_receiver.clone(),
+            amount: 10 * COIN_VALUE,
+            lock: false,
+            lock_period: 0,
+        }];
+
+        let tx = create_energy_transaction(
+            &sender_keypair,
+            EnergyPayload::batch_delegate_resource(delegations),
+            0,
+        );
+
+        let tx = Arc::new(tx);
+        let tx_hash = tx.hash();
+
+        // Transaction should fail due to unregistered receiver
+        let result = tx.apply_without_verify(&tx_hash, &mut chain_state).await;
+
+        assert!(
+            result.is_err(),
+            "Transaction should fail for unregistered receiver"
+        );
+
+        let error_message = format!("{:?}", result.unwrap_err());
+        assert!(
+            error_message.contains("not registered"),
+            "Error should mention receiver not registered: {}",
+            error_message
+        );
+    }
+
+    /// BatchDelegateResource with mixed registered/unregistered receivers
+    /// should fail if ANY receiver is unregistered.
+    #[tokio::test]
+    async fn test_batch_delegate_rejects_mixed_receivers() {
+        let sender_keypair = create_keypair();
+        let sender = sender_keypair.get_public_key();
+        let sender_compressed = sender.compress();
+
+        let registered_receiver = KeyPair::new().get_public_key().compress();
+        let unregistered_receiver = KeyPair::new().get_public_key().compress();
+
+        let mut chain_state = BatchTestChainState::new();
+        chain_state.register_account(&sender_compressed);
+        chain_state.register_account(&registered_receiver); // Only register one
+        chain_state.set_balance(sender, 100 * COIN_VALUE);
+        chain_state.set_nonce(sender, 0);
+
+        let sender_energy = AccountEnergy {
+            frozen_balance: 50 * COIN_VALUE,
+            ..Default::default()
+        };
+        chain_state.set_account_energy_state(&sender_compressed, sender_energy);
+
+        assert!(chain_state.is_registered(&registered_receiver));
+        assert!(!chain_state.is_registered(&unregistered_receiver));
+
+        let delegations = vec![
+            BatchDelegationItem {
+                receiver: registered_receiver.clone(),
+                amount: 10 * COIN_VALUE,
+                lock: false,
+                lock_period: 0,
+            },
+            BatchDelegationItem {
+                receiver: unregistered_receiver.clone(),
+                amount: 10 * COIN_VALUE,
+                lock: false,
+                lock_period: 0,
+            },
+        ];
+
+        let tx = create_energy_transaction(
+            &sender_keypair,
+            EnergyPayload::batch_delegate_resource(delegations),
+            0,
+        );
+
+        let tx = Arc::new(tx);
+        let tx_hash = tx.hash();
+
+        // Transaction should fail due to unregistered receiver
+        let result = tx.apply_without_verify(&tx_hash, &mut chain_state).await;
+
+        assert!(
+            result.is_err(),
+            "Transaction should fail when any receiver is unregistered"
+        );
+    }
+
+    /// BatchDelegateResource with all registered receivers should succeed.
+    #[tokio::test]
+    async fn test_batch_delegate_succeeds_all_registered() {
+        let sender_keypair = create_keypair();
+        let sender = sender_keypair.get_public_key();
+        let sender_compressed = sender.compress();
+
+        let receivers = create_test_accounts(3);
+
+        let mut chain_state = BatchTestChainState::new();
+        chain_state.register_account(&sender_compressed);
+        // Register ALL receivers
+        for receiver in &receivers {
+            chain_state.register_account(receiver);
+        }
+        chain_state.set_balance(sender, 100 * COIN_VALUE);
+        chain_state.set_nonce(sender, 0);
+
+        let sender_energy = AccountEnergy {
+            frozen_balance: 50 * COIN_VALUE,
+            ..Default::default()
+        };
+        chain_state.set_account_energy_state(&sender_compressed, sender_energy);
+
+        let delegations: Vec<BatchDelegationItem> = receivers
+            .iter()
+            .map(|receiver| BatchDelegationItem {
+                receiver: receiver.clone(),
+                amount: 5 * COIN_VALUE,
+                lock: false,
+                lock_period: 0,
+            })
+            .collect();
+
+        let tx = create_energy_transaction(
+            &sender_keypair,
+            EnergyPayload::batch_delegate_resource(delegations),
+            0,
+        );
+
+        let tx = Arc::new(tx);
+        let tx_hash = tx.hash();
+
+        // Transaction should succeed for all registered receivers
+        let result = tx.apply_without_verify(&tx_hash, &mut chain_state).await;
+
+        assert!(
+            result.is_ok(),
+            "Transaction should succeed for all registered receivers: {:?}",
+            result
+        );
+
+        // Verify all delegations were created
+        for receiver in &receivers {
+            let delegation = chain_state.get_delegation(&sender_compressed, receiver);
+            assert!(delegation.is_some(), "Delegation should exist");
+            assert_eq!(delegation.unwrap().frozen_balance, 5 * COIN_VALUE);
+        }
+    }
+
+    /// Verify that unregistered receiver check is performed during apply phase.
+    /// When sender also has zero frozen balance, both errors are caught.
+    #[tokio::test]
+    async fn test_batch_delegate_multiple_error_conditions() {
+        let sender_keypair = create_keypair();
+        let sender = sender_keypair.get_public_key();
+        let sender_compressed = sender.compress();
+
+        let unregistered_receiver = KeyPair::new().get_public_key().compress();
+
+        let mut chain_state = BatchTestChainState::new();
+        chain_state.register_account(&sender_compressed);
+        chain_state.set_balance(sender, 100 * COIN_VALUE);
+        chain_state.set_nonce(sender, 0);
+
+        // Sender has ZERO frozen balance (would also fail)
+        let sender_energy = AccountEnergy {
+            frozen_balance: 0, // No frozen balance
+            ..Default::default()
+        };
+        chain_state.set_account_energy_state(&sender_compressed, sender_energy);
+
+        let delegations = vec![BatchDelegationItem {
+            receiver: unregistered_receiver.clone(),
+            amount: 10 * COIN_VALUE,
+            lock: false,
+            lock_period: 0,
+        }];
+
+        let tx = create_energy_transaction(
+            &sender_keypair,
+            EnergyPayload::batch_delegate_resource(delegations),
+            0,
+        );
+
+        let tx = Arc::new(tx);
+        let tx_hash = tx.hash();
+
+        // Transaction should fail due to one or more error conditions
+        let result = tx.apply_without_verify(&tx_hash, &mut chain_state).await;
+
+        // Both conditions are errors - the transaction must fail
+        assert!(
+            result.is_err(),
+            "Transaction should fail with multiple error conditions"
+        );
+    }
+}
+
+// =============================================================================
 // Serialization Tests
 // =============================================================================
 
