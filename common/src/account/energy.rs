@@ -196,13 +196,26 @@ impl AccountEnergy {
     }
 
     /// Start unfreezing process (adds to queue, waits 14 days)
+    ///
+    /// Validation:
+    /// - amount > 0 (reject zero-amount entries)
+    /// - amount <= available_for_delegation() (can't unfreeze delegated TOS)
+    /// - queue not full (max 32 entries)
     pub fn start_unfreeze(&mut self, amount: u64, now_ms: u64) -> Result<(), &'static str> {
+        // Reject zero-amount unfreeze requests
+        if amount == 0 {
+            return Err("Unfreeze amount must be greater than zero");
+        }
+
         if self.unfreezing_list.len() >= MAX_UNFREEZING_LIST_SIZE {
             return Err("Unfreezing queue is full (max 32 entries)");
         }
 
-        if amount > self.frozen_balance {
-            return Err("Insufficient frozen balance");
+        // Can't unfreeze more than available (frozen - delegated)
+        // This prevents unfreezing TOS that is delegated to others
+        let available = self.available_for_delegation();
+        if amount > available {
+            return Err("Cannot unfreeze delegated TOS");
         }
 
         // Move from frozen to unfreezing queue

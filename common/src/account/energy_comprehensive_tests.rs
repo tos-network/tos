@@ -484,8 +484,12 @@ mod tests {
 
             let result = energy.start_unfreeze(2_000 * COIN_VALUE, 0);
 
+            // Now uses available_for_delegation() check which returns "Cannot unfreeze delegated TOS"
+            // when amount > (frozen - delegated), covering both cases:
+            // 1. Insufficient frozen balance
+            // 2. Cannot unfreeze delegated TOS
             assert!(result.is_err());
-            assert_eq!(result.unwrap_err(), "Insufficient frozen balance");
+            assert_eq!(result.unwrap_err(), "Cannot unfreeze delegated TOS");
         }
 
         #[test]
@@ -1783,22 +1787,32 @@ mod tests {
             let mut dave = AccountEnergy::new();
 
             // Alice delegates to multiple receivers
+            // frozen_balance stays unchanged - TOS remains frozen
+            // delegated_frozen_balance tracks total delegated out
             let to_bob = 3_000 * COIN_VALUE;
             let to_carol = 2_000 * COIN_VALUE;
             let to_dave = 1_000 * COIN_VALUE;
 
-            alice.frozen_balance -= to_bob + to_carol + to_dave;
+            // Correct model: frozen_balance unchanged, only update delegated tracking
             alice.delegated_frozen_balance = to_bob + to_carol + to_dave;
 
             bob.acquired_delegated_balance = to_bob;
             carol.acquired_delegated_balance = to_carol;
             dave.acquired_delegated_balance = to_dave;
 
-            assert_eq!(alice.frozen_balance, 4_000 * COIN_VALUE);
+            // frozen_balance unchanged
+            assert_eq!(alice.frozen_balance, 10_000 * COIN_VALUE);
             assert_eq!(alice.delegated_frozen_balance, 6_000 * COIN_VALUE);
             assert_eq!(bob.acquired_delegated_balance, 3_000 * COIN_VALUE);
             assert_eq!(carol.acquired_delegated_balance, 2_000 * COIN_VALUE);
             assert_eq!(dave.acquired_delegated_balance, 1_000 * COIN_VALUE);
+
+            // Verify effective frozen balance
+            // Alice: 10,000 + 0 - 6,000 = 4,000 effective
+            assert_eq!(alice.effective_frozen_balance(), 4_000 * COIN_VALUE);
+            assert_eq!(bob.effective_frozen_balance(), 3_000 * COIN_VALUE);
+            assert_eq!(carol.effective_frozen_balance(), 2_000 * COIN_VALUE);
+            assert_eq!(dave.effective_frozen_balance(), 1_000 * COIN_VALUE);
         }
 
         #[test]
@@ -2521,8 +2535,36 @@ mod tests {
             // Try to unfreeze more than available
             let result = energy.start_unfreeze(200 * COIN_VALUE, 1_000_000);
 
-            // Should fail - can't unfreeze more than frozen
+            // Should fail - can't unfreeze more than frozen (now returns "Cannot unfreeze delegated TOS")
             assert!(result.is_err(), "Cannot unfreeze more than frozen balance");
+        }
+
+        #[test]
+        fn test_26_1_2b_unfreeze_delegated_tos_rejected() {
+            // Cannot unfreeze TOS that is delegated to others
+            let mut energy = AccountEnergy::new();
+            energy.frozen_balance = 1_000 * COIN_VALUE;
+            energy.delegated_frozen_balance = 600 * COIN_VALUE;
+
+            // Available for unfreeze = frozen - delegated = 400 TOS
+            assert_eq!(energy.available_for_delegation(), 400 * COIN_VALUE);
+
+            // Try to unfreeze 500 TOS (more than available 400)
+            let result = energy.start_unfreeze(500 * COIN_VALUE, 1_000_000);
+            assert!(result.is_err());
+            assert_eq!(result.unwrap_err(), "Cannot unfreeze delegated TOS");
+
+            // frozen_balance unchanged
+            assert_eq!(energy.frozen_balance, 1_000 * COIN_VALUE);
+
+            // Unfreezing exactly available should succeed
+            let result2 = energy.start_unfreeze(400 * COIN_VALUE, 1_000_000);
+            assert!(result2.is_ok());
+            assert_eq!(energy.frozen_balance, 600 * COIN_VALUE);
+            assert_eq!(energy.unfreezing_list.len(), 1);
+
+            // Now invariant is maintained: delegated <= frozen
+            assert!(energy.is_delegation_valid());
         }
 
         #[test]
@@ -2650,18 +2692,19 @@ mod tests {
 
         #[test]
         fn test_26_2_6_unfreeze_zero_amount() {
-            // Zero unfreeze amount should be rejected at verify phase
-            // The AccountEnergy::start_unfreeze doesn't validate zero (design choice)
-            // Verify phase checks: amount > 0 before calling start_unfreeze
+            // Zero unfreeze amount is now rejected directly by start_unfreeze
+            let mut energy = AccountEnergy::new();
+            energy.frozen_balance = 1_000 * COIN_VALUE;
 
-            let zero_amount = 0u64;
+            let result = energy.start_unfreeze(0, 1_000_000);
+            assert!(result.is_err());
+            assert_eq!(
+                result.unwrap_err(),
+                "Unfreeze amount must be greater than zero"
+            );
 
-            // In verify phase, this check happens:
-            // if amount == 0 { return Err(AmountZero) }
-            assert_eq!(zero_amount, 0, "Zero amount should be rejected at verify");
-
-            // Document: MIN_UNFREEZE_TOS_AMOUNT could be added as a constant
-            // For now, verify phase should reject amount <= 0
+            // Queue should remain empty
+            assert_eq!(energy.unfreezing_list.len(), 0);
         }
 
         // ====================================================================
