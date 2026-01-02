@@ -184,7 +184,7 @@ impl Transaction {
                 .any(|c| c.get_asset() == asset)
         };
 
-        // UNO_ASSET is required for fees (paid from encrypted balance)
+        // UNO_ASSET is required for transfer amounts (fees paid via TOS Energy)
         // Since UNO is a single dedicated asset, we only need UNO_ASSET
         if !has_commitment_for_asset(&UNO_ASSET) {
             return false;

@@ -1497,7 +1497,7 @@ impl TransactionTypeBuilder {
                 }
             }
             TransactionTypeBuilder::UnoTransfers(transfers) => {
-                // UNO transfers use UNO_ASSET for fees (paid from encrypted balance)
+                // UNO transfers use UNO_ASSET for transfer amounts (fees paid via TOS Energy)
                 consumed.insert(&UNO_ASSET);
                 for transfer in transfers {
                     consumed.insert(&transfer.asset);
