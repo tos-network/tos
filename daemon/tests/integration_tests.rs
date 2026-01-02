@@ -256,6 +256,18 @@ impl MockChainState {
                         // Stake 2.0: Undelegate energy
                         // Mock: no-op for now
                     }
+                    tos_common::transaction::EnergyPayload::ActivateAccounts { .. } => {
+                        // Batch operation: Activate multiple accounts
+                        // Mock: no-op for now
+                    }
+                    tos_common::transaction::EnergyPayload::BatchDelegateResource { .. } => {
+                        // Batch operation: Delegate to multiple receivers
+                        // Mock: no-op for now
+                    }
+                    tos_common::transaction::EnergyPayload::ActivateAndDelegate { .. } => {
+                        // Batch operation: Activate and delegate in one transaction
+                        // Mock: no-op for now
+                    }
                 }
             }
             _ => {

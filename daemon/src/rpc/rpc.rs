@@ -2425,6 +2425,44 @@ async fn get_account_history<S: Storage>(
                                     block_timestamp: block_header.get_timestamp(),
                                 });
                             }
+                            EnergyPayload::ActivateAccounts { accounts } => {
+                                // Batch account activation - record summary
+                                history.push(AccountHistoryEntry {
+                                    topoheight: topo,
+                                    hash: tx_hash.clone(),
+                                    history_type: AccountHistoryType::BatchActivateAccounts {
+                                        count: accounts.len() as u32,
+                                    },
+                                    block_timestamp: block_header.get_timestamp(),
+                                });
+                            }
+                            EnergyPayload::BatchDelegateResource { delegations } => {
+                                // Batch delegation - record summary
+                                let total_amount: u64 = delegations.iter().map(|d| d.amount).sum();
+                                history.push(AccountHistoryEntry {
+                                    topoheight: topo,
+                                    hash: tx_hash.clone(),
+                                    history_type: AccountHistoryType::BatchDelegateResource {
+                                        count: delegations.len() as u32,
+                                        total_amount,
+                                    },
+                                    block_timestamp: block_header.get_timestamp(),
+                                });
+                            }
+                            EnergyPayload::ActivateAndDelegate { items } => {
+                                // Combined activation and delegation - record summary
+                                let total_delegation: u64 =
+                                    items.iter().map(|i| i.delegate_amount).sum();
+                                history.push(AccountHistoryEntry {
+                                    topoheight: topo,
+                                    hash: tx_hash.clone(),
+                                    history_type: AccountHistoryType::ActivateAndDelegate {
+                                        count: items.len() as u32,
+                                        total_delegation,
+                                    },
+                                    block_timestamp: block_header.get_timestamp(),
+                                });
+                            }
                         }
                     }
                 }

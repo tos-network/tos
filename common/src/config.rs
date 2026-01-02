@@ -61,6 +61,16 @@ pub const MAX_DELEGATE_LOCK_DAYS: u32 = 365;
 // 0 = no lock (can undelegate immediately after 3 days minimum)
 pub const DEFAULT_DELEGATE_LOCK_DAYS: u32 = 3;
 
+// ===== Batch Operation Limits (TOS Innovation) =====
+// Maximum accounts that can be activated in a single ActivateAccounts transaction
+pub const MAX_BATCH_ACTIVATE: usize = 500;
+
+// Maximum delegations in a single BatchDelegateResource transaction
+pub const MAX_BATCH_DELEGATE: usize = 500;
+
+// Maximum items in a single ActivateAndDelegate transaction
+pub const MAX_BATCH_ACTIVATE_DELEGATE: usize = 500;
+
 // Energy costs for different transaction types (Stake 2.0)
 pub const ENERGY_COST_TRANSFER_BASE: u64 = 0; // Base cost for transfer (size-based)
 pub const ENERGY_COST_TRANSFER_PER_OUTPUT: u64 = 100; // Per transfer output

@@ -1,8 +1,87 @@
 use crate::{
+    config::{MAX_BATCH_ACTIVATE, MAX_BATCH_ACTIVATE_DELEGATE, MAX_BATCH_DELEGATE},
     crypto::elgamal::CompressedPublicKey,
     serializer::{Reader, ReaderError, Serializer, Writer},
 };
 use serde::{Deserialize, Serialize};
+
+/// Item for batch delegation operation
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BatchDelegationItem {
+    /// Receiver of delegated energy
+    pub receiver: CompressedPublicKey,
+    /// Amount of TOS to delegate
+    pub amount: u64,
+    /// Lock the delegation for a period
+    pub lock: bool,
+    /// Lock period in days (0-365, only used if lock=true)
+    pub lock_period: u32,
+}
+
+impl Serializer for BatchDelegationItem {
+    fn write(&self, writer: &mut Writer) {
+        self.receiver.write(writer);
+        writer.write_u64(&self.amount);
+        writer.write_bool(self.lock);
+        writer.write_u32(&self.lock_period);
+    }
+
+    fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
+        let receiver = CompressedPublicKey::read(reader)?;
+        let amount = reader.read_u64()?;
+        let lock = reader.read_bool()?;
+        let lock_period = reader.read_u32()?;
+        Ok(Self {
+            receiver,
+            amount,
+            lock,
+            lock_period,
+        })
+    }
+
+    fn size(&self) -> usize {
+        self.receiver.size() + 8 + 1 + 4
+    }
+}
+
+/// Item for activate-and-delegate operation
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ActivateDelegateItem {
+    /// Target account to activate and delegate to
+    pub account: CompressedPublicKey,
+    /// Amount of TOS to delegate (0 = activate only, no delegation)
+    pub delegate_amount: u64,
+    /// Lock the delegation for a period
+    pub lock: bool,
+    /// Lock period in days (0-365, only used if lock=true)
+    pub lock_period: u32,
+}
+
+impl Serializer for ActivateDelegateItem {
+    fn write(&self, writer: &mut Writer) {
+        self.account.write(writer);
+        writer.write_u64(&self.delegate_amount);
+        writer.write_bool(self.lock);
+        writer.write_u32(&self.lock_period);
+    }
+
+    fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
+        let account = CompressedPublicKey::read(reader)?;
+        let delegate_amount = reader.read_u64()?;
+        let lock = reader.read_bool()?;
+        let lock_period = reader.read_u32()?;
+        Ok(Self {
+            account,
+            delegate_amount,
+            lock,
+            lock_period,
+        })
+    }
+
+    fn size(&self) -> usize {
+        self.account.size() + 8 + 1 + 4
+    }
+}
 
 /// Energy-related transaction payloads for Stake 2.0 model
 ///
@@ -20,9 +99,14 @@ use serde::{Deserialize, Serialize};
 /// - `DelegateResource`: Delegate energy to another account
 /// - `UndelegateResource`: Take back delegated energy
 ///
+/// # Batch Operations (TOS Innovation)
+/// - `ActivateAccounts`: Batch activate up to 500 accounts (0.1 TOS each)
+/// - `BatchDelegateResource`: Batch delegate to up to 500 recipients
+/// - `ActivateAndDelegate`: Activate and delegate in one tx (up to 500 items)
+///
 /// # Fee Model
 /// - Energy operations are FREE (0 energy cost)
-/// - No TOS fees for energy management operations
+/// - Batch activation requires 0.1 TOS per account (TOS-only fee)
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum EnergyPayload {
     /// Freeze TOS to gain proportional energy
@@ -57,6 +141,30 @@ pub enum EnergyPayload {
         /// Amount to undelegate
         amount: u64,
     },
+
+    // === Batch Operations (TOS Innovation) ===
+    /// Batch activate accounts (third-party payment)
+    /// Activates up to 500 accounts in a single transaction.
+    /// Fee: 0.1 TOS per account (skips already-activated accounts)
+    ActivateAccounts {
+        /// Accounts to activate (max 500)
+        accounts: Vec<CompressedPublicKey>,
+    },
+
+    /// Batch delegate energy to multiple recipients
+    /// Delegates energy to up to 500 recipients in one transaction.
+    BatchDelegateResource {
+        /// Delegation items (max 500)
+        delegations: Vec<BatchDelegationItem>,
+    },
+
+    /// Activate accounts and delegate energy in one operation
+    /// Combines activation and delegation for up to 500 accounts.
+    /// Fee: 0.1 TOS per newly-activated account
+    ActivateAndDelegate {
+        /// Items to process (max 500)
+        items: Vec<ActivateDelegateItem>,
+    },
 }
 
 impl EnergyPayload {
@@ -90,6 +198,21 @@ impl EnergyPayload {
         Self::UndelegateResource { receiver, amount }
     }
 
+    /// Create a new ActivateAccounts payload
+    pub fn activate_accounts(accounts: Vec<CompressedPublicKey>) -> Self {
+        Self::ActivateAccounts { accounts }
+    }
+
+    /// Create a new BatchDelegateResource payload
+    pub fn batch_delegate_resource(delegations: Vec<BatchDelegationItem>) -> Self {
+        Self::BatchDelegateResource { delegations }
+    }
+
+    /// Create a new ActivateAndDelegate payload
+    pub fn activate_and_delegate(items: Vec<ActivateDelegateItem>) -> Self {
+        Self::ActivateAndDelegate { items }
+    }
+
     /// Get the energy cost for this operation
     /// All energy operations are FREE in Stake 2.0
     pub fn energy_cost(&self) -> u64 {
@@ -97,14 +220,70 @@ impl EnergyPayload {
     }
 
     /// Get the TOS fee required for this operation
-    /// Energy operations are fee-free in Stake 2.0
+    /// Returns 0 for most operations, but batch activation has per-account fees
+    /// Note: Actual fee calculation happens during verification (checks existing accounts)
     pub fn tos_fee(&self) -> u64 {
-        0
+        0 // Actual fee depends on how many accounts are newly activated
     }
 
     /// Check if this operation requires account activation
     pub fn requires_activation(&self) -> bool {
         false
+    }
+
+    /// Check if this is a batch operation
+    pub fn is_batch_operation(&self) -> bool {
+        matches!(
+            self,
+            Self::ActivateAccounts { .. }
+                | Self::BatchDelegateResource { .. }
+                | Self::ActivateAndDelegate { .. }
+        )
+    }
+
+    /// Get the batch size for batch operations
+    pub fn batch_size(&self) -> Option<usize> {
+        match self {
+            Self::ActivateAccounts { accounts } => Some(accounts.len()),
+            Self::BatchDelegateResource { delegations } => Some(delegations.len()),
+            Self::ActivateAndDelegate { items } => Some(items.len()),
+            _ => None,
+        }
+    }
+
+    /// Validate batch operation limits
+    /// Returns Ok(()) if within limits, Err with message otherwise
+    pub fn validate_batch_limits(&self) -> Result<(), &'static str> {
+        match self {
+            Self::ActivateAccounts { accounts } => {
+                if accounts.is_empty() {
+                    return Err("Empty account list");
+                }
+                if accounts.len() > MAX_BATCH_ACTIVATE {
+                    return Err("Too many accounts (max 500)");
+                }
+                Ok(())
+            }
+            Self::BatchDelegateResource { delegations } => {
+                if delegations.is_empty() {
+                    return Err("Empty delegation list");
+                }
+                if delegations.len() > MAX_BATCH_DELEGATE {
+                    return Err("Too many delegations (max 500)");
+                }
+                Ok(())
+            }
+            Self::ActivateAndDelegate { items } => {
+                if items.is_empty() {
+                    return Err("Empty item list");
+                }
+                if items.len() > MAX_BATCH_ACTIVATE_DELEGATE {
+                    return Err("Too many items (max 500)");
+                }
+                Ok(())
+            }
+            _ => Ok(()), // Non-batch operations have no limits
+        }
     }
 
     /// Get the amount of TOS involved in this operation (if applicable)
@@ -114,7 +293,15 @@ impl EnergyPayload {
             Self::UnfreezeTos { amount } => Some(*amount),
             Self::DelegateResource { amount, .. } => Some(*amount),
             Self::UndelegateResource { amount, .. } => Some(*amount),
-            Self::WithdrawExpireUnfreeze | Self::CancelAllUnfreeze => None,
+            Self::BatchDelegateResource { delegations } => {
+                Some(delegations.iter().map(|d| d.amount).sum())
+            }
+            Self::ActivateAndDelegate { items } => {
+                Some(items.iter().map(|i| i.delegate_amount).sum())
+            }
+            Self::WithdrawExpireUnfreeze
+            | Self::CancelAllUnfreeze
+            | Self::ActivateAccounts { .. } => None,
         }
     }
 
@@ -124,6 +311,20 @@ impl EnergyPayload {
             Self::DelegateResource { receiver, .. } => Some(receiver),
             Self::UndelegateResource { receiver, .. } => Some(receiver),
             _ => None,
+        }
+    }
+
+    /// Get all receivers for batch operations
+    pub fn get_receivers(&self) -> Vec<&CompressedPublicKey> {
+        match self {
+            Self::DelegateResource { receiver, .. } => vec![receiver],
+            Self::UndelegateResource { receiver, .. } => vec![receiver],
+            Self::ActivateAccounts { accounts } => accounts.iter().collect(),
+            Self::BatchDelegateResource { delegations } => {
+                delegations.iter().map(|d| &d.receiver).collect()
+            }
+            Self::ActivateAndDelegate { items } => items.iter().map(|i| &i.account).collect(),
+            _ => vec![],
         }
     }
 }
@@ -162,6 +363,27 @@ impl Serializer for EnergyPayload {
                 receiver.write(writer);
                 writer.write_u64(amount);
             }
+            Self::ActivateAccounts { accounts } => {
+                writer.write_u8(6);
+                writer.write_u16(accounts.len() as u16);
+                for account in accounts {
+                    account.write(writer);
+                }
+            }
+            Self::BatchDelegateResource { delegations } => {
+                writer.write_u8(7);
+                writer.write_u16(delegations.len() as u16);
+                for item in delegations {
+                    item.write(writer);
+                }
+            }
+            Self::ActivateAndDelegate { items } => {
+                writer.write_u8(8);
+                writer.write_u16(items.len() as u16);
+                for item in items {
+                    item.write(writer);
+                }
+            }
         }
     }
 
@@ -195,6 +417,39 @@ impl Serializer for EnergyPayload {
                 let amount = reader.read_u64()?;
                 Ok(Self::UndelegateResource { receiver, amount })
             }
+            6 => {
+                let count = reader.read_u16()? as usize;
+                if count > MAX_BATCH_ACTIVATE {
+                    return Err(ReaderError::InvalidSize);
+                }
+                let mut accounts = Vec::with_capacity(count);
+                for _ in 0..count {
+                    accounts.push(CompressedPublicKey::read(reader)?);
+                }
+                Ok(Self::ActivateAccounts { accounts })
+            }
+            7 => {
+                let count = reader.read_u16()? as usize;
+                if count > MAX_BATCH_DELEGATE {
+                    return Err(ReaderError::InvalidSize);
+                }
+                let mut delegations = Vec::with_capacity(count);
+                for _ in 0..count {
+                    delegations.push(BatchDelegationItem::read(reader)?);
+                }
+                Ok(Self::BatchDelegateResource { delegations })
+            }
+            8 => {
+                let count = reader.read_u16()? as usize;
+                if count > MAX_BATCH_ACTIVATE_DELEGATE {
+                    return Err(ReaderError::InvalidSize);
+                }
+                let mut items = Vec::with_capacity(count);
+                for _ in 0..count {
+                    items.push(ActivateDelegateItem::read(reader)?);
+                }
+                Ok(Self::ActivateAndDelegate { items })
+            }
             _ => Err(ReaderError::InvalidValue),
         }
     }
@@ -207,6 +462,15 @@ impl Serializer for EnergyPayload {
             Self::CancelAllUnfreeze => 1,
             Self::DelegateResource { receiver, .. } => 1 + receiver.size() + 8 + 1 + 4,
             Self::UndelegateResource { receiver, .. } => 1 + receiver.size() + 8,
+            Self::ActivateAccounts { accounts } => {
+                1 + 2 + accounts.iter().map(|a| a.size()).sum::<usize>()
+            }
+            Self::BatchDelegateResource { delegations } => {
+                1 + 2 + delegations.iter().map(|d| d.size()).sum::<usize>()
+            }
+            Self::ActivateAndDelegate { items } => {
+                1 + 2 + items.iter().map(|i| i.size()).sum::<usize>()
+            }
         }
     }
 }

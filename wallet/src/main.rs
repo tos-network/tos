@@ -3018,6 +3018,29 @@ async fn history(
                 AccountHistoryType::BindReferrer { referrer } => {
                     format!("Bind referrer: {}", referrer)
                 }
+                AccountHistoryType::BatchActivateAccounts { count } => {
+                    format!("Batch activate: {} accounts", count)
+                }
+                AccountHistoryType::BatchDelegateResource {
+                    count,
+                    total_amount,
+                } => {
+                    format!(
+                        "Batch delegate: {} delegations, {} TOS",
+                        count,
+                        format_tos(*total_amount)
+                    )
+                }
+                AccountHistoryType::ActivateAndDelegate {
+                    count,
+                    total_delegation,
+                } => {
+                    format!(
+                        "Activate & delegate: {} accounts, {} TOS",
+                        count,
+                        format_tos(*total_delegation)
+                    )
+                }
             };
 
             manager.message(format!(
@@ -3144,6 +3167,22 @@ async fn transaction(
                             receiver.as_address(wallet.get_network().is_mainnet())
                         ));
                         manager.message(format!("  Amount: {} TOS", format_tos(*amount)));
+                    }
+                    EnergyPayload::ActivateAccounts { accounts } => {
+                        manager.message("Type: ActivateAccounts (Batch)".to_string());
+                        manager.message(format!("  Accounts: {}", accounts.len()));
+                    }
+                    EnergyPayload::BatchDelegateResource { delegations } => {
+                        manager.message("Type: BatchDelegateResource (Batch)".to_string());
+                        manager.message(format!("  Delegations: {}", delegations.len()));
+                        let total: u64 = delegations.iter().map(|d| d.amount).sum();
+                        manager.message(format!("  Total amount: {} TOS", format_tos(total)));
+                    }
+                    EnergyPayload::ActivateAndDelegate { items } => {
+                        manager.message("Type: ActivateAndDelegate (Batch)".to_string());
+                        manager.message(format!("  Items: {}", items.len()));
+                        let total: u64 = items.iter().map(|i| i.delegate_amount).sum();
+                        manager.message(format!("  Total delegation: {} TOS", format_tos(total)));
                     }
                 }
             }
@@ -3409,6 +3448,27 @@ async fn export_transactions_csv(
                 }
                 AccountHistoryType::BindReferrer { referrer } => {
                     format!("BindReferrer,referrer:{}", referrer)
+                }
+                AccountHistoryType::BatchActivateAccounts { count } => {
+                    format!("BatchActivateAccounts,count:{}", count)
+                }
+                AccountHistoryType::BatchDelegateResource {
+                    count,
+                    total_amount,
+                } => {
+                    format!(
+                        "BatchDelegateResource,count:{},total_amount:{}",
+                        count, total_amount
+                    )
+                }
+                AccountHistoryType::ActivateAndDelegate {
+                    count,
+                    total_delegation,
+                } => {
+                    format!(
+                        "ActivateAndDelegate,count:{},total_delegation:{}",
+                        count, total_delegation
+                    )
                 }
             };
 

@@ -512,6 +512,18 @@ pub enum AccountHistoryType {
         receiver: Address,
         amount: u64,
     },
+    // Batch operations (TOS Innovation)
+    BatchActivateAccounts {
+        count: u32,
+    },
+    BatchDelegateResource {
+        count: u32,
+        total_amount: u64,
+    },
+    ActivateAndDelegate {
+        count: u32,
+        total_delegation: u64,
+    },
     BindReferrer {
         referrer: Address,
     },
