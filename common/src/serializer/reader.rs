@@ -20,6 +20,8 @@ pub enum ReaderError {
     ExceedsMaxArraySize { max: usize, actual: usize },
     #[error("Exceeds max map size: max={max}, actual={actual}")]
     ExceedsMaxMapSize { max: usize, actual: usize },
+    #[error("Exceeds max bytes size: max={max}, actual={actual}")]
+    ExceedsMaxBytesSize { max: usize, actual: usize },
     #[error(transparent)]
     TryFromSliceError(#[from] TryFromSliceError),
     #[error(transparent)]

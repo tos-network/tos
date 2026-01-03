@@ -23,6 +23,10 @@ const MAX_ARRAY_SIZE: usize = 10000;
 /// Example attack: Map with 10M key-value pairs → gigabytes of memory allocation
 const MAX_MAP_SIZE: usize = 10000;
 
+/// Maximum bytes size for ValueCell::Bytes to prevent memory exhaustion DoS attacks
+/// Example attack: Bytes with 1GB length prefix → gigabytes of memory allocation
+const MAX_BYTES_SIZE: usize = 1_000_000; // 1MB max
+
 /// Contract deposit - plaintext balance system
 ///
 /// Balance simplification: Only public deposits are supported.
@@ -356,6 +360,15 @@ impl Serializer for ValueCell {
                 1 => {
                     // Bytes: Read length and byte array
                     let len = reader.read_u32()? as usize;
+
+                    // Enforce bytes size limit to prevent memory exhaustion DoS
+                    if len > MAX_BYTES_SIZE {
+                        return Err(ReaderError::ExceedsMaxBytesSize {
+                            max: MAX_BYTES_SIZE,
+                            actual: len,
+                        });
+                    }
+
                     current_value = Some(ValueCell::Bytes(reader.read_bytes(len)?));
                     // Loop back to State 2 (have completed value)
                 }

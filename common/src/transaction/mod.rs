@@ -449,9 +449,12 @@ impl Transaction {
             TransactionType::DeployContract(payload) => {
                 // Use Serializer::size() to get module size
                 let bytecode_size = payload.size() as u64;
+                // Include constructor execution cost if present
+                let constructor_cost = payload.invoke.as_ref().map_or(0, |inv| inv.max_gas);
                 base_cost
                     + ENERGY_COST_CONTRACT_DEPLOY_BASE
                     + bytecode_size * ENERGY_COST_CONTRACT_DEPLOY_PER_BYTE
+                    + constructor_cost
             }
             TransactionType::InvokeContract(payload) => {
                 // Use max_gas as energy cost for contract invocation
