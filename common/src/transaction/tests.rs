@@ -1511,6 +1511,13 @@ impl<'a> BlockchainVerificationState<'a, TestError> for ChainState {
         Ok(self.accounts.contains_key(account))
     }
 
+    async fn get_account_energy(
+        &mut self,
+        _account: &'a CompressedPublicKey,
+    ) -> Result<Option<crate::account::AccountEnergy>, TestError> {
+        Ok(None)
+    }
+
     async fn get_delegated_resource(
         &mut self,
         _from: &'a CompressedPublicKey,
