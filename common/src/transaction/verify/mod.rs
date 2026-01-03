@@ -1347,6 +1347,15 @@ impl Transaction {
             .map_err(VerificationError::State)?;
 
         // Atomically check and update nonce
+        //
+        // NOTE (BUG-076): Nonce is incremented here BEFORE ZK proof verification completes.
+        // If proofs later fail, the nonce is "burned" - subsequent transactions with the
+        // expected nonce will be rejected. This is a design trade-off:
+        // - Pro: Prevents nonce reuse attacks within a batch (security)
+        // - Con: Failed transactions consume nonces even on proof failure
+        //
+        // A proper fix would require separating "check" from "apply" phases, but this
+        // is a significant architectural change. For now, this behavior is documented.
         let success = state
             .compare_and_swap_nonce(&self.source, self.nonce, self.nonce + 1)
             .await
@@ -1362,6 +1371,35 @@ impl Transaction {
                 self.nonce,
                 current,
             ));
+        }
+
+        // BUG-070 FIX: Check sender has sufficient TOS balance for fee_limit
+        // UNO transactions require plaintext TOS for energy burn when energy is insufficient
+        // This must be checked BEFORE expensive ZK proof verification
+        let fee_limit = self.get_fee_limit();
+        if fee_limit > 0 {
+            let sender_tos_balance = state
+                .get_sender_balance(&self.source, &TOS_ASSET, &self.reference)
+                .await
+                .map_err(VerificationError::State)?;
+
+            if *sender_tos_balance < fee_limit {
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "UNO pre-verify: Insufficient TOS balance for fee_limit. Balance: {}, fee_limit: {}",
+                        sender_tos_balance, fee_limit
+                    );
+                }
+                return Err(VerificationError::InsufficientFunds {
+                    available: *sender_tos_balance,
+                    required: fee_limit,
+                });
+            }
+
+            // Reserve fee_limit by deducting from balance (will be refunded if TX fails or energy sufficient)
+            *sender_tos_balance = sender_tos_balance
+                .checked_sub(fee_limit)
+                .ok_or(VerificationError::Underflow)?;
         }
 
         // Decompress UNO transfers
@@ -1486,6 +1524,18 @@ impl Transaction {
             let source_ct_compressed = source_verification_ciphertext.compress();
 
             // Compute new balance: old_balance - output
+            //
+            // NOTE (BUG-077): Balance is mutated here BEFORE range proof verification completes.
+            // Range proofs are verified later in batch (verify_batch -> spawn_blocking_safe).
+            // If proofs later fail, this balance mutation persists in verification state,
+            // causing subsequent UNO transactions to see incorrect balances.
+            //
+            // This is a design trade-off similar to BUG-076:
+            // - Pro: Prevents double-spending within a batch (security)
+            // - Con: Failed transactions leave reduced balance in verification state
+            //
+            // The balance reduction is intentional for batch verification correctness.
+            // A proper fix would require a two-phase verification approach.
             *source_verification_ciphertext -= &output;
 
             // Prepare transcript for CommitmentEqProof
@@ -1627,6 +1677,8 @@ impl Transaction {
             .map_err(VerificationError::State)?;
 
         // Atomically check and update nonce
+        //
+        // NOTE (BUG-076): See pre_verify_uno for explanation of nonce burning trade-off.
         let success = state
             .compare_and_swap_nonce(&self.source, self.nonce, self.nonce + 1)
             .await
@@ -1642,6 +1694,35 @@ impl Transaction {
                 self.nonce,
                 current,
             ));
+        }
+
+        // BUG-070 FIX: Check sender has sufficient TOS balance for fee_limit
+        // Unshield transactions require plaintext TOS for energy burn when energy is insufficient
+        // This must be checked BEFORE expensive ZK proof verification
+        let fee_limit = self.get_fee_limit();
+        if fee_limit > 0 {
+            let sender_tos_balance = state
+                .get_sender_balance(&self.source, &TOS_ASSET, &self.reference)
+                .await
+                .map_err(VerificationError::State)?;
+
+            if *sender_tos_balance < fee_limit {
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "Unshield pre-verify: Insufficient TOS balance for fee_limit. Balance: {}, fee_limit: {}",
+                        sender_tos_balance, fee_limit
+                    );
+                }
+                return Err(VerificationError::InsufficientFunds {
+                    available: *sender_tos_balance,
+                    required: fee_limit,
+                });
+            }
+
+            // Reserve fee_limit by deducting from balance (will be refunded if TX fails or energy sufficient)
+            *sender_tos_balance = sender_tos_balance
+                .checked_sub(fee_limit)
+                .ok_or(VerificationError::Underflow)?;
         }
 
         // Decompress Unshield transfers
