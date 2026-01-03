@@ -569,8 +569,8 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for Applicable
         contract: &Hash,
         tx_hash: &'a Hash,
     ) -> Result<(), BlockchainError> {
-        // BUG-087 FIX: Actually persist contract events to storage
-        // Previously events were only logged but not stored, making event filtering impossible
+        // Persist contract events to storage
+        // This enables event filtering and querying
         use crate::core::storage::StoredContractEvent;
         use tos_common::crypto::Hashable;
 

@@ -129,7 +129,7 @@ impl Transaction {
         };
 
         // Execute the contract
-        // BUG-073 FIX: Convert execution errors to is_success=false instead of returning Err.
+        // Convert execution errors to is_success=false instead of returning Err.
         // This prevents state corruption when contract execution fails - balance was already
         // deducted in apply_without_verify, so returning Err would leave state inconsistent.
         // Instead, treat execution errors as failed executions with max_gas consumed.

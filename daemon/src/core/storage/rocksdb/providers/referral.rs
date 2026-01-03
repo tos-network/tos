@@ -635,7 +635,7 @@ impl RocksStorage {
 
     /// Calculate team size recursively (real-time, expensive)
     async fn calculate_team_size(&self, user: &PublicKey) -> Result<u64, BlockchainError> {
-        // BUG-071 FIX: Add visited set to prevent infinite loops on cyclic referral graphs
+        // Add visited set to prevent infinite loops on cyclic referral graphs
         // Even though bind_referrer checks for cycles up to MAX_UPLINE_LEVELS (20),
         // a longer cycle could theoretically exist from legacy data or corruption.
         // This visited set ensures we never process the same node twice.

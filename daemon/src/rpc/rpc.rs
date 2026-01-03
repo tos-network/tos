@@ -134,7 +134,7 @@ async fn maybe_send_callback(
                 return;
             }
             if let (Some(tx_hash), Some(amount)) = (tx_hash, amount) {
-                // BUG-088 FIX: Pass expected amount to detect underpaid payments
+                // Pass expected amount to detect underpaid payments
                 // Use stored.amount if available, otherwise treat as fully paid (0 means no underpayment check)
                 let expected = stored.amount.unwrap_or(amount);
                 send_payment_callback(
@@ -167,7 +167,7 @@ async fn maybe_send_callback(
                 return;
             }
             if let (Some(tx_hash), Some(amount)) = (tx_hash, amount) {
-                // BUG-088 FIX: Pass expected amount to detect underpaid payments
+                // Pass expected amount to detect underpaid payments
                 let expected = stored.amount.unwrap_or(amount);
                 send_payment_callback(
                     Arc::clone(&CALLBACK_SERVICE),

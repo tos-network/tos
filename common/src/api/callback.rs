@@ -30,7 +30,7 @@ pub enum CallbackEventType {
     PaymentConfirmed,
     /// Payment expired
     PaymentExpired,
-    /// BUG-088 FIX: Payment underpaid (amount < expected, even if confirmed)
+    /// Payment underpaid (amount < expected, even if confirmed)
     PaymentUnderpaid,
 }
 
@@ -100,7 +100,7 @@ impl CallbackPayload {
         }
     }
 
-    /// BUG-088 FIX: Create a new payment underpaid callback payload
+    /// Create a new payment underpaid callback payload
     /// This is used when the payment amount is less than the expected amount,
     /// even if the transaction is confirmed.
     pub fn payment_underpaid(

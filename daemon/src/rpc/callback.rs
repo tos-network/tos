@@ -100,7 +100,7 @@ impl CallbackService {
 
     /// Deliver callback with retry logic
     ///
-    /// BUG-089 FIX: Now uses config.max_retries and config.timeout_seconds
+    /// Uses config.max_retries and config.timeout_seconds
     /// instead of hardcoded CALLBACK_RETRY_DELAYS_MS and CALLBACK_TIMEOUT_SECONDS
     async fn deliver_with_retry(
         &self,
@@ -140,7 +140,7 @@ impl CallbackService {
         let timestamp = payload_for_send.timestamp;
         let signature = generate_callback_signature(&config.secret, timestamp, &body);
 
-        // BUG-089 FIX: Use config.max_retries instead of hardcoded array length
+        // Use config.max_retries instead of hardcoded array length
         let max_attempts = config.max_retries as usize;
         let mut attempts_made = 0u32;
 
@@ -170,7 +170,7 @@ impl CallbackService {
 
             attempts_made = (attempt + 1) as u32;
 
-            // BUG-089 FIX: Use config.timeout_seconds for request timeout
+            // Use config.timeout_seconds for request timeout
             match self
                 .send_callback_with_timeout(
                     &config.url,
@@ -231,7 +231,7 @@ impl CallbackService {
         .await
     }
 
-    /// BUG-089 FIX: Send a single callback request with configurable timeout
+    /// Send a single callback request with configurable timeout
     async fn send_callback_with_timeout(
         &self,
         url: &str,
@@ -254,7 +254,7 @@ impl CallbackService {
             .header("X-TOS-Timestamp", timestamp.to_string())
             .header("X-TOS-Idempotency", idempotency_key)
             .body(body.to_string())
-            .timeout(Duration::from_secs(timeout_seconds)) // BUG-089 FIX: Use config timeout
+            .timeout(Duration::from_secs(timeout_seconds))
             .send()
             .await
             .map_err(|e| format!("Request failed: {}", e))?;
@@ -289,7 +289,7 @@ pub fn create_callback_config(callback_url: String, webhook_secret: Vec<u8>) -> 
 /// It should be called from the blockchain event handler when a payment
 /// matches a registered payment request with a callback URL.
 ///
-/// BUG-088 FIX: Added expected_amount parameter to detect underpaid transactions.
+/// Added expected_amount parameter to detect underpaid transactions.
 /// If amount < expected_amount, uses PaymentUnderpaid instead of PaymentConfirmed.
 pub fn send_payment_callback(
     service: Arc<CallbackService>,
@@ -303,7 +303,7 @@ pub fn send_payment_callback(
 ) {
     let config = create_callback_config(callback_url, webhook_secret);
     let payload = if confirmations >= 8 {
-        // BUG-088 FIX: Check if payment is underpaid before marking as confirmed
+        // Check if payment is underpaid before marking as confirmed
         if amount < expected_amount {
             // Underpaid payment - use distinct callback type
             CallbackPayload::payment_underpaid(payment_id, tx_hash, amount, confirmations)

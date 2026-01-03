@@ -25,7 +25,7 @@ pub fn serialize_extra_nonce<S: serde::Serializer>(
 }
 
 // Deserialize the extra nonce from a hexadecimal string
-// BUG-085 FIX: Add length validation before copy_from_slice to prevent panic
+// Add length validation before copy_from_slice to prevent panic
 pub fn deserialize_extra_nonce<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
 ) -> Result<[u8; EXTRA_NONCE_SIZE], D::Error> {
@@ -283,7 +283,7 @@ impl Serializer for BlockHeader {
         }
 
         let txs_count = reader.read_u16()?;
-        // BUG-086 FIX: Validate txs_count before allocation to prevent memory exhaustion DoS
+        // Validate txs_count before allocation to prevent memory exhaustion DoS
         // Maximum based on block size limits: 1.25MB / minimum_tx_size (~100 bytes) ≈ 13,000 txs
         // Using 10,000 as a safe upper bound
         const MAX_TXS_PER_BLOCK: u16 = 10_000;

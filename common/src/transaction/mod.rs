@@ -447,7 +447,7 @@ impl Transaction {
             }
             TransactionType::Burn(_) => base_cost + ENERGY_COST_BURN,
             TransactionType::DeployContract(payload) => {
-                // BUG-058 FIX: Use module.size() instead of payload.size() to avoid
+                // Use module.size() instead of payload.size() to avoid
                 // overcharging for constructor data (max_gas + deposits).
                 // Only charge per-byte cost for actual bytecode, not constructor parameters.
                 let bytecode_size = payload.module.size() as u64;
@@ -795,7 +795,7 @@ impl Serializer for Transaction {
         // UNO fields: source_commitments and range_proof
         // Only written for UNO transactions
         if self.has_uno_transfers() {
-            // BUG-078 FIX: Assert that source_commitments length fits in u8 to prevent silent truncation
+            // Assert that source_commitments length fits in u8 to prevent silent truncation
             // source_commitments represents assets in UNO transfers, realistically limited
             // This debug_assert catches programming errors; verification phase enforces the limit
             debug_assert!(

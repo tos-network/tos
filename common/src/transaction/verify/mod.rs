@@ -780,7 +780,7 @@ impl Transaction {
                 // AI Mining transactions don't require special verification beyond basic checks for now
             }
             TransactionType::BindReferrer(payload) => {
-                // BUG-072 FIX: Validate extra_data size to prevent mempool/storage bloat
+                // Validate extra_data size to prevent mempool/storage bloat
                 // BindReferrer has extra_data field but was missing size validation
                 if let Some(extra_data) = payload.get_extra_data() {
                     let size = extra_data.size();
@@ -1118,7 +1118,7 @@ impl Transaction {
                 }
             }
             TransactionType::AIMining(payload) => {
-                // BUG-066 FIX: Enforce AIMining fee/stake/reward spending on-chain
+                // Enforce AIMining fee/stake/reward spending on-chain
                 // Previously only modeled in builder, now enforced during verification
                 use crate::ai_mining::AIMiningPayload;
                 match payload {
@@ -1348,7 +1348,7 @@ impl Transaction {
 
         // Atomically check and update nonce
         //
-        // NOTE (BUG-076): Nonce is incremented here BEFORE ZK proof verification completes.
+        // NOTE: Nonce is incremented here BEFORE ZK proof verification completes.
         // If proofs later fail, the nonce is "burned" - subsequent transactions with the
         // expected nonce will be rejected. This is a design trade-off:
         // - Pro: Prevents nonce reuse attacks within a batch (security)
@@ -1373,7 +1373,7 @@ impl Transaction {
             ));
         }
 
-        // BUG-070 FIX: Check sender has sufficient TOS balance for fee_limit
+        // Check sender has sufficient TOS balance for fee_limit
         // UNO transactions require plaintext TOS for energy burn when energy is insufficient
         // This must be checked BEFORE expensive ZK proof verification
         let fee_limit = self.get_fee_limit();
@@ -1525,12 +1525,12 @@ impl Transaction {
 
             // Compute new balance: old_balance - output
             //
-            // NOTE (BUG-077): Balance is mutated here BEFORE range proof verification completes.
+            // NOTE: Balance is mutated here BEFORE range proof verification completes.
             // Range proofs are verified later in batch (verify_batch -> spawn_blocking_safe).
             // If proofs later fail, this balance mutation persists in verification state,
             // causing subsequent UNO transactions to see incorrect balances.
             //
-            // This is a design trade-off similar to BUG-076:
+            // This is a design trade-off:
             // - Pro: Prevents double-spending within a batch (security)
             // - Con: Failed transactions leave reduced balance in verification state
             //
@@ -1678,7 +1678,7 @@ impl Transaction {
 
         // Atomically check and update nonce
         //
-        // NOTE (BUG-076): See pre_verify_uno for explanation of nonce burning trade-off.
+        // NOTE: See pre_verify_uno for explanation of nonce burning trade-off.
         let success = state
             .compare_and_swap_nonce(&self.source, self.nonce, self.nonce + 1)
             .await
@@ -1696,7 +1696,7 @@ impl Transaction {
             ));
         }
 
-        // BUG-070 FIX: Check sender has sufficient TOS balance for fee_limit
+        // Check sender has sufficient TOS balance for fee_limit
         // Unshield transactions require plaintext TOS for energy burn when energy is insufficient
         // This must be checked BEFORE expensive ZK proof verification
         let fee_limit = self.get_fee_limit();
@@ -2505,7 +2505,7 @@ impl Transaction {
                 // AI Mining transactions don't require special verification beyond basic checks for now
             }
             TransactionType::BindReferrer(payload) => {
-                // BUG-072 FIX: Validate extra_data size to prevent mempool/storage bloat
+                // Validate extra_data size to prevent mempool/storage bloat
                 if let Some(extra_data) = payload.get_extra_data() {
                     let size = extra_data.size();
                     if size > EXTRA_DATA_LIMIT_SIZE {
@@ -3041,7 +3041,7 @@ impl Transaction {
                 }
             }
             TransactionType::AIMining(payload) => {
-                // BUG-066 FIX: Enforce AIMining fee/stake/reward spending on-chain
+                // Enforce AIMining fee/stake/reward spending on-chain
                 use crate::ai_mining::AIMiningPayload;
                 match payload {
                     AIMiningPayload::RegisterMiner { registration_fee, .. } => {
@@ -3360,7 +3360,7 @@ impl Transaction {
         // Format: (max_gas, used_gas) - only set for InvokeContract/DeployContract with constructor
         let mut contract_gas_info: Option<(u64, u64)> = None;
 
-        // BUG-057 FIX: Track new accounts created for energy cost calculation
+        // Track new accounts created for energy cost calculation
         // ENERGY_COST_NEW_ACCOUNT (25,000) is charged per new account created
         let mut new_accounts_created: u64 = 0;
 
@@ -3487,7 +3487,7 @@ impl Transaction {
                 }
             }
             TransactionType::AIMining(payload) => {
-                // BUG-066 FIX: Enforce AIMining fee/stake/reward spending on-chain
+                // Enforce AIMining fee/stake/reward spending on-chain
                 use crate::ai_mining::AIMiningPayload;
                 match payload {
                     AIMiningPayload::RegisterMiner { registration_fee, .. } => {
@@ -3640,7 +3640,7 @@ impl Transaction {
                             // Record as pending registration for subsequent TXs in this block
                             state.record_pending_registration(destination);
 
-                            // BUG-057 FIX: Track new account for energy cost
+                            // Track new account for energy cost
                             new_accounts_created += 1;
 
                             if log::log_enabled!(log::Level::Debug) {
@@ -4069,7 +4069,7 @@ impl Transaction {
                             .map_err(VerificationError::State)?
                             .ok_or(VerificationError::DelegationNotFound)?;
 
-                        // BUG-065 FIX: Use same timestamp calculation as verification phase
+                        // Use same timestamp calculation as verification phase
                         // Verification uses: get_verification_timestamp() * 1000
                         // This ensures consistent lock expiry checks between verify and apply
                         let now_ms = state.get_verification_timestamp() * 1000;
@@ -4591,7 +4591,7 @@ impl Transaction {
                     .await
                     .map_err(VerificationError::State)?;
 
-                // BUG-067 FIX: Apply account creation fee for new accounts receiving rewards
+                // Apply account creation fee for new accounts receiving rewards
                 // Only applies to TOS rewards (non-TOS assets don't have account creation fee)
                 let is_tos_reward = *payload.get_asset() == TOS_ASSET;
                 let mut total_fees_burned = 0u64;
@@ -4602,7 +4602,7 @@ impl Transaction {
                     let recipient = &distribution.recipient;
                     let mut reward_amount = distribution.amount;
 
-                    // BUG-067 FIX: Check if recipient is a new account (TOS rewards only)
+                    // Check if recipient is a new account (TOS rewards only)
                     if is_tos_reward {
                         let is_registered = state
                             .is_account_registered(recipient)
@@ -4638,7 +4638,7 @@ impl Transaction {
                             // Record as pending registration
                             state.record_pending_registration(recipient);
 
-                            // BUG-057 FIX: Track new account for energy cost
+                            // Track new account for energy cost
                             new_accounts_created += 1;
 
                             if log::log_enabled!(log::Level::Debug) {
@@ -5269,7 +5269,7 @@ impl Transaction {
                 // Validate governance constraints using committee state
                 // SECURITY FIX (Issue #36, #37): Include approver_count and kyc_threshold
                 // to properly validate threshold changes and role updates
-                // BUG-075 FIX: Validate that member exists for update/remove operations
+                // Validate that member exists for update/remove operations
                 let (target_is_active, target_can_approve) = match payload.get_update() {
                     crate::transaction::CommitteeUpdateData::RemoveMember { public_key }
                     | crate::transaction::CommitteeUpdateData::UpdateMemberRole {
@@ -5280,7 +5280,7 @@ impl Transaction {
                         public_key,
                         ..
                     } => {
-                        // BUG-075 FIX: Member MUST exist for these operations
+                        // Member MUST exist for these operations
                         let member = committee.get_member(public_key).ok_or_else(|| {
                             VerificationError::AnyError(anyhow::anyhow!(
                                 "Member {:?} not found in committee {}",
@@ -5498,7 +5498,7 @@ impl Transaction {
                     let destination = transfer.get_destination();
                     let plain_amount = transfer.get_amount();
 
-                    // BUG-090 FIX: Apply account creation fee for new accounts
+                    // Apply account creation fee for new accounts
                     // Unshield transfers credit TOS to receivers, same fee rules as regular transfers
                     let is_registered = state
                         .is_account_registered(destination)
@@ -5528,7 +5528,7 @@ impl Transaction {
                         // Record as pending registration for subsequent TXs in this block
                         state.record_pending_registration(destination);
 
-                        // BUG-057 FIX: Track new account for energy cost
+                        // Track new account for energy cost
                         new_accounts_created += 1;
 
                         if log::log_enabled!(log::Level::Debug) {
@@ -5571,7 +5571,7 @@ impl Transaction {
         let mut required_energy = self.calculate_energy_cost();
         let now_ms = state.get_block().get_timestamp();
 
-        // BUG-057 FIX: Add energy cost for new accounts created
+        // Add energy cost for new accounts created
         // ENERGY_COST_NEW_ACCOUNT (25,000) is charged per new account
         if new_accounts_created > 0 {
             let new_account_energy =
@@ -5834,7 +5834,7 @@ impl Transaction {
                 }
             }
             TransactionType::AIMining(payload) => {
-                // BUG-066 FIX: Enforce AIMining fee/stake/reward spending on-chain
+                // Enforce AIMining fee/stake/reward spending on-chain
                 use crate::ai_mining::AIMiningPayload;
                 match payload {
                     AIMiningPayload::RegisterMiner { registration_fee, .. } => {
