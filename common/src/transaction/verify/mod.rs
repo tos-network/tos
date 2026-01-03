@@ -2985,6 +2985,10 @@ impl Transaction {
         // Use references to original Hash values in transaction (they live for 'a)
         let mut spending_per_asset: IndexMap<&'a Hash, u64> = IndexMap::new();
 
+        // Track contract gas usage for energy refund after execution
+        // Format: (max_gas, used_gas) - only set for InvokeContract/DeployContract with constructor
+        let mut contract_gas_info: Option<(u64, u64)> = None;
+
         match &self.data {
             TransactionType::Transfers(transfers) => {
                 for transfer in transfers {
@@ -3275,16 +3279,19 @@ impl Transaction {
             }
             TransactionType::InvokeContract(payload) => {
                 if self.is_contract_available(state, &payload.contract).await? {
-                    self.invoke_contract(
-                        tx_hash,
-                        state,
-                        &payload.contract,
-                        &payload.deposits,
-                        payload.parameters.iter().cloned(),
-                        payload.max_gas,
-                        InvokeContract::Entry(payload.entry_id),
-                    )
-                    .await?;
+                    let (_is_success, used_gas) = self
+                        .invoke_contract(
+                            tx_hash,
+                            state,
+                            &payload.contract,
+                            &payload.deposits,
+                            payload.parameters.iter().cloned(),
+                            payload.max_gas,
+                            InvokeContract::Entry(payload.entry_id),
+                        )
+                        .await?;
+                    // Track gas usage for energy refund
+                    contract_gas_info = Some((payload.max_gas, used_gas));
                 } else {
                     if log::log_enabled!(log::Level::Debug) {
                         debug!(
@@ -3296,6 +3303,8 @@ impl Transaction {
                     // Nothing was spent, we must refund the gas and deposits
                     self.handle_gas(state, 0, payload.max_gas).await?;
                     self.refund_deposits(state, &payload.deposits).await?;
+                    // Contract not available = no gas used
+                    contract_gas_info = Some((payload.max_gas, 0));
                 }
             }
             TransactionType::DeployContract(payload) => {
@@ -3316,7 +3325,7 @@ impl Transaction {
                     .map_err(VerificationError::State)?;
 
                 if let Some(invoke) = payload.invoke.as_ref() {
-                    let is_success = self
+                    let (is_success, used_gas) = self
                         .invoke_contract(
                             tx_hash,
                             state,
@@ -3327,6 +3336,9 @@ impl Transaction {
                             InvokeContract::Hook(0),
                         )
                         .await?;
+
+                    // Track gas usage for energy refund (constructor execution)
+                    contract_gas_info = Some((invoke.max_gas, used_gas));
 
                     // if it has failed, we don't want to deploy the contract
                     // TODO: we must handle this carefully
@@ -4996,8 +5008,24 @@ impl Transaction {
         // Calculate actual energy cost and consume from account energy resources
         // Priority: 1. Free quota → 2. Frozen energy → 3. TOS burn (from fee_limit)
         let fee_limit = self.get_fee_limit();
-        let required_energy = self.calculate_energy_cost();
+        let mut required_energy = self.calculate_energy_cost();
         let now_ms = state.get_block().get_timestamp();
+
+        // BUG-044 FIX: Adjust energy cost for contracts based on actual gas used
+        // calculate_energy_cost() uses max_gas, but actual execution may use less
+        // Refund the difference to prevent over-consumption of stake energy
+        if let Some((max_gas, used_gas)) = contract_gas_info {
+            if used_gas < max_gas {
+                let unused_gas = max_gas.saturating_sub(used_gas);
+                required_energy = required_energy.saturating_sub(unused_gas);
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "Contract energy adjustment: max_gas={}, used_gas={}, unused={}, adjusted_energy={}",
+                        max_gas, used_gas, unused_gas, required_energy
+                    );
+                }
+            }
+        }
 
         // Get sender's account energy
         let mut sender_energy = state

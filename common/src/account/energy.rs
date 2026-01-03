@@ -196,6 +196,29 @@ impl AccountEnergy {
         to_consume
     }
 
+    /// Refund energy after contract execution
+    ///
+    /// This reverses energy consumption when actual gas used is less than max_gas.
+    /// Refunds are applied in reverse order of consumption:
+    /// 1. First refund to frozen energy (decrease energy_usage)
+    /// 2. Then refund to free energy (decrease free_energy_usage)
+    ///
+    /// # Arguments
+    /// * `frozen_energy_refund` - Amount to refund to frozen energy
+    /// * `free_energy_refund` - Amount to refund to free energy
+    ///
+    /// # Returns
+    /// Total energy refunded
+    pub fn refund_energy(&mut self, frozen_energy_refund: u64, free_energy_refund: u64) -> u64 {
+        // Refund frozen energy (decrease usage)
+        self.energy_usage = self.energy_usage.saturating_sub(frozen_energy_refund);
+
+        // Refund free energy (decrease usage)
+        self.free_energy_usage = self.free_energy_usage.saturating_sub(free_energy_refund);
+
+        frozen_energy_refund.saturating_add(free_energy_refund)
+    }
+
     /// Add TOS to frozen balance
     pub fn freeze(&mut self, amount: u64) {
         self.frozen_balance = self.frozen_balance.saturating_add(amount);

@@ -35,6 +35,10 @@ impl Transaction {
 
     // Invoke a contract from a transaction using the ContractExecutor trait
     // This method supports both TOS Kernel(TAKO) (eBPF) and legacy contracts
+    //
+    // Returns: (is_success, used_gas)
+    // - is_success: true if contract execution succeeded (exit_code == 0)
+    // - used_gas: actual gas consumed by contract execution
     pub(super) async fn invoke_contract<
         'a,
         P: ContractProvider + Send,
@@ -49,7 +53,7 @@ impl Transaction {
         user_parameters: impl DoubleEndedIterator<Item = ValueCell>,
         max_gas: u64,
         invoke: InvokeContract,
-    ) -> Result<bool, VerificationError<E>> {
+    ) -> Result<(bool, u64), VerificationError<E>> {
         if log::log_enabled!(log::Level::Debug) {
             debug!("Invoking contract {contract} from TX {tx_hash}: {invoke:?}");
         }
@@ -240,7 +244,7 @@ impl Transaction {
             .await
             .map_err(VerificationError::State)?;
 
-        Ok(is_success)
+        Ok((is_success, used_gas))
     }
 
     pub(super) async fn handle_gas<
