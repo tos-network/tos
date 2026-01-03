@@ -557,17 +557,29 @@ impl KycProvider for RocksStorage {
             .load_optional_from_disk(Column::KycData, user.as_bytes())?
             .ok_or(BlockchainError::KycNotFound)?;
 
+        // Check if user is already suspended
         if kyc_data.status == KycStatus::Suspended {
-            return Err(BlockchainError::KycSuspended);
-        }
+            // Load existing suspension to check if it has expired
+            // Since expires_at = current_time + 24h, we can infer current_time
+            let current_time = expires_at.saturating_sub(86400);
 
-        // Only store the previous status if user is NOT already suspended.
-        // If user is already suspended, we must NOT overwrite the original previous_status.
-        // Otherwise, repeated EmergencySuspend calls would lose the true prior status.
-        // Example: Active -> Suspended (prev=Active) -> Suspended again (prev=Suspended) -> WRONG!
-        // With fix: Active -> Suspended (prev=Active) -> Suspended again (prev=Active still) -> CORRECT!
-        if kyc_data.status != KycStatus::Suspended {
-            // Store the previous status before setting to Suspended
+            if let Some(existing_suspension) = self
+                .load_optional_from_disk::<_, EmergencySuspensionData>(
+                    Column::KycEmergencySuspension,
+                    user.as_bytes(),
+                )?
+            {
+                if current_time < existing_suspension.expires_at {
+                    // Existing suspension is still active - block re-suspension
+                    return Err(BlockchainError::KycSuspended);
+                }
+                // Existing suspension has expired - allow new suspension
+                // Don't update previous_status - keep the original from before first suspension
+            }
+            // If no suspension record exists but status is Suspended (edge case),
+            // allow the new suspension and preserve existing previous_status if any
+        } else {
+            // User is NOT suspended - store current status as previous status
             // This allows lift_emergency_suspension to restore the correct status
             // (e.g., if user was Revoked before suspension, they should remain Revoked after lifting)
             self.insert_into_disk(

@@ -299,7 +299,20 @@ impl MockState {
             return Err("Dissolved committee cannot emergency suspend");
         }
 
-        kyc.previous_status = Some(kyc.status);
+        // SECURITY CHECK: Block re-suspension while actively suspended (unless expired)
+        if kyc.status == KycStatus::Suspended {
+            if let Some(expires_at) = kyc.expires_at {
+                if self.current_time < expires_at {
+                    // Suspension is still active - block re-suspension
+                    return Err("User is already suspended");
+                }
+                // Suspension expired - allow new suspension, keep original previous_status
+            }
+        } else {
+            // Only store previous_status when not already suspended
+            kyc.previous_status = Some(kyc.status);
+        }
+
         kyc.status = KycStatus::Suspended;
         // Use saturating arithmetic to prevent overflow
         kyc.expires_at = Some(
@@ -338,7 +351,9 @@ impl MockState {
         if kyc.status == KycStatus::Suspended {
             if let Some(expires_at) = kyc.expires_at {
                 if self.current_time >= expires_at {
-                    return kyc.previous_status;
+                    // Fall back to stored status (Suspended) if previous_status is missing
+                    // to prevent unauthorized status elevation from missing data
+                    return Some(kyc.previous_status.unwrap_or(kyc.status));
                 }
             }
         }
@@ -2569,18 +2584,27 @@ mod duplicate_injection_tests {
 
         let first_expires = state.kyc_data.get(&user).unwrap().expires_at.unwrap();
 
-        // Second suspension for 24 hours - should NOT stack to 48 hours
+        // Second suspension while still active should FAIL
+        let result = state.emergency_suspend(&user, &committee_id, 24);
+        assert!(
+            result.is_err(),
+            "Second suspend while still active should be blocked"
+        );
+
+        // Advance time past expiry
+        state.advance_time(25 * 3600); // 25 hours
+
+        // Now re-suspension should succeed
         state
             .emergency_suspend(&user, &committee_id, 24)
-            .expect("Second suspend should succeed");
+            .expect("Re-suspend after expiry should succeed");
 
         let second_expires = state.kyc_data.get(&user).unwrap().expires_at.unwrap();
 
-        // Second suspension should reset the timer, not add to it
-        // The new expires_at should be current_time + 24 hours, not first_expires + 24 hours
+        // Second suspension should be based on current time (after advancing)
         assert!(
-            second_expires <= first_expires + 24 * 3600,
-            "Suspensions should not stack durations"
+            second_expires > first_expires,
+            "Re-suspension expires_at should be after first suspension"
         );
     }
 
@@ -3971,6 +3995,271 @@ mod state_machine_tests {
 }
 
 // ============================================================================
+// CATEGORY 17: SECURITY REGRESSION TESTS
+// ============================================================================
+//
+// These tests verify fixes for security issues identified by Codex review.
+// They ensure that:
+// 1. Re-suspension is blocked while actively suspended but allowed after expiry
+// 2. Missing previous_status defaults to Suspended (not Active)
+
+mod security_regression_tests {
+    use super::*;
+
+    /// Test: Re-suspension blocked while actively suspended
+    ///
+    /// Verifies that emergency suspend is blocked when a user is already
+    /// suspended and the suspension has not yet expired.
+    #[test]
+    fn test_resuspend_blocked_while_active() {
+        let mut state = MockState::new();
+        let keypairs = create_keypairs(5);
+        let committee = create_committee(
+            "Test Committee",
+            KycRegion::Global,
+            &keypairs,
+            4,
+            2,
+            32767,
+            None,
+            CommitteeStatus::Active,
+        );
+        let committee_id = committee.id.clone();
+        state.add_committee(committee);
+
+        let user = KeyPair::new().get_public_key().compress();
+        state
+            .set_kyc(user.clone(), 255, committee_id.clone(), Hash::zero())
+            .expect("SetKyc should succeed");
+
+        // First suspension
+        state
+            .emergency_suspend(&user, &committee_id, 24)
+            .expect("First suspend should succeed");
+
+        // Second suspension while still active should FAIL
+        let result = state.emergency_suspend(&user, &committee_id, 24);
+        assert!(
+            result.is_err(),
+            "Re-suspension should be blocked while actively suspended"
+        );
+        assert_eq!(
+            result.unwrap_err(),
+            "User is already suspended",
+            "Should return appropriate error message"
+        );
+    }
+
+    /// Test: Re-suspension allowed after expiry
+    ///
+    /// Verifies that emergency suspend is allowed after the previous
+    /// suspension has expired.
+    #[test]
+    fn test_resuspend_allowed_after_expiry() {
+        let mut state = MockState::new();
+        let keypairs = create_keypairs(5);
+        let committee = create_committee(
+            "Test Committee",
+            KycRegion::Global,
+            &keypairs,
+            4,
+            2,
+            32767,
+            None,
+            CommitteeStatus::Active,
+        );
+        let committee_id = committee.id.clone();
+        state.add_committee(committee);
+
+        let user = KeyPair::new().get_public_key().compress();
+        state
+            .set_kyc(user.clone(), 255, committee_id.clone(), Hash::zero())
+            .expect("SetKyc should succeed");
+
+        // First suspension for 24 hours
+        state
+            .emergency_suspend(&user, &committee_id, 24)
+            .expect("First suspend should succeed");
+
+        // Advance time past expiry
+        state.advance_time(25 * 3600);
+
+        // Re-suspension should now succeed
+        let result = state.emergency_suspend(&user, &committee_id, 24);
+        assert!(
+            result.is_ok(),
+            "Re-suspension should succeed after expiry: {:?}",
+            result
+        );
+    }
+
+    /// Test: Previous status preserved through expiry and re-suspension
+    ///
+    /// Verifies that when a user is re-suspended after expiry, their
+    /// original previous_status is preserved (not overwritten with Suspended).
+    #[test]
+    fn test_previous_status_preserved_through_resuspension() {
+        let mut state = MockState::new();
+        let keypairs = create_keypairs(5);
+        let committee = create_committee(
+            "Test Committee",
+            KycRegion::Global,
+            &keypairs,
+            4,
+            2,
+            32767,
+            None,
+            CommitteeStatus::Active,
+        );
+        let committee_id = committee.id.clone();
+        state.add_committee(committee);
+
+        let user = KeyPair::new().get_public_key().compress();
+        state
+            .set_kyc(user.clone(), 255, committee_id.clone(), Hash::zero())
+            .expect("SetKyc should succeed");
+
+        // Verify initial status is Active
+        assert_eq!(
+            state.get_effective_status(&user),
+            Some(KycStatus::Active),
+            "Initial status should be Active"
+        );
+
+        // First suspension
+        state
+            .emergency_suspend(&user, &committee_id, 24)
+            .expect("First suspend should succeed");
+
+        // Verify previous_status is Active
+        let prev_status_1 = state.kyc_data.get(&user).unwrap().previous_status;
+        assert_eq!(
+            prev_status_1,
+            Some(KycStatus::Active),
+            "Previous status should be Active after first suspension"
+        );
+
+        // Advance time past expiry
+        state.advance_time(25 * 3600);
+
+        // Re-suspend
+        state
+            .emergency_suspend(&user, &committee_id, 24)
+            .expect("Re-suspend should succeed");
+
+        // Verify previous_status is STILL Active (not Suspended)
+        let prev_status_2 = state.kyc_data.get(&user).unwrap().previous_status;
+        assert_eq!(
+            prev_status_2,
+            Some(KycStatus::Active),
+            "Previous status should still be Active after re-suspension (not Suspended)"
+        );
+    }
+
+    /// Test: Missing previous_status defaults to Suspended (not Active)
+    ///
+    /// Verifies that if previous_status is missing (None), the effective
+    /// status after expiry is Suspended (to prevent unauthorized elevation).
+    #[test]
+    fn test_missing_previous_status_defaults_to_suspended() {
+        let mut state = MockState::new();
+        let keypairs = create_keypairs(5);
+        let committee = create_committee(
+            "Test Committee",
+            KycRegion::Global,
+            &keypairs,
+            4,
+            2,
+            32767,
+            None,
+            CommitteeStatus::Active,
+        );
+        let committee_id = committee.id.clone();
+        state.add_committee(committee);
+
+        let user = KeyPair::new().get_public_key().compress();
+        state
+            .set_kyc(user.clone(), 255, committee_id.clone(), Hash::zero())
+            .expect("SetKyc should succeed");
+
+        // Suspend the user
+        state
+            .emergency_suspend(&user, &committee_id, 24)
+            .expect("Suspend should succeed");
+
+        // Simulate missing previous_status (data corruption scenario)
+        state.kyc_data.get_mut(&user).unwrap().previous_status = None;
+
+        // Advance time past expiry
+        state.advance_time(25 * 3600);
+
+        // Effective status should be Suspended (not Active) due to safe default
+        let effective_status = state.get_effective_status(&user);
+        assert_eq!(
+            effective_status,
+            Some(KycStatus::Suspended),
+            "Missing previous_status should default to Suspended (not Active)"
+        );
+    }
+
+    /// Test: Revoked user remains Revoked after suspension expires
+    ///
+    /// Verifies that a user who was Revoked before suspension returns
+    /// to Revoked status (not Active) after suspension expires.
+    #[test]
+    fn test_revoked_status_preserved_after_suspension() {
+        let mut state = MockState::new();
+        let keypairs = create_keypairs(5);
+        let committee = create_committee(
+            "Test Committee",
+            KycRegion::Global,
+            &keypairs,
+            4,
+            2,
+            32767,
+            None,
+            CommitteeStatus::Active,
+        );
+        let committee_id = committee.id.clone();
+        state.add_committee(committee);
+
+        let user = KeyPair::new().get_public_key().compress();
+        state
+            .set_kyc(user.clone(), 255, committee_id.clone(), Hash::zero())
+            .expect("SetKyc should succeed");
+
+        // Revoke the user
+        state
+            .revoke_kyc(&user, &committee_id)
+            .expect("Revoke should succeed");
+
+        // Suspend the revoked user
+        state
+            .emergency_suspend(&user, &committee_id, 24)
+            .expect("Suspend should succeed");
+
+        // Verify previous_status is Revoked
+        let prev_status = state.kyc_data.get(&user).unwrap().previous_status;
+        assert_eq!(
+            prev_status,
+            Some(KycStatus::Revoked),
+            "Previous status should be Revoked"
+        );
+
+        // Advance time past expiry
+        state.advance_time(25 * 3600);
+
+        // Effective status should be Revoked (not Active)
+        let effective_status = state.get_effective_status(&user);
+        assert_eq!(
+            effective_status,
+            Some(KycStatus::Revoked),
+            "User should return to Revoked status after suspension expires"
+        );
+    }
+}
+
+// ============================================================================
 // SUMMARY TEST
 // ============================================================================
 
@@ -4097,7 +4386,15 @@ fn test_adversarial_test_suite_summary() {
     println!("  - Cross-client hash compatibility");
     println!();
 
+    println!("Category 17: Security Regression Tests (5 tests)");
+    println!("  - Re-suspension blocked while actively suspended");
+    println!("  - Re-suspension allowed after expiry");
+    println!("  - Previous status preserved through re-suspension");
+    println!("  - Missing previous_status defaults to Suspended");
+    println!("  - Revoked status preserved after suspension expires");
+    println!();
+
     println!("========================================");
-    println!("TOTAL: 73 adversarial tests");
+    println!("TOTAL: 78 adversarial tests");
     println!("========================================\n");
 }

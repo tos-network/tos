@@ -947,12 +947,14 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for Applicable
                 {
                     let current_time = self.get_verification_timestamp();
                     if current_time >= expires_at {
+                        // Get previous status, but if missing, keep user as Suspended
+                        // to prevent unauthorized status elevation from missing data
                         let previous_status = self
                             .inner
                             .storage
                             .get_emergency_previous_status(user)
                             .await?
-                            .unwrap_or(tos_common::kyc::KycStatus::Active);
+                            .unwrap_or(data.status); // Fall back to stored status (Suspended)
                         return Ok(Some(previous_status));
                     }
                 }
