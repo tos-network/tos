@@ -24,7 +24,7 @@ use tos_common::{
     config,
     rpc::{
         server::{
-            json_rpc, websocket,
+            json_rpc,
             websocket::{EventWebSocketHandler, WebSocketServer, WebSocketServerShared},
             RPCServerHandler, WebSocketServerHandler,
         },
@@ -172,14 +172,8 @@ impl<S: Storage> DaemonRpcServer<S> {
                         "/json_rpc",
                         web::post().to(json_rpc::<Arc<Blockchain<S>>, DaemonRpcServer<S>>),
                     )
-                    // WebSocket support
-                    .route(
-                        "/json_rpc",
-                        web::get().to(websocket::<
-                            EventWebSocketHandler<Arc<Blockchain<S>>, NotifyEvent>,
-                            DaemonRpcServer<S>,
-                        >),
-                    )
+                    // WebSocket support with security enforcement
+                    .route("/json_rpc", web::get().to(secure_websocket::<S>))
                     .route(
                         "/getwork/{address}/{worker}",
                         web::get().to(getwork_endpoint::<S>),
@@ -312,4 +306,46 @@ async fn getwork_endpoint<S: Storage>(
             .reason("GetWork server is not enabled")
             .finish()), // getwork server is not started
     }
+}
+
+/// Secure WebSocket endpoint with security enforcement
+///
+/// This endpoint enforces the following security checks before establishing the connection:
+/// 1. Origin validation (CORS protection)
+/// 2. Connection rate limiting (per-IP DoS protection)
+async fn secure_websocket<S: Storage>(
+    server: Data<DaemonRpcServer<S>>,
+    request: HttpRequest,
+    stream: Payload,
+) -> Result<HttpResponse, Error> {
+    let security = server.websocket_security();
+
+    // 1. Validate Origin header (CORS protection)
+    let origin = request
+        .headers()
+        .get("Origin")
+        .and_then(|v| v.to_str().ok());
+
+    if let Err(e) = security.validate_origin(origin) {
+        if log::log_enabled!(log::Level::Warn) {
+            warn!("WebSocket connection rejected: {}", e);
+        }
+        return Ok(HttpResponse::Forbidden().body(e.to_string()));
+    }
+
+    // 2. Check connection rate limit (per-IP DoS protection)
+    if let Some(peer_addr) = request.peer_addr() {
+        if let Err(e) = security.check_connection_rate(peer_addr.ip()).await {
+            if log::log_enabled!(log::Level::Warn) {
+                warn!("WebSocket connection rejected: {}", e);
+            }
+            return Ok(HttpResponse::TooManyRequests().body(e.to_string()));
+        }
+    }
+
+    // Security checks passed, delegate to the WebSocket handler
+    server
+        .get_websocket()
+        .handle_connection(request, stream)
+        .await
 }
