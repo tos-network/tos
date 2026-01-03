@@ -364,7 +364,7 @@ impl CommitteeProvider for RocksStorage {
             member.status = new_status.clone();
             self.insert_into_disk(Column::Committees, committee_id.as_bytes(), &committee)?;
 
-            // SECURITY FIX (Issue #28): When transitioning to MemberStatus::Removed,
+            // When transitioning to MemberStatus::Removed,
             // also remove the member from the MemberCommittees index.
             // This prevents stale indexes where removed members still appear to be
             // associated with committees they're no longer part of.
@@ -586,7 +586,7 @@ impl CommitteeProvider for RocksStorage {
             trace!("deleting committee {}", committee_id);
         }
 
-        // SECURITY FIX (Issue #27): Check if committee has children before deletion
+        // Check if committee has children before deletion
         // Deleting a parent committee would orphan children (their parent_id would point to
         // a non-existent committee). Block deletion if children exist.
         let children: Option<Vec<Hash>> =

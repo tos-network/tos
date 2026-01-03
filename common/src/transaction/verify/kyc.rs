@@ -185,7 +185,7 @@ pub fn verify_transfer_kyc<E>(
         )));
     }
 
-    // SECURITY FIX (Issue #38): Enforce combined approval count limit
+    // Enforce combined approval count limit
     // TransferKyc has two approval lists, but the total should not exceed
     // a reasonable limit to prevent DoS via oversized transactions.
     // We use 2 * MAX_APPROVALS as the combined limit for dual-committee transfers.
@@ -271,7 +271,7 @@ pub fn verify_appeal_kyc<E>(
         )));
     }
 
-    // SECURITY FIX (Issue #43): Appeal submitted_at must be within a reasonable window
+    // Appeal submitted_at must be within a reasonable window
     // to prevent backdating attacks that could bypass time-based appeal policies.
     // We enforce both upper and lower bounds on the submission timestamp.
     let max_future = current_time.saturating_add(3600); // 1 hour future tolerance
@@ -314,7 +314,7 @@ pub fn verify_bootstrap_committee<E>(
     payload: &BootstrapCommitteePayload,
     sender: &crate::crypto::elgamal::CompressedPublicKey,
 ) -> Result<(), VerificationError<E>> {
-    // SECURITY FIX (Issue #33): Verify sender is BOOTSTRAP_ADDRESS
+    // Verify sender is BOOTSTRAP_ADDRESS
     // Only the designated bootstrap address can create the global committee
     let bootstrap_pubkey = {
         use crate::crypto::Address;
@@ -381,7 +381,7 @@ pub fn verify_bootstrap_committee<E>(
         }
     }
 
-    // SECURITY FIX (Issue #35): Count only members who can approve (non-observers)
+    // Count only members who can approve (non-observers)
     // Observers cannot approve, so thresholds must be achievable with actual approvers
     let approver_count = payload
         .get_members()
@@ -400,7 +400,7 @@ pub fn verify_bootstrap_committee<E>(
         )));
     }
 
-    // SECURITY FIX (Issue #35): Threshold must be <= approver count
+    // Threshold must be <= approver count
     if (payload.get_threshold() as usize) > approver_count {
         return Err(VerificationError::AnyError(anyhow::anyhow!(
             "Governance threshold {} exceeds approver count {} (observers cannot approve)",
@@ -426,7 +426,7 @@ pub fn verify_bootstrap_committee<E>(
         )));
     }
 
-    // SECURITY FIX (Issue #35): KYC threshold must be <= approver count
+    // KYC threshold must be <= approver count
     if (payload.get_kyc_threshold() as usize) > approver_count {
         return Err(VerificationError::AnyError(anyhow::anyhow!(
             "KYC threshold {} exceeds approver count {} (observers cannot approve)",
@@ -435,7 +435,7 @@ pub fn verify_bootstrap_committee<E>(
         )));
     }
 
-    // SECURITY FIX (Issue #19): Ensure kyc_threshold doesn't exceed MAX_APPROVALS
+    // Ensure kyc_threshold doesn't exceed MAX_APPROVALS
     // Otherwise KYC operations become impossible (can't submit enough approvals)
     if (payload.get_kyc_threshold() as usize) > MAX_APPROVALS {
         return Err(VerificationError::AnyError(anyhow::anyhow!(
@@ -538,7 +538,7 @@ pub fn verify_register_committee<E>(
         }
     }
 
-    // SECURITY FIX (Issue #35): Count only members who can approve (non-observers)
+    // Count only members who can approve (non-observers)
     // Observers cannot approve, so thresholds must be achievable with actual approvers
     let approver_count = payload
         .get_members()
@@ -557,7 +557,7 @@ pub fn verify_register_committee<E>(
         )));
     }
 
-    // SECURITY FIX (Issue #35): Threshold must be <= approver count
+    // Threshold must be <= approver count
     if (payload.get_threshold() as usize) > approver_count {
         return Err(VerificationError::AnyError(anyhow::anyhow!(
             "Governance threshold {} exceeds approver count {} (observers cannot approve)",
@@ -583,7 +583,7 @@ pub fn verify_register_committee<E>(
         )));
     }
 
-    // SECURITY FIX (Issue #35): KYC threshold must be <= approver count
+    // KYC threshold must be <= approver count
     if (payload.get_kyc_threshold() as usize) > approver_count {
         return Err(VerificationError::AnyError(anyhow::anyhow!(
             "KYC threshold {} exceeds approver count {} (observers cannot approve)",
@@ -592,7 +592,7 @@ pub fn verify_register_committee<E>(
         )));
     }
 
-    // SECURITY FIX (Issue #19): Ensure kyc_threshold doesn't exceed MAX_APPROVALS
+    // Ensure kyc_threshold doesn't exceed MAX_APPROVALS
     // Otherwise KYC operations become impossible (can't submit enough approvals)
     if (payload.get_kyc_threshold() as usize) > MAX_APPROVALS {
         return Err(VerificationError::AnyError(anyhow::anyhow!(
@@ -699,7 +699,7 @@ pub struct CommitteeGovernanceInfo {
     /// Current number of active members in the committee
     pub member_count: usize,
     /// Current number of active members who can approve (excludes observers)
-    /// SECURITY FIX (Issue #36): Used for threshold validation to prevent
+    /// Used for threshold validation to prevent
     /// setting thresholds higher than the number of members who can actually approve.
     pub approver_count: usize,
     /// Total member count including inactive/suspended/removed members
@@ -709,7 +709,7 @@ pub struct CommitteeGovernanceInfo {
     /// Current governance threshold
     pub threshold: u8,
     /// Current KYC threshold
-    /// SECURITY FIX (Issue #37): Used to validate role changes don't brick KYC operations
+    /// Used to validate role changes don't brick KYC operations
     pub kyc_threshold: u8,
     /// Target member is active (for member updates/removals)
     pub target_is_active: Option<bool>,
@@ -740,7 +740,7 @@ pub fn verify_update_committee_with_state<E>(
     match payload.get_update() {
         crate::transaction::payload::CommitteeUpdateData::UpdateThreshold { new_threshold } => {
             let new_threshold = *new_threshold as usize;
-            // SECURITY FIX (Issue #36): Use approver_count instead of member_count
+            // Use approver_count instead of member_count
             // Observers cannot approve, so threshold must be achievable with actual approvers
             let approver_count = committee_info.approver_count;
 
@@ -823,7 +823,7 @@ pub fn verify_update_committee_with_state<E>(
             new_kyc_threshold,
         } => {
             let new_kyc_threshold = *new_kyc_threshold as usize;
-            // SECURITY FIX (Issue #36): Use approver_count instead of member_count
+            // Use approver_count instead of member_count
             // Observers cannot approve, so KYC threshold must be achievable with actual approvers
             let approver_count = committee_info.approver_count;
 
@@ -836,7 +836,7 @@ pub fn verify_update_committee_with_state<E>(
                 )));
             }
 
-            // SECURITY FIX (Issue #19): Ensure kyc_threshold doesn't exceed MAX_APPROVALS
+            // Ensure kyc_threshold doesn't exceed MAX_APPROVALS
             // Otherwise KYC operations become impossible (can't submit enough approvals)
             if new_kyc_threshold > MAX_APPROVALS {
                 return Err(VerificationError::AnyError(anyhow::anyhow!(
@@ -847,7 +847,7 @@ pub fn verify_update_committee_with_state<E>(
             }
         }
         crate::transaction::payload::CommitteeUpdateData::AddMember { role, .. } => {
-            // SECURITY FIX (Issue #23): Use total member count (including inactive/suspended)
+            // Use total member count (including inactive/suspended)
             // for MAX_COMMITTEE_MEMBERS check. This prevents committees from bypassing the
             // hard cap by suspending members and then adding new ones.
             let total_members = committee_info.total_member_count;
@@ -860,7 +860,7 @@ pub fn verify_update_committee_with_state<E>(
                 )));
             }
 
-            // SECURITY FIX (Issue #18): After adding a member, the current threshold may
+            // After adding a member, the current threshold may
             // no longer meet the 2/3 governance invariant. Re-validate that:
             // threshold >= ceil(2/3 * new_approver_count)
             // Use approver count since observers cannot approve governance actions
@@ -881,7 +881,7 @@ pub fn verify_update_committee_with_state<E>(
         crate::transaction::payload::CommitteeUpdateData::UpdateMemberStatus {
             new_status, ..
         } => {
-            // SECURITY FIX (Issue #17): UpdateMemberStatus can deactivate members without
+            // UpdateMemberStatus can deactivate members without
             // checking governance invariants. When a member is set to Suspended or Removed,
             // we must ensure that remaining active members >= threshold and >= MIN_COMMITTEE_MEMBERS.
             use crate::kyc::MemberStatus;
@@ -933,7 +933,7 @@ pub fn verify_update_committee_with_state<E>(
                 }
             } else if *new_status == MemberStatus::Active && !target_is_active && target_can_approve
             {
-                // SECURITY FIX (Issue #42): When reactivating a suspended/removed member who is an approver,
+                // When reactivating a suspended/removed member who is an approver,
                 // approver_count increases. Must revalidate 2/3 governance invariant.
                 let new_approver_count = current_approvers + 1;
                 let required_threshold = (new_approver_count * 2).div_ceil(3);
@@ -949,7 +949,7 @@ pub fn verify_update_committee_with_state<E>(
             }
         }
         crate::transaction::payload::CommitteeUpdateData::UpdateMemberRole { new_role, .. } => {
-            // SECURITY FIX (Issue #37): UpdateMemberRole can downgrade approvers to Observer
+            // UpdateMemberRole can downgrade approvers to Observer
             // without checking if remaining approvers >= threshold/kyc_threshold.
             // When a member is changed to Observer, they can no longer approve operations.
             use crate::kyc::MemberRole;
@@ -988,7 +988,7 @@ pub fn verify_update_committee_with_state<E>(
                     )));
                 }
             } else if new_role.can_approve() && !target_can_approve && target_is_active {
-                // SECURITY FIX (Issue #42): When promoting from Observer to Member/Chair,
+                // When promoting from Observer to Member/Chair,
                 // approver_count increases. Must revalidate 2/3 governance invariant.
                 let new_approver_count = current_approvers + 1;
                 let required_threshold = (new_approver_count * 2).div_ceil(3);

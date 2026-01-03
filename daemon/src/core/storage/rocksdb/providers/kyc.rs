@@ -206,7 +206,7 @@ impl KycProvider for RocksStorage {
                 }
                 return Err(BlockchainError::KycRevoked);
             }
-            // SECURITY FIX (Issue #25): When status is Suspended, check if the previous_status
+            // When status is Suspended, check if the previous_status
             // was Revoked. This prevents attack: Revoked -> EmergencySuspend -> RenewKyc -> Active
             // A revoked user should not be able to reactivate their KYC by going through suspension.
             KycStatus::Suspended => {
@@ -282,7 +282,7 @@ impl KycProvider for RocksStorage {
 
         // Check KYC status before transfer - only Active or Expired can be transferred
         // Revoked or Suspended KYC cannot be transferred to prevent reactivation bypass
-        // SECURITY FIX (Issue #26): Use verification_timestamp (block time) instead of
+        // Use verification_timestamp (block time) instead of
         // transferred_at (payload time, which can be up to 1 hour in future) to check
         // suspension expiry. This prevents attackers from using future timestamps to
         // bypass suspension.
@@ -561,7 +561,7 @@ impl KycProvider for RocksStorage {
             return Err(BlockchainError::KycSuspended);
         }
 
-        // SECURITY FIX (Issue #20): Only store the previous status if user is NOT already suspended.
+        // Only store the previous status if user is NOT already suspended.
         // If user is already suspended, we must NOT overwrite the original previous_status.
         // Otherwise, repeated EmergencySuspend calls would lose the true prior status.
         // Example: Active -> Suspended (prev=Active) -> Suspended again (prev=Suspended) -> WRONG!
@@ -698,7 +698,7 @@ impl KycProvider for RocksStorage {
             );
         }
 
-        // SECURITY FIX (Issue #24): Check if an appeal already exists for this user.
+        // Check if an appeal already exists for this user.
         // This prevents overwriting pending appeals, which could be exploited to
         // reset appeal timers or change appeal details without proper resolution.
         if let Some(_existing_appeal) =

@@ -453,7 +453,7 @@ pub trait BlockchainApplyState<'a, P: ContractProvider, E>:
 
     /// Get the KYC level for a user
     ///
-    /// SECURITY FIX (Issue #45): Added to support binding TransferKyc approvals to current level
+    /// Added to support binding TransferKyc approvals to current level
     ///
     /// # Arguments
     /// * `user` - The user's public key

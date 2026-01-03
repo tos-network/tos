@@ -146,8 +146,8 @@ pub enum ApprovalError {
 
 /// Verify approvals for SetKyc operation
 ///
-/// SECURITY FIX (Issue #34): Now requires verified_at parameter to bind approvals to timestamp
-/// SECURITY FIX (Issue #44): Now requires network parameter for cross-network replay protection
+/// Now requires verified_at parameter to bind approvals to timestamp
+/// Now requires network parameter for cross-network replay protection
 ///
 /// Validates:
 /// - Committee exists and is active
@@ -178,8 +178,8 @@ pub fn verify_set_kyc_approvals(
     }
 
     // Build the signing message
-    // SECURITY FIX (Issue #34): Include verified_at in message to bind approval to timestamp
-    // SECURITY FIX (Issue #44): Include network chain_id for cross-network replay protection
+    // Include verified_at in message to bind approval to timestamp
+    // Include network chain_id for cross-network replay protection
     let build_message = |approval: &CommitteeApproval| {
         CommitteeApproval::build_set_kyc_message(
             network,
@@ -201,7 +201,7 @@ pub fn verify_set_kyc_approvals(
 
 /// Verify approvals for RevokeKyc operation
 ///
-/// SECURITY FIX (Issue #44): Now requires network parameter for cross-network replay protection
+/// Now requires network parameter for cross-network replay protection
 pub fn verify_revoke_kyc_approvals(
     network: &Network,
     committee: &SecurityCommittee,
@@ -232,8 +232,8 @@ pub fn verify_revoke_kyc_approvals(
 
 /// Verify approvals for RenewKyc operation
 ///
-/// SECURITY FIX (Issue #34): Now requires verified_at parameter to bind approvals to timestamp
-/// SECURITY FIX (Issue #44): Now requires network parameter for cross-network replay protection
+/// Now requires verified_at parameter to bind approvals to timestamp
+/// Now requires network parameter for cross-network replay protection
 pub fn verify_renew_kyc_approvals(
     network: &Network,
     committee: &SecurityCommittee,
@@ -248,8 +248,8 @@ pub fn verify_renew_kyc_approvals(
         return Err(ApprovalError::CommitteeNotActive(committee.id.clone()));
     }
 
-    // SECURITY FIX (Issue #34): Include verified_at in message to bind approval to timestamp
-    // SECURITY FIX (Issue #44): Include network chain_id for cross-network replay protection
+    // Include verified_at in message to bind approval to timestamp
+    // Include network chain_id for cross-network replay protection
     let build_message = |approval: &CommitteeApproval| {
         CommitteeApproval::build_renew_kyc_message(
             network,
@@ -268,10 +268,10 @@ pub fn verify_renew_kyc_approvals(
 
 /// Verify approvals for TransferKyc - source committee side
 ///
-/// SECURITY FIX (Issue #34): Now requires transferred_at parameter to bind approvals to timestamp
-/// SECURITY FIX (Issue #39): Now requires new_data_hash parameter to bind source approval to the transferred data
-/// SECURITY FIX (Issue #44): Now requires network parameter for cross-network replay protection
-/// SECURITY FIX (Issue #45): Now requires current_level parameter to bind approval to user's KYC level
+/// Now requires transferred_at parameter to bind approvals to timestamp
+/// Now requires new_data_hash parameter to bind source approval to the transferred data
+/// Now requires network parameter for cross-network replay protection
+/// Now requires current_level parameter to bind approval to user's KYC level
 pub fn verify_transfer_kyc_source_approvals(
     network: &Network,
     source_committee: &SecurityCommittee,
@@ -294,10 +294,10 @@ pub fn verify_transfer_kyc_source_approvals(
     let account = account.clone();
     let new_data_hash = new_data_hash.clone();
 
-    // SECURITY FIX (Issue #34): Include transferred_at in message to bind approval to timestamp
-    // SECURITY FIX (Issue #39): Include new_data_hash so source committee approves the exact data
-    // SECURITY FIX (Issue #44): Include network chain_id for cross-network replay protection
-    // SECURITY FIX (Issue #45): Include current_level to bind approval to user's KYC level
+    // Include transferred_at in message to bind approval to timestamp
+    // Include new_data_hash so source committee approves the exact data
+    // Include network chain_id for cross-network replay protection
+    // Include current_level to bind approval to user's KYC level
     let build_message = move |approval: &CommitteeApproval| {
         CommitteeApproval::build_transfer_kyc_source_message(
             network,
@@ -324,9 +324,9 @@ pub fn verify_transfer_kyc_source_approvals(
 
 /// Verify approvals for TransferKyc - destination committee side
 ///
-/// SECURITY FIX (Issue #34): Now requires transferred_at parameter to bind approvals to timestamp
-/// SECURITY FIX (Issue #44): Now requires network parameter for cross-network replay protection
-/// SECURITY FIX (Issue #97): Now requires current_level to bind approvals to KYC level
+/// Now requires transferred_at parameter to bind approvals to timestamp
+/// Now requires network parameter for cross-network replay protection
+/// Now requires current_level to bind approvals to KYC level
 pub fn verify_transfer_kyc_dest_approvals(
     network: &Network,
     dest_committee: &SecurityCommittee,
@@ -347,8 +347,8 @@ pub fn verify_transfer_kyc_dest_approvals(
     let account = account.clone();
     let new_data_hash = new_data_hash.clone();
 
-    // SECURITY FIX (Issue #34): Include transferred_at in message to bind approval to timestamp
-    // SECURITY FIX (Issue #44): Include network chain_id for cross-network replay protection
+    // Include transferred_at in message to bind approval to timestamp
+    // Include network chain_id for cross-network replay protection
     let build_message = move |approval: &CommitteeApproval| {
         CommitteeApproval::build_transfer_kyc_dest_message(
             network,
@@ -375,7 +375,7 @@ pub fn verify_transfer_kyc_dest_approvals(
 
 /// Verify approvals for EmergencySuspend operation
 ///
-/// SECURITY FIX (Issue #44): Now requires network parameter for cross-network replay protection
+/// Now requires network parameter for cross-network replay protection
 ///
 /// # Policy Decision
 /// Emergency suspend operations are allowed even if the issuing committee is suspended.
@@ -419,7 +419,7 @@ pub fn verify_emergency_suspend_approvals(
 
 /// Verify approvals for RegisterCommittee operation
 ///
-/// SECURITY FIX (Issue #44): Now requires network parameter for cross-network replay protection
+/// Now requires network parameter for cross-network replay protection
 ///
 /// The `config_hash` binds the approval signatures to the full committee configuration
 /// (members, thresholds, max_kyc_level), preventing approval replay with different configs.
@@ -466,7 +466,7 @@ pub fn verify_register_committee_approvals(
 
 /// Verify approvals for UpdateCommittee operation
 ///
-/// SECURITY FIX (Issue #44): Now requires network parameter for cross-network replay protection
+/// Now requires network parameter for cross-network replay protection
 pub fn verify_update_committee_approvals(
     network: &Network,
     committee: &SecurityCommittee,
