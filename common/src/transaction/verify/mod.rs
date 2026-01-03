@@ -3279,6 +3279,10 @@ impl Transaction {
         // Format: (max_gas, used_gas) - only set for InvokeContract/DeployContract with constructor
         let mut contract_gas_info: Option<(u64, u64)> = None;
 
+        // BUG-057 FIX: Track new accounts created for energy cost calculation
+        // ENERGY_COST_NEW_ACCOUNT (25,000) is charged per new account created
+        let mut new_accounts_created: u64 = 0;
+
         match &self.data {
             TransactionType::Transfers(transfers) => {
                 for transfer in transfers {
@@ -3554,6 +3558,9 @@ impl Transaction {
 
                             // Record as pending registration for subsequent TXs in this block
                             state.record_pending_registration(destination);
+
+                            // BUG-057 FIX: Track new account for energy cost
+                            new_accounts_created += 1;
 
                             if log::log_enabled!(log::Level::Debug) {
                                 debug!(
@@ -3981,8 +3988,10 @@ impl Transaction {
                             .map_err(VerificationError::State)?
                             .ok_or(VerificationError::DelegationNotFound)?;
 
-                        // Check lock has expired
-                        let now_ms = state.get_block().get_timestamp();
+                        // BUG-065 FIX: Use same timestamp calculation as verification phase
+                        // Verification uses: get_verification_timestamp() * 1000
+                        // This ensures consistent lock expiry checks between verify and apply
+                        let now_ms = state.get_verification_timestamp() * 1000;
                         if delegation.expire_time > now_ms {
                             return Err(VerificationError::DelegationStillLocked);
                         }
@@ -4501,9 +4510,66 @@ impl Transaction {
                     .await
                     .map_err(VerificationError::State)?;
 
+                // BUG-067 FIX: Apply account creation fee for new accounts receiving rewards
+                // Only applies to TOS rewards (non-TOS assets don't have account creation fee)
+                let is_tos_reward = *payload.get_asset() == TOS_ASSET;
+                let mut total_fees_burned = 0u64;
+
                 // Credit rewards to each upline's balance
                 // Note: distribution.recipient is already a CompressedPublicKey (aka crypto::PublicKey)
                 for distribution in &distribution_result.distributions {
+                    let recipient = &distribution.recipient;
+                    let mut reward_amount = distribution.amount;
+
+                    // BUG-067 FIX: Check if recipient is a new account (TOS rewards only)
+                    if is_tos_reward {
+                        let is_registered = state
+                            .is_account_registered(recipient)
+                            .await
+                            .map_err(VerificationError::State)?;
+                        let is_pending = state.is_pending_registration(recipient);
+                        let is_new_account = !is_registered && !is_pending;
+
+                        if is_new_account {
+                            // Check if reward covers account creation fee
+                            if reward_amount < FEE_PER_ACCOUNT_CREATION {
+                                // Skip this recipient - reward too small to cover fee
+                                // The amount will be refunded to sender below
+                                if log::log_enabled!(log::Level::Debug) {
+                                    debug!(
+                                        "BatchReferralReward: Skipping new account {:?}, reward {} < fee {}",
+                                        recipient, reward_amount, FEE_PER_ACCOUNT_CREATION
+                                    );
+                                }
+                                continue;
+                            }
+
+                            // Deduct account creation fee from reward
+                            reward_amount -= FEE_PER_ACCOUNT_CREATION;
+                            total_fees_burned += FEE_PER_ACCOUNT_CREATION;
+
+                            // Burn the account creation fee
+                            state
+                                .add_burned_coins(FEE_PER_ACCOUNT_CREATION)
+                                .await
+                                .map_err(VerificationError::State)?;
+
+                            // Record as pending registration
+                            state.record_pending_registration(recipient);
+
+                            // BUG-057 FIX: Track new account for energy cost
+                            new_accounts_created += 1;
+
+                            if log::log_enabled!(log::Level::Debug) {
+                                debug!(
+                                    "BatchReferralReward: Account creation fee {} TOS burned for new account {:?}",
+                                    FEE_PER_ACCOUNT_CREATION as f64 / COIN_VALUE as f64,
+                                    recipient
+                                );
+                            }
+                        }
+                    }
+
                     let balance = state
                         .get_receiver_balance(
                             std::borrow::Cow::Owned(distribution.recipient.clone()),
@@ -4512,15 +4578,18 @@ impl Transaction {
                         .await
                         .map_err(VerificationError::State)?;
                     *balance = balance
-                        .checked_add(distribution.amount)
+                        .checked_add(reward_amount)
                         .ok_or(VerificationError::Overflow)?;
                 }
 
                 // Refund remainder to sender (prevents burning undistributed funds)
+                // Note: This now includes rewards that were skipped due to insufficient amount for new accounts
                 let remainder = payload
                     .get_total_amount()
-                    .saturating_sub(distribution_result.total_distributed);
-                if remainder > 0 {
+                    .saturating_sub(distribution_result.total_distributed)
+                    .saturating_add(total_fees_burned); // Fees were already burned, don't count as distributed
+                let actual_remainder = remainder.saturating_sub(total_fees_burned);
+                if actual_remainder > 0 {
                     let sender_balance = state
                         .get_receiver_balance(
                             std::borrow::Cow::Borrowed(self.get_source()),
@@ -4529,17 +4598,18 @@ impl Transaction {
                         .await
                         .map_err(VerificationError::State)?;
                     *sender_balance = sender_balance
-                        .checked_add(remainder)
+                        .checked_add(actual_remainder)
                         .ok_or(VerificationError::Overflow)?;
                 }
 
                 if log::log_enabled!(log::Level::Debug) {
                     debug!(
-                        "BatchReferralReward transaction applied - levels: {}, total_amount: {}, distributed: {}, refunded: {}",
+                        "BatchReferralReward transaction applied - levels: {}, total_amount: {}, distributed: {}, refunded: {}, fees_burned: {}",
                         payload.get_levels(),
                         payload.get_total_amount(),
                         distribution_result.total_distributed,
-                        remainder
+                        actual_remainder,
+                        total_fees_burned
                     );
                 }
             }
@@ -5344,24 +5414,69 @@ impl Transaction {
                 // Sender UNO balance is deducted in verify_dynamic_parts
                 // Here we only add plaintext TOS balance to receiver
                 for transfer in transfers {
+                    let destination = transfer.get_destination();
+                    let plain_amount = transfer.get_amount();
+
+                    // BUG-090 FIX: Apply account creation fee for new accounts
+                    // Unshield transfers credit TOS to receivers, same fee rules as regular transfers
+                    let is_registered = state
+                        .is_account_registered(destination)
+                        .await
+                        .map_err(VerificationError::State)?;
+                    let is_pending = state.is_pending_registration(destination);
+                    let is_new_account = !is_registered && !is_pending;
+
+                    let amount_to_credit = if is_new_account {
+                        // Verify transfer amount covers account creation fee
+                        if plain_amount < FEE_PER_ACCOUNT_CREATION {
+                            return Err(VerificationError::AmountTooSmallForAccountCreation {
+                                amount: plain_amount,
+                                fee: FEE_PER_ACCOUNT_CREATION,
+                            });
+                        }
+
+                        // Deduct account creation fee from transfer amount
+                        let net_amount = plain_amount - FEE_PER_ACCOUNT_CREATION;
+
+                        // Burn the account creation fee
+                        state
+                            .add_burned_coins(FEE_PER_ACCOUNT_CREATION)
+                            .await
+                            .map_err(VerificationError::State)?;
+
+                        // Record as pending registration for subsequent TXs in this block
+                        state.record_pending_registration(destination);
+
+                        // BUG-057 FIX: Track new account for energy cost
+                        new_accounts_created += 1;
+
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!(
+                                "Unshield: Account creation fee {} TOS burned for new account {:?}",
+                                FEE_PER_ACCOUNT_CREATION as f64 / COIN_VALUE as f64,
+                                destination
+                            );
+                        }
+
+                        net_amount
+                    } else {
+                        plain_amount
+                    };
+
                     // Add plaintext amount to receiver's TOS balance
                     let current_balance = state
-                        .get_receiver_balance(
-                            Cow::Borrowed(transfer.get_destination()),
-                            Cow::Borrowed(&TOS_ASSET),
-                        )
+                        .get_receiver_balance(Cow::Borrowed(destination), Cow::Borrowed(&TOS_ASSET))
                         .await
                         .map_err(VerificationError::State)?;
 
                     *current_balance = current_balance
-                        .checked_add(transfer.get_amount())
+                        .checked_add(amount_to_credit)
                         .ok_or(VerificationError::Overflow)?;
 
                     if log::log_enabled!(log::Level::Debug) {
                         debug!(
                             "Unshield transfer applied - receiver: {:?}, amount: {}",
-                            transfer.get_destination(),
-                            transfer.get_amount()
+                            destination, amount_to_credit
                         );
                     }
                 }
@@ -5374,6 +5489,20 @@ impl Transaction {
         let fee_limit = self.get_fee_limit();
         let mut required_energy = self.calculate_energy_cost();
         let now_ms = state.get_block().get_timestamp();
+
+        // BUG-057 FIX: Add energy cost for new accounts created
+        // ENERGY_COST_NEW_ACCOUNT (25,000) is charged per new account
+        if new_accounts_created > 0 {
+            let new_account_energy =
+                Transaction::account_creation_energy_cost(new_accounts_created as usize);
+            required_energy = required_energy.saturating_add(new_account_energy);
+            if log::log_enabled!(log::Level::Debug) {
+                debug!(
+                    "New account energy cost: {} accounts × 25,000 = {} energy added",
+                    new_accounts_created, new_account_energy
+                );
+            }
+        }
 
         // Adjust energy cost for contracts based on actual gas used
         // calculate_energy_cost() uses max_gas, but actual execution may use less

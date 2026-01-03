@@ -447,8 +447,10 @@ impl Transaction {
             }
             TransactionType::Burn(_) => base_cost + ENERGY_COST_BURN,
             TransactionType::DeployContract(payload) => {
-                // Use Serializer::size() to get module size
-                let bytecode_size = payload.size() as u64;
+                // BUG-058 FIX: Use module.size() instead of payload.size() to avoid
+                // overcharging for constructor data (max_gas + deposits).
+                // Only charge per-byte cost for actual bytecode, not constructor parameters.
+                let bytecode_size = payload.module.size() as u64;
                 // Include constructor execution cost if present
                 let constructor_cost = payload.invoke.as_ref().map_or(0, |inv| inv.max_gas);
                 base_cost
