@@ -443,8 +443,10 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for Applicable
 
     async fn set_global_energy_state(
         &mut self,
-        state: tos_common::account::GlobalEnergyState,
+        mut state: tos_common::account::GlobalEnergyState,
     ) -> Result<(), BlockchainError> {
+        // Automatically update last_update to current topoheight
+        state.last_update = self.inner.topoheight;
         self.inner.storage.set_global_energy_state(&state).await
     }
 
