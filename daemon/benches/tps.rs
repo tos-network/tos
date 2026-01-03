@@ -435,6 +435,13 @@ impl<'a> tos_common::transaction::verify::BlockchainVerificationState<'a, ()>
         Err(())
     }
 
+    async fn get_account_energy(
+        &mut self,
+        _account: &'a CompressedPublicKey,
+    ) -> Result<Option<tos_common::account::AccountEnergy>, ()> {
+        Ok(None)
+    }
+
     async fn get_delegated_resource(
         &mut self,
         _from: &'a CompressedPublicKey,

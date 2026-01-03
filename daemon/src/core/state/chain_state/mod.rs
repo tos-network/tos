@@ -1182,6 +1182,14 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for ChainS
         Ok(false)
     }
 
+    /// Get account energy for stake 2.0 validation
+    async fn get_account_energy(
+        &mut self,
+        account: &'a CompressedPublicKey,
+    ) -> Result<Option<tos_common::account::AccountEnergy>, BlockchainError> {
+        self.storage.get_account_energy(account).await
+    }
+
     /// Get a specific delegation from one account to another
     async fn get_delegated_resource(
         &mut self,

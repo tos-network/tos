@@ -412,6 +412,13 @@ impl<'a> BlockchainVerificationState<'a, TestError> for KycTestChainState {
         Err(TestError::Unsupported)
     }
 
+    async fn get_account_energy(
+        &mut self,
+        _account: &'a CompressedPublicKey,
+    ) -> Result<Option<tos_common::account::AccountEnergy>, TestError> {
+        Ok(None)
+    }
+
     async fn get_delegated_resource(
         &mut self,
         _from: &'a CompressedPublicKey,
@@ -495,12 +502,7 @@ impl<'a> BlockchainApplyState<'a, DummyContractProvider, TestError> for KycTestC
         Err(TestError::Unsupported)
     }
 
-    async fn get_account_energy(
-        &mut self,
-        _account: &'a CompressedPublicKey,
-    ) -> Result<Option<AccountEnergy>, TestError> {
-        Ok(None)
-    }
+    // Note: get_account_energy is inherited from BlockchainVerificationState
 
     async fn set_account_energy(
         &mut self,

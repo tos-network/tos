@@ -140,6 +140,24 @@ pub trait BlockchainVerificationState<'a, E> {
     /// true if the account exists (has nonce > 0 or has any balance), false otherwise
     async fn is_account_registered(&self, account: &CompressedPublicKey) -> Result<bool, E>;
 
+    // ===== Stake 2.0 Energy Methods (Verification Phase) =====
+
+    /// Get the account energy for an account (Stake 2.0)
+    ///
+    /// This method is available in verification phase to enable:
+    /// - available_for_delegation() check for DelegateResource
+    /// - Balance validation for batch delegation operations
+    ///
+    /// # Arguments
+    /// * `account` - The account's compressed public key
+    ///
+    /// # Returns
+    /// The account energy if it exists, None otherwise.
+    async fn get_account_energy(
+        &mut self,
+        account: &'a CompressedPublicKey,
+    ) -> Result<Option<crate::account::AccountEnergy>, E>;
+
     // ===== Stake 2.0 Delegation Methods (Verification Phase) =====
 
     /// Get a specific delegation from one account to another
@@ -254,11 +272,7 @@ pub trait BlockchainApplyState<'a, P: ContractProvider, E>:
     /// as a None version
     async fn remove_contract_module(&mut self, hash: &Hash) -> Result<(), E>;
 
-    /// Get the account energy for an account (Stake 2.0)
-    async fn get_account_energy(
-        &mut self,
-        account: &'a CompressedPublicKey,
-    ) -> Result<Option<crate::account::AccountEnergy>, E>;
+    // Note: get_account_energy is inherited from BlockchainVerificationState
 
     /// Set the account energy for an account (Stake 2.0)
     async fn set_account_energy(

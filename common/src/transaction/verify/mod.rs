@@ -505,6 +505,16 @@ impl Transaction {
                             "lock=false should have lock_period=0 (non-zero value would be ignored)"
                         )));
                     }
+                    // Check sender has sufficient available frozen balance
+                    let sender = self.get_source();
+                    let sender_energy = state
+                        .get_account_energy(sender)
+                        .await
+                        .map_err(VerificationError::State)?
+                        .unwrap_or_default();
+                    if sender_energy.available_for_delegation() < *amount {
+                        return Err(VerificationError::InsufficientFrozenBalance);
+                    }
                 }
                 EnergyPayload::UndelegateResource { receiver, amount } => {
                     if *amount == 0 {
@@ -622,6 +632,21 @@ impl Transaction {
                             )));
                         }
                     }
+                    // Check sender has sufficient available frozen balance for total delegation
+                    let total_delegation: u64 = delegations
+                        .iter()
+                        .map(|d| d.amount)
+                        .try_fold(0u64, |acc, amount| acc.checked_add(amount))
+                        .ok_or(VerificationError::Overflow)?;
+                    let sender = self.get_source();
+                    let sender_energy = state
+                        .get_account_energy(sender)
+                        .await
+                        .map_err(VerificationError::State)?
+                        .unwrap_or_default();
+                    if sender_energy.available_for_delegation() < total_delegation {
+                        return Err(VerificationError::InsufficientFrozenBalance);
+                    }
                 }
                 EnergyPayload::ActivateAndDelegate { items } => {
                     // Validate batch limits
@@ -671,6 +696,23 @@ impl Transaction {
                             return Err(VerificationError::AnyError(anyhow!(
                                 "Lock period cannot exceed 365 days"
                             )));
+                        }
+                    }
+                    // Check sender has sufficient available frozen balance for total delegation
+                    let total_delegation: u64 = items
+                        .iter()
+                        .map(|item| item.delegate_amount)
+                        .try_fold(0u64, |acc, amount| acc.checked_add(amount))
+                        .ok_or(VerificationError::Overflow)?;
+                    if total_delegation > 0 {
+                        let sender = self.get_source();
+                        let sender_energy = state
+                            .get_account_energy(sender)
+                            .await
+                            .map_err(VerificationError::State)?
+                            .unwrap_or_default();
+                        if sender_energy.available_for_delegation() < total_delegation {
+                            return Err(VerificationError::InsufficientFrozenBalance);
                         }
                     }
                 }
@@ -1994,6 +2036,16 @@ impl Transaction {
                             "lock=false should have lock_period=0 (non-zero value would be ignored)"
                         )));
                     }
+                    // Check sender has sufficient available frozen balance
+                    let sender = self.get_source();
+                    let sender_energy = state
+                        .get_account_energy(sender)
+                        .await
+                        .map_err(VerificationError::State)?
+                        .unwrap_or_default();
+                    if sender_energy.available_for_delegation() < *amount {
+                        return Err(VerificationError::InsufficientFrozenBalance);
+                    }
                 }
                 EnergyPayload::UndelegateResource { receiver, amount } => {
                     if *amount == 0 {
@@ -2111,6 +2163,21 @@ impl Transaction {
                             )));
                         }
                     }
+                    // Check sender has sufficient available frozen balance for total delegation
+                    let total_delegation: u64 = delegations
+                        .iter()
+                        .map(|d| d.amount)
+                        .try_fold(0u64, |acc, amount| acc.checked_add(amount))
+                        .ok_or(VerificationError::Overflow)?;
+                    let sender = self.get_source();
+                    let sender_energy = state
+                        .get_account_energy(sender)
+                        .await
+                        .map_err(VerificationError::State)?
+                        .unwrap_or_default();
+                    if sender_energy.available_for_delegation() < total_delegation {
+                        return Err(VerificationError::InsufficientFrozenBalance);
+                    }
                 }
                 EnergyPayload::ActivateAndDelegate { items } => {
                     // Validate batch limits
@@ -2160,6 +2227,23 @@ impl Transaction {
                             return Err(VerificationError::AnyError(anyhow!(
                                 "Lock period cannot exceed 365 days"
                             )));
+                        }
+                    }
+                    // Check sender has sufficient available frozen balance for total delegation
+                    let total_delegation: u64 = items
+                        .iter()
+                        .map(|item| item.delegate_amount)
+                        .try_fold(0u64, |acc, amount| acc.checked_add(amount))
+                        .ok_or(VerificationError::Overflow)?;
+                    if total_delegation > 0 {
+                        let sender = self.get_source();
+                        let sender_energy = state
+                            .get_account_energy(sender)
+                            .await
+                            .map_err(VerificationError::State)?
+                            .unwrap_or_default();
+                        if sender_energy.available_for_delegation() < total_delegation {
+                            return Err(VerificationError::InsufficientFrozenBalance);
                         }
                     }
                 }

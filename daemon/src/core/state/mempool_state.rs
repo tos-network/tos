@@ -651,6 +651,17 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Mempoo
         Ok(false)
     }
 
+    /// Get account energy for stake 2.0 validation
+    ///
+    /// This enables available_for_delegation check in verification phase
+    /// to reject delegation transactions that exceed available frozen balance.
+    async fn get_account_energy(
+        &mut self,
+        account: &'a CompressedPublicKey,
+    ) -> Result<Option<tos_common::account::AccountEnergy>, BlockchainError> {
+        self.storage.get_account_energy(account).await
+    }
+
     /// Get a specific delegation from one account to another
     ///
     /// This enables lock expiry checking and receiver validation

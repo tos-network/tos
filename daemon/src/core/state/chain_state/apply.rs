@@ -229,6 +229,14 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError>
         self.inner.is_account_registered(account).await
     }
 
+    /// Get account energy for stake 2.0 validation
+    async fn get_account_energy(
+        &mut self,
+        account: &'a CompressedPublicKey,
+    ) -> Result<Option<tos_common::account::AccountEnergy>, BlockchainError> {
+        self.inner.get_account_energy(account).await
+    }
+
     /// Get a specific delegation from one account to another
     async fn get_delegated_resource(
         &mut self,
@@ -414,12 +422,7 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for Applicable
         self.remove_contract_module_internal(hash).await
     }
 
-    async fn get_account_energy(
-        &mut self,
-        account: &'a CompressedPublicKey,
-    ) -> Result<Option<AccountEnergy>, BlockchainError> {
-        self.inner.storage.get_account_energy(account).await
-    }
+    // Note: get_account_energy is inherited from BlockchainVerificationState
 
     async fn set_account_energy(
         &mut self,

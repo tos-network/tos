@@ -545,6 +545,13 @@ impl<'a> BlockchainVerificationState<'a, TestError> for BatchTestChainState {
         Err(TestError::Unsupported)
     }
 
+    async fn get_account_energy(
+        &mut self,
+        account: &'a CompressedPublicKey,
+    ) -> Result<Option<AccountEnergy>, TestError> {
+        Ok(self.account_energies.get(account).cloned())
+    }
+
     async fn get_delegated_resource(
         &mut self,
         from: &'a CompressedPublicKey,
@@ -632,12 +639,7 @@ impl<'a> BlockchainApplyState<'a, DummyContractProvider, TestError> for BatchTes
         Err(TestError::Unsupported)
     }
 
-    async fn get_account_energy(
-        &mut self,
-        account: &'a CompressedPublicKey,
-    ) -> Result<Option<AccountEnergy>, TestError> {
-        Ok(self.account_energies.get(account).cloned())
-    }
+    // Note: get_account_energy is inherited from BlockchainVerificationState
 
     async fn set_account_energy(
         &mut self,
