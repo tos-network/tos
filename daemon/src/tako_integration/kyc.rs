@@ -344,6 +344,13 @@ mod tests {
             Ok(None)
         }
 
+        async fn get_emergency_previous_status(
+            &self,
+            _user: &PublicKey,
+        ) -> Result<Option<KycStatus>, BlockchainError> {
+            Ok(None)
+        }
+
         async fn lift_emergency_suspension(
             &mut self,
             _user: &PublicKey,

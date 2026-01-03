@@ -200,6 +200,13 @@ pub trait KycProvider {
         user: &PublicKey,
     ) -> Result<Option<(Hash, u64)>, BlockchainError>;
 
+    /// Get previous KYC status stored before emergency suspension
+    /// Returns None if no previous status is recorded
+    async fn get_emergency_previous_status(
+        &self,
+        user: &PublicKey,
+    ) -> Result<Option<KycStatus>, BlockchainError>;
+
     /// Lift emergency suspension (called automatically or by committee)
     async fn lift_emergency_suspension(
         &mut self,

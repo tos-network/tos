@@ -360,6 +360,7 @@ impl CommitteeProvider for RocksStorage {
             .iter_mut()
             .find(|m| m.public_key == *member_pubkey)
         {
+            let old_status = member.status.clone();
             member.status = new_status.clone();
             self.insert_into_disk(Column::Committees, committee_id.as_bytes(), &committee)?;
 
@@ -369,6 +370,10 @@ impl CommitteeProvider for RocksStorage {
             // associated with committees they're no longer part of.
             if new_status == MemberStatus::Removed {
                 self.remove_member_committee_index(member_pubkey, committee_id)
+                    .await?;
+            }
+            if old_status == MemberStatus::Removed && new_status == MemberStatus::Active {
+                self.add_member_committee_index(member_pubkey, committee_id)
                     .await?;
             }
 

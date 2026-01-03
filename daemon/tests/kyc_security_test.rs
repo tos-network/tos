@@ -934,11 +934,11 @@ mod malicious_input_tests {
             current_time,
         );
 
-        // Current behavior: Future timestamps are ACCEPTED (not validated)
-        // This test documents the behavior; consider adding future timestamp rejection
+        // SECURITY FIX (BUG-091): Future timestamps are now REJECTED
+        // Approvals with timestamps too far in the future are considered invalid
         assert!(
-            result.is_ok(),
-            "Future timestamps are currently accepted (behavior documented)"
+            result.is_err(),
+            "Future timestamps should be rejected after BUG-091 fix"
         );
     }
 }

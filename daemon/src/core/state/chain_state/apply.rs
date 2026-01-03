@@ -940,7 +940,27 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for Applicable
         user: &'a CompressedPublicKey,
     ) -> Result<Option<tos_common::kyc::KycStatus>, BlockchainError> {
         let kyc_data = self.inner.storage.get_kyc(user).await?;
-        Ok(kyc_data.map(|d| d.status))
+        if let Some(data) = kyc_data {
+            if data.status == tos_common::kyc::KycStatus::Suspended {
+                if let Some((_reason_hash, expires_at)) =
+                    self.inner.storage.get_emergency_suspension(user).await?
+                {
+                    let current_time = self.get_verification_timestamp();
+                    if current_time >= expires_at {
+                        let previous_status = self
+                            .inner
+                            .storage
+                            .get_emergency_previous_status(user)
+                            .await?
+                            .unwrap_or(tos_common::kyc::KycStatus::Active);
+                        return Ok(Some(previous_status));
+                    }
+                }
+            }
+            Ok(Some(data.status))
+        } else {
+            Ok(None)
+        }
     }
 
     async fn get_kyc_level(

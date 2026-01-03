@@ -326,12 +326,14 @@ pub fn verify_transfer_kyc_source_approvals(
 ///
 /// SECURITY FIX (Issue #34): Now requires transferred_at parameter to bind approvals to timestamp
 /// SECURITY FIX (Issue #44): Now requires network parameter for cross-network replay protection
+/// SECURITY FIX (Issue #97): Now requires current_level to bind approvals to KYC level
 pub fn verify_transfer_kyc_dest_approvals(
     network: &Network,
     dest_committee: &SecurityCommittee,
     approvals: &[CommitteeApproval],
     source_committee_id: &Hash,
     account: &PublicKey,
+    current_level: u16,
     new_data_hash: &Hash,
     transferred_at: u64,
     current_time: u64,
@@ -353,6 +355,7 @@ pub fn verify_transfer_kyc_dest_approvals(
             &source_id,
             &dest_id,
             &account,
+            current_level,
             &new_data_hash,
             transferred_at,
             approval.timestamp,

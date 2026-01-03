@@ -557,6 +557,10 @@ impl KycProvider for RocksStorage {
             .load_optional_from_disk(Column::KycData, user.as_bytes())?
             .ok_or(BlockchainError::KycNotFound)?;
 
+        if kyc_data.status == KycStatus::Suspended {
+            return Err(BlockchainError::KycSuspended);
+        }
+
         // SECURITY FIX (Issue #20): Only store the previous status if user is NOT already suspended.
         // If user is already suspended, we must NOT overwrite the original previous_status.
         // Otherwise, repeated EmergencySuspend calls would lose the true prior status.
@@ -572,8 +576,6 @@ impl KycProvider for RocksStorage {
                 &kyc_data.status,
             )?;
         }
-        // If already suspended, keep the existing previous_status unchanged
-
         // Update KYC status to Suspended
         kyc_data.status = KycStatus::Suspended;
         self.insert_into_disk(Column::KycData, user.as_bytes(), &kyc_data)?;
@@ -603,6 +605,15 @@ impl KycProvider for RocksStorage {
         let suspension: Option<EmergencySuspensionData> =
             self.load_optional_from_disk(Column::KycEmergencySuspension, user.as_bytes())?;
         Ok(suspension.map(|s| (s.reason_hash, s.expires_at)))
+    }
+
+    async fn get_emergency_previous_status(
+        &self,
+        user: &PublicKey,
+    ) -> Result<Option<KycStatus>, BlockchainError> {
+        let previous_status: Option<KycStatus> =
+            self.load_optional_from_disk(Column::KycEmergencyPreviousStatus, user.as_bytes())?;
+        Ok(previous_status)
     }
 
     async fn lift_emergency_suspension(

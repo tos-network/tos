@@ -613,7 +613,9 @@ impl CommitteeApproval {
 
     /// Check if approval has expired
     pub fn is_expired(&self, current_time: u64) -> bool {
-        current_time.saturating_sub(self.timestamp) > APPROVAL_EXPIRY_SECONDS
+        let max_future = current_time.saturating_add(3600);
+        self.timestamp > max_future
+            || current_time.saturating_sub(self.timestamp) > APPROVAL_EXPIRY_SECONDS
     }
 
     /// Verify the approval signature against a message
@@ -741,23 +743,27 @@ impl CommitteeApproval {
     ///
     /// SECURITY FIX (Issue #34): Now includes transferred_at to bind the approval to a specific timestamp
     /// SECURITY FIX (Issue #44): Now includes chain_id to prevent cross-network replay attacks
-    /// Message format: "TOS_KYC_TRANSFER_DST" || chain_id || source_committee || dest_committee || account || new_data_hash || transferred_at || timestamp
+    /// SECURITY FIX (Issue #97): Now includes current_level to bind approval to user's KYC level
+    /// Message format: "TOS_KYC_TRANSFER_DST" || chain_id || source_committee || dest_committee || account || current_level || new_data_hash || transferred_at || timestamp
     pub fn build_transfer_kyc_dest_message(
         network: &Network,
         source_committee: &Hash,
         dest_committee: &Hash,
         account: &PublicKey,
+        current_level: u16,
         new_data_hash: &Hash,
         transferred_at: u64,
         timestamp: u64,
     ) -> Vec<u8> {
-        let mut message = Vec::with_capacity(184);
+        let mut message = Vec::with_capacity(186);
         message.extend_from_slice(b"TOS_KYC_TRANSFER_DST");
         // SECURITY FIX (Issue #44): Include chain_id to prevent cross-network replay
         message.extend_from_slice(&network.chain_id().to_le_bytes());
         message.extend_from_slice(source_committee.as_bytes());
         message.extend_from_slice(dest_committee.as_bytes());
         message.extend_from_slice(account.as_bytes());
+        // SECURITY FIX (Issue #97): Bind current_level to prevent replay after upgrades
+        message.extend_from_slice(&current_level.to_le_bytes());
         message.extend_from_slice(new_data_hash.as_bytes());
         // SECURITY FIX (Issue #34): Bind transferred_at to prevent timestamp manipulation
         message.extend_from_slice(&transferred_at.to_le_bytes());
@@ -1231,5 +1237,13 @@ mod tests {
 
         // Expired after 24 hours
         assert!(approval.is_expired(1000 + APPROVAL_EXPIRY_SECONDS + 1));
+
+        // Future-dated approvals beyond tolerance should be rejected
+        let future_approval = CommitteeApproval::new(
+            create_test_pubkey(1),
+            create_test_signature(),
+            1000 + 3600 + 1,
+        );
+        assert!(future_approval.is_expired(1000));
     }
 }
