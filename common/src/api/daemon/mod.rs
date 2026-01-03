@@ -1496,6 +1496,10 @@ pub struct EstimateEnergyParams<'a> {
     /// Fee limit (max TOS willing to burn)
     #[serde(default)]
     pub fee_limit: u64,
+    /// Max gas for contract invocation (required for InvokeContract)
+    /// Added for accurate contract energy estimation
+    #[serde(default)]
+    pub max_gas: u64,
 }
 
 /// Transaction type for energy estimation

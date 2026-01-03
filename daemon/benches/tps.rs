@@ -458,6 +458,38 @@ impl<'a> tos_common::transaction::verify::BlockchainVerificationState<'a, ()>
     ) -> Result<(), ()> {
         Ok(())
     }
+
+    fn is_pending_registration(&self, _account: &CompressedPublicKey) -> bool {
+        false
+    }
+
+    fn record_pending_registration(&mut self, _account: &CompressedPublicKey) {}
+
+    // Stub implementations for benchmark
+    async fn record_pending_delegation(
+        &mut self,
+        _sender: &'a CompressedPublicKey,
+        _amount: u64,
+    ) -> Result<(), ()> {
+        Ok(())
+    }
+
+    fn get_pending_delegation(&self, _sender: &CompressedPublicKey) -> u64 {
+        0
+    }
+
+    // Stub implementations for benchmark
+    async fn record_pending_energy(
+        &mut self,
+        _sender: &'a CompressedPublicKey,
+        _amount: u64,
+    ) -> Result<(), ()> {
+        Ok(())
+    }
+
+    fn get_pending_energy(&self, _sender: &CompressedPublicKey) -> u64 {
+        0
+    }
 }
 
 // -------------------------------------------------------------------------------------------------

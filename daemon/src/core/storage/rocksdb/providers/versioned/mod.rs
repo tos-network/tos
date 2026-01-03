@@ -14,6 +14,7 @@ mod balance;
 mod cache;
 mod contract;
 mod dag_order;
+mod energy; // Add versioned energy cleanup
 mod multisig;
 mod nonce;
 mod registrations;

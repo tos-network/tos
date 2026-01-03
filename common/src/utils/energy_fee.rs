@@ -26,15 +26,17 @@ impl EnergyFeeCalculator {
     /// Calculate energy cost for a transfer transaction
     ///
     /// Formula: size_bytes + outputs × ENERGY_COST_TRANSFER_PER_OUTPUT
+    /// Uses saturating arithmetic to prevent overflow
     pub fn calculate_transfer_cost(tx_size: usize, output_count: usize) -> u64 {
         let base = tx_size as u64;
-        let output_cost = output_count as u64 * ENERGY_COST_TRANSFER_PER_OUTPUT;
-        base + output_cost
+        let output_cost = (output_count as u64).saturating_mul(ENERGY_COST_TRANSFER_PER_OUTPUT);
+        base.saturating_add(output_cost)
     }
 
     /// Calculate additional energy cost for new account creation
+    /// Uses saturating arithmetic to prevent overflow
     pub fn calculate_new_account_cost(new_addresses: usize) -> u64 {
-        new_addresses as u64 * ENERGY_COST_NEW_ACCOUNT
+        (new_addresses as u64).saturating_mul(ENERGY_COST_NEW_ACCOUNT)
     }
 
     /// Calculate energy cost for burn transaction
@@ -45,28 +47,32 @@ impl EnergyFeeCalculator {
     /// Calculate energy cost for contract deployment
     ///
     /// Formula: bytecode_size × 10 + 32,000
+    /// Uses saturating arithmetic to prevent overflow
     pub fn calculate_deploy_cost(bytecode_size: usize) -> u64 {
-        ENERGY_COST_CONTRACT_DEPLOY_BASE
-            + (bytecode_size as u64 * ENERGY_COST_CONTRACT_DEPLOY_PER_BYTE)
+        let per_byte_cost =
+            (bytecode_size as u64).saturating_mul(ENERGY_COST_CONTRACT_DEPLOY_PER_BYTE);
+        ENERGY_COST_CONTRACT_DEPLOY_BASE.saturating_add(per_byte_cost)
     }
 
     /// Calculate energy cost for UNO (privacy) transfers
     ///
     /// UNO transfers have higher costs due to ZK proof overhead
     /// Formula: size + outputs × 500
+    /// Uses saturating arithmetic to prevent overflow
     pub fn calculate_uno_transfer_cost(tx_size: usize, output_count: usize) -> u64 {
         let base = tx_size as u64;
-        let output_cost = output_count as u64 * 500;
-        base + output_cost
+        let output_cost = (output_count as u64).saturating_mul(500);
+        base.saturating_add(output_cost)
     }
 
     /// Legacy compatibility: calculate_energy_cost
     ///
     /// For backward compatibility with existing code.
     /// Uses new Stake 2.0 calculation internally.
+    /// Uses saturating arithmetic to prevent overflow
     pub fn calculate_energy_cost(tx_size: usize, output_count: usize, new_addresses: usize) -> u64 {
         Self::calculate_transfer_cost(tx_size, output_count)
-            + Self::calculate_new_account_cost(new_addresses)
+            .saturating_add(Self::calculate_new_account_cost(new_addresses))
     }
 }
 

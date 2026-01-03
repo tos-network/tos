@@ -3,6 +3,7 @@ mod balance;
 mod cache;
 mod contract;
 mod dag_order;
+mod energy;
 mod multisig;
 mod nonce;
 mod registrations;
@@ -18,6 +19,7 @@ pub use balance::*;
 pub use cache::*;
 pub use contract::*;
 pub use dag_order::*;
+pub use energy::*;
 pub use multisig::*;
 pub use nonce::*;
 pub use registrations::*;
@@ -38,6 +40,7 @@ pub trait VersionedProvider:
     + VersionedCacheProvider
     + VersionedDagOrderProvider
     + VersionedScheduledExecutionProvider
+    + VersionedEnergyProvider // Include energy in versioned cleanup
 {
     // Delete versioned data at topoheight
     async fn delete_versioned_data_at_topoheight(
@@ -60,6 +63,10 @@ pub trait VersionedProvider:
         self.delete_versioned_contract_data_at_topoheight(topoheight)
             .await?;
         self.delete_versioned_assets_supply_at_topoheight(topoheight)
+            .await?;
+
+        // Delete versioned energy at this topoheight
+        self.delete_versioned_energy_at_topoheight(topoheight)
             .await?;
 
         // Delete scheduled executions registered at this topoheight
@@ -105,6 +112,10 @@ pub trait VersionedProvider:
         self.delete_versioned_assets_below_topoheight(topoheight, keep_last)
             .await?;
 
+        // Delete versioned energy below this topoheight
+        self.delete_versioned_energy_below_topoheight(topoheight, keep_last)
+            .await?;
+
         // Delete scheduled executions registered below this topoheight
         self.delete_scheduled_executions_registered_below_topoheight(topoheight)
             .await?;
@@ -139,6 +150,10 @@ pub trait VersionedProvider:
         self.delete_versioned_assets_supply_above_topoheight(topoheight)
             .await?;
         self.delete_versioned_assets_above_topoheight(topoheight)
+            .await?;
+
+        // Delete versioned energy above this topoheight
+        self.delete_versioned_energy_above_topoheight(topoheight)
             .await?;
 
         // Delete scheduled executions registered above this topoheight

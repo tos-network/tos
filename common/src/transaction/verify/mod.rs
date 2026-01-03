@@ -22,7 +22,7 @@ use super::{payload::EnergyPayload, ContractDeposit, Role, Transaction, Transact
 use crate::{
     config::{
         BURN_PER_CONTRACT, COIN_VALUE, FEE_PER_ACCOUNT_CREATION, FEE_PER_MULTISIG_SIGNATURE,
-        MAX_GAS_USAGE_PER_TX, MIN_DELEGATION_AMOUNT, TOS_ASSET, UNO_ASSET,
+        MAX_FEE_LIMIT, MAX_GAS_USAGE_PER_TX, MIN_DELEGATION_AMOUNT, TOS_ASSET, UNO_ASSET,
     },
     contract::ContractProvider,
     crypto::{
@@ -460,9 +460,53 @@ impl Transaction {
                             "Unfreeze amount must be at least 1 TOS"
                         )));
                     }
+
+                    // Add queue capacity and delegation checks to match apply phase
+                    let sender = self.get_source();
+                    let sender_energy = state
+                        .get_account_energy(sender)
+                        .await
+                        .map_err(VerificationError::State)?
+                        .unwrap_or_default();
+
+                    // Check queue capacity (max 32 entries)
+                    if sender_energy.unfreezing_list.len()
+                        >= crate::config::MAX_UNFREEZING_LIST_SIZE
+                    {
+                        return Err(VerificationError::AnyError(anyhow!(
+                            "Unfreezing queue is full (max {} entries)",
+                            crate::config::MAX_UNFREEZING_LIST_SIZE
+                        )));
+                    }
+
+                    // Check frozen balance
+                    if sender_energy.frozen_balance < *amount {
+                        return Err(VerificationError::InsufficientFrozenBalance);
+                    }
+
+                    // Check available_for_delegation (can't unfreeze delegated TOS)
+                    if *amount > sender_energy.available_for_delegation() {
+                        return Err(VerificationError::AnyError(anyhow!(
+                            "Cannot unfreeze delegated TOS"
+                        )));
+                    }
                 }
                 EnergyPayload::WithdrawExpireUnfreeze => {
-                    // No additional validation needed
+                    // Check that there are unfreezing entries to withdraw
+                    // Note: We can only check if the unfreezing list is non-empty during verification
+                    // The actual expiry check happens at apply time when we have the block timestamp
+                    let sender = self.get_source();
+                    let sender_energy = state
+                        .get_account_energy(sender)
+                        .await
+                        .map_err(VerificationError::State)?
+                        .unwrap_or_default();
+
+                    if sender_energy.unfreezing_list.is_empty() {
+                        return Err(VerificationError::AnyError(anyhow!(
+                            "No pending unfreeze entries to withdraw"
+                        )));
+                    }
                 }
                 EnergyPayload::CancelAllUnfreeze => {
                     // Check that there are pending unfreeze entries to cancel
@@ -911,6 +955,11 @@ impl Transaction {
         // SECURITY FIX: Verify sender has sufficient balance for all spending
         // Calculate total spending per asset
         // Use references to original Hash values in transaction (they live for 'a)
+        //
+        // NOTE: Under Stake 2.0 Energy model, contract max_gas
+        // is NOT added to spending_per_asset. Only fee_limit (added later) covers
+        // the maximum TOS that can be burned when energy is insufficient.
+        // This prevents double-charging and double-refunding.
         let mut spending_per_asset: IndexMap<&'a Hash, u64> = IndexMap::new();
 
         match &self.data {
@@ -921,18 +970,26 @@ impl Transaction {
 
                     // TOS-Only Fee: Check account creation fee during verification
                     // This catches insufficient fee errors early (mempool validation)
+                    // Also check pending registrations for same-block/same-TX visibility
                     if *asset == TOS_ASSET {
                         let destination = transfer.get_destination();
-                        let is_new_account = !state
+                        let is_registered = state
                             .is_account_registered(destination)
                             .await
                             .map_err(VerificationError::State)?;
+                        let is_pending = state.is_pending_registration(destination);
+                        let is_new_account = !is_registered && !is_pending;
 
-                        if is_new_account && amount < FEE_PER_ACCOUNT_CREATION {
-                            return Err(VerificationError::AmountTooSmallForAccountCreation {
-                                amount,
-                                fee: FEE_PER_ACCOUNT_CREATION,
-                            });
+                        if is_new_account {
+                            if amount < FEE_PER_ACCOUNT_CREATION {
+                                return Err(VerificationError::AmountTooSmallForAccountCreation {
+                                    amount,
+                                    fee: FEE_PER_ACCOUNT_CREATION,
+                                });
+                            }
+                            // Record pending registration so subsequent outputs
+                            // to the same new account won't fail the creation fee check
+                            state.record_pending_registration(destination);
                         }
                     }
 
@@ -959,11 +1016,9 @@ impl Transaction {
                         .checked_add(amount)
                         .ok_or(VerificationError::Overflow)?;
                 }
-                // Add max_gas to TOS spending
-                let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
-                *current = current
-                    .checked_add(payload.max_gas)
-                    .ok_or(VerificationError::Overflow)?;
+                // max_gas is NOT added to TOS spending under Stake 2.0.
+                // Contract execution costs are handled via the Energy model.
+                // fee_limit (added below) covers the maximum TOS that can be burned.
             }
             TransactionType::DeployContract(payload) => {
                 // Add BURN_PER_CONTRACT to TOS spending
@@ -972,7 +1027,7 @@ impl Transaction {
                     .checked_add(BURN_PER_CONTRACT)
                     .ok_or(VerificationError::Overflow)?;
 
-                // If invoking constructor, add deposits and max_gas
+                // If invoking constructor, add deposits only (not max_gas - handled by Energy model)
                 if let Some(invoke) = &payload.invoke {
                     for (asset, deposit) in &invoke.deposits {
                         let amount = deposit
@@ -983,11 +1038,7 @@ impl Transaction {
                             .checked_add(amount)
                             .ok_or(VerificationError::Overflow)?;
                     }
-                    // Add max_gas to TOS spending
-                    let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
-                    *current = current
-                        .checked_add(invoke.max_gas)
-                        .ok_or(VerificationError::Overflow)?;
+                    // Constructor max_gas NOT added under Stake 2.0
                 }
             }
             TransactionType::Energy(payload) => {
@@ -1792,6 +1843,15 @@ impl Transaction {
         // All transactions use the Energy model (Stake 2.0)
         // No special validation needed for fee types
 
+        // Validate fee_limit does not exceed MAX_FEE_LIMIT
+        let fee_limit = self.get_fee_limit();
+        if fee_limit > MAX_FEE_LIMIT {
+            return Err(VerificationError::FeeLimitExceedsMax {
+                provided: fee_limit,
+                max: MAX_FEE_LIMIT,
+            });
+        }
+
         trace!("Pre-verifying transaction on state");
         state
             .pre_verify_tx(self)
@@ -2010,9 +2070,53 @@ impl Transaction {
                             "Unfreeze amount must be at least 1 TOS"
                         )));
                     }
+
+                    // Add queue capacity and delegation checks to match apply phase
+                    let sender = self.get_source();
+                    let sender_energy = state
+                        .get_account_energy(sender)
+                        .await
+                        .map_err(VerificationError::State)?
+                        .unwrap_or_default();
+
+                    // Check queue capacity (max 32 entries)
+                    if sender_energy.unfreezing_list.len()
+                        >= crate::config::MAX_UNFREEZING_LIST_SIZE
+                    {
+                        return Err(VerificationError::AnyError(anyhow!(
+                            "Unfreezing queue is full (max {} entries)",
+                            crate::config::MAX_UNFREEZING_LIST_SIZE
+                        )));
+                    }
+
+                    // Check frozen balance
+                    if sender_energy.frozen_balance < *amount {
+                        return Err(VerificationError::InsufficientFrozenBalance);
+                    }
+
+                    // Check available_for_delegation (can't unfreeze delegated TOS)
+                    if *amount > sender_energy.available_for_delegation() {
+                        return Err(VerificationError::AnyError(anyhow!(
+                            "Cannot unfreeze delegated TOS"
+                        )));
+                    }
                 }
                 EnergyPayload::WithdrawExpireUnfreeze => {
-                    // No additional validation needed
+                    // Check that there are unfreezing entries to withdraw
+                    // Note: We can only check if the unfreezing list is non-empty during verification
+                    // The actual expiry check happens at apply time when we have the block timestamp
+                    let sender = self.get_source();
+                    let sender_energy = state
+                        .get_account_energy(sender)
+                        .await
+                        .map_err(VerificationError::State)?
+                        .unwrap_or_default();
+
+                    if sender_energy.unfreezing_list.is_empty() {
+                        return Err(VerificationError::AnyError(anyhow!(
+                            "No pending unfreeze entries to withdraw"
+                        )));
+                    }
                 }
                 EnergyPayload::CancelAllUnfreeze => {
                     // Check that there are pending unfreeze entries to cancel
@@ -2718,11 +2822,9 @@ impl Transaction {
                         .checked_add(amount)
                         .ok_or(VerificationError::Overflow)?;
                 }
-                // Add max_gas to TOS spending
-                let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
-                *current = current
-                    .checked_add(payload.max_gas)
-                    .ok_or(VerificationError::Overflow)?;
+                // max_gas is NOT added to TOS spending under Stake 2.0.
+                // Contract execution costs are handled via the Energy model.
+                // fee_limit (added below) covers the maximum TOS that can be burned.
             }
             TransactionType::DeployContract(payload) => {
                 // Add BURN_PER_CONTRACT to TOS spending
@@ -3139,11 +3241,9 @@ impl Transaction {
                         .checked_add(amount)
                         .ok_or(VerificationError::Overflow)?;
                 }
-                // Add max_gas to TOS spending
-                let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
-                *current = current
-                    .checked_add(payload.max_gas)
-                    .ok_or(VerificationError::Overflow)?;
+                // max_gas is NOT added to TOS spending under Stake 2.0.
+                // Contract execution costs are handled via the Energy model.
+                // fee_limit (added below) covers the maximum TOS that can be burned.
             }
             TransactionType::DeployContract(payload) => {
                 // Add BURN_PER_CONTRACT to TOS spending
@@ -3152,7 +3252,7 @@ impl Transaction {
                     .checked_add(BURN_PER_CONTRACT)
                     .ok_or(VerificationError::Overflow)?;
 
-                // If invoking constructor, add deposits and max_gas
+                // If invoking constructor, add deposits only (not max_gas - handled by Energy model)
                 if let Some(invoke) = &payload.invoke {
                     for (asset, deposit) in &invoke.deposits {
                         let amount = deposit
@@ -3163,11 +3263,7 @@ impl Transaction {
                             .checked_add(amount)
                             .ok_or(VerificationError::Overflow)?;
                     }
-                    // Add max_gas to TOS spending
-                    let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
-                    *current = current
-                        .checked_add(invoke.max_gas)
-                        .ok_or(VerificationError::Overflow)?;
+                    // Constructor max_gas NOT added under Stake 2.0
                 }
             }
             TransactionType::Energy(payload) => {
@@ -3767,6 +3863,17 @@ impl Transaction {
                             .set_account_energy(receiver, receiver_energy)
                             .await
                             .map_err(VerificationError::State)?;
+
+                        // Record receiver as pending registration
+                        // This ensures that subsequent transactions in the same block
+                        // won't double-charge the account creation fee
+                        let is_registered = state
+                            .is_account_registered(receiver)
+                            .await
+                            .map_err(VerificationError::State)?;
+                        if !is_registered {
+                            state.record_pending_registration(receiver);
+                        }
                     }
                     EnergyPayload::UndelegateResource { receiver, amount } => {
                         if log::log_enabled!(log::Level::Debug) {
@@ -4024,6 +4131,17 @@ impl Transaction {
                                 .set_account_energy(receiver, receiver_energy)
                                 .await
                                 .map_err(VerificationError::State)?;
+
+                            // Record receiver as pending registration
+                            // This ensures that subsequent transactions in the same block
+                            // won't double-charge the account creation fee
+                            let is_registered = state
+                                .is_account_registered(receiver)
+                                .await
+                                .map_err(VerificationError::State)?;
+                            if !is_registered {
+                                state.record_pending_registration(receiver);
+                            }
                         }
 
                         // Update sender's delegated balance
@@ -5185,21 +5303,17 @@ impl Transaction {
             .await
             .map_err(VerificationError::State)?;
 
-        // Consume energy with priority (free → frozen → TOS burn)
+        // Compute energy consumption on a COPY first, check fee_limit,
+        // then apply to the actual state. This prevents state mutation before rejection.
+        let mut sender_energy_copy = sender_energy.clone();
         let tx_result = EnergyResourceManager::consume_transaction_energy_detailed(
-            &mut sender_energy,
+            &mut sender_energy_copy,
             required_energy,
             global_energy.total_energy_weight,
             now_ms,
         );
 
-        // Save updated energy state
-        state
-            .set_account_energy(self.get_source(), sender_energy)
-            .await
-            .map_err(VerificationError::State)?;
-
-        // Enforce fee_limit as hard cap
+        // Enforce fee_limit as hard cap BEFORE mutating state
         // If the required TOS burn exceeds fee_limit, reject the transaction
         // This prevents underpayment attacks where users set low fee_limit
         if tx_result.fee > fee_limit {
@@ -5208,6 +5322,15 @@ impl Transaction {
                 provided: fee_limit,
             });
         }
+
+        // fee_limit check passed - now apply the energy consumption to actual state
+        sender_energy = sender_energy_copy;
+
+        // Save updated energy state
+        state
+            .set_account_energy(self.get_source(), sender_energy)
+            .await
+            .map_err(VerificationError::State)?;
 
         // Calculate actual TOS burned (now always equals tx_result.fee since we checked above)
         let actual_tos_burned = tx_result.fee;
@@ -5302,11 +5425,9 @@ impl Transaction {
                         .checked_add(amount)
                         .ok_or(VerificationError::Overflow)?;
                 }
-                // Add max_gas to TOS spending
-                let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
-                *current = current
-                    .checked_add(payload.max_gas)
-                    .ok_or(VerificationError::Overflow)?;
+                // max_gas is NOT added to TOS spending under Stake 2.0.
+                // Contract execution costs are handled via the Energy model.
+                // fee_limit (added below) covers the maximum TOS that can be burned.
             }
             TransactionType::DeployContract(payload) => {
                 // Add BURN_PER_CONTRACT to TOS spending
@@ -5456,7 +5577,7 @@ impl Transaction {
 
         // TOS-Only Fee: MultiSig fee (1 TOS per signature)
         // Charged when transaction has 2+ signatures (main + multisig participants)
-        // Aligned with TRON's MULTI_SIGN_FEE (1 TRX/signature)
+        // MultiSig fee: 1 TOS per signature
         let multisig_count = self.get_multisig_count();
         let total_signatures = if multisig_count > 0 {
             // MultiSig transaction: count = multisig signatures (excluding main signature)

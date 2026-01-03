@@ -83,4 +83,6 @@ pub enum VerificationError<T> {
     // Energy fee errors
     #[error("Insufficient fee_limit: required {required} TOS, provided {provided} TOS")]
     InsufficientFeeLimit { required: u64, provided: u64 },
+    #[error("fee_limit exceeds maximum: provided {provided}, max {max}")]
+    FeeLimitExceedsMax { provided: u64, max: u64 },
 }

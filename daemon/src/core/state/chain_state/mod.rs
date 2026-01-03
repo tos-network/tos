@@ -1227,4 +1227,42 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for ChainS
     fn record_pending_registration(&mut self, account: &CompressedPublicKey) {
         self.pending_registrations.insert(account.clone());
     }
+
+    /// Record pending delegation (no-op for ChainState)
+    ///
+    /// ChainState is used during block verification where transactions
+    /// are processed sequentially. Pending delegation tracking is only
+    /// needed for mempool verification.
+    async fn record_pending_delegation(
+        &mut self,
+        _sender: &'a CompressedPublicKey,
+        _amount: u64,
+    ) -> Result<(), BlockchainError> {
+        // No-op for block verification - apply phase handles state changes
+        Ok(())
+    }
+
+    /// Get pending delegation (always 0 for ChainState)
+    fn get_pending_delegation(&self, _sender: &CompressedPublicKey) -> u64 {
+        0
+    }
+
+    /// Record pending energy (no-op for ChainState)
+    ///
+    /// ChainState is used during block verification where transactions
+    /// are processed sequentially. Pending energy tracking is only
+    /// needed for mempool verification.
+    async fn record_pending_energy(
+        &mut self,
+        _sender: &'a CompressedPublicKey,
+        _amount: u64,
+    ) -> Result<(), BlockchainError> {
+        // No-op for block verification - apply phase handles state changes
+        Ok(())
+    }
+
+    /// Get pending energy (always 0 for ChainState)
+    fn get_pending_energy(&self, _sender: &CompressedPublicKey) -> u64 {
+        0
+    }
 }

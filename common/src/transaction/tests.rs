@@ -77,6 +77,8 @@ struct ChainState {
     multisig: HashMap<PublicKey, MultiSigPayload>,
     contracts: HashMap<Hash, Module>,
     env: Environment,
+    // Add account energy tracking for tests
+    account_energies: HashMap<PublicKey, crate::account::AccountEnergy>,
 }
 
 impl ChainState {
@@ -86,6 +88,7 @@ impl ChainState {
             multisig: HashMap::new(),
             contracts: HashMap::new(),
             env: Environment::new(),
+            account_energies: HashMap::new(),
         }
     }
 }
@@ -571,8 +574,10 @@ async fn test_tx_invoke_contract() {
 
     // Check Alice balance
     let balance = state.accounts[&alice.keypair.get_public_key().compress()].balances[&TOS_ASSET];
-    // 50 coins deposit + tx fee + 1000 gas fee
-    let total_spend = (50 * COIN_VALUE) + tx.fee_limit + 1000;
+    // Under Stake 2.0 Energy model, legacy gas handling is disabled.
+    // Contract costs are now handled via the Energy model, not the legacy gas system.
+    // Total spend = deposit + fee_limit (no separate gas fee)
+    let total_spend = (50 * COIN_VALUE) + tx.fee_limit;
 
     assert_eq!(balance, (100 * COIN_VALUE) - total_spend);
 }
@@ -663,8 +668,8 @@ async fn test_tx_invoke_contract_multiple_deposits() {
 
     // Check Alice balance (sender side - should reflect deduction)
     let balance = state.accounts[&alice.keypair.get_public_key().compress()].balances[&TOS_ASSET];
-    // 50 coins deposit + tx fee + 1000 gas fee
-    let total_spend = (50 * COIN_VALUE) + tx.fee_limit + 1000;
+    // 50 coins deposit + tx fee (legacy gas fee removed under Stake 2.0)
+    let total_spend = (50 * COIN_VALUE) + tx.fee_limit;
 
     assert_eq!(balance, (100 * COIN_VALUE) - total_spend);
 }
@@ -1261,6 +1266,16 @@ async fn test_unfreeze_tos_balance_refund() {
         );
     }
 
+    // Set up account energy with frozen balance for unfreeze test
+    // The account needs frozen_balance >= _unfreeze_amount to pass verification
+    {
+        let mut energy = crate::account::AccountEnergy::new();
+        energy.frozen_balance = _unfreeze_amount; // Set frozen balance to the amount we want to unfreeze
+        state
+            .account_energies
+            .insert(alice.keypair.get_public_key().compress(), energy);
+    }
+
     // Check balance before verify
     let balance_before_verify = state
         .accounts
@@ -1513,9 +1528,10 @@ impl<'a> BlockchainVerificationState<'a, TestError> for ChainState {
 
     async fn get_account_energy(
         &mut self,
-        _account: &'a CompressedPublicKey,
+        account: &'a CompressedPublicKey,
     ) -> Result<Option<crate::account::AccountEnergy>, TestError> {
-        Ok(None)
+        // Return stored account energy for test
+        Ok(self.account_energies.get(account).cloned())
     }
 
     async fn get_delegated_resource(
@@ -1544,6 +1560,36 @@ impl<'a> BlockchainVerificationState<'a, TestError> for ChainState {
     /// Record that account will be registered (stub for tests)
     fn record_pending_registration(&mut self, _account: &CompressedPublicKey) {
         // No-op for test state
+    }
+
+    /// Record pending delegation (stub for tests)
+    async fn record_pending_delegation(
+        &mut self,
+        _sender: &'a CompressedPublicKey,
+        _amount: u64,
+    ) -> Result<(), TestError> {
+        // No-op for test state
+        Ok(())
+    }
+
+    /// Get pending delegation (stub for tests)
+    fn get_pending_delegation(&self, _sender: &CompressedPublicKey) -> u64 {
+        0
+    }
+
+    /// Record pending energy (stub for tests)
+    async fn record_pending_energy(
+        &mut self,
+        _sender: &'a CompressedPublicKey,
+        _amount: u64,
+    ) -> Result<(), TestError> {
+        // No-op for test state
+        Ok(())
+    }
+
+    /// Get pending energy (stub for tests)
+    fn get_pending_energy(&self, _sender: &CompressedPublicKey) -> u64 {
+        0
     }
 }
 

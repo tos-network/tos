@@ -2374,7 +2374,7 @@ mod tests {
         #[test]
         fn test_13_3_energy_operations_are_free() {
             // All energy staking operations should cost 0 energy
-            // This is by design - aligned with TRON Stake 2.0
+            // This is by design - aligned with Stake 2.0 model
 
             // FreezeTos: 0
             // UnfreezeTos: 0
@@ -3649,7 +3649,7 @@ mod tests {
             reserved_fee: u64,
             _now_ms: u64,
         ) -> TransactionResult {
-            // FreezeTos has zero energy cost (aligned with TRON)
+            // FreezeTos has zero energy cost (by design)
             let actual_energy_cost = 0u64;
             let tos_burned = 0u64;
 
@@ -4351,7 +4351,7 @@ mod tests {
             // - Post-execution based on actual CU (requires refund mechanism)
 
             // This is a documentation test for the correct cost model
-            assert!(true, "InvokeContract cost should be base_cost + max_gas");
+            // InvokeContract cost should be base_cost + max_gas
         }
 
         /// Compare expected costs for different contract complexities
@@ -5250,13 +5250,13 @@ mod tests {
     }
 
     // ========================================================================
-    // Codex Review Scenarios (35-43) - BUG-040 through BUG-051
+    // Codex Review Scenarios (35-43) - Edge case tests
     // ========================================================================
     // These tests cover missing perspectives identified by Codex code review.
     // Each scenario tests a specific bug fix or behavioral guarantee.
     // ========================================================================
 
-    /// Scenario 35: Same-Block State Visibility Tests (BUG-040)
+    /// Scenario 35: Same-Block State Visibility Tests
     ///
     /// Tests verify that pending registration tracking correctly handles
     /// same-block transaction interactions.
@@ -5334,7 +5334,7 @@ mod tests {
         /// Test 35.3: Delegation to just-activated account
         ///
         /// Verifies that delegation works to accounts activated earlier
-        /// in the same block (after BUG-041 fix removed registration check).
+        /// in the same block (registration check removed).
         #[test]
         fn test_35_3_delegation_to_pending_account() {
             let mut pending_registrations: std::collections::HashSet<String> =
@@ -5345,7 +5345,7 @@ mod tests {
             pending_registrations.insert(bob.clone());
 
             // TX2: DelegateResource to Bob
-            // After BUG-041 fix: No registration check, so this should work
+            // No registration check, so this should work
             let receiver = bob.clone();
 
             // The key insight: delegation should NOT check is_registered
@@ -5363,7 +5363,7 @@ mod tests {
         }
     }
 
-    /// Scenario 36: Single vs Batch Operation Consistency Tests (BUG-041)
+    /// Scenario 36: Single vs Batch Operation Consistency Tests
     ///
     /// Tests verify that single and batch operations have consistent
     /// validation behavior.
@@ -5373,7 +5373,7 @@ mod tests {
         /// Test 36.1: DelegateResource vs BatchDelegateResource unregistered receiver
         ///
         /// Verifies that both single and batch delegation accept unregistered
-        /// receivers (after BUG-041 fix).
+        /// receivers (registration check removed).
         #[test]
         fn test_36_1_unregistered_receiver_consistency() {
             let mut alice = AccountEnergy::new();
@@ -5389,7 +5389,7 @@ mod tests {
 
             // Simulate batch delegation (single item)
             let batch_delegate_amount = 1_000 * COIN_VALUE;
-            // After BUG-041 fix: No registration check for batch either
+            // No registration check for batch either
             let batch_result = alice.frozen_balance >= batch_delegate_amount;
             assert!(batch_result, "Batch delegation should succeed");
 
@@ -5412,7 +5412,7 @@ mod tests {
         /// Verifies the expected behavior for all operation/state combinations.
         #[test]
         fn test_36_2_registration_check_matrix() {
-            // After BUG-041 fix: Neither single nor batch checks registration
+            // Neither single nor batch checks registration
             struct TestCase {
                 operation: &'static str,
                 receiver_registered: bool,
@@ -5443,7 +5443,7 @@ mod tests {
             ];
 
             for tc in test_cases {
-                // After BUG-041 fix, all cases should succeed
+                // All cases should succeed (no registration check)
                 assert!(
                     tc.expected_result,
                     "{} with registered={} should succeed",
@@ -5484,7 +5484,7 @@ mod tests {
         }
     }
 
-    /// Scenario 37: Mempool Pending State Tests (BUG-042)
+    /// Scenario 37: Mempool Pending State Tests
     ///
     /// Tests verify that mempool tracks pending operations to prevent
     /// double-spend during verification phase.
@@ -5616,7 +5616,7 @@ mod tests {
         }
     }
 
-    /// Scenario 38: Verify Phase Balance Enforcement Tests (BUG-043)
+    /// Scenario 38: Verify Phase Balance Enforcement Tests
     ///
     /// Tests verify that verify phase enforces same balance checks as apply phase.
     mod scenario_codex_38_verify_balance_enforcement {
@@ -5660,7 +5660,7 @@ mod tests {
             assert_eq!(available, 1_000 * COIN_VALUE);
 
             // Batch: Bob=400, Carol=400, Dave=400 (total=1200)
-            let delegations = vec![
+            let delegations = [
                 ("Bob", 400 * COIN_VALUE),
                 ("Carol", 400 * COIN_VALUE),
                 ("Dave", 400 * COIN_VALUE),
@@ -5695,7 +5695,7 @@ mod tests {
         }
     }
 
-    /// Scenario 39: Contract Energy Refund Tests (BUG-044)
+    /// Scenario 39: Contract Energy Refund Tests
     ///
     /// Tests verify that unused energy is refunded after contract execution.
     mod scenario_codex_39_contract_energy_refund {
@@ -5793,7 +5793,7 @@ mod tests {
         }
     }
 
-    /// Scenario 40: GlobalEnergyState Field Update Tests (BUG-045)
+    /// Scenario 40: GlobalEnergyState Field Update Tests
     ///
     /// Tests verify that all GlobalEnergyState fields are properly updated.
     mod scenario_codex_40_global_field_updates {
@@ -5877,7 +5877,7 @@ mod tests {
         }
     }
 
-    /// Scenario 41: TOS Burn Overflow Protection Tests (BUG-046)
+    /// Scenario 41: TOS Burn Overflow Protection Tests
     ///
     /// Tests verify that checked arithmetic prevents overflow in burn calculations.
     mod scenario_codex_41_overflow_protection {
@@ -5985,7 +5985,7 @@ mod tests {
         }
     }
 
-    /// Scenario 42: Zero-Cost Operation Spam Prevention Tests (BUG-048)
+    /// Scenario 42: Zero-Cost Operation Spam Prevention Tests
     ///
     /// Tests verify that no-op operations are rejected.
     mod scenario_codex_42_noop_spam_prevention {
@@ -6004,7 +6004,7 @@ mod tests {
             let (withdrawn, cancelled) = alice.cancel_all_unfreeze(0);
 
             // With empty queue, both should be 0 (indicating no-op)
-            // The BUG-048 fix rejects this at verification level
+            // This is rejected at verification level to prevent spam
             let is_noop = withdrawn == 0 && cancelled == 0;
             assert!(is_noop, "Empty queue should result in (0, 0) no-op");
 
@@ -6071,7 +6071,7 @@ mod tests {
                     operation: "CancelAllUnfreeze",
                     queue_empty: true,
                     has_expired: false,
-                    expected_success: false, // After BUG-048 fix
+                    expected_success: false, // Empty queue rejected
                 },
                 TestCase {
                     operation: "CancelAllUnfreeze",
@@ -6101,7 +6101,7 @@ mod tests {
         }
     }
 
-    /// Scenario 43: Contract Energy Cost Tests (BUG-051)
+    /// Scenario 43: Contract Energy Cost Tests
     ///
     /// Tests verify that energy cost calculation includes constructor execution.
     mod scenario_codex_43_contract_energy_cost {

@@ -2644,7 +2644,8 @@ impl<S: Storage> Blockchain<S> {
                 if log::log_enabled!(log::Level::Debug) {
                     debug!("Considering TX {} for inclusion in block template", hash);
                 }
-                if block_size + total_txs_size + size >= MAX_BLOCK_SIZE
+                // Include HASH_SIZE in size check to account for tx hash in block header
+                if block_size + total_txs_size + size + HASH_SIZE >= MAX_BLOCK_SIZE
                     || block.txs_hashes.len() >= u16::MAX as usize
                 {
                     if log::log_enabled!(log::Level::Debug) {

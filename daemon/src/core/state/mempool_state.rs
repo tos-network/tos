@@ -52,9 +52,15 @@ pub struct MempoolState<'a, S: Storage> {
     topoheight: TopoHeight,
     // Block header version
     block_version: BlockVersion,
+    // Pending delegation amounts per sender
+    // Tracks delegations that passed verification but not yet applied
+    pending_delegations: HashMap<CompressedPublicKey, u64>,
     // Pending undelegation amounts: (from, to) -> amount
     // Tracks undelegations that passed verification but not yet applied
     pending_undelegations: HashMap<(CompressedPublicKey, CompressedPublicKey), u64>,
+    // Pending energy consumption per sender
+    // Tracks energy used that passed verification but not yet applied
+    pending_energy_consumption: HashMap<CompressedPublicKey, u64>,
     // Pending registrations: accounts that will be registered by earlier TXs in this block
     // Enables same-block visibility for fee calculation
     pending_registrations: HashSet<CompressedPublicKey>,
@@ -70,6 +76,7 @@ impl<'a, S: Storage> MempoolState<'a, S> {
         block_version: BlockVersion,
         mainnet: bool,
     ) -> Self {
+        // Initialize from mempool's existing pending state
         Self {
             mainnet,
             mempool,
@@ -82,9 +89,27 @@ impl<'a, S: Storage> MempoolState<'a, S> {
             stable_topoheight,
             topoheight,
             block_version,
-            pending_undelegations: HashMap::new(),
+            pending_delegations: mempool.get_pending_delegations().clone(),
+            pending_undelegations: mempool.get_pending_undelegations().clone(),
+            pending_energy_consumption: mempool.get_pending_energy_consumption().clone(),
             pending_registrations: HashSet::new(),
         }
+    }
+
+    // Get pending state to update mempool after successful verification
+    // Uses mem::take to extract the state without consuming self
+    pub fn get_pending_state(
+        &mut self,
+    ) -> (
+        HashMap<CompressedPublicKey, u64>,
+        HashMap<(CompressedPublicKey, CompressedPublicKey), u64>,
+        HashMap<CompressedPublicKey, u64>,
+    ) {
+        (
+            std::mem::take(&mut self.pending_delegations),
+            std::mem::take(&mut self.pending_undelegations),
+            std::mem::take(&mut self.pending_energy_consumption),
+        )
     }
 
     // Retrieve the sender cache (inclunding balances and multisig)
@@ -717,5 +742,46 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Mempoo
     /// Record that account will be registered by an earlier TX in this block
     fn record_pending_registration(&mut self, account: &CompressedPublicKey) {
         self.pending_registrations.insert(account.clone());
+    }
+
+    /// Record a pending delegation amount
+    ///
+    /// Called after DelegateResource verification passes to track
+    /// the amount being delegated. Subsequent transactions will see
+    /// reduced available_for_delegation balance.
+    async fn record_pending_delegation(
+        &mut self,
+        sender: &'a CompressedPublicKey,
+        amount: u64,
+    ) -> Result<(), BlockchainError> {
+        *self.pending_delegations.entry(sender.clone()).or_insert(0) += amount;
+        Ok(())
+    }
+
+    /// Get pending delegation amount for sender
+    fn get_pending_delegation(&self, sender: &CompressedPublicKey) -> u64 {
+        *self.pending_delegations.get(sender).unwrap_or(&0)
+    }
+
+    /// Record pending energy consumption
+    ///
+    /// Called after energy is consumed during verification to track
+    /// total energy used. Subsequent transactions will see reduced
+    /// available energy.
+    async fn record_pending_energy(
+        &mut self,
+        sender: &'a CompressedPublicKey,
+        amount: u64,
+    ) -> Result<(), BlockchainError> {
+        *self
+            .pending_energy_consumption
+            .entry(sender.clone())
+            .or_insert(0) += amount;
+        Ok(())
+    }
+
+    /// Get pending energy consumption for sender
+    fn get_pending_energy(&self, sender: &CompressedPublicKey) -> u64 {
+        *self.pending_energy_consumption.get(sender).unwrap_or(&0)
     }
 }

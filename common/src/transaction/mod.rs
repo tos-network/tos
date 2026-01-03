@@ -465,7 +465,15 @@ impl Transaction {
             }
             // Energy operations are free
             TransactionType::Energy(_) => 0,
-            // Other transactions use base cost + account creation if applicable
+            // Add per-recipient energy cost for BatchReferralReward
+            TransactionType::BatchReferralReward(payload) => {
+                // Each recipient costs same as a transfer output
+                let recipient_count = payload.get_ratios().len() as u64;
+                base_cost
+                    .saturating_add(recipient_count.saturating_mul(ENERGY_COST_TRANSFER_PER_OUTPUT))
+            }
+            // Other transactions use base cost only
+            // (new account energy cost is applied separately during execution)
             _ => base_cost,
         }
     }

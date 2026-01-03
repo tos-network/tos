@@ -9,7 +9,7 @@ use tos_common::{
     api::daemon::FeeRatesEstimated,
     block::{BlockVersion, TopoHeight},
     config::{BYTES_PER_KB, FEE_PER_KB},
-    crypto::{Hash, PublicKey},
+    crypto::{elgamal::CompressedPublicKey, Hash, PublicKey},
     network::Network,
     time::{get_current_time_in_seconds, TimestampSeconds},
     transaction::{MultiSigPayload, Transaction},
@@ -60,6 +60,15 @@ pub struct Mempool {
     // store all sender's nonce for faster finding
     caches: HashMap<PublicKey, AccountCache>,
     disable_zkp_cache: bool,
+    // Track pending delegations per sender to prevent over-delegation
+    // Key: sender address, Value: total pending delegation amount
+    pending_delegations: HashMap<CompressedPublicKey, u64>,
+    // Track pending undelegations across mempool transactions
+    // Key: (from, to) delegation pair, Value: total pending undelegation amount
+    pending_undelegations: HashMap<(CompressedPublicKey, CompressedPublicKey), u64>,
+    // Track pending energy consumption per sender
+    // Key: sender address, Value: total pending energy consumed
+    pending_energy_consumption: HashMap<CompressedPublicKey, u64>,
 }
 
 impl Mempool {
@@ -70,7 +79,25 @@ impl Mempool {
             txs: LinkedHashMap::new(),
             caches: HashMap::new(),
             disable_zkp_cache,
+            pending_delegations: HashMap::new(),
+            pending_undelegations: HashMap::new(),
+            pending_energy_consumption: HashMap::new(),
         }
+    }
+
+    // Getters for pending state to pass to MempoolState
+    pub fn get_pending_delegations(&self) -> &HashMap<CompressedPublicKey, u64> {
+        &self.pending_delegations
+    }
+
+    pub fn get_pending_undelegations(
+        &self,
+    ) -> &HashMap<(CompressedPublicKey, CompressedPublicKey), u64> {
+        &self.pending_undelegations
+    }
+
+    pub fn get_pending_energy_consumption(&self) -> &HashMap<CompressedPublicKey, u64> {
+        &self.pending_energy_consumption
     }
 
     fn internal_estimate_fee_rates(mut fee_rates: Vec<u64>) -> FeeRatesEstimated {
@@ -138,26 +165,49 @@ impl Mempool {
         size: usize,
         block_version: BlockVersion,
     ) -> Result<(), BlockchainError> {
-        let mut state = MempoolState::new(
-            &self,
-            storage,
-            environment,
-            stable_topoheight,
-            topoheight,
-            block_version,
-            self.mainnet,
-        );
-        let tx_cache = TxCache::new(storage, self, self.disable_zkp_cache);
-        tx.verify(&hash, &mut state, &tx_cache).await?;
+        // Extract results in a scope to avoid borrow checker issues
+        let (balances, multisig, pending_delegations, pending_undelegations, pending_energy) = {
+            let mut state = MempoolState::new(
+                &self,
+                storage,
+                environment,
+                stable_topoheight,
+                topoheight,
+                block_version,
+                self.mainnet,
+            );
+            let tx_cache = TxCache::new(storage, self, self.disable_zkp_cache);
+            tx.verify(&hash, &mut state, &tx_cache).await?;
 
-        let (balances, multisig) = state.get_sender_cache(tx.get_source()).ok_or_else(|| {
-            BlockchainError::AccountNotFound(tx.get_source().as_address(self.mainnet))
-        })?;
+            // Get sender cache first (borrows from state)
+            let (balances, multisig) =
+                state.get_sender_cache(tx.get_source()).ok_or_else(|| {
+                    BlockchainError::AccountNotFound(tx.get_source().as_address(self.mainnet))
+                })?;
 
-        let balances = balances
-            .into_iter()
-            .map(|(asset, balance)| (asset.clone(), balance))
-            .collect();
+            // Clone balances to owned values before dropping state
+            let owned_balances: HashMap<Hash, u64> = balances
+                .into_iter()
+                .map(|(asset, balance)| (asset.clone(), balance))
+                .collect();
+
+            // Get pending state from MempoolState
+            let (pending_delegations, pending_undelegations, pending_energy) =
+                state.get_pending_state();
+
+            (
+                owned_balances,
+                multisig,
+                pending_delegations,
+                pending_undelegations,
+                pending_energy,
+            )
+        };
+
+        // Update mempool's pending state (state is now dropped, so no borrow conflict)
+        self.pending_delegations = pending_delegations;
+        self.pending_undelegations = pending_undelegations;
+        self.pending_energy_consumption = pending_energy;
 
         let nonce = tx.get_nonce();
         // update the cache for this owner

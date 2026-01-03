@@ -390,7 +390,7 @@ mod tests {
             let available = account.calculate_free_energy_available(now_ms);
 
             // Should be approximately half (750 energy)
-            assert!(available >= 740 && available <= 760);
+            assert!((740..=760).contains(&available));
         }
 
         #[test]

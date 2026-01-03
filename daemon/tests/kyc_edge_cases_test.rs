@@ -722,6 +722,32 @@ impl<'a> BlockchainVerificationState<'a, TestError> for EdgeCaseTestState {
     }
 
     fn record_pending_registration(&mut self, _account: &CompressedPublicKey) {}
+
+    // Stub implementations for test
+    async fn record_pending_delegation(
+        &mut self,
+        _sender: &'a CompressedPublicKey,
+        _amount: u64,
+    ) -> Result<(), TestError> {
+        Ok(())
+    }
+
+    fn get_pending_delegation(&self, _sender: &CompressedPublicKey) -> u64 {
+        0
+    }
+
+    // Stub implementations for test
+    async fn record_pending_energy(
+        &mut self,
+        _sender: &'a CompressedPublicKey,
+        _amount: u64,
+    ) -> Result<(), TestError> {
+        Ok(())
+    }
+
+    fn get_pending_energy(&self, _sender: &CompressedPublicKey) -> u64 {
+        0
+    }
 }
 
 // ============================================================================

@@ -3259,11 +3259,11 @@ async fn get_energy<S: Storage>(context: &Context, body: Value) -> Result<Value,
             })
             .collect::<Vec<_>>();
 
-        let total_unfreezing = account_energy
+        // Use saturating arithmetic to prevent overflow when summing unfreezing amounts
+        let total_unfreezing: u64 = account_energy
             .unfreezing_list
             .iter()
-            .map(|r| r.unfreeze_amount)
-            .sum();
+            .fold(0u64, |acc, r| acc.saturating_add(r.unfreeze_amount));
 
         json!(GetEnergyResult {
             frozen_balance: account_energy.frozen_balance,
@@ -3356,9 +3356,10 @@ async fn estimate_energy<S: Storage>(
             EnergyFeeCalculator::calculate_deploy_cost(params.bytecode_size)
         }
         EstimateTxType::InvokeContract => {
-            // Contract invocation requires simulation - return 0 for now
-            // Actual cost depends on contract execution
-            0
+            // Use max_gas parameter for contract invocation energy estimate
+            // The actual cost will be the base transaction size + user-specified max_gas
+            // Unused gas is refunded after execution
+            (params.tx_size as u64).saturating_add(params.max_gas)
         }
         EstimateTxType::Energy => 0, // Energy operations are free
     };
@@ -3367,7 +3368,8 @@ async fn estimate_energy<S: Storage>(
     let free_energy_available = account_energy.calculate_free_energy_available(now_ms);
     let frozen_energy_available =
         account_energy.calculate_frozen_energy_available(now_ms, total_energy_weight);
-    let total_energy_available = free_energy_available + frozen_energy_available;
+    // Use saturating arithmetic to prevent overflow when summing energy
+    let total_energy_available = free_energy_available.saturating_add(frozen_energy_available);
 
     // Calculate if TOS burn is needed
     let (estimated_fee, will_succeed, error) = if total_energy_available >= energy_required {
@@ -3375,8 +3377,9 @@ async fn estimate_energy<S: Storage>(
         (0, true, None)
     } else {
         // Need to burn TOS for the shortfall
+        // Use saturating_mul to prevent overflow
         let shortfall = energy_required - total_energy_available;
-        let tos_needed = shortfall * TOS_PER_ENERGY;
+        let tos_needed = shortfall.saturating_mul(TOS_PER_ENERGY);
 
         if params.fee_limit >= tos_needed {
             // fee_limit covers the shortfall

@@ -221,6 +221,58 @@ pub trait BlockchainVerificationState<'a, E> {
     /// * `account` - The account's compressed public key
     fn record_pending_registration(&mut self, account: &CompressedPublicKey);
 
+    // ===== Pending Delegation Tracking =====
+
+    /// Record a pending delegation amount
+    ///
+    /// Called after DelegateResource verification passes to track
+    /// the amount being delegated. Subsequent transactions will see
+    /// reduced available_for_delegation balance.
+    ///
+    /// # Arguments
+    /// * `sender` - The delegator's public key
+    /// * `amount` - The amount being delegated
+    async fn record_pending_delegation(
+        &mut self,
+        sender: &'a CompressedPublicKey,
+        amount: u64,
+    ) -> Result<(), E>;
+
+    /// Get pending delegation amount for sender
+    ///
+    /// Returns the total pending delegation amount for an account.
+    /// Used to calculate effective available_for_delegation balance.
+    ///
+    /// # Arguments
+    /// * `sender` - The delegator's public key
+    fn get_pending_delegation(&self, sender: &CompressedPublicKey) -> u64;
+
+    // ===== Pending Energy Tracking =====
+
+    /// Record pending energy consumption
+    ///
+    /// Called after energy is consumed during verification to track
+    /// total energy used. Subsequent transactions will see reduced
+    /// available energy.
+    ///
+    /// # Arguments
+    /// * `sender` - The sender's public key
+    /// * `amount` - The energy amount consumed
+    async fn record_pending_energy(
+        &mut self,
+        sender: &'a CompressedPublicKey,
+        amount: u64,
+    ) -> Result<(), E>;
+
+    /// Get pending energy consumption for sender
+    ///
+    /// Returns the total pending energy consumption for an account.
+    /// Used to calculate effective available energy.
+    ///
+    /// # Arguments
+    /// * `sender` - The sender's public key
+    fn get_pending_energy(&self, sender: &CompressedPublicKey) -> u64;
+
     /// Set the contract module
     async fn set_contract_module(&mut self, hash: &Hash, module: &'a Module) -> Result<(), E>;
 

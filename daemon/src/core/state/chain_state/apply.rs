@@ -267,6 +267,34 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError>
     fn record_pending_registration(&mut self, account: &CompressedPublicKey) {
         self.inner.record_pending_registration(account)
     }
+
+    /// Record pending delegation (delegated to inner)
+    async fn record_pending_delegation(
+        &mut self,
+        sender: &'a CompressedPublicKey,
+        amount: u64,
+    ) -> Result<(), BlockchainError> {
+        self.inner.record_pending_delegation(sender, amount).await
+    }
+
+    /// Get pending delegation (delegated to inner)
+    fn get_pending_delegation(&self, sender: &CompressedPublicKey) -> u64 {
+        self.inner.get_pending_delegation(sender)
+    }
+
+    /// Record pending energy (delegated to inner)
+    async fn record_pending_energy(
+        &mut self,
+        sender: &'a CompressedPublicKey,
+        amount: u64,
+    ) -> Result<(), BlockchainError> {
+        self.inner.record_pending_energy(sender, amount).await
+    }
+
+    /// Get pending energy (delegated to inner)
+    fn get_pending_energy(&self, sender: &CompressedPublicKey) -> u64 {
+        self.inner.get_pending_energy(sender)
+    }
 }
 
 #[async_trait]

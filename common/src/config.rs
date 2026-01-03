@@ -79,12 +79,17 @@ pub const ENERGY_COST_BURN: u64 = 1_000; // Burn operation
 pub const ENERGY_COST_CONTRACT_DEPLOY_BASE: u64 = 32_000; // Base cost for contract deploy
 pub const ENERGY_COST_CONTRACT_DEPLOY_PER_BYTE: u64 = 10; // Per byte of bytecode
 
+// Maximum fee_limit per transaction
+// 1000 TOS = 1000 * COIN_VALUE = 100,000,000,000 atomic units
+// This limits the maximum TOS that can be burned for energy in a single transaction
+pub const MAX_FEE_LIMIT: u64 = 1000 * COIN_VALUE;
+
 // TOS-based fee model constants
 pub const FEE_PER_KB: u64 = 10000;
 pub const FEE_PER_TRANSFER: u64 = 5000;
 
 // ===== TOS-Only Fees (cannot use Energy) =====
-// These fees must be paid in TOS, not Energy. Aligned with TRON mainnet.
+// These fees must be paid in TOS, not Energy.
 
 /// Account creation fee - deducted from transfer amount when sending to new account
 /// 0.1 TOS = 10,000,000 atomic units
@@ -94,7 +99,6 @@ pub const FEE_PER_ACCOUNT_CREATION: u64 = 10_000_000;
 /// MultiSig transaction fee - per signature, deducted from sender's TOS balance
 /// 1 TOS = 100,000,000 atomic units per signature
 /// Only charged when transaction has 2+ signatures
-/// Aligned with TRON's MULTI_SIGN_FEE (1 TRX/signature)
 pub const FEE_PER_MULTISIG_SIGNATURE: u64 = COIN_VALUE;
 
 // Note: UNO transfers use Energy model with 5x multiplier (see EnergyFeeCalculator)
