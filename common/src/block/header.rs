@@ -25,12 +25,30 @@ pub fn serialize_extra_nonce<S: serde::Serializer>(
 }
 
 // Deserialize the extra nonce from a hexadecimal string
+// BUG-085 FIX: Add length validation before copy_from_slice to prevent panic
 pub fn deserialize_extra_nonce<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
 ) -> Result<[u8; EXTRA_NONCE_SIZE], D::Error> {
     let mut extra_nonce = [0u8; EXTRA_NONCE_SIZE];
     let hex = String::deserialize(deserializer)?;
+    // SECURITY FIX: Limit input length to prevent memory exhaustion DoS
+    const MAX_HEX_LENGTH: usize = EXTRA_NONCE_SIZE * 2;
+    if hex.len() > MAX_HEX_LENGTH {
+        return Err(serde::de::Error::custom(format!(
+            "Invalid extraNonce: hex string length {} exceeds maximum {}",
+            hex.len(),
+            MAX_HEX_LENGTH
+        )));
+    }
     let decoded = hex::decode(hex).map_err(serde::de::Error::custom)?;
+    // SECURITY FIX: Validate length before copy_from_slice to prevent panic
+    if decoded.len() != EXTRA_NONCE_SIZE {
+        return Err(serde::de::Error::custom(format!(
+            "Invalid extraNonce: expected {} bytes, got {}",
+            EXTRA_NONCE_SIZE,
+            decoded.len()
+        )));
+    }
     extra_nonce.copy_from_slice(&decoded);
     Ok(extra_nonce)
 }
@@ -265,6 +283,17 @@ impl Serializer for BlockHeader {
         }
 
         let txs_count = reader.read_u16()?;
+        // BUG-086 FIX: Validate txs_count before allocation to prevent memory exhaustion DoS
+        // Maximum based on block size limits: 1.25MB / minimum_tx_size (~100 bytes) ≈ 13,000 txs
+        // Using 10,000 as a safe upper bound
+        const MAX_TXS_PER_BLOCK: u16 = 10_000;
+        if txs_count > MAX_TXS_PER_BLOCK {
+            debug!(
+                "Error, too many transactions in block header: {} > {}",
+                txs_count, MAX_TXS_PER_BLOCK
+            );
+            return Err(ReaderError::InvalidValue);
+        }
         let mut txs_hashes = IndexSet::with_capacity(txs_count as usize);
         for _ in 0..txs_count {
             if !txs_hashes.insert(reader.read_hash()?) {

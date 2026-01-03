@@ -779,8 +779,15 @@ impl Transaction {
             TransactionType::AIMining(_) => {
                 // AI Mining transactions don't require special verification beyond basic checks for now
             }
-            TransactionType::BindReferrer(_) => {
-                // BindReferrer validation is handled by the referral provider
+            TransactionType::BindReferrer(payload) => {
+                // BUG-072 FIX: Validate extra_data size to prevent mempool/storage bloat
+                // BindReferrer has extra_data field but was missing size validation
+                if let Some(extra_data) = payload.get_extra_data() {
+                    let size = extra_data.size();
+                    if size > EXTRA_DATA_LIMIT_SIZE {
+                        return Err(VerificationError::TransferExtraDataSize);
+                    }
+                }
             }
             TransactionType::BatchReferralReward(payload) => {
                 // BatchReferralReward validation
@@ -1110,8 +1117,35 @@ impl Transaction {
                     }
                 }
             }
+            TransactionType::AIMining(payload) => {
+                // BUG-066 FIX: Enforce AIMining fee/stake/reward spending on-chain
+                // Previously only modeled in builder, now enforced during verification
+                use crate::ai_mining::AIMiningPayload;
+                match payload {
+                    AIMiningPayload::RegisterMiner { registration_fee, .. } => {
+                        let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                        *current = current
+                            .checked_add(*registration_fee)
+                            .ok_or(VerificationError::Overflow)?;
+                    }
+                    AIMiningPayload::SubmitAnswer { stake_amount, .. } => {
+                        let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                        *current = current
+                            .checked_add(*stake_amount)
+                            .ok_or(VerificationError::Overflow)?;
+                    }
+                    AIMiningPayload::PublishTask { reward_amount, .. } => {
+                        let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                        *current = current
+                            .checked_add(*reward_amount)
+                            .ok_or(VerificationError::Overflow)?;
+                    }
+                    AIMiningPayload::ValidateAnswer { .. } => {
+                        // ValidateAnswer does not spend TOS directly
+                    }
+                }
+            }
             TransactionType::MultiSig(_)
-            | TransactionType::AIMining(_)
             | TransactionType::BindReferrer(_)
             // KYC transactions don't spend assets directly (only fee)
             | TransactionType::SetKyc(_)
@@ -2389,8 +2423,14 @@ impl Transaction {
             TransactionType::AIMining(_) => {
                 // AI Mining transactions don't require special verification beyond basic checks for now
             }
-            TransactionType::BindReferrer(_) => {
-                // BindReferrer transactions are validated by the referral provider at execution time
+            TransactionType::BindReferrer(payload) => {
+                // BUG-072 FIX: Validate extra_data size to prevent mempool/storage bloat
+                if let Some(extra_data) = payload.get_extra_data() {
+                    let size = extra_data.size();
+                    if size > EXTRA_DATA_LIMIT_SIZE {
+                        return Err(VerificationError::TransferExtraDataSize);
+                    }
+                }
             }
             TransactionType::BatchReferralReward(payload) => {
                 // BatchReferralReward validation - check payload is valid
@@ -2919,8 +2959,34 @@ impl Transaction {
                     }
                 }
             }
+            TransactionType::AIMining(payload) => {
+                // BUG-066 FIX: Enforce AIMining fee/stake/reward spending on-chain
+                use crate::ai_mining::AIMiningPayload;
+                match payload {
+                    AIMiningPayload::RegisterMiner { registration_fee, .. } => {
+                        let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                        *current = current
+                            .checked_add(*registration_fee)
+                            .ok_or(VerificationError::Overflow)?;
+                    }
+                    AIMiningPayload::SubmitAnswer { stake_amount, .. } => {
+                        let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                        *current = current
+                            .checked_add(*stake_amount)
+                            .ok_or(VerificationError::Overflow)?;
+                    }
+                    AIMiningPayload::PublishTask { reward_amount, .. } => {
+                        let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                        *current = current
+                            .checked_add(*reward_amount)
+                            .ok_or(VerificationError::Overflow)?;
+                    }
+                    AIMiningPayload::ValidateAnswer { .. } => {
+                        // ValidateAnswer does not spend TOS directly
+                    }
+                }
+            }
             TransactionType::MultiSig(_)
-            | TransactionType::AIMining(_)
             | TransactionType::BindReferrer(_)
             // KYC transactions don't spend assets directly (only fee)
             | TransactionType::SetKyc(_)
@@ -3335,8 +3401,34 @@ impl Transaction {
                     }
                 }
             }
+            TransactionType::AIMining(payload) => {
+                // BUG-066 FIX: Enforce AIMining fee/stake/reward spending on-chain
+                use crate::ai_mining::AIMiningPayload;
+                match payload {
+                    AIMiningPayload::RegisterMiner { registration_fee, .. } => {
+                        let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                        *current = current
+                            .checked_add(*registration_fee)
+                            .ok_or(VerificationError::Overflow)?;
+                    }
+                    AIMiningPayload::SubmitAnswer { stake_amount, .. } => {
+                        let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                        *current = current
+                            .checked_add(*stake_amount)
+                            .ok_or(VerificationError::Overflow)?;
+                    }
+                    AIMiningPayload::PublishTask { reward_amount, .. } => {
+                        let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                        *current = current
+                            .checked_add(*reward_amount)
+                            .ok_or(VerificationError::Overflow)?;
+                    }
+                    AIMiningPayload::ValidateAnswer { .. } => {
+                        // ValidateAnswer does not spend TOS directly
+                    }
+                }
+            }
             TransactionType::MultiSig(_)
-            | TransactionType::AIMining(_)
             | TransactionType::BindReferrer(_)
             // KYC transactions don't spend assets directly (only fee)
             | TransactionType::SetKyc(_)
@@ -5026,6 +5118,7 @@ impl Transaction {
                 // Validate governance constraints using committee state
                 // SECURITY FIX (Issue #36, #37): Include approver_count and kyc_threshold
                 // to properly validate threshold changes and role updates
+                // BUG-075 FIX: Validate that member exists for update/remove operations
                 let (target_is_active, target_can_approve) = match payload.get_update() {
                     crate::transaction::CommitteeUpdateData::RemoveMember { public_key }
                     | crate::transaction::CommitteeUpdateData::UpdateMemberRole {
@@ -5035,12 +5128,20 @@ impl Transaction {
                     | crate::transaction::CommitteeUpdateData::UpdateMemberStatus {
                         public_key,
                         ..
-                    } => committee.get_member(public_key).map(|member| {
-                        (
+                    } => {
+                        // BUG-075 FIX: Member MUST exist for these operations
+                        let member = committee.get_member(public_key).ok_or_else(|| {
+                            VerificationError::AnyError(anyhow::anyhow!(
+                                "Member {:?} not found in committee {}",
+                                public_key,
+                                payload.get_committee_id()
+                            ))
+                        })?;
+                        Some((
                             member.status == crate::kyc::MemberStatus::Active,
                             member.role.can_approve(),
-                        )
-                    }),
+                        ))
+                    }
                     _ => None,
                 }
                 .unwrap_or((true, true));
@@ -5522,8 +5623,34 @@ impl Transaction {
                     }
                 }
             }
+            TransactionType::AIMining(payload) => {
+                // BUG-066 FIX: Enforce AIMining fee/stake/reward spending on-chain
+                use crate::ai_mining::AIMiningPayload;
+                match payload {
+                    AIMiningPayload::RegisterMiner { registration_fee, .. } => {
+                        let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                        *current = current
+                            .checked_add(*registration_fee)
+                            .ok_or(VerificationError::Overflow)?;
+                    }
+                    AIMiningPayload::SubmitAnswer { stake_amount, .. } => {
+                        let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                        *current = current
+                            .checked_add(*stake_amount)
+                            .ok_or(VerificationError::Overflow)?;
+                    }
+                    AIMiningPayload::PublishTask { reward_amount, .. } => {
+                        let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                        *current = current
+                            .checked_add(*reward_amount)
+                            .ok_or(VerificationError::Overflow)?;
+                    }
+                    AIMiningPayload::ValidateAnswer { .. } => {
+                        // ValidateAnswer does not spend TOS directly
+                    }
+                }
+            }
             TransactionType::MultiSig(_)
-            | TransactionType::AIMining(_)
             | TransactionType::BindReferrer(_)
             // KYC transactions don't spend assets directly (only fee)
             | TransactionType::SetKyc(_)
