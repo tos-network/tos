@@ -456,6 +456,23 @@ impl<'a> BlockchainVerificationState<'a, TestError> for KycTestChainState {
     }
 
     // Stub implementations for test
+    async fn record_pending_unfreeze(
+        &mut self,
+        _sender: &'a CompressedPublicKey,
+        _amount: u64,
+    ) -> Result<(), TestError> {
+        Ok(())
+    }
+
+    fn get_pending_unfreeze_count(&self, _sender: &CompressedPublicKey) -> usize {
+        0
+    }
+
+    fn get_pending_unfreeze_amount(&self, _sender: &CompressedPublicKey) -> u64 {
+        0
+    }
+
+    // Stub implementations for test
     async fn record_pending_energy(
         &mut self,
         _sender: &'a CompressedPublicKey,
@@ -466,6 +483,12 @@ impl<'a> BlockchainVerificationState<'a, TestError> for KycTestChainState {
 
     fn get_pending_energy(&self, _sender: &CompressedPublicKey) -> u64 {
         0
+    }
+
+    async fn get_global_energy_state(
+        &mut self,
+    ) -> Result<tos_common::account::GlobalEnergyState, TestError> {
+        Ok(tos_common::account::GlobalEnergyState::default())
     }
 }
 
@@ -544,11 +567,7 @@ impl<'a> BlockchainApplyState<'a, DummyContractProvider, TestError> for KycTestC
         Ok(())
     }
 
-    async fn get_global_energy_state(
-        &mut self,
-    ) -> Result<tos_common::account::GlobalEnergyState, TestError> {
-        Ok(tos_common::account::GlobalEnergyState::default())
-    }
+    // Note: get_global_energy_state is inherited from BlockchainVerificationState
 
     async fn set_global_energy_state(
         &mut self,

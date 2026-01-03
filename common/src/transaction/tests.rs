@@ -703,7 +703,7 @@ async fn test_tx_deploy_contract() {
             alice.keypair.get_public_key().compress(),
             None,
             data,
-            FeeBuilder::default(),
+            FeeBuilder::Value(10 * COIN_VALUE), // Sufficient fee for contract deploy
         ); // Use T0 for DeployContract
         let estimated_size = builder.estimate_size();
         let tx = builder.build(&mut state, &alice.keypair).unwrap();
@@ -1577,6 +1577,26 @@ impl<'a> BlockchainVerificationState<'a, TestError> for ChainState {
         0
     }
 
+    /// Record pending unfreeze (stub for tests)
+    async fn record_pending_unfreeze(
+        &mut self,
+        _sender: &'a CompressedPublicKey,
+        _amount: u64,
+    ) -> Result<(), TestError> {
+        // No-op for test state
+        Ok(())
+    }
+
+    /// Get pending unfreeze count (stub for tests)
+    fn get_pending_unfreeze_count(&self, _sender: &CompressedPublicKey) -> usize {
+        0
+    }
+
+    /// Get pending unfreeze amount (stub for tests)
+    fn get_pending_unfreeze_amount(&self, _sender: &CompressedPublicKey) -> u64 {
+        0
+    }
+
     /// Record pending energy (stub for tests)
     async fn record_pending_energy(
         &mut self,
@@ -1590,6 +1610,13 @@ impl<'a> BlockchainVerificationState<'a, TestError> for ChainState {
     /// Get pending energy (stub for tests)
     fn get_pending_energy(&self, _sender: &CompressedPublicKey) -> u64 {
         0
+    }
+
+    /// Get the global energy state (stub for tests)
+    async fn get_global_energy_state(
+        &mut self,
+    ) -> Result<crate::account::GlobalEnergyState, TestError> {
+        Ok(crate::account::GlobalEnergyState::default())
     }
 }
 

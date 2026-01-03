@@ -247,6 +247,37 @@ pub trait BlockchainVerificationState<'a, E> {
     /// * `sender` - The delegator's public key
     fn get_pending_delegation(&self, sender: &CompressedPublicKey) -> u64;
 
+    // ===== Pending Unfreeze Tracking =====
+
+    /// Record a pending unfreeze amount
+    ///
+    /// Called after UnfreezeTos verification passes to track
+    /// the amount and count being unfrozen. Subsequent transactions will see
+    /// reduced available_for_delegation balance and queue capacity.
+    ///
+    /// # Arguments
+    /// * `sender` - The account public key
+    /// * `amount` - The amount being unfrozen
+    async fn record_pending_unfreeze(
+        &mut self,
+        sender: &'a CompressedPublicKey,
+        amount: u64,
+    ) -> Result<(), E>;
+
+    /// Get pending unfreeze count for sender
+    ///
+    /// Returns the number of pending unfreeze entries for an account.
+    fn get_pending_unfreeze_count(&self, _sender: &CompressedPublicKey) -> usize {
+        0
+    }
+
+    /// Get pending unfreeze amount for sender
+    ///
+    /// Returns the total pending unfreeze amount for an account.
+    fn get_pending_unfreeze_amount(&self, _sender: &CompressedPublicKey) -> u64 {
+        0
+    }
+
     // ===== Pending Energy Tracking =====
 
     /// Record pending energy consumption
@@ -272,6 +303,16 @@ pub trait BlockchainVerificationState<'a, E> {
     /// # Arguments
     /// * `sender` - The sender's public key
     fn get_pending_energy(&self, sender: &CompressedPublicKey) -> u64;
+
+    /// Get the global energy state (Stake 2.0)
+    ///
+    /// This method is available in verification phase to enable:
+    /// - Energy availability calculation based on total_energy_weight
+    /// - Pending energy verification for transactions
+    ///
+    /// # Returns
+    /// The global energy state containing total_energy_weight
+    async fn get_global_energy_state(&mut self) -> Result<crate::account::GlobalEnergyState, E>;
 
     /// Set the contract module
     async fn set_contract_module(&mut self, hash: &Hash, module: &'a Module) -> Result<(), E>;
@@ -357,8 +398,7 @@ pub trait BlockchainApplyState<'a, P: ContractProvider, E>:
         account_energy: crate::account::AccountEnergy,
     ) -> Result<(), E>;
 
-    /// Get the global energy state (Stake 2.0)
-    async fn get_global_energy_state(&mut self) -> Result<crate::account::GlobalEnergyState, E>;
+    // Note: get_global_energy_state is inherited from BlockchainVerificationState
 
     /// Set the global energy state (Stake 2.0)
     async fn set_global_energy_state(

@@ -479,6 +479,23 @@ impl<'a> tos_common::transaction::verify::BlockchainVerificationState<'a, ()>
     }
 
     // Stub implementations for benchmark
+    async fn record_pending_unfreeze(
+        &mut self,
+        _sender: &'a CompressedPublicKey,
+        _amount: u64,
+    ) -> Result<(), ()> {
+        Ok(())
+    }
+
+    fn get_pending_unfreeze_count(&self, _sender: &CompressedPublicKey) -> usize {
+        0
+    }
+
+    fn get_pending_unfreeze_amount(&self, _sender: &CompressedPublicKey) -> u64 {
+        0
+    }
+
+    // Stub implementations for benchmark
     async fn record_pending_energy(
         &mut self,
         _sender: &'a CompressedPublicKey,
@@ -489,6 +506,12 @@ impl<'a> tos_common::transaction::verify::BlockchainVerificationState<'a, ()>
 
     fn get_pending_energy(&self, _sender: &CompressedPublicKey) -> u64 {
         0
+    }
+
+    async fn get_global_energy_state(
+        &mut self,
+    ) -> Result<tos_common::account::GlobalEnergyState, ()> {
+        Ok(tos_common::account::GlobalEnergyState::default())
     }
 }
 

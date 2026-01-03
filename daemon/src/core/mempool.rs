@@ -66,6 +66,10 @@ pub struct Mempool {
     // Track pending undelegations across mempool transactions
     // Key: (from, to) delegation pair, Value: total pending undelegation amount
     pending_undelegations: HashMap<(CompressedPublicKey, CompressedPublicKey), u64>,
+    // Track pending unfreezes across mempool transactions
+    // Key: sender address, Value: pending unfreeze count/amount
+    pending_unfreezes_count: HashMap<CompressedPublicKey, usize>,
+    pending_unfreezes_amount: HashMap<CompressedPublicKey, u64>,
     // Track pending energy consumption per sender
     // Key: sender address, Value: total pending energy consumed
     pending_energy_consumption: HashMap<CompressedPublicKey, u64>,
@@ -81,6 +85,8 @@ impl Mempool {
             disable_zkp_cache,
             pending_delegations: HashMap::new(),
             pending_undelegations: HashMap::new(),
+            pending_unfreezes_count: HashMap::new(),
+            pending_unfreezes_amount: HashMap::new(),
             pending_energy_consumption: HashMap::new(),
         }
     }
@@ -94,6 +100,14 @@ impl Mempool {
         &self,
     ) -> &HashMap<(CompressedPublicKey, CompressedPublicKey), u64> {
         &self.pending_undelegations
+    }
+
+    pub fn get_pending_unfreezes_count(&self) -> &HashMap<CompressedPublicKey, usize> {
+        &self.pending_unfreezes_count
+    }
+
+    pub fn get_pending_unfreezes_amount(&self) -> &HashMap<CompressedPublicKey, u64> {
+        &self.pending_unfreezes_amount
     }
 
     pub fn get_pending_energy_consumption(&self) -> &HashMap<CompressedPublicKey, u64> {
@@ -166,7 +180,15 @@ impl Mempool {
         block_version: BlockVersion,
     ) -> Result<(), BlockchainError> {
         // Extract results in a scope to avoid borrow checker issues
-        let (balances, multisig, pending_delegations, pending_undelegations, pending_energy) = {
+        let (
+            balances,
+            multisig,
+            pending_delegations,
+            pending_undelegations,
+            pending_unfreezes_count,
+            pending_unfreezes_amount,
+            pending_energy,
+        ) = {
             let mut state = MempoolState::new(
                 &self,
                 storage,
@@ -192,14 +214,21 @@ impl Mempool {
                 .collect();
 
             // Get pending state from MempoolState
-            let (pending_delegations, pending_undelegations, pending_energy) =
-                state.get_pending_state();
+            let (
+                pending_delegations,
+                pending_undelegations,
+                pending_unfreezes_count,
+                pending_unfreezes_amount,
+                pending_energy,
+            ) = state.get_pending_state();
 
             (
                 owned_balances,
                 multisig,
                 pending_delegations,
                 pending_undelegations,
+                pending_unfreezes_count,
+                pending_unfreezes_amount,
                 pending_energy,
             )
         };
@@ -207,6 +236,8 @@ impl Mempool {
         // Update mempool's pending state (state is now dropped, so no borrow conflict)
         self.pending_delegations = pending_delegations;
         self.pending_undelegations = pending_undelegations;
+        self.pending_unfreezes_count = pending_unfreezes_count;
+        self.pending_unfreezes_amount = pending_unfreezes_amount;
         self.pending_energy_consumption = pending_energy;
 
         let nonce = tx.get_nonce();

@@ -58,6 +58,12 @@ pub struct MempoolState<'a, S: Storage> {
     // Pending undelegation amounts: (from, to) -> amount
     // Tracks undelegations that passed verification but not yet applied
     pending_undelegations: HashMap<(CompressedPublicKey, CompressedPublicKey), u64>,
+    // Pending unfreeze counts per sender
+    // Tracks unfreeze entries that passed verification but not yet applied
+    pending_unfreezes_count: HashMap<CompressedPublicKey, usize>,
+    // Pending unfreeze amounts per sender
+    // Tracks unfreeze amounts that passed verification but not yet applied
+    pending_unfreezes_amount: HashMap<CompressedPublicKey, u64>,
     // Pending energy consumption per sender
     // Tracks energy used that passed verification but not yet applied
     pending_energy_consumption: HashMap<CompressedPublicKey, u64>,
@@ -91,6 +97,8 @@ impl<'a, S: Storage> MempoolState<'a, S> {
             block_version,
             pending_delegations: mempool.get_pending_delegations().clone(),
             pending_undelegations: mempool.get_pending_undelegations().clone(),
+            pending_unfreezes_count: mempool.get_pending_unfreezes_count().clone(),
+            pending_unfreezes_amount: mempool.get_pending_unfreezes_amount().clone(),
             pending_energy_consumption: mempool.get_pending_energy_consumption().clone(),
             pending_registrations: HashSet::new(),
         }
@@ -103,11 +111,15 @@ impl<'a, S: Storage> MempoolState<'a, S> {
     ) -> (
         HashMap<CompressedPublicKey, u64>,
         HashMap<(CompressedPublicKey, CompressedPublicKey), u64>,
+        HashMap<CompressedPublicKey, usize>,
+        HashMap<CompressedPublicKey, u64>,
         HashMap<CompressedPublicKey, u64>,
     ) {
         (
             std::mem::take(&mut self.pending_delegations),
             std::mem::take(&mut self.pending_undelegations),
+            std::mem::take(&mut self.pending_unfreezes_count),
+            std::mem::take(&mut self.pending_unfreezes_amount),
             std::mem::take(&mut self.pending_energy_consumption),
         )
     }
@@ -763,6 +775,33 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Mempoo
         *self.pending_delegations.get(sender).unwrap_or(&0)
     }
 
+    /// Record a pending unfreeze amount
+    async fn record_pending_unfreeze(
+        &mut self,
+        sender: &'a CompressedPublicKey,
+        amount: u64,
+    ) -> Result<(), BlockchainError> {
+        *self
+            .pending_unfreezes_count
+            .entry(sender.clone())
+            .or_insert(0) += 1;
+        *self
+            .pending_unfreezes_amount
+            .entry(sender.clone())
+            .or_insert(0) += amount;
+        Ok(())
+    }
+
+    /// Get pending unfreeze count for sender
+    fn get_pending_unfreeze_count(&self, sender: &CompressedPublicKey) -> usize {
+        *self.pending_unfreezes_count.get(sender).unwrap_or(&0)
+    }
+
+    /// Get pending unfreeze amount for sender
+    fn get_pending_unfreeze_amount(&self, sender: &CompressedPublicKey) -> u64 {
+        *self.pending_unfreezes_amount.get(sender).unwrap_or(&0)
+    }
+
     /// Record pending energy consumption
     ///
     /// Called after energy is consumed during verification to track
@@ -783,5 +822,12 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Mempoo
     /// Get pending energy consumption for sender
     fn get_pending_energy(&self, sender: &CompressedPublicKey) -> u64 {
         *self.pending_energy_consumption.get(sender).unwrap_or(&0)
+    }
+
+    /// Get the global energy state (Stake 2.0)
+    async fn get_global_energy_state(
+        &mut self,
+    ) -> Result<tos_common::account::GlobalEnergyState, BlockchainError> {
+        self.storage.get_global_energy_state().await
     }
 }

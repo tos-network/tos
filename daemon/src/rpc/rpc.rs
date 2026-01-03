@@ -3237,8 +3237,8 @@ async fn get_energy<S: Storage>(context: &Context, body: Value) -> Result<Value,
     let blockchain: &Arc<Blockchain<S>> = context.get()?;
     let storage = blockchain.get_storage().read().await;
 
-    // Get current time in milliseconds (use block timestamp for consistency)
-    let now_ms = tos_common::time::get_current_time_in_millis();
+    // Get latest block timestamp for consistency with apply phase
+    let now_ms = storage.get_top_block_header().await?.0.get_timestamp();
 
     // Get account energy for the account (Stake 2.0)
     let pubkey = params.address.into_owned().to_public_key();
@@ -3337,7 +3337,8 @@ async fn estimate_energy<S: Storage>(
     let blockchain: &Arc<Blockchain<S>> = context.get()?;
     let storage = blockchain.get_storage().read().await;
 
-    let now_ms = tos_common::time::get_current_time_in_millis();
+    // Get latest block timestamp for consistency with apply phase
+    let now_ms = storage.get_top_block_header().await?.0.get_timestamp();
     let pubkey = params.address.into_owned().to_public_key();
 
     // Get account energy state

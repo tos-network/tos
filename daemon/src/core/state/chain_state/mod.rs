@@ -1247,6 +1247,30 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for ChainS
         0
     }
 
+    /// Record pending unfreeze (no-op for ChainState)
+    ///
+    /// ChainState is used during block verification where transactions
+    /// are processed sequentially. Pending unfreeze tracking is only
+    /// needed for mempool verification.
+    async fn record_pending_unfreeze(
+        &mut self,
+        _sender: &'a CompressedPublicKey,
+        _amount: u64,
+    ) -> Result<(), BlockchainError> {
+        // No-op for block verification - apply phase handles state changes
+        Ok(())
+    }
+
+    /// Get pending unfreeze count (always 0 for ChainState)
+    fn get_pending_unfreeze_count(&self, _sender: &CompressedPublicKey) -> usize {
+        0
+    }
+
+    /// Get pending unfreeze amount (always 0 for ChainState)
+    fn get_pending_unfreeze_amount(&self, _sender: &CompressedPublicKey) -> u64 {
+        0
+    }
+
     /// Record pending energy (no-op for ChainState)
     ///
     /// ChainState is used during block verification where transactions
@@ -1264,5 +1288,12 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for ChainS
     /// Get pending energy (always 0 for ChainState)
     fn get_pending_energy(&self, _sender: &CompressedPublicKey) -> u64 {
         0
+    }
+
+    /// Get the global energy state (Stake 2.0)
+    async fn get_global_energy_state(
+        &mut self,
+    ) -> Result<tos_common::account::GlobalEnergyState, BlockchainError> {
+        self.storage.get_global_energy_state().await
     }
 }

@@ -282,6 +282,25 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError>
         self.inner.get_pending_delegation(sender)
     }
 
+    /// Record pending unfreeze (delegated to inner)
+    async fn record_pending_unfreeze(
+        &mut self,
+        sender: &'a CompressedPublicKey,
+        amount: u64,
+    ) -> Result<(), BlockchainError> {
+        self.inner.record_pending_unfreeze(sender, amount).await
+    }
+
+    /// Get pending unfreeze count (delegated to inner)
+    fn get_pending_unfreeze_count(&self, sender: &CompressedPublicKey) -> usize {
+        self.inner.get_pending_unfreeze_count(sender)
+    }
+
+    /// Get pending unfreeze amount (delegated to inner)
+    fn get_pending_unfreeze_amount(&self, sender: &CompressedPublicKey) -> u64 {
+        self.inner.get_pending_unfreeze_amount(sender)
+    }
+
     /// Record pending energy (delegated to inner)
     async fn record_pending_energy(
         &mut self,
@@ -294,6 +313,13 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError>
     /// Get pending energy (delegated to inner)
     fn get_pending_energy(&self, sender: &CompressedPublicKey) -> u64 {
         self.inner.get_pending_energy(sender)
+    }
+
+    /// Get the global energy state (delegated to inner)
+    async fn get_global_energy_state(
+        &mut self,
+    ) -> Result<tos_common::account::GlobalEnergyState, BlockchainError> {
+        self.inner.get_global_energy_state().await
     }
 }
 
@@ -473,11 +499,7 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for Applicable
             .await
     }
 
-    async fn get_global_energy_state(
-        &mut self,
-    ) -> Result<tos_common::account::GlobalEnergyState, BlockchainError> {
-        self.inner.storage.get_global_energy_state().await
-    }
+    // Note: get_global_energy_state is inherited from BlockchainVerificationState
 
     async fn set_global_energy_state(
         &mut self,
