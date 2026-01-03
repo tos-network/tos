@@ -572,6 +572,12 @@ impl<'a> BlockchainVerificationState<'a, TestError> for BatchTestChainState {
         // No-op for test state - delegation changes happen in apply phase
         Ok(())
     }
+
+    fn is_pending_registration(&self, _account: &CompressedPublicKey) -> bool {
+        false
+    }
+
+    fn record_pending_registration(&mut self, _account: &CompressedPublicKey) {}
 }
 
 // =============================================================================

@@ -2,7 +2,7 @@ use crate::core::{error::BlockchainError, mempool::Mempool, storage::Storage};
 use async_trait::async_trait;
 use std::{
     borrow::Cow,
-    collections::{hash_map::Entry, HashMap},
+    collections::{hash_map::Entry, HashMap, HashSet},
 };
 use tos_common::{
     account::Nonce,
@@ -55,6 +55,9 @@ pub struct MempoolState<'a, S: Storage> {
     // Pending undelegation amounts: (from, to) -> amount
     // Tracks undelegations that passed verification but not yet applied
     pending_undelegations: HashMap<(CompressedPublicKey, CompressedPublicKey), u64>,
+    // Pending registrations: accounts that will be registered by earlier TXs in this block
+    // Enables same-block visibility for fee calculation
+    pending_registrations: HashSet<CompressedPublicKey>,
 }
 
 impl<'a, S: Storage> MempoolState<'a, S> {
@@ -80,6 +83,7 @@ impl<'a, S: Storage> MempoolState<'a, S> {
             topoheight,
             block_version,
             pending_undelegations: HashMap::new(),
+            pending_registrations: HashSet::new(),
         }
     }
 
@@ -703,5 +707,15 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Mempoo
         let key = (from.clone(), to.clone());
         *self.pending_undelegations.entry(key).or_insert(0) += amount;
         Ok(())
+    }
+
+    /// Check if account is pending registration in current block
+    fn is_pending_registration(&self, account: &CompressedPublicKey) -> bool {
+        self.pending_registrations.contains(account)
+    }
+
+    /// Record that account will be registered by an earlier TX in this block
+    fn record_pending_registration(&mut self, account: &CompressedPublicKey) {
+        self.pending_registrations.insert(account.clone());
     }
 }

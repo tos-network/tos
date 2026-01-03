@@ -257,6 +257,16 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError>
             .record_pending_undelegation(from, to, amount)
             .await
     }
+
+    /// Check if account is pending registration in current block
+    fn is_pending_registration(&self, account: &CompressedPublicKey) -> bool {
+        self.inner.is_pending_registration(account)
+    }
+
+    /// Record that account will be registered by an earlier TX in this block
+    fn record_pending_registration(&mut self, account: &CompressedPublicKey) {
+        self.inner.record_pending_registration(account)
+    }
 }
 
 #[async_trait]

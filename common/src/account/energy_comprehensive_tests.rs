@@ -4335,7 +4335,7 @@ mod tests {
             // According to transaction/mod.rs:456-458:
             // TransactionType::InvokeContract(_) => {
             //     // Actual cost determined by execution (CU consumed)
-            //     base_cost  // <-- BUG: Returns fixed cost, not actual CU!
+            //     base_cost  // <-- Returns fixed cost, not actual CU!
             // }
 
             // The comment says "Actual cost determined by execution (CU consumed)"

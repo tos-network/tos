@@ -1535,6 +1535,16 @@ impl<'a> BlockchainVerificationState<'a, TestError> for ChainState {
         // No-op for test state
         Ok(())
     }
+
+    /// Check if account is pending registration (stub for tests)
+    fn is_pending_registration(&self, _account: &CompressedPublicKey) -> bool {
+        false
+    }
+
+    /// Record that account will be registered (stub for tests)
+    fn record_pending_registration(&mut self, _account: &CompressedPublicKey) {
+        // No-op for test state
+    }
 }
 
 impl FeeHelper for AccountStateImpl {

@@ -1183,7 +1183,7 @@ mod input_validation_tests {
 }
 
 // ============================================================================
-// POTENTIAL REMAINING BUG TESTS
+// POTENTIAL EDGE CASE TESTS
 // ============================================================================
 
 mod potential_remaining_bugs {

@@ -197,6 +197,30 @@ pub trait BlockchainVerificationState<'a, E> {
         amount: u64,
     ) -> Result<(), E>;
 
+    // ===== Pending Registration Tracking (Same-Block Visibility) =====
+
+    /// Check if an account is pending registration in the current block/batch
+    ///
+    /// This enables same-block visibility: when TX1 transfers to account A,
+    /// TX2's ActivateAccounts can see that A will be registered and skip
+    /// charging the activation fee for it.
+    ///
+    /// # Arguments
+    /// * `account` - The account's compressed public key
+    ///
+    /// # Returns
+    /// true if the account will be registered by an earlier transaction in the same block
+    fn is_pending_registration(&self, account: &CompressedPublicKey) -> bool;
+
+    /// Record that an account will be registered (received balance or delegation)
+    ///
+    /// Called when a transaction creates a new account (via transfer or delegation).
+    /// Subsequent transactions in the same block can see this pending registration.
+    ///
+    /// # Arguments
+    /// * `account` - The account's compressed public key
+    fn record_pending_registration(&mut self, account: &CompressedPublicKey);
+
     /// Set the contract module
     async fn set_contract_module(&mut self, hash: &Hash, module: &'a Module) -> Result<(), E>;
 

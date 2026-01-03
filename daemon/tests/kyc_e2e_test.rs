@@ -435,6 +435,12 @@ impl<'a> BlockchainVerificationState<'a, TestError> for KycTestChainState {
     ) -> Result<(), TestError> {
         Ok(())
     }
+
+    fn is_pending_registration(&self, _account: &CompressedPublicKey) -> bool {
+        false
+    }
+
+    fn record_pending_registration(&mut self, _account: &CompressedPublicKey) {}
 }
 
 // ============================================================================

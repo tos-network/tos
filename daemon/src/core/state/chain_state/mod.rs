@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use log::{debug, trace};
 use std::{
     borrow::Cow,
-    collections::{hash_map::Entry, HashMap},
+    collections::{hash_map::Entry, HashMap, HashSet},
 };
 use tos_common::{
     account::{Nonce, VersionedBalance, VersionedNonce, VersionedUnoBalance},
@@ -160,6 +160,9 @@ pub struct ChainState<'a, S: Storage> {
     // Block timestamp for deterministic verification (in seconds)
     // None for mempool verification (uses system time)
     block_timestamp: Option<u64>,
+    // Pending registrations: accounts that will be registered by earlier TXs in this block
+    // Enables same-block visibility for fee calculation
+    pending_registrations: HashSet<CompressedPublicKey>,
 }
 
 impl<'a, S: Storage> ChainState<'a, S> {
@@ -183,6 +186,7 @@ impl<'a, S: Storage> ChainState<'a, S> {
             block_version,
             gas_fee: 0,
             block_timestamp,
+            pending_registrations: HashSet::new(),
         }
     }
 
@@ -1212,5 +1216,15 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for ChainS
     ) -> Result<(), BlockchainError> {
         // No-op for block verification - apply phase handles state changes
         Ok(())
+    }
+
+    /// Check if account is pending registration in current block
+    fn is_pending_registration(&self, account: &CompressedPublicKey) -> bool {
+        self.pending_registrations.contains(account)
+    }
+
+    /// Record that account will be registered by an earlier TX in this block
+    fn record_pending_registration(&mut self, account: &CompressedPublicKey) {
+        self.pending_registrations.insert(account.clone());
     }
 }

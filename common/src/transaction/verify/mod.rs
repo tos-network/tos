@@ -1011,13 +1011,15 @@ impl Transaction {
                     EnergyPayload::ActivateAccounts { accounts } => {
                         // ActivateAccounts spends 0.1 TOS per NEW account only (idempotent)
                         // Count only unregistered accounts to match apply phase logic
+                        // Also check pending registrations for same-block visibility
                         let mut unregistered_count = 0u64;
                         for account in accounts {
                             let is_registered = state
                                 .is_account_registered(account)
                                 .await
                                 .map_err(VerificationError::State)?;
-                            if !is_registered {
+                            let is_pending = state.is_pending_registration(account);
+                            if !is_registered && !is_pending {
                                 unregistered_count += 1;
                             }
                         }
@@ -1035,13 +1037,15 @@ impl Transaction {
                     EnergyPayload::ActivateAndDelegate { items } => {
                         // ActivateAndDelegate spends 0.1 TOS per NEW account only (idempotent)
                         // Count only unregistered accounts to match apply phase logic
+                        // Also check pending registrations for same-block visibility
                         let mut unregistered_count = 0u64;
                         for item in items {
                             let is_registered = state
                                 .is_account_registered(&item.account)
                                 .await
                                 .map_err(VerificationError::State)?;
-                            if !is_registered {
+                            let is_pending = state.is_pending_registration(&item.account);
+                            if !is_registered && !is_pending {
                                 unregistered_count += 1;
                             }
                         }
@@ -2765,13 +2769,15 @@ impl Transaction {
                     EnergyPayload::ActivateAccounts { accounts } => {
                         // ActivateAccounts spends 0.1 TOS per NEW account only (idempotent)
                         // Count only unregistered accounts to match apply phase logic
+                        // Also check pending registrations for same-block visibility
                         let mut unregistered_count = 0u64;
                         for account in accounts {
                             let is_registered = state
                                 .is_account_registered(account)
                                 .await
                                 .map_err(VerificationError::State)?;
-                            if !is_registered {
+                            let is_pending = state.is_pending_registration(account);
+                            if !is_registered && !is_pending {
                                 unregistered_count += 1;
                             }
                         }
@@ -2789,13 +2795,15 @@ impl Transaction {
                     EnergyPayload::ActivateAndDelegate { items } => {
                         // ActivateAndDelegate spends 0.1 TOS per NEW account only (idempotent)
                         // Count only unregistered accounts to match apply phase logic
+                        // Also check pending registrations for same-block visibility
                         let mut unregistered_count = 0u64;
                         for item in items {
                             let is_registered = state
                                 .is_account_registered(&item.account)
                                 .await
                                 .map_err(VerificationError::State)?;
-                            if !is_registered {
+                            let is_pending = state.is_pending_registration(&item.account);
+                            if !is_registered && !is_pending {
                                 unregistered_count += 1;
                             }
                         }
@@ -3183,13 +3191,15 @@ impl Transaction {
                     EnergyPayload::ActivateAccounts { accounts } => {
                         // ActivateAccounts spends 0.1 TOS per NEW account only (idempotent)
                         // Count only unregistered accounts to match apply phase logic
+                        // Also check pending registrations for same-block visibility
                         let mut unregistered_count = 0u64;
                         for account in accounts {
                             let is_registered = state
                                 .is_account_registered(account)
                                 .await
                                 .map_err(VerificationError::State)?;
-                            if !is_registered {
+                            let is_pending = state.is_pending_registration(account);
+                            if !is_registered && !is_pending {
                                 unregistered_count += 1;
                             }
                         }
@@ -3207,13 +3217,15 @@ impl Transaction {
                     EnergyPayload::ActivateAndDelegate { items } => {
                         // ActivateAndDelegate spends 0.1 TOS per NEW account only (idempotent)
                         // Count only unregistered accounts to match apply phase logic
+                        // Also check pending registrations for same-block visibility
                         let mut unregistered_count = 0u64;
                         for item in items {
                             let is_registered = state
                                 .is_account_registered(&item.account)
                                 .await
                                 .map_err(VerificationError::State)?;
-                            if !is_registered {
+                            let is_pending = state.is_pending_registration(&item.account);
+                            if !is_registered && !is_pending {
                                 unregistered_count += 1;
                             }
                         }
@@ -3325,11 +3337,14 @@ impl Transaction {
 
                     // TOS-Only Fee: Account creation fee (0.1 TOS)
                     // When sending TOS to a new (unregistered) account, deduct fee from transfer
+                    // Also check pending registrations for same-block visibility
                     let amount_to_credit = if *asset == TOS_ASSET {
-                        let is_new_account = !state
+                        let is_registered = state
                             .is_account_registered(destination)
                             .await
                             .map_err(VerificationError::State)?;
+                        let is_pending = state.is_pending_registration(destination);
+                        let is_new_account = !is_registered && !is_pending;
 
                         if is_new_account {
                             // Verify transfer amount covers account creation fee
@@ -3348,6 +3363,9 @@ impl Transaction {
                                 .add_burned_coins(FEE_PER_ACCOUNT_CREATION)
                                 .await
                                 .map_err(VerificationError::State)?;
+
+                            // Record as pending registration for subsequent TXs in this block
+                            state.record_pending_registration(destination);
 
                             if log::log_enabled!(log::Level::Debug) {
                                 debug!(
@@ -3850,16 +3868,21 @@ impl Transaction {
                         let mut activated_count = 0u64;
 
                         for account in accounts {
-                            // Check if account is already registered
+                            // Check if account is already registered OR pending registration
+                            // (same-block visibility fix)
                             let is_registered = state
                                 .is_account_registered(account)
                                 .await
                                 .map_err(VerificationError::State)?;
+                            let is_pending = state.is_pending_registration(account);
 
-                            if is_registered {
-                                // Skip already-activated accounts (as per spec)
+                            if is_registered || is_pending {
+                                // Skip already-activated or pending-activation accounts
                                 if log::log_enabled!(log::Level::Debug) {
-                                    debug!("Skipping already-activated account: {:?}", account);
+                                    debug!(
+                                        "Skipping account: {:?} (registered={}, pending={})",
+                                        account, is_registered, is_pending
+                                    );
                                 }
                                 continue;
                             }
@@ -3875,6 +3898,9 @@ impl Transaction {
                                 .map_err(VerificationError::State)?;
                             // Balance stays at 0 - we're just activating the account
                             let _ = balance;
+
+                            // Record as pending registration for subsequent TXs in this block
+                            state.record_pending_registration(account);
 
                             activated_count += 1;
 
@@ -4048,13 +4074,15 @@ impl Transaction {
                         for item in items {
                             let account = &item.account;
 
-                            // Check if account is already registered
+                            // Check if account is already registered OR pending registration
+                            // (same-block visibility fix)
                             let is_registered = state
                                 .is_account_registered(account)
                                 .await
                                 .map_err(VerificationError::State)?;
+                            let is_pending = state.is_pending_registration(account);
 
-                            if !is_registered {
+                            if !is_registered && !is_pending {
                                 // Activate the account by creating balance entry
                                 let balance = state
                                     .get_receiver_balance(
@@ -4066,6 +4094,9 @@ impl Transaction {
                                 // Balance stays at 0 - we're just activating the account
                                 let _ = balance;
 
+                                // Record as pending registration for subsequent TXs in this block
+                                state.record_pending_registration(account);
+
                                 activated_count += 1;
 
                                 if log::log_enabled!(log::Level::Debug) {
@@ -4073,8 +4104,8 @@ impl Transaction {
                                 }
                             } else if log::log_enabled!(log::Level::Debug) {
                                 debug!(
-                                    "Skipping activation for already-registered account: {:?}",
-                                    account
+                                    "Skipping activation for account: {:?} (registered={}, pending={})",
+                                    account, is_registered, is_pending
                                 );
                             }
 
@@ -5322,13 +5353,15 @@ impl Transaction {
                     EnergyPayload::ActivateAccounts { accounts } => {
                         // ActivateAccounts spends 0.1 TOS per NEW account only (idempotent)
                         // Count only unregistered accounts to match apply phase logic
+                        // Also check pending registrations for same-block visibility
                         let mut unregistered_count = 0u64;
                         for account in accounts {
                             let is_registered = state
                                 .is_account_registered(account)
                                 .await
                                 .map_err(VerificationError::State)?;
-                            if !is_registered {
+                            let is_pending = state.is_pending_registration(account);
+                            if !is_registered && !is_pending {
                                 unregistered_count += 1;
                             }
                         }
@@ -5346,13 +5379,15 @@ impl Transaction {
                     EnergyPayload::ActivateAndDelegate { items } => {
                         // ActivateAndDelegate spends 0.1 TOS per NEW account only (idempotent)
                         // Count only unregistered accounts to match apply phase logic
+                        // Also check pending registrations for same-block visibility
                         let mut unregistered_count = 0u64;
                         for item in items {
                             let is_registered = state
                                 .is_account_registered(&item.account)
                                 .await
                                 .map_err(VerificationError::State)?;
-                            if !is_registered {
+                            let is_pending = state.is_pending_registration(&item.account);
+                            if !is_registered && !is_pending {
                                 unregistered_count += 1;
                             }
                         }
