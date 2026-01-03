@@ -461,8 +461,23 @@ impl Transaction {
                         )));
                     }
                 }
-                EnergyPayload::WithdrawExpireUnfreeze | EnergyPayload::CancelAllUnfreeze => {
+                EnergyPayload::WithdrawExpireUnfreeze => {
                     // No additional validation needed
+                }
+                EnergyPayload::CancelAllUnfreeze => {
+                    // Check that there are pending unfreeze entries to cancel
+                    // Reject empty queue to prevent zero-cost spam transactions
+                    let sender = self.get_source();
+                    let sender_energy = state
+                        .get_account_energy(sender)
+                        .await
+                        .map_err(VerificationError::State)?
+                        .unwrap_or_default();
+                    if sender_energy.unfreezing_list.is_empty() {
+                        return Err(VerificationError::AnyError(anyhow!(
+                            "No pending unfreeze entries to cancel"
+                        )));
+                    }
                 }
                 EnergyPayload::DelegateResource {
                     receiver,
@@ -1992,8 +2007,23 @@ impl Transaction {
                         )));
                     }
                 }
-                EnergyPayload::WithdrawExpireUnfreeze | EnergyPayload::CancelAllUnfreeze => {
+                EnergyPayload::WithdrawExpireUnfreeze => {
                     // No additional validation needed
+                }
+                EnergyPayload::CancelAllUnfreeze => {
+                    // Check that there are pending unfreeze entries to cancel
+                    // Reject empty queue to prevent zero-cost spam transactions
+                    let sender = self.get_source();
+                    let sender_energy = state
+                        .get_account_energy(sender)
+                        .await
+                        .map_err(VerificationError::State)?
+                        .unwrap_or_default();
+                    if sender_energy.unfreezing_list.is_empty() {
+                        return Err(VerificationError::AnyError(anyhow!(
+                            "No pending unfreeze entries to cancel"
+                        )));
+                    }
                 }
                 EnergyPayload::DelegateResource {
                     receiver,
