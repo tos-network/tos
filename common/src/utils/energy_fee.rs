@@ -117,8 +117,9 @@ impl EnergyResourceManager {
     /// Calculate TOS cost for energy shortfall
     ///
     /// When energy is insufficient, user must burn TOS at rate of TOS_PER_ENERGY
+    /// Uses saturating_mul to prevent overflow (returns u64::MAX on overflow)
     pub fn calculate_tos_cost_for_energy(energy_needed: u64) -> u64 {
-        energy_needed * TOS_PER_ENERGY
+        energy_needed.saturating_mul(TOS_PER_ENERGY)
     }
 
     /// Consume energy for a transaction with priority order
@@ -183,8 +184,8 @@ impl EnergyResourceManager {
             }
         }
 
-        // 3. Remaining must be paid in TOS
-        let tos_cost = remaining * TOS_PER_ENERGY;
+        // 3. Remaining must be paid in TOS (saturating_mul prevents overflow)
+        let tos_cost = remaining.saturating_mul(TOS_PER_ENERGY);
 
         crate::transaction::TransactionResult {
             fee: tos_cost,
@@ -211,9 +212,9 @@ impl EnergyResourceManager {
             return true;
         }
 
-        // Check if TOS can cover the shortfall
+        // Check if TOS can cover the shortfall (saturating_mul prevents overflow)
         let shortfall = required_energy - total_energy;
-        let tos_needed = shortfall * TOS_PER_ENERGY;
+        let tos_needed = shortfall.saturating_mul(TOS_PER_ENERGY);
         account_balance >= tos_needed
     }
 }
