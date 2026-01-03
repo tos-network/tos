@@ -588,10 +588,10 @@ impl Transaction {
                                 "Cannot delegate to self"
                             )));
                         }
-                        // NOTE: Receiver registration check removed (BUG-041 fix)
+                        // NOTE: Receiver registration check removed for implicit account model
                         // Consistent with single DelegateResource which doesn't require
                         // receiver to be registered. Receivers are implicitly created
-                        // when they receive delegation (similar to XELIS model).
+                        // when they receive delegation.
                         // Check minimum delegation amount
                         if item.amount < MIN_DELEGATION_AMOUNT {
                             return Err(VerificationError::AnyError(anyhow!(
@@ -2077,10 +2077,10 @@ impl Transaction {
                                 "Cannot delegate to self"
                             )));
                         }
-                        // NOTE: Receiver registration check removed (BUG-041 fix)
+                        // NOTE: Receiver registration check removed for implicit account model
                         // Consistent with single DelegateResource which doesn't require
                         // receiver to be registered. Receivers are implicitly created
-                        // when they receive delegation (similar to XELIS model).
+                        // when they receive delegation.
                         // Check minimum delegation amount
                         if item.amount < MIN_DELEGATION_AMOUNT {
                             return Err(VerificationError::AnyError(anyhow!(
@@ -3821,7 +3821,7 @@ impl Transaction {
                         for delegation_item in delegations {
                             let receiver = &delegation_item.receiver;
 
-                            // NOTE: Registration check removed (BUG-041 fix)
+                            // NOTE: Registration check removed for implicit account model
                             // Receivers are implicitly created when they receive delegation.
                             // Energy state will be created via get_account_energy if needed.
 
@@ -5011,9 +5011,9 @@ impl Transaction {
         let mut required_energy = self.calculate_energy_cost();
         let now_ms = state.get_block().get_timestamp();
 
-        // BUG-044 FIX: Adjust energy cost for contracts based on actual gas used
+        // Adjust energy cost for contracts based on actual gas used
         // calculate_energy_cost() uses max_gas, but actual execution may use less
-        // Refund the difference to prevent over-consumption of stake energy
+        // Subtract unused gas to prevent over-consumption of stake energy
         if let Some((max_gas, used_gas)) = contract_gas_info {
             if used_gas < max_gas {
                 let unused_gas = max_gas.saturating_sub(used_gas);

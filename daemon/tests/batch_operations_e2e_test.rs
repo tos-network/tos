@@ -1933,9 +1933,8 @@ mod mixed_activation_tests {
 mod receiver_registration_tests {
     use super::*;
 
-    /// BatchDelegateResource accepts unregistered receivers (BUG-041 fix).
-    /// Receivers are implicitly created when they receive delegation,
-    /// similar to XELIS's implicit account creation model.
+    /// BatchDelegateResource accepts unregistered receivers (implicit account model).
+    /// Receivers are implicitly created when they receive delegation.
     #[tokio::test]
     async fn test_batch_delegate_accepts_unregistered_receiver() {
         let sender_keypair = create_keypair();
@@ -1981,7 +1980,7 @@ mod receiver_registration_tests {
 
         assert!(
             result.is_ok(),
-            "Transaction should succeed for unregistered receiver (BUG-041 fix): {:?}",
+            "Transaction should succeed for unregistered receiver (implicit account model): {:?}",
             result.unwrap_err()
         );
 
@@ -1993,7 +1992,7 @@ mod receiver_registration_tests {
     }
 
     /// BatchDelegateResource with mixed registered/unregistered receivers
-    /// should succeed for all (BUG-041 fix).
+    /// should succeed for all (implicit account model).
     #[tokio::test]
     async fn test_batch_delegate_accepts_mixed_receivers() {
         let sender_keypair = create_keypair();
@@ -2042,12 +2041,12 @@ mod receiver_registration_tests {
         let tx = Arc::new(tx);
         let tx_hash = tx.hash();
 
-        // Transaction should succeed for all receivers (BUG-041 fix)
+        // Transaction should succeed for all receivers (implicit account model)
         let result = tx.apply_without_verify(&tx_hash, &mut chain_state).await;
 
         assert!(
             result.is_ok(),
-            "Transaction should succeed for mixed receivers (BUG-041 fix): {:?}",
+            "Transaction should succeed for mixed receivers (implicit account model): {:?}",
             result.unwrap_err()
         );
 
