@@ -10,7 +10,7 @@ use log::{debug, trace};
 use tos_common::{
     account::{DelegatedResource, GlobalEnergyState},
     block::TopoHeight,
-    crypto::PublicKey,
+    crypto::{Address, PublicKey},
 };
 
 /// Parse a versioned delegation key: {topoheight}_{from_address}_{to_address}
@@ -40,9 +40,10 @@ impl VersionedEnergyProvider for RocksStorage {
         }
 
         let target_prefix = format!("{}_", topoheight);
+        let is_mainnet = self.is_mainnet();
 
-        // Collect keys to delete first (to avoid borrowing issues during iteration)
-        let keys_to_delete: Vec<Vec<u8>> = Self::iter_owned_internal::<Vec<u8>, ()>(
+        // Collect keys to delete with their account addresses
+        let keys_to_delete: Vec<(Vec<u8>, String)> = Self::iter_owned_internal::<Vec<u8>, ()>(
             &self.db,
             self.snapshot.as_ref(),
             IteratorMode::Start,
@@ -50,24 +51,59 @@ impl VersionedEnergyProvider for RocksStorage {
         )?
         .filter_map(|res| {
             let (key, _) = res.ok()?;
-            // Parse key as string to check topoheight prefix
+            // Parse key as string "{topo}_{address}" to check topoheight prefix
             if let Ok(key_str) = std::str::from_utf8(&key) {
                 if key_str.starts_with(&target_prefix) {
-                    return Some(key);
+                    // Extract address from key (after the topoheight prefix)
+                    let address = key_str[target_prefix.len()..].to_string();
+                    return Some((key, address));
                 }
             }
             None
         })
         .collect();
 
-        // Delete the collected keys
-        for key in keys_to_delete {
+        // Delete the collected keys and restore energy_pointer
+        for (key, address) in keys_to_delete {
             Self::remove_from_disk_internal(
                 &self.db,
                 self.snapshot.as_mut(),
                 Column::VersionedEnergyResources,
                 &key,
             )?;
+
+            // Restore Account.energy_pointer (follow nonce provider pattern)
+            if let Ok(addr) = Address::from_string(&address) {
+                let account_key: PublicKey = addr.into();
+                if let Ok(mut account) = self.get_account_type(&account_key) {
+                    if account
+                        .energy_pointer
+                        .is_some_and(|pointer| pointer >= topoheight)
+                    {
+                        // Find previous valid topoheight for this account
+                        let prev_topo = self
+                            .find_previous_energy_topoheight(&address, topoheight, is_mainnet)
+                            .await?;
+                        account.energy_pointer = prev_topo;
+
+                        if log::log_enabled!(log::Level::Trace) {
+                            trace!(
+                                "updating account {} energy_pointer to {:?}",
+                                address,
+                                account.energy_pointer
+                            );
+                        }
+
+                        Self::insert_into_disk_internal(
+                            &self.db,
+                            self.snapshot.as_mut(),
+                            Column::Account,
+                            account_key.as_bytes(),
+                            &account,
+                        )?;
+                    }
+                }
+            }
         }
 
         Ok(())
@@ -81,41 +117,77 @@ impl VersionedEnergyProvider for RocksStorage {
             trace!("delete versioned energy above topoheight {}", topoheight);
         }
 
-        // Collect keys to delete first (to avoid borrowing issues during iteration)
-        let keys_to_delete: Vec<Vec<u8>> = Self::iter_owned_internal::<Vec<u8>, ()>(
-            &self.db,
-            self.snapshot.as_ref(),
-            IteratorMode::Start,
-            Column::VersionedEnergyResources,
-        )?
-        .filter_map(|res| {
-            let (key, _) = res.ok()?;
-            // Parse key as string "{topo}_{address}" to extract topoheight
-            if let Ok(key_str) = std::str::from_utf8(&key) {
-                if let Some(underscore_pos) = key_str.find('_') {
-                    if let Ok(key_topo) = key_str[..underscore_pos].parse::<TopoHeight>() {
-                        if key_topo > topoheight {
-                            return Some(key);
+        let is_mainnet = self.is_mainnet();
+
+        // Collect keys to delete with their topoheight and address
+        let keys_to_delete: Vec<(Vec<u8>, TopoHeight, String)> =
+            Self::iter_owned_internal::<Vec<u8>, ()>(
+                &self.db,
+                self.snapshot.as_ref(),
+                IteratorMode::Start,
+                Column::VersionedEnergyResources,
+            )?
+            .filter_map(|res| {
+                let (key, _) = res.ok()?;
+                // Parse key as string "{topo}_{address}" to extract topoheight and address
+                if let Ok(key_str) = std::str::from_utf8(&key) {
+                    if let Some(underscore_pos) = key_str.find('_') {
+                        if let Ok(key_topo) = key_str[..underscore_pos].parse::<TopoHeight>() {
+                            if key_topo > topoheight {
+                                let address = key_str[underscore_pos + 1..].to_string();
+                                return Some((key, key_topo, address));
+                            }
                         }
                     }
                 }
-            }
-            None
-        })
-        .collect();
+                None
+            })
+            .collect();
 
-        // Delete the collected keys
-        for key in keys_to_delete {
+        // Delete the collected keys and restore energy_pointer
+        for (key, key_topo, address) in keys_to_delete {
             Self::remove_from_disk_internal(
                 &self.db,
                 self.snapshot.as_mut(),
                 Column::VersionedEnergyResources,
                 &key,
             )?;
-        }
 
-        // NOTE: Account energy_pointer cleanup is handled separately by the reorg
-        // mechanism when it resets account state to previous topoheight
+            // Restore Account.energy_pointer (follow nonce provider pattern)
+            if let Ok(addr) = Address::from_string(&address) {
+                let account_key: PublicKey = addr.into();
+                if let Ok(mut account) = self.get_account_type(&account_key) {
+                    // Update if pointer is None or above topoheight
+                    if account.energy_pointer.is_none_or(|v| v > topoheight) {
+                        // Find the highest valid topoheight <= target topoheight
+                        let prev_topo = self
+                            .find_previous_energy_topoheight(&address, key_topo, is_mainnet)
+                            .await?;
+                        let filtered = prev_topo.filter(|v| *v <= topoheight);
+
+                        if filtered != account.energy_pointer {
+                            account.energy_pointer = filtered;
+
+                            if log::log_enabled!(log::Level::Trace) {
+                                trace!(
+                                    "updating account {} energy_pointer to {:?}",
+                                    address,
+                                    account.energy_pointer
+                                );
+                            }
+
+                            Self::insert_into_disk_internal(
+                                &self.db,
+                                self.snapshot.as_mut(),
+                                Column::Account,
+                                account_key.as_bytes(),
+                                &account,
+                            )?;
+                        }
+                    }
+                }
+            }
+        }
 
         Ok(())
     }
@@ -591,5 +663,45 @@ impl RocksStorage {
         }
 
         Ok(None)
+    }
+
+    /// Find the most recent energy topoheight before the given topoheight for an account
+    ///
+    /// Used during reorg to restore Account.energy_pointer to the previous valid state.
+    /// Key format: "{topoheight}_{address}"
+    async fn find_previous_energy_topoheight(
+        &self,
+        address: &str,
+        before_topoheight: TopoHeight,
+        _is_mainnet: bool,
+    ) -> Result<Option<TopoHeight>, BlockchainError> {
+        let mut best_topo: Option<TopoHeight> = None;
+
+        for result in Self::iter_owned_internal::<Vec<u8>, ()>(
+            &self.db,
+            self.snapshot.as_ref(),
+            IteratorMode::Start,
+            Column::VersionedEnergyResources,
+        )? {
+            let (key, _) = result?;
+            if let Ok(key_str) = std::str::from_utf8(&key) {
+                if let Some(underscore_pos) = key_str.find('_') {
+                    let key_address = &key_str[underscore_pos + 1..];
+                    if key_address == address {
+                        if let Ok(key_topo) = key_str[..underscore_pos].parse::<TopoHeight>() {
+                            if key_topo < before_topoheight {
+                                match best_topo {
+                                    Some(best) if key_topo > best => best_topo = Some(key_topo),
+                                    None => best_topo = Some(key_topo),
+                                    _ => {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(best_topo)
     }
 }

@@ -3364,7 +3364,8 @@ impl Transaction {
             .get_global_energy_state()
             .await
             .map_err(VerificationError::State)?;
-        let now_ms = state.get_verification_timestamp().saturating_mul(1000);
+        // get_verification_timestamp() returns milliseconds directly
+        let now_ms = state.get_verification_timestamp();
 
         let free_available = sender_energy.calculate_free_energy_available(now_ms);
         let frozen_available = sender_energy
