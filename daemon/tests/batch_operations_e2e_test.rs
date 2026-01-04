@@ -4,6 +4,7 @@
 //! - ActivateAccounts: Batch account activation (up to 500 accounts)
 //! - BatchDelegateResource: Batch delegation to multiple receivers
 //! - ActivateAndDelegate: Combined activation and delegation
+#![allow(clippy::useless_vec)]
 //!
 //! These operations are designed for exchanges and large dApps.
 
@@ -2400,7 +2401,7 @@ mod batch_delegation_duplicate_tests {
     #[test]
     fn test_batch_delegation_detects_duplicate_receivers() {
         // Setup accounts
-        let sender_keypair = KeyPair::new();
+        let _sender_keypair = KeyPair::new();
         let receiver1 = KeyPair::new().get_public_key().compress();
 
         // Create batch with duplicate receiver

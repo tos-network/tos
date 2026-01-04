@@ -6849,7 +6849,7 @@ mod tests {
             let lock_period = 365u32;
 
             // Validation rule: lock=false should have lock_period=0
-            let is_consistent = !(!lock && lock_period > 0);
+            let is_consistent = lock || lock_period == 0;
             assert!(
                 !is_consistent,
                 "lock=false with period>0 should be detected as inconsistent"
@@ -7951,8 +7951,10 @@ mod tests {
         /// Test 65.3: Boundary at limit
         #[test]
         fn test_65_3_boundary() {
-            assert!(128 <= BINDREFERRER_EXTRA_DATA_LIMIT);
-            assert!(129 > BINDREFERRER_EXTRA_DATA_LIMIT);
+            let at_limit: usize = 128;
+            let over_limit: usize = 129;
+            assert!(at_limit <= BINDREFERRER_EXTRA_DATA_LIMIT);
+            assert!(over_limit > BINDREFERRER_EXTRA_DATA_LIMIT);
         }
 
         /// Test 65.4: None extra_data is valid
@@ -7961,7 +7963,7 @@ mod tests {
             let extra_data: Option<Vec<u8>> = None;
             let is_valid = extra_data
                 .as_ref()
-                .map_or(true, |d| d.len() <= BINDREFERRER_EXTRA_DATA_LIMIT);
+                .is_none_or(|d| d.len() <= BINDREFERRER_EXTRA_DATA_LIMIT);
             assert!(is_valid);
         }
 
@@ -8141,8 +8143,10 @@ mod tests {
         /// Test 68.3: Boundary at limit
         #[test]
         fn test_68_3_boundary() {
-            assert!(1_000_000 <= MAX_BYTES_SIZE);
-            assert!(1_000_001 > MAX_BYTES_SIZE);
+            let at_limit: usize = 1_000_000;
+            let over_limit: usize = 1_000_001;
+            assert!(at_limit <= MAX_BYTES_SIZE);
+            assert!(over_limit > MAX_BYTES_SIZE);
         }
 
         /// Test 68.4: Zero length valid
@@ -8532,7 +8536,7 @@ mod tests {
 
             // TX2 using same receivers should see them as unregistered
             assert!(
-                !registered_receivers.contains(&"r1".to_string()),
+                !registered_receivers.contains("r1"),
                 "r1 should not be registered after TX1 failure"
             );
         }
@@ -8685,10 +8689,9 @@ mod tests {
             let _deferred_increment_ux = true; // Better UX but complex
 
             // Current choice: eager increment for security
-            assert!(
-                true,
-                "Trade-off documented: security over UX for nonce handling"
-            );
+            // Trade-off documented: security over UX for nonce handling
+            // This design decision ensures nonces are immediately consumed
+            // to prevent any potential replay attacks.
         }
     }
 
@@ -8739,9 +8742,9 @@ mod tests {
             let mut versioned_energy: BTreeMap<u64, AccountEnergy> = BTreeMap::new();
 
             // Create versions 0, 1, 2
-            for i in 0..3 {
+            for i in 0..3u64 {
                 let mut energy = AccountEnergy::new();
-                energy.frozen_balance = (i + 1) as u64 * 100 * COIN_VALUE;
+                energy.frozen_balance = (i + 1) * 100 * COIN_VALUE;
                 versioned_energy.insert(i, energy);
             }
 
@@ -8788,10 +8791,8 @@ mod tests {
 
             // Keep the last version before prune point if it existed
             if let Some((k, v)) = last_before_prune {
-                if !versioned_energy.contains_key(&k) {
-                    // In real impl, we'd keep the last version for continuity
-                    versioned_energy.insert(k, v);
-                }
+                // In real impl, we'd keep the last version for continuity
+                versioned_energy.entry(k).or_insert(v);
             }
 
             // Verify old versions are pruned
@@ -8808,9 +8809,9 @@ mod tests {
             let mut versioned_energy: BTreeMap<u64, AccountEnergy> = BTreeMap::new();
 
             // Create versions
-            for i in 0..5 {
+            for i in 0..5u64 {
                 let mut energy = AccountEnergy::new();
-                energy.frozen_balance = (i + 1) as u64 * 100 * COIN_VALUE;
+                energy.frozen_balance = (i + 1) * 100 * COIN_VALUE;
                 versioned_energy.insert(i, energy);
             }
 

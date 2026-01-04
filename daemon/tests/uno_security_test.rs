@@ -1053,7 +1053,7 @@ async fn test_security_uno_balance_version_edge_cases() -> Result<(), Blockchain
 
     // Verify balance decryption
     let balance = versioned.get_mut_balance().decompressed()?;
-    let decrypted = alice.get_private_key().decrypt_to_point(&balance);
+    let decrypted = alice.get_private_key().decrypt_to_point(balance);
     assert_eq!(
         decrypted,
         Scalar::from(200 * COIN_VALUE) * *G,

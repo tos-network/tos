@@ -513,6 +513,21 @@ impl<'a> tos_common::transaction::verify::BlockchainVerificationState<'a, ()>
     ) -> Result<tos_common::account::GlobalEnergyState, ()> {
         Ok(tos_common::account::GlobalEnergyState::default())
     }
+
+    // Stub implementations for pending weight tracking (benchmark only)
+    fn record_pending_weight_change(&mut self, _delta: i64) {}
+
+    fn get_pending_weight_delta(&self) -> i64 {
+        0
+    }
+
+    fn record_pending_withdrawal(&mut self, _sender: &CompressedPublicKey) {}
+
+    fn has_pending_withdrawal(&self, _sender: &CompressedPublicKey) -> bool {
+        false
+    }
+
+    fn clear_pending_unfreezes(&mut self, _sender: &CompressedPublicKey) {}
 }
 
 // -------------------------------------------------------------------------------------------------

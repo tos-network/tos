@@ -441,6 +441,9 @@ impl Transaction {
                             "Freeze amount must be at least 1 TOS"
                         )));
                     }
+
+                    // Record pending weight increase for mempool energy limit consistency
+                    state.record_pending_weight_change(*amount as i64);
                 }
                 EnergyPayload::UnfreezeTos { amount } => {
                     if *amount == 0 {
@@ -505,6 +508,9 @@ impl Transaction {
                         .record_pending_unfreeze(sender, *amount)
                         .await
                         .map_err(VerificationError::State)?;
+
+                    // Record pending weight decrease for mempool energy limit consistency
+                    state.record_pending_weight_change(-(*amount as i64));
                 }
                 EnergyPayload::WithdrawExpireUnfreeze => {
                     // Check that there are unfreezing entries to withdraw
@@ -558,6 +564,23 @@ impl Transaction {
                         return Err(VerificationError::AnyError(anyhow!(
                             "No pending unfreeze entries to cancel"
                         )));
+                    }
+
+                    // Restore weight from pending unfreezes being cancelled
+                    // (they had decreased weight, now we're undoing that)
+                    let pending_amount = state.get_pending_unfreeze_amount(sender);
+                    if pending_amount > 0 {
+                        state.record_pending_weight_change(pending_amount as i64);
+                    }
+
+                    // Also restore weight from storage unfreezes being cancelled
+                    let storage_unfreeze_total: u64 = sender_energy
+                        .unfreezing_list
+                        .iter()
+                        .map(|e| e.unfreeze_amount)
+                        .sum();
+                    if storage_unfreeze_total > 0 {
+                        state.record_pending_weight_change(storage_unfreeze_total as i64);
                     }
 
                     // Clear pending unfreezes after cancellation
@@ -1272,6 +1295,14 @@ impl Transaction {
                 *current = current
                     .checked_add(payload.get_total_amount())
                     .ok_or(VerificationError::Overflow)?;
+
+                // Count max possible new accounts (levels) for energy calculation
+                // This is conservative - apply will count actual new accounts
+                // Only applies to TOS rewards (non-TOS assets don't have account creation fee)
+                if *payload.get_asset() == TOS_ASSET {
+                    new_accounts_created =
+                        new_accounts_created.saturating_add(payload.get_levels() as u64);
+                }
             }
             TransactionType::UnoTransfers(_)
             | TransactionType::ShieldTransfers(_)
@@ -2277,6 +2308,9 @@ impl Transaction {
                             "Freeze amount must be at least 1 TOS"
                         )));
                     }
+
+                    // Record pending weight increase for mempool energy limit consistency
+                    state.record_pending_weight_change(*amount as i64);
                 }
                 EnergyPayload::UnfreezeTos { amount } => {
                     if *amount == 0 {
@@ -2341,6 +2375,9 @@ impl Transaction {
                         .record_pending_unfreeze(sender, *amount)
                         .await
                         .map_err(VerificationError::State)?;
+
+                    // Record pending weight decrease for mempool energy limit consistency
+                    state.record_pending_weight_change(-(*amount as i64));
                 }
                 EnergyPayload::WithdrawExpireUnfreeze => {
                     // Check that there are unfreezing entries to withdraw
@@ -2394,6 +2431,23 @@ impl Transaction {
                         return Err(VerificationError::AnyError(anyhow!(
                             "No pending unfreeze entries to cancel"
                         )));
+                    }
+
+                    // Restore weight from pending unfreezes being cancelled
+                    // (they had decreased weight, now we're undoing that)
+                    let pending_amount = state.get_pending_unfreeze_amount(sender);
+                    if pending_amount > 0 {
+                        state.record_pending_weight_change(pending_amount as i64);
+                    }
+
+                    // Also restore weight from storage unfreezes being cancelled
+                    let storage_unfreeze_total: u64 = sender_energy
+                        .unfreezing_list
+                        .iter()
+                        .map(|e| e.unfreeze_amount)
+                        .sum();
+                    if storage_unfreeze_total > 0 {
+                        state.record_pending_weight_change(storage_unfreeze_total as i64);
                     }
 
                     // Clear pending unfreezes after cancellation
@@ -3302,6 +3356,14 @@ impl Transaction {
                 *current = current
                     .checked_add(payload.get_total_amount())
                     .ok_or(VerificationError::Overflow)?;
+
+                // Count max possible new accounts (levels) for energy calculation
+                // This is conservative - apply will count actual new accounts
+                // Only applies to TOS rewards (non-TOS assets don't have account creation fee)
+                if *payload.get_asset() == TOS_ASSET {
+                    new_accounts_created =
+                        new_accounts_created.saturating_add(payload.get_levels() as u64);
+                }
             }
             TransactionType::UnoTransfers(_) => {
                 // UNO transfers spend from encrypted balances
@@ -3838,6 +3900,14 @@ impl Transaction {
                 *current = current
                     .checked_add(payload.get_total_amount())
                     .ok_or(VerificationError::Overflow)?;
+
+                // Count max possible new accounts (levels) for energy calculation
+                // This is conservative - apply will count actual new accounts
+                // Only applies to TOS rewards (non-TOS assets don't have account creation fee)
+                if *payload.get_asset() == TOS_ASSET {
+                    new_accounts_created =
+                        new_accounts_created.saturating_add(payload.get_levels() as u64);
+                }
             }
             TransactionType::UnoTransfers(_) => {
                 // UNO transfers spend from encrypted balances
@@ -4350,19 +4420,20 @@ impl Transaction {
                             .map_err(VerificationError::State)?;
 
                         // Apply account creation fee for new accounts
-                        // Note: Only check is_registered here, not is_pending
-                        // Verification already counted the fee in spending_per_asset
-                        // and recorded pending. Apply should burn the fee unconditionally
-                        // for unregistered accounts (the fee was already validated).
+                        // Check both is_registered and is_pending to prevent double-burn
+                        // when multiple delegations target the same new account in one block
                         let is_registered = state
                             .is_account_registered(receiver)
                             .await
                             .map_err(VerificationError::State)?;
-                        if !is_registered {
+                        let is_pending = state.is_pending_registration(receiver);
+                        if !is_registered && !is_pending {
                             state
                                 .add_burned_coins(FEE_PER_ACCOUNT_CREATION)
                                 .await
                                 .map_err(VerificationError::State)?;
+                            // Record as pending to prevent double-burn from later TXs
+                            state.record_pending_registration(receiver);
                             new_accounts_created += 1;
                         }
                     }
@@ -4491,18 +4562,21 @@ impl Transaction {
                         let mut activated_count = 0u64;
 
                         for account in accounts {
-                            // Note: Only check is_registered, not is_pending
-                            // Verification already counted the fee in spending_per_asset
-                            // and recorded pending. Apply should activate unregistered accounts.
+                            // Check both is_registered and is_pending to prevent double-burn
+                            // when multiple TXs target the same new account in one block
                             let is_registered = state
                                 .is_account_registered(account)
                                 .await
                                 .map_err(VerificationError::State)?;
+                            let is_pending = state.is_pending_registration(account);
 
-                            if is_registered {
-                                // Skip already-activated accounts
+                            if is_registered || is_pending {
+                                // Skip already-activated or pending accounts
                                 if log::log_enabled!(log::Level::Debug) {
-                                    debug!("Skipping account: {:?} (already registered)", account);
+                                    debug!(
+                                        "Skipping account: {:?} (already registered or pending)",
+                                        account
+                                    );
                                 }
                                 continue;
                             }
@@ -4519,6 +4593,8 @@ impl Transaction {
                             // Balance stays at 0 - we're just activating the account
                             let _ = balance;
 
+                            // Record as pending to prevent double-burn from later TXs
+                            state.record_pending_registration(account);
                             activated_count += 1;
                             new_accounts_created += 1;
 
@@ -4670,17 +4746,20 @@ impl Transaction {
                                 .map_err(VerificationError::State)?;
 
                             // Apply account creation fee for new accounts
-                            // Note: Only check is_registered, not is_pending
-                            // Verification already counted the fee and recorded pending
+                            // Check both is_registered and is_pending to prevent double-burn
+                            // when multiple delegations target the same new account in one block
                             let is_registered = state
                                 .is_account_registered(receiver)
                                 .await
                                 .map_err(VerificationError::State)?;
-                            if !is_registered {
+                            let is_pending = state.is_pending_registration(receiver);
+                            if !is_registered && !is_pending {
                                 state
                                     .add_burned_coins(FEE_PER_ACCOUNT_CREATION)
                                     .await
                                     .map_err(VerificationError::State)?;
+                                // Record as pending to prevent double-burn from later TXs
+                                state.record_pending_registration(receiver);
                                 new_accounts_created += 1;
                             }
                         }
@@ -4733,15 +4812,15 @@ impl Transaction {
                         for item in items {
                             let account = &item.account;
 
-                            // Note: Only check is_registered, not is_pending
-                            // Verification already counted the fee in spending_per_asset
-                            // and recorded pending. Apply should activate unregistered accounts.
+                            // Check both is_registered and is_pending to prevent double-burn
+                            // when multiple TXs target the same new account in one block
                             let is_registered = state
                                 .is_account_registered(account)
                                 .await
                                 .map_err(VerificationError::State)?;
+                            let is_pending = state.is_pending_registration(account);
 
-                            if !is_registered {
+                            if !is_registered && !is_pending {
                                 // Activate the account by creating balance entry
                                 let balance = state
                                     .get_receiver_balance(
@@ -4753,6 +4832,8 @@ impl Transaction {
                                 // Balance stays at 0 - we're just activating the account
                                 let _ = balance;
 
+                                // Record as pending to prevent double-burn from later TXs
+                                state.record_pending_registration(account);
                                 activated_count += 1;
 
                                 if log::log_enabled!(log::Level::Debug) {
@@ -4760,7 +4841,7 @@ impl Transaction {
                                 }
                             } else if log::log_enabled!(log::Level::Debug) {
                                 debug!(
-                                    "Skipping activation for account: {:?} (already registered)",
+                                    "Skipping activation for account: {:?} (already registered or pending)",
                                     account
                                 );
                             }
@@ -6285,6 +6366,7 @@ impl Transaction {
                 *current = current
                     .checked_add(payload.get_total_amount())
                     .ok_or(VerificationError::Overflow)?;
+                // Note: new_accounts_created tracking is done in verify phase, not in apply_without_verify
             }
             TransactionType::UnoTransfers(_) => {
                 // UNO transfers spend from encrypted balances

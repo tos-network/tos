@@ -916,7 +916,8 @@ async fn test_batch_referral_reward_refunds_remainder_e2e() {
     let payload =
         BatchReferralRewardPayload::new(TOS_ASSET, alice_pk.clone(), 1000, 2, vec![2500, 1500]);
     let tx_type = TransactionTypeBuilder::BatchReferralReward(payload);
-    let fee_builder = FeeBuilder::Value(0);
+    // Provide sufficient fee_limit for energy model (batch referral + 2 levels as potential new accounts)
+    let fee_builder = FeeBuilder::Value(10_000_000);
     let builder = TransactionBuilder::new(
         TxVersion::T0,
         0,
@@ -927,7 +928,7 @@ async fn test_batch_referral_reward_refunds_remainder_e2e() {
     );
 
     let mut account_state = TestAccountState::new();
-    account_state.set_balance(TOS_ASSET, 10_000);
+    account_state.set_balance(TOS_ASSET, 100_000_000);
     account_state.set_nonce(0);
 
     let tx = builder.build(&mut account_state, &alice).unwrap();
@@ -940,7 +941,7 @@ async fn test_batch_referral_reward_refunds_remainder_e2e() {
     assert_eq!(tx.get_source(), &alice_pk);
 
     let mut chain_state = TestChainState::new();
-    chain_state.set_balance(&alice_pk, 10_000);
+    chain_state.set_balance(&alice_pk, 100_000_000);
     chain_state.set_balance(&bob_pk, 0);
     chain_state.set_balance(&charlie_pk, 0);
     chain_state.set_nonce(&alice_pk, 0);
@@ -959,9 +960,18 @@ async fn test_batch_referral_reward_refunds_remainder_e2e() {
     let bob_balance = chain_state.get_balance(&bob_pk);
     let charlie_balance = chain_state.get_balance(&charlie_pk);
 
+    // fee_refund = fee_limit - burned (energy model refunds unused fee)
+    let fee_limit = 10_000_000u64;
+    let fee_refund = fee_limit.saturating_sub(chain_state.burned);
+
+    // alice_receiver should include: remainder (600) + fee_refund
+    // Remainder = 1000 - 250 (bob) - 150 (charlie) = 600
+    let expected_remainder = 600u64;
+    let expected_alice_receiver = fee_refund + expected_remainder;
     assert_eq!(
-        alice_receiver, 600,
-        "Remainder should be credited to sender"
+        alice_receiver, expected_alice_receiver,
+        "Remainder should be credited to sender (got {}, expected {} = fee_refund {} + remainder {})",
+        alice_receiver, expected_alice_receiver, fee_refund, expected_remainder
     );
     assert_eq!(bob_balance, 250, "Bob should receive 25%");
     assert_eq!(charlie_balance, 150, "Charlie should receive 15%");
