@@ -2196,4 +2196,199 @@ mod tests {
         assert_eq!(resource.freeze_records[0].duration, duration_7);
         assert_eq!(resource.freeze_records[0].energy_gained, 14);
     }
+
+    // ==================== WithdrawUnfrozen Tests ====================
+
+    #[test]
+    fn test_withdraw_no_pending() {
+        let mut resource = EnergyResource::new();
+
+        // No pending unfreezes - withdraw should return 0
+        let withdrawn = resource.withdraw_unfrozen(1000);
+        assert_eq!(withdrawn, 0);
+        assert_eq!(resource.pending_unfreezes.len(), 0);
+    }
+
+    #[test]
+    fn test_withdraw_none_expired() {
+        let mut resource = EnergyResource::new();
+        let freeze_topoheight = 1000;
+        let duration = FreezeDuration::new(7).unwrap();
+        let unlock_topoheight = freeze_topoheight + duration.duration_in_blocks();
+        let cooldown = crate::config::UNFREEZE_COOLDOWN_BLOCKS;
+
+        // Freeze and unfreeze to create pending
+        resource.freeze_tos_for_energy(200000000, duration, freeze_topoheight);
+        resource
+            .unfreeze_tos(100000000, unlock_topoheight, None)
+            .unwrap();
+        resource
+            .unfreeze_tos(100000000, unlock_topoheight, None)
+            .unwrap();
+
+        assert_eq!(resource.pending_unfreezes.len(), 2);
+
+        // Try to withdraw before any have expired
+        let before_expire = unlock_topoheight + cooldown - 1;
+        let withdrawn = resource.withdraw_unfrozen(before_expire);
+
+        assert_eq!(withdrawn, 0);
+        assert_eq!(resource.pending_unfreezes.len(), 2); // All still pending
+    }
+
+    #[test]
+    fn test_withdraw_single_expired() {
+        let mut resource = EnergyResource::new();
+        let freeze_topoheight = 1000;
+        let duration = FreezeDuration::new(7).unwrap();
+        let unlock_topoheight = freeze_topoheight + duration.duration_in_blocks();
+        let cooldown = crate::config::UNFREEZE_COOLDOWN_BLOCKS;
+
+        // Freeze and unfreeze
+        resource.freeze_tos_for_energy(100000000, duration, freeze_topoheight);
+        resource
+            .unfreeze_tos(100000000, unlock_topoheight, None)
+            .unwrap();
+
+        assert_eq!(resource.pending_unfreezes.len(), 1);
+
+        // Withdraw after cooldown
+        let after_expire = unlock_topoheight + cooldown;
+        let withdrawn = resource.withdraw_unfrozen(after_expire);
+
+        assert_eq!(withdrawn, 100000000); // 1 TOS
+        assert_eq!(resource.pending_unfreezes.len(), 0);
+    }
+
+    #[test]
+    fn test_withdraw_partial_expired() {
+        let mut resource = EnergyResource::new();
+        let freeze_topoheight = 1000;
+        let duration = FreezeDuration::new(7).unwrap();
+        let unlock_topoheight = freeze_topoheight + duration.duration_in_blocks();
+        let cooldown = crate::config::UNFREEZE_COOLDOWN_BLOCKS;
+
+        // Freeze 3 TOS
+        resource.freeze_tos_for_energy(300000000, duration, freeze_topoheight);
+
+        // Create 3 pending unfreezes at different times
+        // First unfreeze at unlock_topoheight
+        resource
+            .unfreeze_tos(100000000, unlock_topoheight, None)
+            .unwrap();
+
+        // Second unfreeze 100 blocks later
+        resource
+            .unfreeze_tos(100000000, unlock_topoheight + 100, None)
+            .unwrap();
+
+        // Third unfreeze 200 blocks later
+        resource
+            .unfreeze_tos(100000000, unlock_topoheight + 200, None)
+            .unwrap();
+
+        assert_eq!(resource.pending_unfreezes.len(), 3);
+
+        // Withdraw when only first has expired (after first cooldown, before second)
+        let partial_expire = unlock_topoheight + cooldown + 50;
+        let withdrawn = resource.withdraw_unfrozen(partial_expire);
+
+        assert_eq!(withdrawn, 100000000); // Only first 1 TOS expired
+        assert_eq!(resource.pending_unfreezes.len(), 2); // 2 still pending
+    }
+
+    #[test]
+    fn test_withdraw_all_expired() {
+        let mut resource = EnergyResource::new();
+        let freeze_topoheight = 1000;
+        let duration = FreezeDuration::new(7).unwrap();
+        let unlock_topoheight = freeze_topoheight + duration.duration_in_blocks();
+        let cooldown = crate::config::UNFREEZE_COOLDOWN_BLOCKS;
+
+        // Freeze 3 TOS
+        resource.freeze_tos_for_energy(300000000, duration, freeze_topoheight);
+
+        // Create 3 pending unfreezes
+        resource
+            .unfreeze_tos(100000000, unlock_topoheight, None)
+            .unwrap();
+        resource
+            .unfreeze_tos(100000000, unlock_topoheight + 100, None)
+            .unwrap();
+        resource
+            .unfreeze_tos(100000000, unlock_topoheight + 200, None)
+            .unwrap();
+
+        assert_eq!(resource.pending_unfreezes.len(), 3);
+
+        // Withdraw when all have expired
+        let all_expired = unlock_topoheight + 200 + cooldown + 1;
+        let withdrawn = resource.withdraw_unfrozen(all_expired);
+
+        assert_eq!(withdrawn, 300000000); // All 3 TOS
+        assert_eq!(resource.pending_unfreezes.len(), 0);
+    }
+
+    #[test]
+    fn test_withdraw_multiple_times() {
+        let mut resource = EnergyResource::new();
+        let freeze_topoheight = 1000;
+        let duration = FreezeDuration::new(7).unwrap();
+        let unlock_topoheight = freeze_topoheight + duration.duration_in_blocks();
+        let cooldown = crate::config::UNFREEZE_COOLDOWN_BLOCKS;
+
+        // Freeze 2 TOS
+        resource.freeze_tos_for_energy(200000000, duration, freeze_topoheight);
+
+        // Create 2 pending unfreezes at different times
+        resource
+            .unfreeze_tos(100000000, unlock_topoheight, None)
+            .unwrap();
+        resource
+            .unfreeze_tos(100000000, unlock_topoheight + 1000, None)
+            .unwrap();
+
+        assert_eq!(resource.pending_unfreezes.len(), 2);
+
+        // First withdraw - only first expired
+        let first_withdraw_time = unlock_topoheight + cooldown;
+        let first_withdrawn = resource.withdraw_unfrozen(first_withdraw_time);
+        assert_eq!(first_withdrawn, 100000000);
+        assert_eq!(resource.pending_unfreezes.len(), 1);
+
+        // Second withdraw - second now expired
+        let second_withdraw_time = unlock_topoheight + 1000 + cooldown;
+        let second_withdrawn = resource.withdraw_unfrozen(second_withdraw_time);
+        assert_eq!(second_withdrawn, 100000000);
+        assert_eq!(resource.pending_unfreezes.len(), 0);
+    }
+
+    #[test]
+    fn test_withdraw_idempotent() {
+        let mut resource = EnergyResource::new();
+        let freeze_topoheight = 1000;
+        let duration = FreezeDuration::new(7).unwrap();
+        let unlock_topoheight = freeze_topoheight + duration.duration_in_blocks();
+        let cooldown = crate::config::UNFREEZE_COOLDOWN_BLOCKS;
+
+        // Freeze and unfreeze
+        resource.freeze_tos_for_energy(100000000, duration, freeze_topoheight);
+        resource
+            .unfreeze_tos(100000000, unlock_topoheight, None)
+            .unwrap();
+
+        let after_expire = unlock_topoheight + cooldown;
+
+        // First withdraw
+        let first = resource.withdraw_unfrozen(after_expire);
+        assert_eq!(first, 100000000);
+
+        // Second withdraw at same time - should return 0
+        let second = resource.withdraw_unfrozen(after_expire);
+        assert_eq!(second, 0);
+
+        // Third withdraw later - still 0
+        let third = resource.withdraw_unfrozen(after_expire + 1000);
+        assert_eq!(third, 0);
+    }
 }
