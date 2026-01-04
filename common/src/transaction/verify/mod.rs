@@ -510,6 +510,14 @@ impl Transaction {
                     // Check that there are unfreezing entries to withdraw
                     // The expiry check uses verification timestamp for deterministic validation
                     let sender = self.get_source();
+
+                    // Check if a withdrawal is already pending in mempool
+                    if state.has_pending_withdrawal(sender) {
+                        return Err(VerificationError::AnyError(anyhow!(
+                            "Withdrawal already pending in mempool"
+                        )));
+                    }
+
                     let sender_energy = state
                         .get_account_energy(sender)
                         .await
@@ -532,6 +540,9 @@ impl Transaction {
                             "No expired unfreeze entries to withdraw"
                         )));
                     }
+
+                    // Record pending withdrawal to prevent duplicates
+                    state.record_pending_withdrawal(sender);
                 }
                 EnergyPayload::CancelAllUnfreeze => {
                     // Check that there are pending unfreeze entries to cancel
@@ -548,6 +559,9 @@ impl Transaction {
                             "No pending unfreeze entries to cancel"
                         )));
                     }
+
+                    // Clear pending unfreezes after cancellation
+                    state.clear_pending_unfreezes(sender);
                 }
                 EnergyPayload::DelegateResource {
                     receiver,
@@ -2332,6 +2346,14 @@ impl Transaction {
                     // Check that there are unfreezing entries to withdraw
                     // The expiry check uses verification timestamp for deterministic validation
                     let sender = self.get_source();
+
+                    // Check if a withdrawal is already pending in mempool
+                    if state.has_pending_withdrawal(sender) {
+                        return Err(VerificationError::AnyError(anyhow!(
+                            "Withdrawal already pending in mempool"
+                        )));
+                    }
+
                     let sender_energy = state
                         .get_account_energy(sender)
                         .await
@@ -2354,6 +2376,9 @@ impl Transaction {
                             "No expired unfreeze entries to withdraw"
                         )));
                     }
+
+                    // Record pending withdrawal to prevent duplicates
+                    state.record_pending_withdrawal(sender);
                 }
                 EnergyPayload::CancelAllUnfreeze => {
                     // Check that there are pending unfreeze entries to cancel
@@ -2370,6 +2395,9 @@ impl Transaction {
                             "No pending unfreeze entries to cancel"
                         )));
                     }
+
+                    // Clear pending unfreezes after cancellation
+                    state.clear_pending_unfreezes(sender);
                 }
                 EnergyPayload::DelegateResource {
                     receiver,

@@ -837,10 +837,24 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Mempoo
     }
 
     /// Get the global energy state (Stake 2.0)
+    /// Applies pending weight changes from Freeze/Unfreeze operations in mempool
     async fn get_global_energy_state(
         &mut self,
     ) -> Result<tos_common::account::GlobalEnergyState, BlockchainError> {
-        self.storage.get_global_energy_state().await
+        let mut state = self.storage.get_global_energy_state().await?;
+
+        // Apply pending weight changes from Freeze/Unfreeze/CancelAllUnfreeze
+        if self.pending_weight_delta > 0 {
+            state.total_energy_weight = state
+                .total_energy_weight
+                .saturating_add(self.pending_weight_delta as u64);
+        } else if self.pending_weight_delta < 0 {
+            state.total_energy_weight = state
+                .total_energy_weight
+                .saturating_sub((-self.pending_weight_delta) as u64);
+        }
+
+        Ok(state)
     }
 
     /// Record a pending weight change

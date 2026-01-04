@@ -463,7 +463,8 @@ impl<'a> BlockchainVerificationState<'a, TestError> for BatchTestChainState {
     }
 
     fn get_verification_timestamp(&self) -> u64 {
-        self.block.get_timestamp() / 1000
+        // Block timestamp is already in milliseconds
+        self.block.get_timestamp()
     }
 
     async fn set_multisig_state(

@@ -364,10 +364,10 @@ impl<'a> BlockchainVerificationState<'a, TestError> for TestChainState {
     }
 
     fn get_verification_timestamp(&self) -> u64 {
-        // Use current system time for tests
+        // Use current system time for tests (in milliseconds)
         std::time::SystemTime::now()
             .duration_since(std::time::SystemTime::UNIX_EPOCH)
-            .map(|d| d.as_secs())
+            .map(|d| d.as_millis() as u64)
             .unwrap_or(0)
     }
 

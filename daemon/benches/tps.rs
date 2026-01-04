@@ -356,10 +356,10 @@ impl<'a> tos_common::transaction::verify::BlockchainVerificationState<'a, ()>
     }
 
     fn get_verification_timestamp(&self) -> u64 {
-        // Return current time for benchmarks
+        // Return current time for benchmarks (in milliseconds)
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
+            .map(|d| d.as_millis() as u64)
             .unwrap_or(0)
     }
 
