@@ -617,6 +617,17 @@ impl<'a> BlockchainVerificationState<'a, TestError> for EdgeCaseTestState {
         self.current_time
     }
 
+    fn get_verification_topoheight(&self) -> u64 {
+        1000 // Default topoheight for tests
+    }
+
+    async fn get_recyclable_tos(
+        &mut self,
+        _account: &'a CompressedPublicKey,
+    ) -> Result<u64, TestError> {
+        Ok(0) // No recyclable TOS in KYC edge case tests
+    }
+
     async fn set_multisig_state(
         &mut self,
         _account: &'a CompressedPublicKey,

@@ -749,13 +749,23 @@ impl Transaction {
             TransactionType::Energy(payload) => {
                 match payload {
                     EnergyPayload::FreezeTos { amount, .. } => {
+                        // Expired Freeze Recycling: Only charge balance for non-recyclable portion
+                        let recyclable_tos = state
+                            .get_recyclable_tos(&self.source)
+                            .await
+                            .map_err(VerificationError::State)?;
+
+                        // Only charge for balance portion (amount - recyclable)
+                        let balance_required = amount.saturating_sub(recyclable_tos);
+
                         let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
                         *current = current
-                            .checked_add(*amount)
+                            .checked_add(balance_required)
                             .ok_or(VerificationError::Overflow)?;
                     }
                     EnergyPayload::FreezeTosDelegate { delegatees, .. } => {
                         // Calculate total delegation amount
+                        // Delegation does NOT support recycling - must use full balance
                         let total: u64 = delegatees.iter().map(|d| d.amount).sum();
                         let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
                         *current = current
@@ -2113,13 +2123,23 @@ impl Transaction {
             TransactionType::Energy(payload) => {
                 match payload {
                     EnergyPayload::FreezeTos { amount, .. } => {
+                        // Expired Freeze Recycling: Only charge balance for non-recyclable portion
+                        let recyclable_tos = state
+                            .get_recyclable_tos(&self.source)
+                            .await
+                            .map_err(VerificationError::State)?;
+
+                        // Only charge for balance portion (amount - recyclable)
+                        let balance_required = amount.saturating_sub(recyclable_tos);
+
                         let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
                         *current = current
-                            .checked_add(*amount)
+                            .checked_add(balance_required)
                             .ok_or(VerificationError::Overflow)?;
                     }
                     EnergyPayload::FreezeTosDelegate { delegatees, .. } => {
                         // Calculate total delegation amount
+                        // Delegation does NOT support recycling - must use full balance
                         let total: u64 = delegatees.iter().map(|d| d.amount).sum();
                         let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
                         *current = current
@@ -2487,13 +2507,23 @@ impl Transaction {
             TransactionType::Energy(payload) => {
                 match payload {
                     EnergyPayload::FreezeTos { amount, .. } => {
+                        // Expired Freeze Recycling: Only charge balance for non-recyclable portion
+                        let recyclable_tos = state
+                            .get_recyclable_tos(&self.source)
+                            .await
+                            .map_err(VerificationError::State)?;
+
+                        // Only charge for balance portion (amount - recyclable)
+                        let balance_required = amount.saturating_sub(recyclable_tos);
+
                         let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
                         *current = current
-                            .checked_add(*amount)
+                            .checked_add(balance_required)
                             .ok_or(VerificationError::Overflow)?;
                     }
                     EnergyPayload::FreezeTosDelegate { delegatees, .. } => {
                         // Calculate total delegation amount
+                        // Delegation does NOT support recycling - must use full balance
                         let total: u64 = delegatees.iter().map(|d| d.amount).sum();
                         let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
                         *current = current
@@ -2816,13 +2846,14 @@ impl Transaction {
                             )));
                         }
 
-                        // Freeze TOS for energy - get topoheight from the blockchain state
-                        let topoheight = state.get_block().get_height(); // BlockDAG uses height
-                                                                         // Use network-aware freeze duration (Devnet uses accelerated timing)
+                        // Freeze TOS for energy with expired freeze recycling
+                        // - Prioritizes recycling TOS from expired freeze records
+                        // - Recycled TOS preserves existing energy (no new energy)
+                        // - Only TOS from balance generates new energy
+                        let topoheight = state.get_block().get_height();
                         let network = state.get_network();
-                        energy_resource.freeze_tos_for_energy_with_network(
-                            *amount, *duration, topoheight, &network,
-                        );
+                        let result = energy_resource
+                            .freeze_tos_with_recycling(*amount, *duration, topoheight, &network);
 
                         // Update energy resource in state
                         state
@@ -2831,8 +2862,23 @@ impl Transaction {
                             .map_err(VerificationError::State)?;
 
                         if log::log_enabled!(log::Level::Debug) {
-                            debug!("FreezeTos applied: {} TOS frozen for {} duration, energy gained: {} units",
-                                   amount, duration.name(), (*amount / crate::config::COIN_VALUE) * duration.reward_multiplier());
+                            if result.recycled_tos > 0 {
+                                debug!(
+                                    "FreezeTos applied with recycling: {} TOS total ({} recycled, {} from balance), \
+                                     {} duration, new energy: {}, recycled energy preserved: {}",
+                                    amount,
+                                    result.recycled_tos,
+                                    result.balance_tos,
+                                    duration.name(),
+                                    result.new_energy,
+                                    result.recycled_energy
+                                );
+                            } else {
+                                debug!(
+                                    "FreezeTos applied: {} TOS frozen for {} duration, energy gained: {} units",
+                                    amount, duration.name(), result.new_energy
+                                );
+                            }
                         }
                     }
                     EnergyPayload::FreezeTosDelegate {
@@ -4103,13 +4149,23 @@ impl Transaction {
             TransactionType::Energy(payload) => {
                 match payload {
                     EnergyPayload::FreezeTos { amount, .. } => {
+                        // Expired Freeze Recycling: Only charge balance for non-recyclable portion
+                        let recyclable_tos = state
+                            .get_recyclable_tos(&self.source)
+                            .await
+                            .map_err(VerificationError::State)?;
+
+                        // Only charge for balance portion (amount - recyclable)
+                        let balance_required = amount.saturating_sub(recyclable_tos);
+
                         let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
                         *current = current
-                            .checked_add(*amount)
+                            .checked_add(balance_required)
                             .ok_or(VerificationError::Overflow)?;
                     }
                     EnergyPayload::FreezeTosDelegate { delegatees, .. } => {
                         // Calculate total delegation amount
+                        // Delegation does NOT support recycling - must use full balance
                         let total: u64 = delegatees.iter().map(|d| d.amount).sum();
                         let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
                         *current = current

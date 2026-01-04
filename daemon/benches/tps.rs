@@ -363,6 +363,14 @@ impl<'a> tos_common::transaction::verify::BlockchainVerificationState<'a, ()>
             .unwrap_or(0)
     }
 
+    fn get_verification_topoheight(&self) -> u64 {
+        1000 // Default topoheight for benchmarks
+    }
+
+    async fn get_recyclable_tos(&mut self, _account: &'a CompressedPublicKey) -> Result<u64, ()> {
+        Ok(0) // No recyclable TOS in benchmarks
+    }
+
     async fn set_multisig_state(
         &mut self,
         account: &'a CompressedPublicKey,

@@ -371,6 +371,14 @@ impl<'a> BlockchainVerificationState<'a, TestError> for TestChainState {
             .unwrap_or(0)
     }
 
+    fn get_verification_topoheight(&self) -> u64 {
+        1000 // Default topoheight for tests
+    }
+
+    async fn get_recyclable_tos(&mut self, _account: &'a PublicKey) -> Result<u64, TestError> {
+        Ok(0) // No recyclable TOS in referral tests
+    }
+
     async fn set_multisig_state(
         &mut self,
         _account: &'a PublicKey,

@@ -76,7 +76,9 @@ struct ChainState {
     accounts: HashMap<PublicKey, AccountChainState>,
     multisig: HashMap<PublicKey, MultiSigPayload>,
     contracts: HashMap<Hash, Module>,
+    energy_resources: HashMap<PublicKey, crate::account::EnergyResource>,
     env: Environment,
+    topoheight: u64,
 }
 
 impl ChainState {
@@ -85,7 +87,9 @@ impl ChainState {
             accounts: HashMap::new(),
             multisig: HashMap::new(),
             contracts: HashMap::new(),
+            energy_resources: HashMap::new(),
             env: Environment::new(),
+            topoheight: 1000,
         }
     }
 }
@@ -1428,6 +1432,20 @@ impl<'a> BlockchainVerificationState<'a, TestError> for ChainState {
             .duration_since(std::time::SystemTime::UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0)
+    }
+
+    fn get_verification_topoheight(&self) -> u64 {
+        // Use current topoheight for tests
+        self.topoheight
+    }
+
+    async fn get_recyclable_tos(&mut self, account: &'a PublicKey) -> Result<u64, TestError> {
+        // Get energy resource and calculate recyclable TOS
+        let energy = self.energy_resources.get(account);
+        let recyclable = energy
+            .map(|e| e.get_recyclable_tos(self.topoheight))
+            .unwrap_or(0);
+        Ok(recyclable)
     }
 
     async fn set_multisig_state(

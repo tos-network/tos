@@ -111,6 +111,22 @@ pub trait BlockchainVerificationState<'a, E> {
     /// flexibility for mempool operations.
     fn get_verification_timestamp(&self) -> u64;
 
+    /// Get the topoheight to use for verification
+    ///
+    /// For block validation: returns the block's topoheight
+    /// For mempool verification: returns current chain height
+    ///
+    /// Used for checking expired freeze records during balance verification.
+    fn get_verification_topoheight(&self) -> u64;
+
+    /// Get the recyclable TOS amount from expired freeze records
+    ///
+    /// Used during balance verification to determine how much TOS can be
+    /// recycled from expired freeze records instead of requiring fresh balance.
+    ///
+    /// Returns 0 if the account has no energy resource or no expired records.
+    async fn get_recyclable_tos(&mut self, account: &'a CompressedPublicKey) -> Result<u64, E>;
+
     /// Set the multisig state for an account
     async fn set_multisig_state(
         &mut self,

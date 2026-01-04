@@ -175,6 +175,16 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError>
         self.inner.get_verification_timestamp()
     }
 
+    /// Get the topoheight to use for verification (delegates to inner)
+    fn get_verification_topoheight(&self) -> u64 {
+        self.inner.get_verification_topoheight()
+    }
+
+    /// Get the recyclable TOS amount from expired freeze records (delegates to inner)
+    async fn get_recyclable_tos(&mut self, account: &'a PublicKey) -> Result<u64, BlockchainError> {
+        self.inner.get_recyclable_tos(account).await
+    }
+
     async fn set_multisig_state(
         &mut self,
         account: &'a PublicKey,

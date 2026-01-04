@@ -408,6 +408,25 @@ impl Serializer for PendingUnfreeze {
     }
 }
 
+/// Result of freeze operation with recycling
+///
+/// # Fields
+/// - `new_energy`: Energy gained from balance portion only (recycled TOS doesn't generate new energy)
+/// - `recycled_tos`: Amount of TOS recycled from expired freeze records
+/// - `balance_tos`: Amount of TOS taken from available balance
+/// - `recycled_energy`: Energy preserved from recycled expired records
+#[derive(Debug, Clone, Default)]
+pub struct FreezeWithRecyclingResult {
+    /// New energy gained (only from balance portion, not recycled)
+    pub new_energy: u64,
+    /// TOS recycled from expired records
+    pub recycled_tos: u64,
+    /// TOS taken from balance
+    pub balance_tos: u64,
+    /// Energy preserved from recycled records
+    pub recycled_energy: u64,
+}
+
 /// Energy resource management for TOS
 /// Enhanced with TRON-style freeze duration and reward multiplier system
 ///
@@ -510,6 +529,16 @@ impl EnergyResource {
         self.pending_unfreezes.len() < crate::config::MAX_PENDING_UNFREEZES
     }
 
+    /// Get total recyclable TOS from expired freeze records
+    /// Returns the sum of all expired self-freeze record amounts
+    pub fn get_recyclable_tos(&self, current_topoheight: TopoHeight) -> u64 {
+        self.freeze_records
+            .iter()
+            .filter(|r| r.can_unlock(current_topoheight))
+            .map(|r| r.amount)
+            .sum()
+    }
+
     /// Freeze TOS to get energy with duration-based rewards
     /// Ensures TOS amount is a whole number (multiple of COIN_VALUE)
     /// Returns the actual amount of TOS frozen (may be less than requested if not whole number)
@@ -538,33 +567,153 @@ impl EnergyResource {
         topoheight: TopoHeight,
         network: &crate::network::Network,
     ) -> u64 {
+        // Use recycling version with 0 balance to force all from balance (legacy behavior)
+        let result = self.freeze_tos_with_recycling(tos_amount, duration, topoheight, network);
+        result.new_energy
+    }
+
+    /// Freeze TOS with expired freeze recycling (self-freeze only)
+    ///
+    /// # Expired Freeze Recycling
+    /// - Prioritizes recycling TOS from expired freeze records before using balance
+    /// - Recycled TOS preserves its existing Energy (no new Energy granted)
+    /// - Only TOS from balance generates new Energy
+    ///
+    /// # Arguments
+    /// - `tos_amount`: Total amount of TOS to freeze
+    /// - `duration`: Freeze duration (3-365 days)
+    /// - `topoheight`: Current blockchain topoheight
+    /// - `network`: Network for timing calculations
+    ///
+    /// # Returns
+    /// FreezeWithRecyclingResult with new_energy, recycled_tos, balance_tos, recycled_energy
+    pub fn freeze_tos_with_recycling(
+        &mut self,
+        tos_amount: u64,
+        duration: FreezeDuration,
+        topoheight: TopoHeight,
+        network: &crate::network::Network,
+    ) -> FreezeWithRecyclingResult {
         if tos_amount < crate::config::MIN_FREEZE_TOS_AMOUNT {
-            return 0;
+            return FreezeWithRecyclingResult {
+                new_energy: 0,
+                recycled_tos: 0,
+                balance_tos: 0,
+                recycled_energy: 0,
+            };
         }
 
         if !tos_amount.is_multiple_of(crate::config::COIN_VALUE) {
-            return 0;
+            return FreezeWithRecyclingResult {
+                new_energy: 0,
+                recycled_tos: 0,
+                balance_tos: 0,
+                recycled_energy: 0,
+            };
         }
 
-        // Create a new freeze record with network-specific timing
-        let freeze_record =
-            FreezeRecord::new_for_network(tos_amount, duration, topoheight, network);
-        let energy_gained = freeze_record.energy_gained;
-        let actual_tos_frozen = freeze_record.amount;
+        // Step 1: Find expired records and calculate recyclable amount
+        let mut expired_indices: Vec<usize> = Vec::new();
+        let mut total_recyclable: u64 = 0;
 
-        if actual_tos_frozen == 0 {
-            return 0;
+        for (idx, record) in self.freeze_records.iter().enumerate() {
+            if record.can_unlock(topoheight) {
+                expired_indices.push(idx);
+                total_recyclable = total_recyclable.saturating_add(record.amount);
+            }
         }
 
-        // Add to freeze records
-        self.freeze_records.push(freeze_record);
+        // Step 2: Calculate recycle and balance amounts
+        let recycle_amount = std::cmp::min(tos_amount, total_recyclable);
+        let balance_amount = tos_amount.saturating_sub(recycle_amount);
 
-        // Update totals
-        self.frozen_tos += actual_tos_frozen;
-        self.total_energy += energy_gained;
+        // Step 3: Process recycling - collect energy from recycled portions
+        let mut remaining_recycle = recycle_amount;
+        let mut energy_recycled: u64 = 0;
+        let mut records_to_remove: Vec<usize> = Vec::new();
+        let mut records_to_modify: Vec<(usize, u64, u64)> = Vec::new(); // (idx, new_amount, new_energy)
+
+        for &idx in &expired_indices {
+            if remaining_recycle == 0 {
+                break;
+            }
+
+            let record = &self.freeze_records[idx];
+            let unfreeze_from_record = std::cmp::min(remaining_recycle, record.amount);
+
+            if unfreeze_from_record == record.amount {
+                // Full record recycled - keep all its energy
+                energy_recycled = energy_recycled.saturating_add(record.energy_gained);
+                records_to_remove.push(idx);
+            } else {
+                // Partial recycle - calculate proportional energy
+                // Use FLOOR rounding: energy_for_recycled = (unfreeze_from_record / COIN_VALUE) * multiplier
+                let energy_for_recycled = (unfreeze_from_record / crate::config::COIN_VALUE)
+                    * record.duration.reward_multiplier();
+                energy_recycled = energy_recycled.saturating_add(energy_for_recycled);
+
+                // Remaining record
+                let new_amount = record.amount.saturating_sub(unfreeze_from_record);
+                let new_energy = record.energy_gained.saturating_sub(energy_for_recycled);
+                records_to_modify.push((idx, new_amount, new_energy));
+            }
+
+            remaining_recycle = remaining_recycle.saturating_sub(unfreeze_from_record);
+        }
+
+        // Step 4: Apply record modifications (in reverse order to maintain indices)
+        for &idx in records_to_remove.iter().rev() {
+            self.freeze_records.remove(idx);
+        }
+
+        // Need to adjust indices after removals
+        for (idx, new_amount, new_energy) in records_to_modify.iter() {
+            // Calculate adjusted index after removals
+            let removed_before = records_to_remove.iter().filter(|&&r| r < *idx).count();
+            let adjusted_idx = idx.saturating_sub(removed_before);
+            if adjusted_idx < self.freeze_records.len() {
+                self.freeze_records[adjusted_idx].amount = *new_amount;
+                self.freeze_records[adjusted_idx].energy_gained = *new_energy;
+            }
+        }
+
+        // Step 5: Reduce total_energy by recycled energy (will be added back with new record)
+        self.total_energy = self.total_energy.saturating_sub(energy_recycled);
+
+        // Reduce frozen_tos by recycled amount (will be added back)
+        self.frozen_tos = self.frozen_tos.saturating_sub(recycle_amount);
+
+        // Step 6: Calculate new energy (only from balance portion)
+        let new_energy =
+            (balance_amount / crate::config::COIN_VALUE) * duration.reward_multiplier();
+
+        // Step 7: Create new freeze record with combined amount
+        let unlock_topoheight = topoheight + duration.duration_in_blocks_for_network(network);
+        let record_energy = energy_recycled.saturating_add(new_energy);
+
+        let new_record = FreezeRecord {
+            amount: tos_amount,
+            duration,
+            freeze_topoheight: topoheight,
+            unlock_topoheight,
+            energy_gained: record_energy,
+        };
+
+        self.freeze_records.push(new_record);
+
+        // Step 8: Update totals
+        // frozen_tos: we removed recycle_amount, now add full tos_amount
+        // But balance_amount should come from user's balance
+        self.frozen_tos = self.frozen_tos.saturating_add(tos_amount);
+        self.total_energy = self.total_energy.saturating_add(record_energy);
         self.last_update = topoheight;
 
-        energy_gained
+        FreezeWithRecyclingResult {
+            new_energy,
+            recycled_tos: recycle_amount,
+            balance_tos: balance_amount,
+            recycled_energy: energy_recycled,
+        }
     }
 
     /// Unfreeze TOS from self-freeze records (Phase 1 of two-phase unfreeze)
@@ -1469,5 +1618,242 @@ mod tests {
         assert_eq!(record.entries.len(), 1);
         assert_eq!(record.entries[0].amount, 200000000);
         assert_eq!(record.entries[0].energy, 28); // 2 TOS * 14 = 28 energy
+    }
+
+    // ==================== Expired Freeze Recycling Tests ====================
+
+    #[test]
+    fn test_get_recyclable_tos() {
+        let mut resource = EnergyResource::new();
+        let network = crate::network::Network::Mainnet;
+        let freeze_topoheight = 1000;
+        let duration = FreezeDuration::new(3).unwrap(); // 3-day lock
+
+        // Initially no recyclable TOS
+        assert_eq!(resource.get_recyclable_tos(freeze_topoheight), 0);
+
+        // Freeze 5 TOS
+        resource.freeze_tos_for_energy_with_network(
+            500000000,
+            duration,
+            freeze_topoheight,
+            &network,
+        );
+
+        // Before expiration: no recyclable TOS
+        let before_unlock =
+            freeze_topoheight + duration.duration_in_blocks_for_network(&network) - 1;
+        assert_eq!(resource.get_recyclable_tos(before_unlock), 0);
+
+        // After expiration: 5 TOS recyclable
+        let after_unlock = freeze_topoheight + duration.duration_in_blocks_for_network(&network);
+        assert_eq!(resource.get_recyclable_tos(after_unlock), 500000000);
+    }
+
+    #[test]
+    fn test_freeze_with_full_recycling() {
+        let mut resource = EnergyResource::new();
+        let network = crate::network::Network::Mainnet;
+        let freeze_topoheight = 1000;
+        let duration = FreezeDuration::new(7).unwrap();
+
+        // Freeze 3 TOS
+        resource.freeze_tos_for_energy_with_network(
+            300000000,
+            duration,
+            freeze_topoheight,
+            &network,
+        );
+        let initial_energy = resource.total_energy;
+        assert_eq!(initial_energy, 42); // 3 TOS * 2 * 7 days = 42
+
+        // After lock expires
+        let unlock_topoheight =
+            freeze_topoheight + duration.duration_in_blocks_for_network(&network);
+
+        // Freeze 3 TOS again (should fully recycle)
+        let new_duration = FreezeDuration::new(14).unwrap();
+        let result = resource.freeze_tos_with_recycling(
+            300000000,
+            new_duration,
+            unlock_topoheight,
+            &network,
+        );
+
+        // Should recycle all 3 TOS, no balance needed
+        assert_eq!(result.recycled_tos, 300000000);
+        assert_eq!(result.balance_tos, 0);
+        assert_eq!(result.new_energy, 0); // No new energy from recycled portion
+        assert_eq!(result.recycled_energy, 42); // Preserved from old record
+
+        // Total energy preserved (old energy kept)
+        assert_eq!(resource.total_energy, 42);
+        assert_eq!(resource.frozen_tos, 300000000);
+        assert_eq!(resource.freeze_records.len(), 1); // Old record removed, new one added
+    }
+
+    #[test]
+    fn test_freeze_with_mixed_recycling() {
+        let mut resource = EnergyResource::new();
+        let network = crate::network::Network::Mainnet;
+        let freeze_topoheight = 1000;
+        let duration = FreezeDuration::new(7).unwrap();
+
+        // Freeze 3 TOS
+        resource.freeze_tos_for_energy_with_network(
+            300000000,
+            duration,
+            freeze_topoheight,
+            &network,
+        );
+        let initial_energy = resource.total_energy;
+        assert_eq!(initial_energy, 42);
+
+        // After lock expires
+        let unlock_topoheight =
+            freeze_topoheight + duration.duration_in_blocks_for_network(&network);
+
+        // Freeze 5 TOS (3 TOS recycled + 2 TOS from balance)
+        let new_duration = FreezeDuration::new(14).unwrap();
+        let result = resource.freeze_tos_with_recycling(
+            500000000,
+            new_duration,
+            unlock_topoheight,
+            &network,
+        );
+
+        // Should recycle 3 TOS, use 2 TOS from balance
+        assert_eq!(result.recycled_tos, 300000000);
+        assert_eq!(result.balance_tos, 200000000);
+        assert_eq!(result.recycled_energy, 42); // Preserved from old record
+                                                // New energy: 2 TOS * 2 * 14 days = 56
+        assert_eq!(result.new_energy, 56);
+
+        // Total energy = recycled (42) + new (56) = 98
+        assert_eq!(resource.total_energy, 98);
+        assert_eq!(resource.frozen_tos, 500000000);
+    }
+
+    #[test]
+    fn test_freeze_with_partial_recycling() {
+        let mut resource = EnergyResource::new();
+        let network = crate::network::Network::Mainnet;
+        let freeze_topoheight = 1000;
+        let duration = FreezeDuration::new(7).unwrap();
+
+        // Freeze 5 TOS
+        resource.freeze_tos_for_energy_with_network(
+            500000000,
+            duration,
+            freeze_topoheight,
+            &network,
+        );
+        let initial_energy = resource.total_energy;
+        assert_eq!(initial_energy, 70); // 5 TOS * 2 * 7 days = 70
+
+        // After lock expires
+        let unlock_topoheight =
+            freeze_topoheight + duration.duration_in_blocks_for_network(&network);
+
+        // Freeze 2 TOS (partial recycle from 5 TOS expired record)
+        let new_duration = FreezeDuration::new(14).unwrap();
+        let result = resource.freeze_tos_with_recycling(
+            200000000,
+            new_duration,
+            unlock_topoheight,
+            &network,
+        );
+
+        // Should recycle 2 TOS from the 5 TOS expired record
+        assert_eq!(result.recycled_tos, 200000000);
+        assert_eq!(result.balance_tos, 0);
+        // Energy recycled: 2 TOS * 2 * 7 days = 28 (FLOOR calculation)
+        assert_eq!(result.recycled_energy, 28);
+        assert_eq!(result.new_energy, 0); // All from recycled
+
+        // Total energy = remaining (70-28=42) + new record (28) = 70
+        // Wait, let me reconsider: the old record with 5 TOS and 70 energy
+        // We recycle 2 TOS worth 28 energy, leaving 3 TOS with 42 energy in old record
+        // New record: 2 TOS with 28 energy
+        // Total = 42 + 28 = 70
+        assert_eq!(resource.total_energy, 70);
+        assert_eq!(resource.frozen_tos, 500000000); // Still 5 TOS total (3 old + 2 new)
+        assert_eq!(resource.freeze_records.len(), 2); // One remaining + one new
+    }
+
+    #[test]
+    fn test_freeze_recycling_energy_preservation() {
+        let mut resource = EnergyResource::new();
+        let network = crate::network::Network::Mainnet;
+        let freeze_topoheight = 1000;
+
+        // Freeze 3 TOS for 30 days (high energy multiplier: 60)
+        let long_duration = FreezeDuration::new(30).unwrap();
+        resource.freeze_tos_for_energy_with_network(
+            300000000,
+            long_duration,
+            freeze_topoheight,
+            &network,
+        );
+        let long_energy = resource.total_energy;
+        assert_eq!(long_energy, 180); // 3 TOS * 2 * 30 days = 180
+
+        // After lock expires
+        let unlock_topoheight =
+            freeze_topoheight + long_duration.duration_in_blocks_for_network(&network);
+
+        // Re-freeze for shorter period (3 days, multiplier: 6)
+        // Energy should be PRESERVED from old record, not recalculated
+        let short_duration = FreezeDuration::new(3).unwrap();
+        let result = resource.freeze_tos_with_recycling(
+            300000000,
+            short_duration,
+            unlock_topoheight,
+            &network,
+        );
+
+        // All recycled, energy preserved
+        assert_eq!(result.recycled_tos, 300000000);
+        assert_eq!(result.balance_tos, 0);
+        assert_eq!(result.recycled_energy, 180); // Preserved 30-day energy
+        assert_eq!(result.new_energy, 0);
+
+        // Total energy = preserved energy (180), not recalculated (18)
+        assert_eq!(resource.total_energy, 180);
+    }
+
+    #[test]
+    fn test_freeze_no_recycling_when_not_expired() {
+        let mut resource = EnergyResource::new();
+        let network = crate::network::Network::Mainnet;
+        let freeze_topoheight = 1000;
+        let duration = FreezeDuration::new(7).unwrap();
+
+        // Freeze 3 TOS
+        resource.freeze_tos_for_energy_with_network(
+            300000000,
+            duration,
+            freeze_topoheight,
+            &network,
+        );
+
+        // Before expiration, try to freeze more
+        let before_unlock = freeze_topoheight + 10; // Way before unlock
+        let result =
+            resource.freeze_tos_with_recycling(200000000, duration, before_unlock, &network);
+
+        // No recycling, all from balance
+        assert_eq!(result.recycled_tos, 0);
+        assert_eq!(result.balance_tos, 200000000);
+        assert_eq!(result.recycled_energy, 0);
+        // New energy: 2 TOS * 2 * 7 days = 28
+        assert_eq!(result.new_energy, 28);
+
+        // Now have 2 records
+        assert_eq!(resource.freeze_records.len(), 2);
+        // Total: 3 + 2 = 5 TOS frozen
+        assert_eq!(resource.frozen_tos, 500000000);
+        // Total energy: 42 + 28 = 70
+        assert_eq!(resource.total_energy, 70);
     }
 }

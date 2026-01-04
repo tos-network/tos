@@ -478,6 +478,20 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Mempoo
             .unwrap_or(0)
     }
 
+    /// Get the topoheight to use for verification (uses current chain topoheight for mempool)
+    fn get_verification_topoheight(&self) -> u64 {
+        self.topoheight
+    }
+
+    /// Get the recyclable TOS amount from expired freeze records
+    async fn get_recyclable_tos(&mut self, account: &'a PublicKey) -> Result<u64, BlockchainError> {
+        let energy_resource = self.storage.get_energy_resource(account).await?;
+        let recyclable = energy_resource
+            .map(|e| e.get_recyclable_tos(self.topoheight))
+            .unwrap_or(0);
+        Ok(recyclable)
+    }
+
     /// Set the multisig state for an account
     async fn set_multisig_state(
         &mut self,
