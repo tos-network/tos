@@ -82,14 +82,28 @@ pub const MAXIMUM_SUPPLY: u64 = 184_000_000 * COIN_VALUE;
 // ===== FREEZE DURATION LIMITS =====
 // Minimum freeze duration in days
 pub const MIN_FREEZE_DURATION_DAYS: u32 = 3;
-// Maximum freeze duration in days
-pub const MAX_FREEZE_DURATION_DAYS: u32 = 180;
+// Maximum freeze duration in days (extended to 365 for long-term staking)
+pub const MAX_FREEZE_DURATION_DAYS: u32 = 365;
 
 // ===== TOS AMOUNT LIMITS =====
 // Minimum TOS amount for freeze operations (1 TOS)
 pub const MIN_FREEZE_TOS_AMOUNT: u64 = COIN_VALUE;
 // Minimum TOS amount for unfreeze operations (1 TOS)
 pub const MIN_UNFREEZE_TOS_AMOUNT: u64 = COIN_VALUE;
+
+// ===== ENERGY SYSTEM LIMITS =====
+// Maximum freeze records per account (self-freeze + delegation combined)
+pub const MAX_FREEZE_RECORDS: usize = 32;
+// Maximum pending unfreeze operations per account
+pub const MAX_PENDING_UNFREEZES: usize = 32;
+// Maximum delegatees in a single batch delegation
+pub const MAX_DELEGATEES: usize = 500;
+// Unfreeze cooldown period in blocks (14 days)
+// Using 1 block per 2 seconds: 14 days * 24 hours * 60 minutes * 30 blocks/minute
+pub const UNFREEZE_COOLDOWN_BLOCKS: u64 = 14 * 24 * 60 * 30; // 604,800 blocks
+                                                             // Blocks per day (for Energy reset cycle)
+                                                             // Using 1 block per 2 seconds: 24 hours * 60 minutes * 30 blocks/minute
+pub const BLOCKS_PER_DAY: u64 = 24 * 60 * 30; // 43,200 blocks
 
 // Addresses format
 // mainnet prefix address

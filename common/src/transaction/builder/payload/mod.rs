@@ -328,11 +328,11 @@ mod tests {
         };
         assert!(builder.validate().is_err());
 
-        // Test freeze with invalid duration (more than 180 days)
+        // Test freeze with invalid duration (more than 365 days)
         let builder = EnergyBuilder {
             amount: 100000000,
             is_freeze: true,
-            freeze_duration: Some(FreezeDuration { days: 181 }),
+            freeze_duration: Some(FreezeDuration { days: 366 }),
         };
         assert!(builder.validate().is_err());
 
@@ -455,8 +455,8 @@ mod tests {
 
     #[test]
     fn test_freeze_duration_validation() {
-        // Test valid freeze durations
-        let valid_durations = [3, 7, 14, 30, 60, 90, 120, 150, 180]; // 3-180 days
+        // Test valid freeze durations (3-365 days)
+        let valid_durations = [3, 7, 14, 30, 60, 90, 120, 150, 180, 270, 365];
         for days in valid_durations {
             let duration = FreezeDuration::new(days).unwrap();
             let builder = EnergyBuilder::freeze_tos(100000000, duration); // 1 TOS
@@ -466,8 +466,8 @@ mod tests {
             );
         }
 
-        // Test invalid freeze durations
-        let invalid_durations = [1, 2, 181, 182, 365]; // Less than 3 or more than 180 days
+        // Test invalid freeze durations (less than 3 or more than 365 days)
+        let invalid_durations = [1, 2, 366, 400, 500];
         for days in invalid_durations {
             let duration = FreezeDuration { days };
             let builder = EnergyBuilder::freeze_tos(100000000, duration); // 1 TOS

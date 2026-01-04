@@ -1193,13 +1193,15 @@ async fn test_transfer_extra_data_limits() {
     }
 }
 
-// Test UnfreezeTos balance refund in verify phase
-// This test verifies that unfrozen TOS is returned to balance during verification
+// Test UnfreezeTos two-phase behavior
+// With the new design, UnfreezeTos creates a pending unfreeze (no immediate refund)
+// TOS is returned via WithdrawUnfrozen after 14-day cooldown
+// Also, Energy operations are now FREE (no TOS fee)
 #[tokio::test]
 async fn test_unfreeze_tos_balance_refund() {
     let mut alice = Account::new();
     let initial_balance = 1000 * COIN_VALUE;
-    let unfreeze_amount = 100 * COIN_VALUE;
+    let _unfreeze_amount = 100 * COIN_VALUE; // Not used for balance check - TOS goes to pending
 
     // Set initial balance (simulating post-freeze state)
     alice.set_balance(TOS_ASSET, initial_balance);
@@ -1216,7 +1218,7 @@ async fn test_unfreeze_tos_balance_refund() {
         };
 
         let data = TransactionTypeBuilder::Energy(EnergyBuilder {
-            amount: unfreeze_amount,
+            amount: _unfreeze_amount,
             is_freeze: false,
             freeze_duration: None,
         });
@@ -1227,7 +1229,7 @@ async fn test_unfreeze_tos_balance_refund() {
             alice.keypair.get_public_key().compress(),
             None,
             data,
-            FeeBuilder::Multiplier(1.0),
+            FeeBuilder::Value(0), // Energy operations are FREE
         );
         builder.build(&mut state, &alice.keypair).unwrap()
     };
@@ -1249,7 +1251,7 @@ async fn test_unfreeze_tos_balance_refund() {
     }
 
     // Check balance before verify
-    let balance_before_verify = state
+    let balance_before_verify = *state
         .accounts
         .get(&alice.keypair.get_public_key().compress())
         .unwrap()
@@ -1260,7 +1262,7 @@ async fn test_unfreeze_tos_balance_refund() {
 
     // Verify UnfreezeTos transaction
     let unfreeze_tx_hash = unfreeze_tx.hash();
-    let tx_fee = unfreeze_tx.fee; // Save actual fee from transaction
+    let tx_fee = unfreeze_tx.fee; // Energy operations are FREE, so fee should be 0
     println!("Transaction fee: {tx_fee}");
     let unfreeze_result = Arc::new(unfreeze_tx)
         .verify(&unfreeze_tx_hash, &mut state, &NoZKPCache)
@@ -1270,9 +1272,11 @@ async fn test_unfreeze_tos_balance_refund() {
         "UnfreezeTos transaction should succeed"
     );
 
-    // After UnfreezeTos verify: balance should be increased by unfreeze_amount but decreased by fee
-    // Expected: initial + unfreeze_amount - tx_fee (use actual tx fee, not hardcoded)
-    let alice_balance_after_unfreeze = state
+    // After UnfreezeTos verify with two-phase unfreeze:
+    // - Balance is NOT increased (TOS goes to pending unfreeze)
+    // - Energy operations are FREE (no fee deducted)
+    // - Expected: initial_balance (no change in verify phase)
+    let alice_balance_after_unfreeze = *state
         .accounts
         .get(&alice.keypair.get_public_key().compress())
         .unwrap()
@@ -1281,31 +1285,24 @@ async fn test_unfreeze_tos_balance_refund() {
         .unwrap();
     println!("Balance after verify: {alice_balance_after_unfreeze}");
 
-    let expected_balance = initial_balance + unfreeze_amount - tx_fee;
+    // Energy operations are FREE, so fee should be 0
+    assert_eq!(tx_fee, 0, "Energy operations should be FREE");
+
+    // With two-phase unfreeze, balance should remain unchanged
+    // (TOS goes to pending state, not returned to balance)
+    let expected_balance = initial_balance; // No change
     println!(
-        "Expected balance: {expected_balance} (initial {initial_balance} + unfreeze {unfreeze_amount} - fee {tx_fee})"
+        "Expected balance: {expected_balance} (initial {initial_balance} - no change in verify phase)"
     );
     assert_eq!(
-        *alice_balance_after_unfreeze, expected_balance,
-        "Balance should be initial + unfreeze_amount - fee (refund happens in verify phase)"
+        alice_balance_after_unfreeze, expected_balance,
+        "Balance should remain unchanged (TOS goes to pending, not refunded yet)"
     );
 
-    // CRITICAL CHECK: Verify balance was refunded (not just fee deducted)
-    // If refund didn't happen, balance would be: initial - tx_fee
-    let no_refund_balance = initial_balance - tx_fee;
-    assert_ne!(
-        *alice_balance_after_unfreeze, no_refund_balance,
-        "Balance should show refund (if equal to this, refund logic is missing)"
-    );
-
-    println!("UnfreezeTos test passed: Balance refund works correctly");
+    println!("UnfreezeTos test passed: Two-phase unfreeze works correctly");
     println!("   Initial balance:     {initial_balance}");
-    println!("   Unfreeze amount:     {unfreeze_amount}");
-    println!("   Transaction fee:     {tx_fee}");
-    println!("   Final balance:       {expected_balance}");
-    println!(
-        "   Formula verified:    {initial_balance} + {unfreeze_amount} - {tx_fee} = {expected_balance}"
-    );
+    println!("   Balance after:       {alice_balance_after_unfreeze}");
+    println!("   Note: TOS is in pending state, use WithdrawUnfrozen after 14 days");
 }
 
 #[async_trait]

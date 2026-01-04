@@ -241,7 +241,7 @@ impl MockChainState {
                         let energy_gain = (*amount / COIN_VALUE) * duration.reward_multiplier();
                         self.set_energy(sender.clone(), used, total + energy_gain);
                     }
-                    tos_common::transaction::EnergyPayload::UnfreezeTos { amount } => {
+                    tos_common::transaction::EnergyPayload::UnfreezeTos { amount, .. } => {
                         // Check if we have enough balance for fee first
                         let fee = tx.get_fee();
                         let sender_balance = self.get_balance(sender);
@@ -270,6 +270,24 @@ impl MockChainState {
                         // Reduce energy proportionally
                         let energy_removed = (*amount / COIN_VALUE) * 6; // Assume 3-day duration (6x multiplier)
                         self.set_energy(sender.clone(), used, total.saturating_sub(energy_removed));
+                    }
+                    tos_common::transaction::EnergyPayload::FreezeTosDelegate { .. } => {
+                        // Not implemented in mock - just deduct fee
+                        let fee = tx.get_fee();
+                        let sender_balance = self.get_balance(sender);
+                        if sender_balance < fee {
+                            return Err("Insufficient balance for freeze_tos_delegate fee".into());
+                        }
+                        self.set_balance(sender.clone(), sender_balance - fee);
+                    }
+                    tos_common::transaction::EnergyPayload::WithdrawUnfrozen => {
+                        // Not implemented in mock - just deduct fee
+                        let fee = tx.get_fee();
+                        let sender_balance = self.get_balance(sender);
+                        if sender_balance < fee {
+                            return Err("Insufficient balance for withdraw_unfrozen fee".into());
+                        }
+                        self.set_balance(sender.clone(), sender_balance - fee);
                     }
                 }
             }
@@ -1483,7 +1501,7 @@ fn test_unfreeze_tos_sigma_proofs_verification() {
         match unfreeze_tx.get_data() {
             tos_common::transaction::TransactionType::Energy(energy_payload) => {
                 match energy_payload {
-                    tos_common::transaction::EnergyPayload::UnfreezeTos { amount } => {
+                    tos_common::transaction::EnergyPayload::UnfreezeTos { amount, .. } => {
                         assert_eq!(*amount, unfreeze_amount, "Unfreeze amount mismatch");
                         println!("✓ Energy payload validation passed");
                     }
@@ -2015,8 +2033,10 @@ fn test_energy_system_demo() {
     );
 
     match result {
-        Ok(energy_removed) => {
-            println!("Unexpected success! Energy removed: {energy_removed}");
+        Ok((energy_removed, pending_amount)) => {
+            println!(
+                "Unexpected success! Energy removed: {energy_removed}, pending: {pending_amount}"
+            );
         }
         Err(e) => {
             println!("Expected failure: {e}");
@@ -2033,8 +2053,8 @@ fn test_energy_system_demo() {
     );
 
     match result {
-        Ok(energy_removed) => {
-            println!("Success! Energy removed: {energy_removed}");
+        Ok((energy_removed, pending_amount)) => {
+            println!("Success! Energy removed: {energy_removed}, pending: {pending_amount}");
             println!("Remaining frozen TOS: {}", alice_energy.frozen_tos);
             println!("Remaining total energy: {}", alice_energy.total_energy);
         }

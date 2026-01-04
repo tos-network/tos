@@ -472,14 +472,14 @@ impl<'a> BlockchainApplyState<'a, DummyContractProvider, TestError> for KycTestC
 
     async fn get_energy_resource(
         &mut self,
-        _account: &'a CompressedPublicKey,
+        _account: Cow<'a, CompressedPublicKey>,
     ) -> Result<Option<EnergyResource>, TestError> {
         Ok(None)
     }
 
     async fn set_energy_resource(
         &mut self,
-        _account: &'a CompressedPublicKey,
+        _account: Cow<'a, CompressedPublicKey>,
         _energy_resource: EnergyResource,
     ) -> Result<(), TestError> {
         Ok(())

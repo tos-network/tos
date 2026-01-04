@@ -503,14 +503,14 @@ impl<'a> BlockchainApplyState<'a, DummyContractProvider, TestError> for TestChai
 
     async fn get_energy_resource(
         &mut self,
-        _account: &'a PublicKey,
+        _account: Cow<'a, CompressedPublicKey>,
     ) -> Result<Option<EnergyResource>, TestError> {
         Ok(None)
     }
 
     async fn set_energy_resource(
         &mut self,
-        _account: &'a PublicKey,
+        _account: Cow<'a, CompressedPublicKey>,
         _energy_resource: EnergyResource,
     ) -> Result<(), TestError> {
         Ok(())

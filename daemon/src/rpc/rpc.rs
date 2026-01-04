@@ -2346,12 +2346,44 @@ async fn get_account_history<S: Storage>(
                                     block_timestamp: block_header.get_timestamp(),
                                 });
                             }
-                            tos_common::transaction::EnergyPayload::UnfreezeTos { amount } => {
+                            tos_common::transaction::EnergyPayload::FreezeTosDelegate {
+                                delegatees,
+                                duration,
+                            } => {
+                                let total_amount: u64 = delegatees.iter().map(|d| d.amount).sum();
+                                history.push(AccountHistoryEntry {
+                                    topoheight: topo,
+                                    hash: tx_hash.clone(),
+                                    history_type: AccountHistoryType::FreezeTos {
+                                        amount: total_amount,
+                                        duration: format!(
+                                            "{}_days_delegation",
+                                            duration.get_days()
+                                        ),
+                                    },
+                                    block_timestamp: block_header.get_timestamp(),
+                                });
+                            }
+                            tos_common::transaction::EnergyPayload::UnfreezeTos {
+                                amount, ..
+                            } => {
                                 history.push(AccountHistoryEntry {
                                     topoheight: topo,
                                     hash: tx_hash.clone(),
                                     history_type: AccountHistoryType::UnfreezeTos {
                                         amount: *amount,
+                                    },
+                                    block_timestamp: block_header.get_timestamp(),
+                                });
+                            }
+                            tos_common::transaction::EnergyPayload::WithdrawUnfrozen => {
+                                // Withdraw unfrozen is recorded when TOS is returned
+                                // Amount is determined at execution time
+                                history.push(AccountHistoryEntry {
+                                    topoheight: topo,
+                                    hash: tx_hash.clone(),
+                                    history_type: AccountHistoryType::UnfreezeTos {
+                                        amount: 0, // Amount determined at execution
                                     },
                                     block_timestamp: block_header.get_timestamp(),
                                 });

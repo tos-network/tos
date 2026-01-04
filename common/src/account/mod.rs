@@ -9,7 +9,10 @@ use std::{
 };
 
 pub use balance::{AccountSummary, Balance, BalanceType, VersionedBalance};
-pub use energy::{EnergyLease, EnergyResource, FreezeDuration, FreezeRecord};
+pub use energy::{
+    DelegateRecordEntry, DelegatedFreezeRecord, EnergyLease, EnergyResource, FreezeDuration,
+    FreezeRecord, PendingUnfreeze,
+};
 pub use nonce::{Nonce, VersionedNonce};
 pub use uno_balance::{UnoAccountSummary, UnoBalance, VersionedUnoBalance};
 

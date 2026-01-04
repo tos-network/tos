@@ -208,13 +208,13 @@ pub trait BlockchainApplyState<'a, P: ContractProvider, E>:
     /// Get the energy resource for an account
     async fn get_energy_resource(
         &mut self,
-        account: &'a CompressedPublicKey,
+        account: Cow<'a, CompressedPublicKey>,
     ) -> Result<Option<crate::account::EnergyResource>, E>;
 
     /// Set the energy resource for an account
     async fn set_energy_resource(
         &mut self,
-        account: &'a CompressedPublicKey,
+        account: Cow<'a, CompressedPublicKey>,
         energy_resource: crate::account::EnergyResource,
     ) -> Result<(), E>;
 

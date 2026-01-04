@@ -1,65 +1,100 @@
 use crate::{
     account::FreezeDuration,
+    crypto::PublicKey,
     serializer::{Reader, ReaderError, Serializer, Writer},
 };
 use serde::{Deserialize, Serialize};
+
+/// Delegation entry for batch delegation in FreezeTos
+///
+/// # Fields
+/// - `delegatee`: The account receiving delegated energy
+/// - `amount`: Amount of TOS to delegate to this delegatee (must be whole TOS)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DelegationEntry {
+    /// Delegatee account (receives energy)
+    pub delegatee: PublicKey,
+    /// Amount of TOS to delegate
+    pub amount: u64,
+}
+
+impl Serializer for DelegationEntry {
+    fn write(&self, writer: &mut Writer) {
+        self.delegatee.write(writer);
+        writer.write_u64(&self.amount);
+    }
+
+    fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
+        Ok(Self {
+            delegatee: PublicKey::read(reader)?,
+            amount: reader.read_u64()?,
+        })
+    }
+
+    fn size(&self) -> usize {
+        self.delegatee.size() + self.amount.size()
+    }
+}
 
 /// Energy-related transaction payloads for Transfer operations only
 /// Enhanced with TRON-style freeze duration and reward multiplier system
 ///
 /// # Supported Operations
-/// - `FreezeTos`: Lock TOS to gain energy for free transfers
-/// - `UnfreezeTos`: Unlock previously frozen TOS (after lock period expires)
+/// - `FreezeTos`: Lock TOS to gain energy for free transfers (self-freeze)
+/// - `FreezeTosDelegate`: Lock TOS and delegate energy to others (batch delegation)
+/// - `UnfreezeTos`: Unlock previously frozen TOS (Phase 1: creates pending unfreeze)
+/// - `WithdrawUnfrozen`: Retrieve TOS after 14-day cooldown (Phase 2)
 ///
 /// # Fee Model
-/// - Energy operations themselves don't consume energy
-/// - Small TOS fees are required to prevent spam/abuse
+/// - All energy operations are FREE (no TOS fee, no energy consumption)
+/// - This encourages staking participation and network security
 /// - Only regular transfer transactions consume energy
 ///
 /// # Edge Cases
-/// - Freeze amounts must be whole TOS (fractional parts ignored)
+/// - Freeze amounts must be whole TOS (minimum 1 TOS)
 /// - Unfreeze only works after the lock period expires
 /// - Multiple freeze operations with different durations are supported
+/// - Batch delegation supports up to 500 delegatees per transaction
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum EnergyPayload {
-    /// Freeze TOS to get energy for free transfers with duration-based rewards
+    /// Freeze TOS to get energy for free transfers (self-freeze)
     FreezeTos {
-        /// Amount of TOS to freeze
+        /// Amount of TOS to freeze (must be whole TOS, minimum 1 TOS)
         amount: u64,
-        /// Freeze duration (3, 7, or 14 days) affecting reward multiplier
+        /// Freeze duration (3-365 days) affecting reward multiplier
         duration: FreezeDuration,
     },
-    /// Unfreeze TOS (release frozen TOS) - can only unfreeze after lock period
-    UnfreezeTos {
-        /// Amount of TOS to unfreeze
-        amount: u64,
+    /// Freeze TOS and delegate energy to others (batch delegation)
+    FreezeTosDelegate {
+        /// List of delegatees and their amounts (max 500 entries)
+        delegatees: Vec<DelegationEntry>,
+        /// Freeze duration (3-365 days) affecting reward multiplier
+        duration: FreezeDuration,
     },
+    /// Unfreeze TOS - Phase 1: Creates pending unfreeze, energy removed immediately
+    UnfreezeTos {
+        /// Amount of TOS to unfreeze (must be whole TOS, minimum 1 TOS)
+        amount: u64,
+        /// Whether to unfreeze from delegation records (true) or self-freeze records (false)
+        from_delegation: bool,
+    },
+    /// Withdraw unfrozen TOS - Phase 2: After 14-day cooldown, TOS returned to balance
+    WithdrawUnfrozen,
 }
 
 impl EnergyPayload {
     /// Get the energy cost for this operation
-    /// FreezeTos and UnfreezeTos operations don't consume energy but require TOS fees
-    /// Only Transfer transactions consume energy
+    /// All Energy operations are FREE (no energy consumption)
     pub fn energy_cost(&self) -> u64 {
-        match self {
-            // FreezeTos and UnfreezeTos don't consume energy
-            // They require TOS fees to prevent abuse (similar to TRON's bandwidth cost)
-            Self::FreezeTos { .. } => 0,
-            Self::UnfreezeTos { .. } => 0,
-        }
+        // All energy operations are FREE - no energy consumption
+        0
     }
 
     /// Get the TOS fee required for this operation
-    /// FreezeTos and UnfreezeTos require small TOS fees to prevent abuse
+    /// All Energy operations are FREE (no TOS fee)
     pub fn tos_fee(&self) -> u64 {
-        use crate::config::FEE_PER_TRANSFER;
-
-        match self {
-            // Small TOS fee to prevent frequent freeze/unfreeze abuse
-            // Similar to TRON's bandwidth cost for freeze/unfreeze operations
-            Self::FreezeTos { .. } => FEE_PER_TRANSFER,
-            Self::UnfreezeTos { .. } => FEE_PER_TRANSFER,
-        }
+        // All energy operations are FREE - encourages staking participation
+        0
     }
 
     /// Check if this operation requires account activation
@@ -72,7 +107,9 @@ impl EnergyPayload {
     pub fn get_amount(&self) -> u64 {
         match self {
             Self::FreezeTos { amount, .. } => *amount,
-            Self::UnfreezeTos { amount } => *amount,
+            Self::FreezeTosDelegate { delegatees, .. } => delegatees.iter().map(|d| d.amount).sum(),
+            Self::UnfreezeTos { amount, .. } => *amount,
+            Self::WithdrawUnfrozen => 0, // Amount determined at execution
         }
     }
 
@@ -80,19 +117,53 @@ impl EnergyPayload {
     pub fn get_duration(&self) -> Option<FreezeDuration> {
         match self {
             Self::FreezeTos { duration, .. } => Some(*duration),
+            Self::FreezeTosDelegate { duration, .. } => Some(*duration),
             Self::UnfreezeTos { .. } => None,
+            Self::WithdrawUnfrozen => None,
         }
     }
 
     /// Calculate the energy that would be gained from this freeze operation
-    /// Returns None for unfreeze operations
+    /// Returns None for unfreeze/withdraw operations
     pub fn calculate_energy_gain(&self) -> Option<u64> {
         match self {
             Self::FreezeTos { amount, duration } => {
                 Some((*amount / crate::config::COIN_VALUE) * duration.reward_multiplier())
             }
+            Self::FreezeTosDelegate {
+                delegatees,
+                duration,
+            } => {
+                let total_amount: u64 = delegatees.iter().map(|d| d.amount).sum();
+                Some((total_amount / crate::config::COIN_VALUE) * duration.reward_multiplier())
+            }
             Self::UnfreezeTos { .. } => None,
+            Self::WithdrawUnfrozen => None,
         }
+    }
+
+    /// Check if this is a delegation operation
+    pub fn is_delegation(&self) -> bool {
+        matches!(self, Self::FreezeTosDelegate { .. })
+    }
+
+    /// Get delegatees (only for FreezeTosDelegate)
+    pub fn get_delegatees(&self) -> Option<&Vec<DelegationEntry>> {
+        match self {
+            Self::FreezeTosDelegate { delegatees, .. } => Some(delegatees),
+            _ => None,
+        }
+    }
+
+    /// Check if this is an unfreeze from delegation
+    pub fn is_unfreeze_from_delegation(&self) -> bool {
+        matches!(
+            self,
+            Self::UnfreezeTos {
+                from_delegation: true,
+                ..
+            }
+        )
     }
 }
 
@@ -104,9 +175,27 @@ impl Serializer for EnergyPayload {
                 writer.write_u64(amount);
                 duration.write(writer);
             }
-            Self::UnfreezeTos { amount } => {
+            Self::FreezeTosDelegate {
+                delegatees,
+                duration,
+            } => {
                 writer.write_u8(1);
+                writer.write_u64(&(delegatees.len() as u64));
+                for entry in delegatees {
+                    entry.write(writer);
+                }
+                duration.write(writer);
+            }
+            Self::UnfreezeTos {
+                amount,
+                from_delegation,
+            } => {
+                writer.write_u8(2);
                 writer.write_u64(amount);
+                writer.write_bool(*from_delegation);
+            }
+            Self::WithdrawUnfrozen => {
+                writer.write_u8(3);
             }
         }
     }
@@ -120,9 +209,29 @@ impl Serializer for EnergyPayload {
                 Ok(Self::FreezeTos { amount, duration })
             }
             1 => {
-                let amount = reader.read_u64()?;
-                Ok(Self::UnfreezeTos { amount })
+                let count = reader.read_u64()? as usize;
+                if count > crate::config::MAX_DELEGATEES {
+                    return Err(ReaderError::InvalidValue);
+                }
+                let mut delegatees = Vec::with_capacity(count);
+                for _ in 0..count {
+                    delegatees.push(DelegationEntry::read(reader)?);
+                }
+                let duration = FreezeDuration::read(reader)?;
+                Ok(Self::FreezeTosDelegate {
+                    delegatees,
+                    duration,
+                })
             }
+            2 => {
+                let amount = reader.read_u64()?;
+                let from_delegation = reader.read_bool()?;
+                Ok(Self::UnfreezeTos {
+                    amount,
+                    from_delegation,
+                })
+            }
+            3 => Ok(Self::WithdrawUnfrozen),
             _ => Err(ReaderError::InvalidValue),
         }
     }
@@ -130,7 +239,12 @@ impl Serializer for EnergyPayload {
     fn size(&self) -> usize {
         match self {
             Self::FreezeTos { amount, duration } => 1 + amount.size() + duration.size(),
-            Self::UnfreezeTos { amount } => 1 + amount.size(),
+            Self::FreezeTosDelegate {
+                delegatees,
+                duration,
+            } => 1 + 8 + delegatees.iter().map(|e| e.size()).sum::<usize>() + duration.size(),
+            Self::UnfreezeTos { amount, .. } => 1 + amount.size() + 1, // +1 for bool
+            Self::WithdrawUnfrozen => 1,
         }
     }
 }
@@ -139,6 +253,17 @@ impl Serializer for EnergyPayload {
 mod tests {
     use super::*;
     use crate::config::COIN_VALUE;
+
+    fn create_test_pubkey() -> PublicKey {
+        // Create a dummy public key for testing
+        let bytes = [0u8; 32];
+        PublicKey::from_bytes(&bytes).unwrap_or_else(|_| {
+            // Fallback: create from valid test bytes
+            let mut valid_bytes = [0u8; 32];
+            valid_bytes[0] = 1;
+            PublicKey::from_bytes(&valid_bytes).expect("should create valid pubkey")
+        })
+    }
 
     #[test]
     fn test_freeze_tos_payload_creation() {
@@ -151,35 +276,100 @@ mod tests {
         assert_eq!(payload.get_amount(), 100000000);
         assert_eq!(payload.get_duration(), Some(duration));
         assert_eq!(payload.calculate_energy_gain(), Some(14)); // 1 TOS * 14 = 14 transfers
+        assert!(!payload.is_delegation());
+    }
+
+    #[test]
+    fn test_freeze_tos_delegate_payload() {
+        let duration = FreezeDuration::new(7).unwrap();
+        let delegatees = vec![
+            DelegationEntry {
+                delegatee: create_test_pubkey(),
+                amount: 100000000, // 1 TOS
+            },
+            DelegationEntry {
+                delegatee: create_test_pubkey(),
+                amount: 200000000, // 2 TOS
+            },
+        ];
+
+        let payload = EnergyPayload::FreezeTosDelegate {
+            delegatees,
+            duration,
+        };
+
+        assert_eq!(payload.get_amount(), 300000000); // 3 TOS total
+        assert_eq!(payload.get_duration(), Some(duration));
+        assert_eq!(payload.calculate_energy_gain(), Some(42)); // 3 TOS * 14 = 42 transfers
+        assert!(payload.is_delegation());
     }
 
     #[test]
     fn test_unfreeze_tos_payload_creation() {
-        let payload = EnergyPayload::UnfreezeTos { amount: 500 };
+        let payload = EnergyPayload::UnfreezeTos {
+            amount: COIN_VALUE,
+            from_delegation: false,
+        };
 
-        assert_eq!(payload.get_amount(), 500);
+        assert_eq!(payload.get_amount(), COIN_VALUE);
+        assert_eq!(payload.get_duration(), None);
+        assert_eq!(payload.calculate_energy_gain(), None);
+        assert!(!payload.is_unfreeze_from_delegation());
+    }
+
+    #[test]
+    fn test_unfreeze_from_delegation() {
+        let payload = EnergyPayload::UnfreezeTos {
+            amount: COIN_VALUE,
+            from_delegation: true,
+        };
+
+        assert!(payload.is_unfreeze_from_delegation());
+    }
+
+    #[test]
+    fn test_withdraw_unfrozen_payload() {
+        let payload = EnergyPayload::WithdrawUnfrozen;
+
+        assert_eq!(payload.get_amount(), 0);
         assert_eq!(payload.get_duration(), None);
         assert_eq!(payload.calculate_energy_gain(), None);
     }
 
     #[test]
-    fn test_energy_cost() {
+    fn test_energy_operations_are_free() {
         let duration = FreezeDuration::new(3).unwrap();
+
         let freeze_payload = EnergyPayload::FreezeTos {
-            amount: 1000,
+            amount: COIN_VALUE,
             duration,
         };
-        let unfreeze_payload = EnergyPayload::UnfreezeTos { amount: 500 };
+        let delegate_payload = EnergyPayload::FreezeTosDelegate {
+            delegatees: vec![],
+            duration,
+        };
+        let unfreeze_payload = EnergyPayload::UnfreezeTos {
+            amount: COIN_VALUE,
+            from_delegation: false,
+        };
+        let withdraw_payload = EnergyPayload::WithdrawUnfrozen;
 
+        // All operations should be FREE
         assert_eq!(freeze_payload.energy_cost(), 0);
+        assert_eq!(freeze_payload.tos_fee(), 0);
+        assert_eq!(delegate_payload.energy_cost(), 0);
+        assert_eq!(delegate_payload.tos_fee(), 0);
         assert_eq!(unfreeze_payload.energy_cost(), 0);
+        assert_eq!(unfreeze_payload.tos_fee(), 0);
+        assert_eq!(withdraw_payload.energy_cost(), 0);
+        assert_eq!(withdraw_payload.tos_fee(), 0);
     }
 
     #[test]
-    fn test_serialization() {
+    fn test_serialization_freeze_tos() {
         let duration = FreezeDuration::new(14).unwrap();
         let payload = EnergyPayload::FreezeTos {
-            amount: 1000,
+            amount: COIN_VALUE,
             duration,
         };
 
@@ -191,17 +381,60 @@ mod tests {
         let deserialized = EnergyPayload::read(&mut reader).unwrap();
 
         match deserialized {
-            EnergyPayload::FreezeTos { amount, duration } => {
-                assert_eq!(amount, 1000);
-                assert_eq!(duration, duration);
+            EnergyPayload::FreezeTos {
+                amount,
+                duration: d,
+            } => {
+                assert_eq!(amount, COIN_VALUE);
+                assert_eq!(d, duration);
             }
             _ => panic!("Expected FreezeTos payload"),
         }
     }
 
     #[test]
+    fn test_serialization_unfreeze_tos() {
+        let payload = EnergyPayload::UnfreezeTos {
+            amount: COIN_VALUE,
+            from_delegation: true,
+        };
+
+        let mut bytes = Vec::new();
+        let mut writer = crate::serializer::Writer::new(&mut bytes);
+        payload.write(&mut writer);
+
+        let mut reader = crate::serializer::Reader::new(&bytes);
+        let deserialized = EnergyPayload::read(&mut reader).unwrap();
+
+        match deserialized {
+            EnergyPayload::UnfreezeTos {
+                amount,
+                from_delegation,
+            } => {
+                assert_eq!(amount, COIN_VALUE);
+                assert!(from_delegation);
+            }
+            _ => panic!("Expected UnfreezeTos payload"),
+        }
+    }
+
+    #[test]
+    fn test_serialization_withdraw_unfrozen() {
+        let payload = EnergyPayload::WithdrawUnfrozen;
+
+        let mut bytes = Vec::new();
+        let mut writer = crate::serializer::Writer::new(&mut bytes);
+        payload.write(&mut writer);
+
+        let mut reader = crate::serializer::Reader::new(&bytes);
+        let deserialized = EnergyPayload::read(&mut reader).unwrap();
+
+        assert!(matches!(deserialized, EnergyPayload::WithdrawUnfrozen));
+    }
+
+    #[test]
     fn test_different_duration_rewards() {
-        let amounts = [100000000, 200000000, 300000000]; // 1, 2, 3 TOS
+        let amounts = [COIN_VALUE, 2 * COIN_VALUE, 3 * COIN_VALUE]; // 1, 2, 3 TOS
         let durations = [
             FreezeDuration::new(3).unwrap(),
             FreezeDuration::new(7).unwrap(),

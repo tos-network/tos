@@ -436,11 +436,62 @@ impl Transaction {
 
                     if !duration.is_valid() {
                         return Err(VerificationError::AnyError(anyhow!(
-                            "Freeze duration must be between 3 and 180 days"
+                            "Freeze duration must be between 3 and 365 days"
                         )));
                     }
                 }
-                EnergyPayload::UnfreezeTos { amount } => {
+                EnergyPayload::FreezeTosDelegate {
+                    delegatees,
+                    duration,
+                } => {
+                    if delegatees.is_empty() {
+                        return Err(VerificationError::AnyError(anyhow!(
+                            "Delegatees list cannot be empty"
+                        )));
+                    }
+
+                    if delegatees.len() > crate::config::MAX_DELEGATEES {
+                        return Err(VerificationError::AnyError(anyhow!(
+                            "Too many delegatees (max {})",
+                            crate::config::MAX_DELEGATEES
+                        )));
+                    }
+
+                    // Check for duplicates and self-delegation
+                    let mut seen = std::collections::HashSet::new();
+                    for entry in delegatees {
+                        if entry.amount == 0 {
+                            return Err(VerificationError::AnyError(anyhow!(
+                                "Delegation amount must be greater than zero"
+                            )));
+                        }
+
+                        if entry.amount % crate::config::COIN_VALUE != 0 {
+                            return Err(VerificationError::AnyError(anyhow!(
+                                "Delegation amount must be a whole number of TOS"
+                            )));
+                        }
+
+                        if entry.amount < crate::config::MIN_FREEZE_TOS_AMOUNT {
+                            return Err(VerificationError::AnyError(anyhow!(
+                                "Delegation amount must be at least 1 TOS"
+                            )));
+                        }
+
+                        if !seen.insert(&entry.delegatee) {
+                            return Err(VerificationError::AnyError(anyhow!(
+                                "Duplicate delegatee in list"
+                            )));
+                        }
+                    }
+
+                    if !duration.is_valid() {
+                        return Err(VerificationError::AnyError(anyhow!(
+                            "Freeze duration must be between 3 and 365 days"
+                        )));
+                    }
+                }
+                EnergyPayload::UnfreezeTos { amount, .. } => {
                     if *amount == 0 {
                         return Err(VerificationError::AnyError(anyhow!(
                             "Unfreeze amount must be greater than zero"
@@ -458,6 +509,9 @@ impl Transaction {
                             "Unfreeze amount must be at least 1 TOS"
                         )));
                     }
+                }
+                EnergyPayload::WithdrawUnfrozen => {
+                    // No additional validation needed - amount is determined at apply time
                 }
             },
             TransactionType::AIMining(_) => {
@@ -700,8 +754,19 @@ impl Transaction {
                             .checked_add(*amount)
                             .ok_or(VerificationError::Overflow)?;
                     }
+                    EnergyPayload::FreezeTosDelegate { delegatees, .. } => {
+                        // Calculate total delegation amount
+                        let total: u64 = delegatees.iter().map(|d| d.amount).sum();
+                        let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                        *current = current
+                            .checked_add(total)
+                            .ok_or(VerificationError::Overflow)?;
+                    }
                     EnergyPayload::UnfreezeTos { .. } => {
-                        // Unfreeze doesn't spend, it releases frozen funds
+                        // Unfreeze doesn't spend - TOS goes to pending (two-phase)
+                    }
+                    EnergyPayload::WithdrawUnfrozen => {
+                        // Withdraw doesn't spend - it releases pending funds to balance
                     }
                 }
             }
@@ -782,17 +847,8 @@ impl Transaction {
                 .ok_or(VerificationError::Overflow)?;
         }
 
-        // Credit unfrozen TOS immediately in verification state (mempool/ChainState)
-        if let TransactionType::Energy(EnergyPayload::UnfreezeTos { amount }) = &self.data {
-            let balance = state
-                .get_receiver_balance(Cow::Borrowed(self.get_source()), Cow::Borrowed(&TOS_ASSET))
-                .await
-                .map_err(VerificationError::State)?;
-
-            *balance = balance
-                .checked_add(*amount)
-                .ok_or(VerificationError::Overflow)?;
-        }
+        // Two-phase unfreeze: UnfreezeTos creates pending, WithdrawUnfrozen credits balance
+        // UnfreezeTos does NOT credit balance immediately - TOS stays in pending state
 
         // Deduct sender UNO balance for UnshieldTransfers
         // Similar to pre_verify_uno but without CommitmentEqProof (amount is plaintext)
@@ -2062,8 +2118,19 @@ impl Transaction {
                             .checked_add(*amount)
                             .ok_or(VerificationError::Overflow)?;
                     }
+                    EnergyPayload::FreezeTosDelegate { delegatees, .. } => {
+                        // Calculate total delegation amount
+                        let total: u64 = delegatees.iter().map(|d| d.amount).sum();
+                        let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                        *current = current
+                            .checked_add(total)
+                            .ok_or(VerificationError::Overflow)?;
+                    }
                     EnergyPayload::UnfreezeTos { .. } => {
-                        // Unfreeze doesn't spend, it releases frozen funds
+                        // Unfreeze doesn't spend - TOS goes to pending (two-phase)
+                    }
+                    EnergyPayload::WithdrawUnfrozen => {
+                        // Withdraw doesn't spend - it releases pending funds to balance
                     }
                 }
             }
@@ -2145,16 +2212,8 @@ impl Transaction {
                 .ok_or(VerificationError::Overflow)?;
         }
 
-        if let TransactionType::Energy(EnergyPayload::UnfreezeTos { amount }) = &self.data {
-            let balance = state
-                .get_receiver_balance(Cow::Borrowed(self.get_source()), Cow::Borrowed(&TOS_ASSET))
-                .await
-                .map_err(VerificationError::State)?;
-
-            *balance = balance
-                .checked_add(*amount)
-                .ok_or(VerificationError::Overflow)?;
-        }
+        // Two-phase unfreeze: UnfreezeTos creates pending, WithdrawUnfrozen credits balance
+        // UnfreezeTos does NOT credit balance immediately - TOS stays in pending state
 
         Ok(())
     }
@@ -2433,9 +2492,19 @@ impl Transaction {
                             .checked_add(*amount)
                             .ok_or(VerificationError::Overflow)?;
                     }
+                    EnergyPayload::FreezeTosDelegate { delegatees, .. } => {
+                        // Calculate total delegation amount
+                        let total: u64 = delegatees.iter().map(|d| d.amount).sum();
+                        let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                        *current = current
+                            .checked_add(total)
+                            .ok_or(VerificationError::Overflow)?;
+                    }
                     EnergyPayload::UnfreezeTos { .. } => {
-                        // Unfreeze doesn't spend, it releases frozen funds
-                        // Instead it will be added back to sender balance below
+                        // Unfreeze doesn't spend - TOS goes to pending (two-phase)
+                    }
+                    EnergyPayload::WithdrawUnfrozen => {
+                        // Withdraw doesn't spend - it releases pending funds to balance
                     }
                 }
             }
@@ -2595,7 +2664,7 @@ impl Transaction {
 
                 // Get user's energy resource
                 let energy_resource = state
-                    .get_energy_resource(&self.source)
+                    .get_energy_resource(Cow::Borrowed(&self.source))
                     .await
                     .map_err(VerificationError::State)?;
 
@@ -2612,7 +2681,7 @@ impl Transaction {
 
                     // Update energy resource in state
                     state
-                        .set_energy_resource(&self.source, energy_resource)
+                        .set_energy_resource(Cow::Borrowed(&self.source), energy_resource)
                         .await
                         .map_err(VerificationError::State)?;
 
@@ -2733,12 +2802,19 @@ impl Transaction {
                     EnergyPayload::FreezeTos { amount, duration } => {
                         // Get current energy resource for the account
                         let energy_resource = state
-                            .get_energy_resource(&self.source)
+                            .get_energy_resource(Cow::Borrowed(&self.source))
                             .await
                             .map_err(VerificationError::State)?;
 
                         let mut energy_resource =
                             energy_resource.unwrap_or_else(EnergyResource::new);
+
+                        // Check record limit
+                        if !energy_resource.can_add_freeze_record() {
+                            return Err(VerificationError::AnyError(anyhow::anyhow!(
+                                "Maximum freeze records reached"
+                            )));
+                        }
 
                         // Freeze TOS for energy - get topoheight from the blockchain state
                         let topoheight = state.get_block().get_height(); // BlockDAG uses height
@@ -2750,7 +2826,7 @@ impl Transaction {
 
                         // Update energy resource in state
                         state
-                            .set_energy_resource(&self.source, energy_resource)
+                            .set_energy_resource(Cow::Borrowed(&self.source), energy_resource)
                             .await
                             .map_err(VerificationError::State)?;
 
@@ -2759,39 +2835,235 @@ impl Transaction {
                                    amount, duration.name(), (*amount / crate::config::COIN_VALUE) * duration.reward_multiplier());
                         }
                     }
-                    EnergyPayload::UnfreezeTos { amount } => {
+                    EnergyPayload::FreezeTosDelegate {
+                        delegatees,
+                        duration,
+                    } => {
+                        // Get current energy resource for the delegator
+                        let energy_resource = state
+                            .get_energy_resource(Cow::Borrowed(&self.source))
+                            .await
+                            .map_err(VerificationError::State)?;
+
+                        let mut energy_resource =
+                            energy_resource.unwrap_or_else(EnergyResource::new);
+
+                        // Check record limit
+                        if !energy_resource.can_add_freeze_record() {
+                            return Err(VerificationError::AnyError(anyhow::anyhow!(
+                                "Maximum freeze records reached"
+                            )));
+                        }
+
+                        let topoheight = state.get_block().get_height();
+                        let network = state.get_network();
+
+                        // Build delegation entries
+                        use crate::account::DelegateRecordEntry;
+                        let entries: Vec<DelegateRecordEntry> = delegatees
+                            .iter()
+                            .map(|d| DelegateRecordEntry {
+                                delegatee: d.delegatee.clone(),
+                                amount: d.amount,
+                                energy: (d.amount / crate::config::COIN_VALUE)
+                                    * duration.reward_multiplier(),
+                            })
+                            .collect();
+
+                        let total_amount: u64 = delegatees.iter().map(|d| d.amount).sum();
+
+                        // Create delegated freeze record
+                        energy_resource
+                            .create_delegated_freeze(
+                                entries,
+                                *duration,
+                                total_amount,
+                                topoheight,
+                                &network,
+                            )
+                            .map_err(|e| VerificationError::AnyError(anyhow::anyhow!("{e}")))?;
+
+                        // Update delegator's energy resource
+                        state
+                            .set_energy_resource(Cow::Borrowed(&self.source), energy_resource)
+                            .await
+                            .map_err(VerificationError::State)?;
+
+                        // Add delegated energy to each delegatee
+                        // Reference delegatees from payload directly (has correct lifetime 'a)
+                        for entry in delegatees.iter() {
+                            let energy = (entry.amount / crate::config::COIN_VALUE)
+                                * duration.reward_multiplier();
+
+                            let delegatee_resource = state
+                                .get_energy_resource(Cow::Borrowed(&entry.delegatee))
+                                .await
+                                .map_err(VerificationError::State)?;
+
+                            let mut delegatee_resource =
+                                delegatee_resource.unwrap_or_else(EnergyResource::new);
+
+                            delegatee_resource.add_delegated_energy(energy, topoheight);
+
+                            state
+                                .set_energy_resource(
+                                    Cow::Borrowed(&entry.delegatee),
+                                    delegatee_resource,
+                                )
+                                .await
+                                .map_err(VerificationError::State)?;
+                        }
+
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!(
+                                "FreezeTosDelegate applied: {} TOS delegated to {} accounts",
+                                total_amount,
+                                delegatees.len()
+                            );
+                        }
+                    }
+                    EnergyPayload::UnfreezeTos {
+                        amount,
+                        from_delegation,
+                    } => {
                         // Get current energy resource for the account
                         let energy_resource = state
-                            .get_energy_resource(&self.source)
+                            .get_energy_resource(Cow::Borrowed(&self.source))
                             .await
                             .map_err(VerificationError::State)?;
 
                         if let Some(mut energy_resource) = energy_resource {
-                            // Unfreeze TOS - get topoheight from the blockchain state
-                            let topoheight = state.get_block().get_height(); // BlockDAG uses height
-                            energy_resource
-                                .unfreeze_tos(*amount, topoheight)
-                                .map_err(|_| {
-                                    VerificationError::AnyError(anyhow::anyhow!(
-                                        "Invalid energy operation"
-                                    ))
-                                })?;
+                            // Check pending unfreeze limit
+                            if !energy_resource.can_add_pending_unfreeze() {
+                                return Err(VerificationError::AnyError(anyhow::anyhow!(
+                                    "Maximum pending unfreezes reached"
+                                )));
+                            }
 
-                            // Update energy resource in state
-                            state
-                                .set_energy_resource(&self.source, energy_resource)
-                                .await
-                                .map_err(VerificationError::State)?;
+                            let topoheight = state.get_block().get_height();
 
-                            // NOTE: Balance refund is done in verify phase (verify_dynamic_parts/pre_verify)
-                            // to keep mempool state consistent. Do NOT add balance here to avoid double-refund.
+                            if *from_delegation {
+                                // Unfreeze from delegated records
+                                // This removes energy from delegatees and creates pending unfreeze for delegator
+                                let (energy_per_delegatee, _pending_amount) = energy_resource
+                                    .unfreeze_delegated(*amount, topoheight)
+                                    .map_err(|e| {
+                                        VerificationError::AnyError(anyhow::anyhow!("{e}"))
+                                    })?;
 
-                            if log::log_enabled!(log::Level::Debug) {
-                                debug!("UnfreezeTos applied: {amount} TOS unfrozen (balance already refunded in verify phase)");
+                                // Update sender's energy resource first
+                                state
+                                    .set_energy_resource(
+                                        Cow::Borrowed(&self.source),
+                                        energy_resource,
+                                    )
+                                    .await
+                                    .map_err(VerificationError::State)?;
+
+                                // Remove delegated energy from each delegatee
+                                for (delegatee_key, energy_removed) in energy_per_delegatee {
+                                    let delegatee_resource = state
+                                        .get_energy_resource(Cow::Owned(delegatee_key.clone()))
+                                        .await
+                                        .map_err(VerificationError::State)?;
+
+                                    if let Some(mut delegatee_resource) = delegatee_resource {
+                                        delegatee_resource
+                                            .remove_delegated_energy(energy_removed, topoheight);
+
+                                        state
+                                            .set_energy_resource(
+                                                Cow::Owned(delegatee_key),
+                                                delegatee_resource,
+                                            )
+                                            .await
+                                            .map_err(VerificationError::State)?;
+                                    }
+                                    // If delegatee has no energy resource, nothing to remove
+                                }
+
+                                if log::log_enabled!(log::Level::Debug) {
+                                    debug!("UnfreezeTos (delegation) applied: {amount} TOS moved to pending (14-day cooldown)");
+                                }
+                            } else {
+                                // Unfreeze from self-freeze records (two-phase: creates pending)
+                                energy_resource
+                                    .unfreeze_tos(*amount, topoheight)
+                                    .map_err(|e| {
+                                        VerificationError::AnyError(anyhow::anyhow!("{e}"))
+                                    })?;
+
+                                // Update energy resource in state
+                                state
+                                    .set_energy_resource(
+                                        Cow::Borrowed(&self.source),
+                                        energy_resource,
+                                    )
+                                    .await
+                                    .map_err(VerificationError::State)?;
+
+                                // NOTE: TOS goes to pending state, NOT to balance
+                                // Use WithdrawUnfrozen after 14-day cooldown to get TOS back
+
+                                if log::log_enabled!(log::Level::Debug) {
+                                    debug!("UnfreezeTos applied: {amount} TOS moved to pending (14-day cooldown)");
+                                }
                             }
                         } else {
                             return Err(VerificationError::AnyError(anyhow::anyhow!(
-                                "Invalid energy operation"
+                                "No energy resource found"
+                            )));
+                        }
+                    }
+                    EnergyPayload::WithdrawUnfrozen => {
+                        // Get current energy resource for the account
+                        let energy_resource = state
+                            .get_energy_resource(Cow::Borrowed(&self.source))
+                            .await
+                            .map_err(VerificationError::State)?;
+
+                        if let Some(mut energy_resource) = energy_resource {
+                            let topoheight = state.get_block().get_height();
+
+                            // Check if there are withdrawable funds
+                            let withdrawable = energy_resource.withdrawable_unfreeze(topoheight);
+                            if withdrawable == 0 {
+                                return Err(VerificationError::AnyError(anyhow::anyhow!(
+                                    "No withdrawable TOS (cooldown not expired)"
+                                )));
+                            }
+
+                            // Withdraw unfrozen TOS
+                            let withdrawn = energy_resource.withdraw_unfrozen(topoheight);
+
+                            // Update energy resource in state
+                            state
+                                .set_energy_resource(Cow::Borrowed(&self.source), energy_resource)
+                                .await
+                                .map_err(VerificationError::State)?;
+
+                            // Credit TOS to user's balance
+                            let balance = state
+                                .get_receiver_balance(
+                                    Cow::Borrowed(self.get_source()),
+                                    Cow::Borrowed(&TOS_ASSET),
+                                )
+                                .await
+                                .map_err(VerificationError::State)?;
+
+                            *balance = balance
+                                .checked_add(withdrawn)
+                                .ok_or(VerificationError::Overflow)?;
+
+                            if log::log_enabled!(log::Level::Debug) {
+                                debug!(
+                                    "WithdrawUnfrozen applied: {} TOS returned to balance",
+                                    withdrawn
+                                );
+                            }
+                        } else {
+                            return Err(VerificationError::AnyError(anyhow::anyhow!(
+                                "No energy resource found"
                             )));
                         }
                     }
@@ -3836,8 +4108,19 @@ impl Transaction {
                             .checked_add(*amount)
                             .ok_or(VerificationError::Overflow)?;
                     }
+                    EnergyPayload::FreezeTosDelegate { delegatees, .. } => {
+                        // Calculate total delegation amount
+                        let total: u64 = delegatees.iter().map(|d| d.amount).sum();
+                        let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                        *current = current
+                            .checked_add(total)
+                            .ok_or(VerificationError::Overflow)?;
+                    }
                     EnergyPayload::UnfreezeTos { .. } => {
-                        // Unfreeze doesn't spend, it releases frozen funds
+                        // Unfreeze doesn't spend - TOS goes to pending (two-phase)
+                    }
+                    EnergyPayload::WithdrawUnfrozen => {
+                        // Withdraw doesn't spend - it releases pending funds to balance
                     }
                 }
             }

@@ -77,13 +77,18 @@ impl EnergyResourceManager {
         energy_resource.freeze_tos_for_energy(tos_amount, duration, topoheight)
     }
 
-    /// Unfreeze TOS
+    /// Unfreeze TOS (two-phase unfreeze - returns energy removed and pending amount)
     pub fn unfreeze_tos(
         energy_resource: &mut EnergyResource,
         tos_amount: u64,
         topoheight: TopoHeight,
-    ) -> Result<u64, String> {
+    ) -> Result<(u64, u64), String> {
         energy_resource.unfreeze_tos(tos_amount, topoheight)
+    }
+
+    /// Withdraw unfrozen TOS after cooldown period
+    pub fn withdraw_unfrozen(energy_resource: &mut EnergyResource, topoheight: TopoHeight) -> u64 {
+        energy_resource.withdraw_unfrozen(topoheight)
     }
 
     /// Consume energy for transaction

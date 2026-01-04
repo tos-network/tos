@@ -3203,9 +3203,24 @@ async fn transaction(
                         manager.message(format!("  Amount: {} TOS", format_tos(*amount)));
                         manager.message(format!("  Duration: {:?}", duration));
                     }
-                    EnergyPayload::UnfreezeTos { amount } => {
+                    EnergyPayload::FreezeTosDelegate {
+                        delegatees,
+                        duration,
+                    } => {
+                        manager.message("Type: FreezeTosDelegate".to_string());
+                        manager.message(format!("  Delegatees: {} accounts", delegatees.len()));
+                        manager.message(format!("  Duration: {:?}", duration));
+                    }
+                    EnergyPayload::UnfreezeTos {
+                        amount,
+                        from_delegation,
+                    } => {
                         manager.message("Type: UnfreezeTos".to_string());
                         manager.message(format!("  Amount: {} TOS", format_tos(*amount)));
+                        manager.message(format!("  From Delegation: {}", from_delegation));
+                    }
+                    EnergyPayload::WithdrawUnfrozen => {
+                        manager.message("Type: WithdrawUnfrozen".to_string());
                     }
                 }
             }
@@ -5174,7 +5189,10 @@ async fn unfreeze_tos(
     let amount = from_coin(&amount_str, 8).context("Invalid amount")?;
 
     // Create unfreeze transaction
-    let _payload = tos_common::transaction::EnergyPayload::UnfreezeTos { amount };
+    let _payload = tos_common::transaction::EnergyPayload::UnfreezeTos {
+        amount,
+        from_delegation: false,
+    };
 
     manager.message("Building transaction...");
 

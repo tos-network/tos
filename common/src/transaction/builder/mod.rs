@@ -325,10 +325,16 @@ impl TransactionBuilder {
                         amount,
                         is_freeze: false,
                         freeze_duration: None,
-                    } => EnergyPayload::UnfreezeTos { amount: *amount },
+                    } => EnergyPayload::UnfreezeTos {
+                        amount: *amount,
+                        from_delegation: false,
+                    },
                     _ => {
                         // This should not happen due to validation, but handle gracefully
-                        EnergyPayload::UnfreezeTos { amount: 0 }
+                        EnergyPayload::UnfreezeTos {
+                            amount: 0,
+                            from_delegation: false,
+                        }
                     }
                 };
 
@@ -899,7 +905,10 @@ impl TransactionBuilder {
                         amount,
                         is_freeze: false,
                         freeze_duration: None,
-                    } => EnergyPayload::UnfreezeTos { amount: *amount },
+                    } => EnergyPayload::UnfreezeTos {
+                        amount: *amount,
+                        from_delegation: false,
+                    },
                     _ => {
                         return Err(GenerationError::State(
                             "Invalid EnergyBuilder configuration".into(),
