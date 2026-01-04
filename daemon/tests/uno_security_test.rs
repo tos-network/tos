@@ -1064,14 +1064,14 @@ async fn test_security_uno_balance_version_edge_cases() -> Result<(), Blockchain
 }
 
 // ============================================================================
-// BUG-017: ShieldTransfers TOS_ASSET Validation Tests
+// ShieldTransfers TOS_ASSET Validation Tests
 // Verifies that ShieldTransfers only accepts TOS_ASSET, rejecting other assets
 // ============================================================================
 
-/// BUG-017-01: ShieldTransfer with TOS_ASSET should be accepted
+/// ShieldTransfer with TOS_ASSET should be accepted
 /// This is the positive test to ensure TOS shielding still works
 #[test]
-fn test_bug017_shield_tos_asset_accepted() {
+fn test_shield_tos_asset_accepted() {
     use tos_common::config::TOS_ASSET;
 
     let sender = KeyPair::new();
@@ -1121,10 +1121,10 @@ fn test_bug017_shield_tos_asset_accepted() {
     );
 }
 
-/// BUG-017-02: ShieldTransfer with non-TOS asset should be rejected
-/// Verifies the fix for BUG-017: UNO only supports TOS as single-asset privacy layer
+/// ShieldTransfer with non-TOS asset should be rejected
+/// UNO only supports TOS as single-asset privacy layer
 #[test]
-fn test_bug017_shield_non_tos_asset_rejected() {
+fn test_shield_non_tos_asset_rejected() {
     use tos_common::crypto::Hash;
 
     // Create a fake non-TOS asset
@@ -1183,10 +1183,10 @@ fn test_bug017_shield_non_tos_asset_rejected() {
     // but the verification layer (not tested here) will reject them
 }
 
-/// BUG-017-03: Verify UNO_ASSET is different from TOS_ASSET
+/// Verify UNO_ASSET is different from TOS_ASSET
 /// Ensures the two assets are properly distinguished
 #[test]
-fn test_bug017_uno_vs_tos_asset_distinct() {
+fn test_uno_vs_tos_asset_distinct() {
     use tos_common::config::{TOS_ASSET, UNO_ASSET};
 
     // UNO_ASSET and TOS_ASSET should be different
@@ -1210,10 +1210,10 @@ fn test_bug017_uno_vs_tos_asset_distinct() {
     );
 }
 
-/// BUG-017-04: Multiple assets in batch - only TOS allowed
+/// Multiple assets in batch - only TOS allowed
 /// Verifies that in a batch of shield transfers, all must use TOS_ASSET
 #[test]
-fn test_bug017_batch_shield_all_must_be_tos() {
+fn test_batch_shield_all_must_be_tos() {
     use tos_common::config::TOS_ASSET;
     use tos_common::crypto::Hash;
 
@@ -1268,10 +1268,10 @@ fn test_bug017_batch_shield_all_must_be_tos() {
     assert_ne!(fake_asset, TOS_ASSET, "Fake asset should differ from TOS");
 }
 
-/// BUG-017-05: Zero amount shield still requires TOS_ASSET
+/// Zero amount shield still requires TOS_ASSET
 /// Edge case: even zero-amount shields must use TOS_ASSET
 #[test]
-fn test_bug017_zero_amount_still_requires_tos() {
+fn test_zero_amount_still_requires_tos() {
     use tos_common::config::TOS_ASSET;
 
     let sender = KeyPair::new();

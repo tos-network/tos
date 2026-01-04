@@ -8213,7 +8213,7 @@ mod tests {
     }
 
     // ============================================================================
-    // SCENARIO 70: INVOKECONTRACT ENERGY COST TESTS (BUG-022)
+    // SCENARIO 70: INVOKECONTRACT ENERGY COST TESTS
     // Verifies that InvokeContract uses max_gas for energy cost calculation
     // ============================================================================
 
@@ -8231,7 +8231,7 @@ mod tests {
         }
 
         /// Test 70.1: InvokeContract energy = base_cost + max_gas
-        /// Verifies the fix for BUG-022: heavy contracts pay proportional to max_gas
+        /// Verifies heavy contracts pay proportional to max_gas
         #[test]
         fn test_70_1_invoke_contract_energy_uses_max_gas() {
             // Create a simple invoke payload
@@ -8397,7 +8397,7 @@ mod tests {
     }
 
     // ============================================================================
-    // SCENARIO 71: VERIFICATION STATE ROLLBACK TESTS (BUG-036)
+    // SCENARIO 71: VERIFICATION STATE ROLLBACK TESTS
     // Verifies that failed transactions don't leave state side effects
     // ============================================================================
 
@@ -8495,7 +8495,7 @@ mod tests {
             );
 
             // This demonstrates the clone pattern: mutations on a copy don't affect original
-            // This is the key pattern for preventing BUG-036
+            // This is the key pattern for preventing state leakage on failed verification
         }
 
         /// Test 71.4: BatchDelegateResource registration check
@@ -8568,7 +8568,7 @@ mod tests {
     }
 
     // ============================================================================
-    // SCENARIO 72: NONCE BURNING BEHAVIOR TESTS (BUG-076)
+    // SCENARIO 72: NONCE BURNING BEHAVIOR TESTS
     // Documents the nonce burning trade-off for failed transactions
     // ============================================================================
 
@@ -8596,7 +8596,7 @@ mod tests {
             let tx_valid = false;
 
             // Nonce is already incremented ("burned")
-            // This is the documented trade-off from BUG-076
+            // This is the documented design trade-off: security over UX
             if !tx_valid {
                 // Nonce 5 is burned, next TX must use nonce 6
             }
@@ -8693,7 +8693,7 @@ mod tests {
     }
 
     // ============================================================================
-    // SCENARIO 73: VERSIONED ENERGY REWIND/PRUNE TESTS (BUG-084)
+    // SCENARIO 73: VERSIONED ENERGY REWIND/PRUNE TESTS
     // Verifies energy state cleanup during blockchain reorgs
     // ============================================================================
 

@@ -527,7 +527,7 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for Applicable
     ) -> Result<(), BlockchainError> {
         // Automatically update last_update to current topoheight
         state.last_update = self.inner.topoheight;
-        // Pass topoheight for versioned storage (BUG-130 fix)
+        // Pass topoheight for versioned storage
         self.inner
             .storage
             .set_global_energy_state(&state, self.inner.topoheight)
@@ -540,7 +540,7 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for Applicable
         &mut self,
         delegation: &tos_common::account::DelegatedResource,
     ) -> Result<(), BlockchainError> {
-        // Pass topoheight for versioned storage (BUG-129 fix)
+        // Pass topoheight for versioned storage
         self.inner
             .storage
             .set_delegated_resource(delegation, self.inner.topoheight)
@@ -552,7 +552,7 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for Applicable
         from: &'a CompressedPublicKey,
         to: &'a CompressedPublicKey,
     ) -> Result<(), BlockchainError> {
-        // Pass topoheight for versioned storage (BUG-129 fix)
+        // Pass topoheight for versioned storage
         self.inner
             .storage
             .delete_delegated_resource(from, to, self.inner.topoheight)

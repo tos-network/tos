@@ -394,7 +394,7 @@ mod tests {
     }
 
     // ============================================================================
-    // BUG-085: extra_nonce Deserialization Boundary Tests
+    // extra_nonce Deserialization Boundary Tests
     // Verifies that deserialize_extra_nonce properly validates input length
     // ============================================================================
 
