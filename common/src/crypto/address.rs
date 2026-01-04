@@ -295,7 +295,7 @@ mod tests {
         let (pub_key, _) = KeyPair::new().split();
         let addr = Address::new(false, AddressType::Normal, pub_key.compress());
         let v = addr.to_string();
-        let addr2: Address = Address::from_string(&v).unwrap();
+        let addr2: Address = Address::from_string(&v).expect("test");
         assert_eq!(addr, addr2);
     }
 }

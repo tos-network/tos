@@ -41,7 +41,7 @@ use tos_common::{
             TransferBuilder,
         },
         verify::NoZKPCache,
-        FeeType, MultiSigPayload, Reference, Transaction, TransactionType, TxVersion,
+        MultiSigPayload, Reference, Transaction, TransactionType, TxVersion,
     },
 };
 use tos_kernel::{Environment, Module};
@@ -203,7 +203,7 @@ impl ExecutionLedger {
             .get_mut(sender)
             .ok_or("missing sender balance")?;
         let sender_balance = sender_balances.entry(TOS_ASSET).or_insert(0);
-        let total_cost = amount.checked_add(tx.get_fee()).ok_or("overflow")?;
+        let total_cost = amount.checked_add(tx.get_fee_limit()).ok_or("overflow")?;
         if *sender_balance < total_cost {
             return Err("insufficient balance");
         }
@@ -356,10 +356,10 @@ impl<'a> tos_common::transaction::verify::BlockchainVerificationState<'a, ()>
     }
 
     fn get_verification_timestamp(&self) -> u64 {
-        // Return current time for benchmarks
+        // Return current time for benchmarks (in milliseconds)
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
+            .map(|d| d.as_millis() as u64)
             .unwrap_or(0)
     }
 
@@ -404,6 +404,11 @@ impl<'a> tos_common::transaction::verify::BlockchainVerificationState<'a, ()>
         Network::Mainnet
     }
 
+    async fn is_account_registered(&self, _account: &CompressedPublicKey) -> Result<bool, ()> {
+        // For benchmarks, assume all accounts are registered
+        Ok(true)
+    }
+
     async fn get_receiver_uno_balance<'b>(
         &'b mut self,
         _account: Cow<'a, CompressedPublicKey>,
@@ -429,6 +434,100 @@ impl<'a> tos_common::transaction::verify::BlockchainVerificationState<'a, ()>
     ) -> Result<(), ()> {
         Err(())
     }
+
+    async fn get_account_energy(
+        &mut self,
+        _account: &'a CompressedPublicKey,
+    ) -> Result<Option<tos_common::account::AccountEnergy>, ()> {
+        Ok(None)
+    }
+
+    async fn get_delegated_resource(
+        &mut self,
+        _from: &'a CompressedPublicKey,
+        _to: &'a CompressedPublicKey,
+    ) -> Result<Option<tos_common::account::DelegatedResource>, ()> {
+        Ok(None)
+    }
+
+    async fn record_pending_undelegation(
+        &mut self,
+        _from: &'a CompressedPublicKey,
+        _to: &'a CompressedPublicKey,
+        _amount: u64,
+    ) -> Result<(), ()> {
+        Ok(())
+    }
+
+    fn is_pending_registration(&self, _account: &CompressedPublicKey) -> bool {
+        false
+    }
+
+    fn record_pending_registration(&mut self, _account: &CompressedPublicKey) {}
+
+    // Stub implementations for benchmark
+    async fn record_pending_delegation(
+        &mut self,
+        _sender: &'a CompressedPublicKey,
+        _amount: u64,
+    ) -> Result<(), ()> {
+        Ok(())
+    }
+
+    fn get_pending_delegation(&self, _sender: &CompressedPublicKey) -> u64 {
+        0
+    }
+
+    // Stub implementations for benchmark
+    async fn record_pending_unfreeze(
+        &mut self,
+        _sender: &'a CompressedPublicKey,
+        _amount: u64,
+    ) -> Result<(), ()> {
+        Ok(())
+    }
+
+    fn get_pending_unfreeze_count(&self, _sender: &CompressedPublicKey) -> usize {
+        0
+    }
+
+    fn get_pending_unfreeze_amount(&self, _sender: &CompressedPublicKey) -> u64 {
+        0
+    }
+
+    // Stub implementations for benchmark
+    async fn record_pending_energy(
+        &mut self,
+        _sender: &'a CompressedPublicKey,
+        _amount: u64,
+    ) -> Result<(), ()> {
+        Ok(())
+    }
+
+    fn get_pending_energy(&self, _sender: &CompressedPublicKey) -> u64 {
+        0
+    }
+
+    async fn get_global_energy_state(
+        &mut self,
+    ) -> Result<tos_common::account::GlobalEnergyState, ()> {
+        Ok(tos_common::account::GlobalEnergyState::default())
+    }
+
+    // Stub implementations for pending weight tracking (benchmark only)
+    fn record_pending_weight_change(&mut self, _delta: i64) {}
+
+    fn get_pending_weight_delta(&self) -> i64 {
+        0
+    }
+
+    fn record_pending_withdrawal(&mut self, _sender: &CompressedPublicKey) {}
+
+    fn has_pending_withdrawal(&self, _sender: &CompressedPublicKey) -> bool {
+        false
+    }
+
+    fn clear_pending_unfreezes(&mut self, _sender: &CompressedPublicKey) {}
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -478,7 +577,6 @@ fn generate_block(tx_count: usize, amount: u64, fee: u64) -> GeneratedBlock {
             TransactionTypeBuilder::Transfers(vec![transfer]),
             FeeBuilder::Value(fee),
         )
-        .with_fee_type(FeeType::TOS)
         .build(&mut builder_state, &sender.keypair)
         .expect("build transaction");
 

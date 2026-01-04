@@ -30,6 +30,8 @@ pub enum CallbackEventType {
     PaymentConfirmed,
     /// Payment expired
     PaymentExpired,
+    /// Payment underpaid (amount < expected, even if confirmed)
+    PaymentUnderpaid,
 }
 
 /// Callback request body sent to merchant webhook
@@ -94,6 +96,25 @@ impl CallbackPayload {
             tx_hash: None,
             amount: None,
             confirmations: 0,
+            timestamp: get_current_time_in_seconds(),
+        }
+    }
+
+    /// Create a new payment underpaid callback payload
+    /// This is used when the payment amount is less than the expected amount,
+    /// even if the transaction is confirmed.
+    pub fn payment_underpaid(
+        payment_id: String,
+        tx_hash: Hash,
+        amount: u64,
+        confirmations: u64,
+    ) -> Self {
+        Self {
+            event: CallbackEventType::PaymentUnderpaid,
+            payment_id,
+            tx_hash: Some(tx_hash),
+            amount: Some(amount),
+            confirmations,
             timestamp: get_current_time_in_seconds(),
         }
     }
@@ -172,6 +193,7 @@ pub fn callback_idempotency_key(payload: &CallbackPayload) -> String {
         CallbackEventType::PaymentReceived => "payment_received",
         CallbackEventType::PaymentConfirmed => "payment_confirmed",
         CallbackEventType::PaymentExpired => "payment_expired",
+        CallbackEventType::PaymentUnderpaid => "payment_underpaid",
     };
     let tx_hash = payload
         .tx_hash
@@ -362,7 +384,7 @@ mod tests {
         let payload =
             CallbackPayload::payment_received("pr_abc123".to_string(), Hash::zero(), 1000000000, 1);
 
-        let json = serde_json::to_string(&payload).unwrap();
+        let json = serde_json::to_string(&payload).expect("test");
         assert!(json.contains("payment_received"));
         assert!(json.contains("pr_abc123"));
         assert!(json.contains("1000000000"));

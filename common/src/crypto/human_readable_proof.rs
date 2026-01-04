@@ -189,14 +189,14 @@ mod tests {
         };
 
         // Transform to string and back to a shareable proof
-        let string = shareable.as_string().unwrap();
+        let string = shareable.as_string().expect("test");
         assert!(string.starts_with(PREFIX_PROOF));
 
         let HumanReadableProof::Balance {
             proof,
             asset,
             topoheight,
-        } = HumanReadableProof::from_string(&string).unwrap()
+        } = HumanReadableProof::from_string(&string).expect("test assertion")
         else {
             panic!("Failed to parse the shareable proof");
         };
@@ -227,8 +227,8 @@ mod tests {
 
         // Create proof
         let mut transcript = Transcript::new(b"test");
-        let proof =
-            OwnershipProof::prove(&keypair, balance, amount, ct.clone(), &mut transcript).unwrap();
+        let proof = OwnershipProof::prove(&keypair, balance, amount, ct.clone(), &mut transcript)
+            .expect("test");
         let shareable = HumanReadableProof::Ownership {
             proof,
             asset: TOS_ASSET,
@@ -236,14 +236,14 @@ mod tests {
         };
 
         // Transform to string and back to a shareable proof
-        let string = shareable.as_string().unwrap();
+        let string = shareable.as_string().expect("test");
         assert!(string.starts_with(PREFIX_PROOF));
 
         let HumanReadableProof::Ownership {
             proof,
             asset,
             topoheight,
-        } = HumanReadableProof::from_string(&string).unwrap()
+        } = HumanReadableProof::from_string(&string).expect("test assertion")
         else {
             panic!("Failed to parse the shareable proof");
         };

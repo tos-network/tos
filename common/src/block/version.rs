@@ -127,10 +127,11 @@ mod tests {
     #[test]
     fn test_block_version_serde() {
         let version = BlockVersion::Nobunaga;
-        let serialized = serde_json::to_string(&version).unwrap();
+        let serialized = serde_json::to_string(&version).expect("test");
         assert_eq!(serialized, "0");
 
-        let deserialized: BlockVersion = serde_json::from_str(&serialized).unwrap();
+        let deserialized: BlockVersion =
+            serde_json::from_str(&serialized).expect("JSON parsing should succeed");
         assert_eq!(deserialized, version);
     }
 

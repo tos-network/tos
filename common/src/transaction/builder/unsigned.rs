@@ -4,7 +4,7 @@ use crate::{
     serializer::{Reader, ReaderError, Serializer, Writer},
     transaction::{
         multisig::{MultiSig, SignatureId},
-        FeeType, Reference, SourceCommitment, Transaction, TransactionType, TxVersion,
+        Reference, SourceCommitment, Transaction, TransactionType, TxVersion,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -20,8 +20,8 @@ pub struct UnsignedTransaction {
     chain_id: u8,
     source: CompressedPublicKey,
     data: TransactionType,
-    fee: u64,
-    fee_type: FeeType,
+    /// Maximum TOS willing to burn if frozen energy insufficient (Stake 2.0)
+    fee_limit: u64,
     nonce: Nonce,
     reference: Reference,
     multisig: Option<MultiSig>,
@@ -39,7 +39,7 @@ impl UnsignedTransaction {
         chain_id: u8,
         source: CompressedPublicKey,
         data: TransactionType,
-        fee: u64,
+        fee_limit: u64,
         nonce: Nonce,
         reference: Reference,
     ) -> Self {
@@ -48,32 +48,7 @@ impl UnsignedTransaction {
             chain_id,
             source,
             data,
-            fee,
-            fee_type: FeeType::TOS,
-            nonce,
-            reference,
-            multisig: None,
-            source_commitments: Vec::new(),
-            range_proof: None,
-        }
-    }
-    pub fn new_with_fee_type(
-        version: TxVersion,
-        chain_id: u8,
-        source: CompressedPublicKey,
-        data: TransactionType,
-        fee: u64,
-        fee_type: FeeType,
-        nonce: Nonce,
-        reference: Reference,
-    ) -> Self {
-        Self {
-            version,
-            chain_id,
-            source,
-            data,
-            fee,
-            fee_type,
+            fee_limit,
             nonce,
             reference,
             multisig: None,
@@ -88,8 +63,7 @@ impl UnsignedTransaction {
         chain_id: u8,
         source: CompressedPublicKey,
         data: TransactionType,
-        fee: u64,
-        fee_type: FeeType,
+        fee_limit: u64,
         nonce: Nonce,
         reference: Reference,
         source_commitments: Vec<SourceCommitment>,
@@ -100,8 +74,7 @@ impl UnsignedTransaction {
             chain_id,
             source,
             data,
-            fee,
-            fee_type,
+            fee_limit,
             nonce,
             reference,
             multisig: None,
@@ -142,8 +115,7 @@ impl UnsignedTransaction {
 
         self.source.write(writer);
         self.data.write(writer);
-        self.fee.write(writer);
-        self.fee_type.write(writer);
+        self.fee_limit.write(writer);
         self.nonce.write(writer);
         self.reference.write(writer);
     }
@@ -171,8 +143,7 @@ impl UnsignedTransaction {
 
         self.source.write(&mut writer);
         self.data.write(&mut writer);
-        self.fee.write(&mut writer);
-        self.fee_type.write(&mut writer);
+        self.fee_limit.write(&mut writer);
         self.nonce.write(&mut writer);
         self.reference.write(&mut writer);
         // Do NOT include multisig - this matches Transaction::get_signing_bytes
@@ -186,8 +157,7 @@ impl UnsignedTransaction {
                 self.chain_id,
                 self.source,
                 self.data,
-                self.fee,
-                self.fee_type,
+                self.fee_limit,
                 self.nonce,
                 self.source_commitments,
                 range_proof,
@@ -201,8 +171,7 @@ impl UnsignedTransaction {
                 self.chain_id,
                 self.source,
                 self.data,
-                self.fee,
-                self.fee_type,
+                self.fee_limit,
                 self.nonce,
                 self.reference,
                 self.multisig,
@@ -223,8 +192,7 @@ impl Serializer for UnsignedTransaction {
 
         self.source.write(writer);
         self.data.write(writer);
-        self.fee.write(writer);
-        self.fee_type.write(writer);
+        self.fee_limit.write(writer);
         self.nonce.write(writer);
         self.reference.write(writer);
     }
@@ -241,8 +209,7 @@ impl Serializer for UnsignedTransaction {
 
         let source = CompressedPublicKey::read(reader)?;
         let data = TransactionType::read(reader)?;
-        let fee = reader.read_u64()?;
-        let fee_type = FeeType::read(reader)?;
+        let fee_limit = reader.read_u64()?;
         let nonce = Nonce::read(reader)?;
         let reference = Reference::read(reader)?;
 
@@ -251,8 +218,7 @@ impl Serializer for UnsignedTransaction {
             chain_id,
             source,
             data,
-            fee,
-            fee_type,
+            fee_limit,
             nonce,
             reference,
             multisig: None,
@@ -265,8 +231,7 @@ impl Serializer for UnsignedTransaction {
         let mut size = self.version.size()
             + self.source.size()
             + self.data.size()
-            + self.fee.size()
-            + self.fee_type.size()
+            + 8 // fee_limit
             + self.nonce.size()
             + self.reference.size();
 

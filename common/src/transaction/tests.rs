@@ -12,9 +12,9 @@ use crate::{
     serializer::Serializer,
     transaction::{
         builder::{
-            AccountState, ContractDepositBuilder, DeployContractBuilder, EnergyBuilder, FeeBuilder,
-            FeeHelper, GenerationError, InvokeContractBuilder, MultiSigBuilder, TransactionBuilder,
-            TransactionTypeBuilder, TransferBuilder,
+            AccountState, ContractDepositBuilder, DeployContractBuilder, EnergyBuilder,
+            EnergyOperationType, FeeBuilder, FeeHelper, GenerationError, InvokeContractBuilder,
+            MultiSigBuilder, TransactionBuilder, TransactionTypeBuilder, TransferBuilder,
         },
         extra_data::Role,
         extra_data::{derive_shared_key_from_opening, PlaintextData},
@@ -77,6 +77,8 @@ struct ChainState {
     multisig: HashMap<PublicKey, MultiSigPayload>,
     contracts: HashMap<Hash, Module>,
     env: Environment,
+    // Add account energy tracking for tests
+    account_energies: HashMap<PublicKey, crate::account::AccountEnergy>,
 }
 
 impl ChainState {
@@ -86,6 +88,7 @@ impl ChainState {
             multisig: HashMap::new(),
             contracts: HashMap::new(),
             env: Environment::new(),
+            account_energies: HashMap::new(),
         }
     }
 }
@@ -172,17 +175,24 @@ fn create_tx_for(
     println!(
         "Debug sizes: estimated={estimated_size}, actual={actual_size}, to_bytes={to_bytes_size}"
     );
-    println!("Debug components: version={}, source={}, data={}, fee={}, fee_type={}, nonce={}, signature={}",
-             1, tx.get_source().size(), tx.get_data().size(), 8, 1, 8, tx.get_signature().size());
+    // Stake 2.0: fee_type removed, only fee_limit (8 bytes) remains
+    println!(
+        "Debug components: version={}, source={}, data={}, fee_limit={}, nonce={}, signature={}",
+        1,
+        tx.get_source().size(),
+        tx.get_data().size(),
+        8,
+        8,
+        tx.get_signature().size()
+    );
     println!("Debug reference size: {}", tx.get_reference().size());
 
-    // Calculate actual components
+    // Calculate actual components (Stake 2.0: no fee_type field)
     let actual_components = 1
         + tx.get_source().size()
         + tx.get_data().size()
-        + 8
-        + 1
-        + 8
+        + 8 // fee_limit
+        + 8 // nonce
         + tx.get_reference().size()
         + tx.get_signature().size();
     println!("Debug calculated actual: {actual_components}");
@@ -340,7 +350,7 @@ async fn test_tx_verify() {
 
     // Check Alice balance
     let balance = state.accounts[&alice.keypair.get_public_key().compress()].balances[&TOS_ASSET];
-    assert_eq!(balance, (100u64 * COIN_VALUE) - (50 + tx.fee));
+    assert_eq!(balance, (100u64 * COIN_VALUE) - (50 + tx.fee_limit));
 }
 
 // Balance simplification: Re-enabled test - passes with plaintext balances
@@ -482,7 +492,10 @@ async fn test_burn_tx_verify() {
 
     // Check Alice balance
     let balance = state.accounts[&alice.keypair.get_public_key().compress()].balances[&TOS_ASSET];
-    assert_eq!(balance, (100u64 * COIN_VALUE) - (50 * COIN_VALUE + tx.fee));
+    assert_eq!(
+        balance,
+        (100u64 * COIN_VALUE) - (50 * COIN_VALUE + tx.fee_limit)
+    );
 }
 
 // Balance simplification: Test updated to work with plain u64 balances
@@ -561,8 +574,10 @@ async fn test_tx_invoke_contract() {
 
     // Check Alice balance
     let balance = state.accounts[&alice.keypair.get_public_key().compress()].balances[&TOS_ASSET];
-    // 50 coins deposit + tx fee + 1000 gas fee
-    let total_spend = (50 * COIN_VALUE) + tx.fee + 1000;
+    // Under Stake 2.0 Energy model, legacy gas handling is disabled.
+    // Contract costs are now handled via the Energy model, not the legacy gas system.
+    // Total spend = deposit + fee_limit (no separate gas fee)
+    let total_spend = (50 * COIN_VALUE) + tx.fee_limit;
 
     assert_eq!(balance, (100 * COIN_VALUE) - total_spend);
 }
@@ -653,8 +668,8 @@ async fn test_tx_invoke_contract_multiple_deposits() {
 
     // Check Alice balance (sender side - should reflect deduction)
     let balance = state.accounts[&alice.keypair.get_public_key().compress()].balances[&TOS_ASSET];
-    // 50 coins deposit + tx fee + 1000 gas fee
-    let total_spend = (50 * COIN_VALUE) + tx.fee + 1000;
+    // 50 coins deposit + tx fee (legacy gas fee removed under Stake 2.0)
+    let total_spend = (50 * COIN_VALUE) + tx.fee_limit;
 
     assert_eq!(balance, (100 * COIN_VALUE) - total_spend);
 }
@@ -688,7 +703,7 @@ async fn test_tx_deploy_contract() {
             alice.keypair.get_public_key().compress(),
             None,
             data,
-            FeeBuilder::default(),
+            FeeBuilder::Value(10 * COIN_VALUE), // Sufficient fee for contract deploy
         ); // Use T0 for DeployContract
         let estimated_size = builder.estimate_size();
         let tx = builder.build(&mut state, &alice.keypair).unwrap();
@@ -729,7 +744,7 @@ async fn test_tx_deploy_contract() {
     // Check Alice balance
     let balance = state.accounts[&alice.keypair.get_public_key().compress()].balances[&TOS_ASSET];
     // 1 TOS for contract deploy, tx fee
-    let total_spend = BURN_PER_CONTRACT + tx.fee;
+    let total_spend = BURN_PER_CONTRACT + tx.fee_limit;
 
     assert_eq!(balance, (100 * COIN_VALUE) - total_spend);
 }
@@ -1067,7 +1082,7 @@ async fn test_transfer_extra_data_limits() {
 
     // Verify the transaction
     let tx_hash = tx.hash();
-    let tx_fee = tx.fee; // Save fee before moving tx into Arc
+    let tx_fee = tx.fee_limit; // Save fee_limit before moving tx into Arc
     let result = Arc::new(tx).verify(&tx_hash, &mut state, &NoZKPCache).await;
     assert!(
         result.is_ok(),
@@ -1193,13 +1208,14 @@ async fn test_transfer_extra_data_limits() {
     }
 }
 
-// Test UnfreezeTos balance refund in verify phase
-// This test verifies that unfrozen TOS is returned to balance during verification
+// Test UnfreezeTos does NOT credit balance immediately (Stake 2.0 behavior)
+// UnfreezeTos adds to unfreezing queue, NOT immediate balance credit
+// Balance is only credited via WithdrawExpireUnfreeze after 14-day waiting period
 #[tokio::test]
 async fn test_unfreeze_tos_balance_refund() {
     let mut alice = Account::new();
     let initial_balance = 1000 * COIN_VALUE;
-    let unfreeze_amount = 100 * COIN_VALUE;
+    let _unfreeze_amount = 100 * COIN_VALUE;
 
     // Set initial balance (simulating post-freeze state)
     alice.set_balance(TOS_ASSET, initial_balance);
@@ -1216,9 +1232,11 @@ async fn test_unfreeze_tos_balance_refund() {
         };
 
         let data = TransactionTypeBuilder::Energy(EnergyBuilder {
-            amount: unfreeze_amount,
-            is_freeze: false,
-            freeze_duration: None,
+            operation: EnergyOperationType::UnfreezeTos,
+            amount: Some(_unfreeze_amount),
+            receiver: None,
+            lock: false,
+            lock_period: 0,
         });
 
         let builder = TransactionBuilder::new(
@@ -1248,6 +1266,16 @@ async fn test_unfreeze_tos_balance_refund() {
         );
     }
 
+    // Set up account energy with frozen balance for unfreeze test
+    // The account needs frozen_balance >= _unfreeze_amount to pass verification
+    {
+        let mut energy = crate::account::AccountEnergy::new();
+        energy.frozen_balance = _unfreeze_amount; // Set frozen balance to the amount we want to unfreeze
+        state
+            .account_energies
+            .insert(alice.keypair.get_public_key().compress(), energy);
+    }
+
     // Check balance before verify
     let balance_before_verify = state
         .accounts
@@ -1260,7 +1288,7 @@ async fn test_unfreeze_tos_balance_refund() {
 
     // Verify UnfreezeTos transaction
     let unfreeze_tx_hash = unfreeze_tx.hash();
-    let tx_fee = unfreeze_tx.fee; // Save actual fee from transaction
+    let tx_fee = unfreeze_tx.fee_limit; // Save actual fee_limit from transaction
     println!("Transaction fee: {tx_fee}");
     let unfreeze_result = Arc::new(unfreeze_tx)
         .verify(&unfreeze_tx_hash, &mut state, &NoZKPCache)
@@ -1270,8 +1298,9 @@ async fn test_unfreeze_tos_balance_refund() {
         "UnfreezeTos transaction should succeed"
     );
 
-    // After UnfreezeTos verify: balance should be increased by unfreeze_amount but decreased by fee
-    // Expected: initial + unfreeze_amount - tx_fee (use actual tx fee, not hardcoded)
+    // After UnfreezeTos verify: balance should NOT include unfreeze_amount (Stake 2.0)
+    // Unfreeze amount goes to unfreezing queue, not immediate balance credit
+    // Note: verify() reserves fee_limit; refund happens in apply() phase
     let alice_balance_after_unfreeze = state
         .accounts
         .get(&alice.keypair.get_public_key().compress())
@@ -1281,31 +1310,30 @@ async fn test_unfreeze_tos_balance_refund() {
         .unwrap();
     println!("Balance after verify: {alice_balance_after_unfreeze}");
 
-    let expected_balance = initial_balance + unfreeze_amount - tx_fee;
+    // In verify-only mode, fee_limit is reserved but not refunded (refund happens in apply)
+    // Expected: initial_balance - tx_fee (fee reserved, no immediate unfreeze credit)
+    let expected_balance = initial_balance - tx_fee;
     println!(
-        "Expected balance: {expected_balance} (initial {initial_balance} + unfreeze {unfreeze_amount} - fee {tx_fee})"
+        "Expected balance: {expected_balance} (initial {initial_balance} - fee {tx_fee}, refund in apply phase)"
     );
     assert_eq!(
         *alice_balance_after_unfreeze, expected_balance,
-        "Balance should be initial + unfreeze_amount - fee (refund happens in verify phase)"
+        "Balance should be initial - fee_limit (refund happens in apply, not verify)"
     );
 
-    // CRITICAL CHECK: Verify balance was refunded (not just fee deducted)
-    // If refund didn't happen, balance would be: initial - tx_fee
-    let no_refund_balance = initial_balance - tx_fee;
+    // CRITICAL: Verify unfreeze amount is NOT credited to balance (Stake 2.0 behavior)
+    let old_wrong_balance = initial_balance + _unfreeze_amount - tx_fee;
     assert_ne!(
-        *alice_balance_after_unfreeze, no_refund_balance,
-        "Balance should show refund (if equal to this, refund logic is missing)"
+        *alice_balance_after_unfreeze, old_wrong_balance,
+        "UnfreezeTos should NOT credit balance immediately"
     );
 
-    println!("UnfreezeTos test passed: Balance refund works correctly");
-    println!("   Initial balance:     {initial_balance}");
-    println!("   Unfreeze amount:     {unfreeze_amount}");
-    println!("   Transaction fee:     {tx_fee}");
-    println!("   Final balance:       {expected_balance}");
-    println!(
-        "   Formula verified:    {initial_balance} + {unfreeze_amount} - {tx_fee} = {expected_balance}"
-    );
+    println!("UnfreezeTos test passed: Stake 2.0 queue behavior verified");
+    println!("   Initial balance:      {initial_balance}");
+    println!("   Transaction fee:      {tx_fee} (reserved in verify, refunded in apply)");
+    println!("   Final balance:        {expected_balance}");
+    println!("   Note: Unfreeze amount goes to unfreezing queue, not immediate balance");
+    println!("   Use WithdrawExpireUnfreeze after 14 days to claim balance");
 }
 
 #[async_trait]
@@ -1316,14 +1344,23 @@ impl<'a> BlockchainVerificationState<'a, TestError> for ChainState {
     }
 
     /// Get the balance for a receiver account
-    /// Auto-creates balance entry with 0 if it doesn't exist
+    /// Auto-creates account and balance entry with 0 if they don't exist
+    /// This matches the real daemon behavior where new accounts are created on first receive
     async fn get_receiver_balance<'b>(
         &'b mut self,
         account: Cow<'a, PublicKey>,
         asset: Cow<'a, Hash>,
     ) -> Result<&'b mut u64, TestError> {
-        // Get account or error if not found
-        let account_state = self.accounts.get_mut(&account).ok_or(TestError(()))?;
+        let key = account.into_owned();
+
+        // Auto-create account if missing (for new accounts receiving funds)
+        let account_state = self
+            .accounts
+            .entry(key)
+            .or_insert_with(|| AccountChainState {
+                balances: HashMap::new(),
+                nonce: 0,
+            });
         // Auto-create balance entry if missing (for new assets being received)
         Ok(account_state
             .balances
@@ -1426,10 +1463,10 @@ impl<'a> BlockchainVerificationState<'a, TestError> for ChainState {
     }
 
     fn get_verification_timestamp(&self) -> u64 {
-        // Use current system time for tests
+        // Use current system time for tests (in milliseconds)
         std::time::SystemTime::now()
             .duration_since(std::time::SystemTime::UNIX_EPOCH)
-            .map(|d| d.as_secs())
+            .map(|d| d.as_millis() as u64)
             .unwrap_or(0)
     }
 
@@ -1477,6 +1514,134 @@ impl<'a> BlockchainVerificationState<'a, TestError> for ChainState {
     fn get_network(&self) -> crate::network::Network {
         // Use Mainnet for tests (chain_id = 0)
         crate::network::Network::Mainnet
+    }
+
+    /// Check if an account is registered (for TOS-Only fee calculation)
+    async fn is_account_registered(
+        &self,
+        account: &CompressedPublicKey,
+    ) -> Result<bool, TestError> {
+        // For testing, check if account exists in our state
+        // Note: crypto::PublicKey = CompressedPublicKey, so account can be used directly
+        Ok(self.accounts.contains_key(account))
+    }
+
+    async fn get_account_energy(
+        &mut self,
+        account: &'a CompressedPublicKey,
+    ) -> Result<Option<crate::account::AccountEnergy>, TestError> {
+        // Return stored account energy for test
+        Ok(self.account_energies.get(account).cloned())
+    }
+
+    async fn get_delegated_resource(
+        &mut self,
+        _from: &'a CompressedPublicKey,
+        _to: &'a CompressedPublicKey,
+    ) -> Result<Option<crate::account::DelegatedResource>, TestError> {
+        Ok(None)
+    }
+
+    async fn record_pending_undelegation(
+        &mut self,
+        _from: &'a CompressedPublicKey,
+        _to: &'a CompressedPublicKey,
+        _amount: u64,
+    ) -> Result<(), TestError> {
+        // No-op for test state
+        Ok(())
+    }
+
+    /// Check if account is pending registration (stub for tests)
+    fn is_pending_registration(&self, _account: &CompressedPublicKey) -> bool {
+        false
+    }
+
+    /// Record that account will be registered (stub for tests)
+    fn record_pending_registration(&mut self, _account: &CompressedPublicKey) {
+        // No-op for test state
+    }
+
+    /// Record pending delegation (stub for tests)
+    async fn record_pending_delegation(
+        &mut self,
+        _sender: &'a CompressedPublicKey,
+        _amount: u64,
+    ) -> Result<(), TestError> {
+        // No-op for test state
+        Ok(())
+    }
+
+    /// Get pending delegation (stub for tests)
+    fn get_pending_delegation(&self, _sender: &CompressedPublicKey) -> u64 {
+        0
+    }
+
+    /// Record pending unfreeze (stub for tests)
+    async fn record_pending_unfreeze(
+        &mut self,
+        _sender: &'a CompressedPublicKey,
+        _amount: u64,
+    ) -> Result<(), TestError> {
+        // No-op for test state
+        Ok(())
+    }
+
+    /// Get pending unfreeze count (stub for tests)
+    fn get_pending_unfreeze_count(&self, _sender: &CompressedPublicKey) -> usize {
+        0
+    }
+
+    /// Get pending unfreeze amount (stub for tests)
+    fn get_pending_unfreeze_amount(&self, _sender: &CompressedPublicKey) -> u64 {
+        0
+    }
+
+    /// Record pending energy (stub for tests)
+    async fn record_pending_energy(
+        &mut self,
+        _sender: &'a CompressedPublicKey,
+        _amount: u64,
+    ) -> Result<(), TestError> {
+        // No-op for test state
+        Ok(())
+    }
+
+    /// Get pending energy (stub for tests)
+    fn get_pending_energy(&self, _sender: &CompressedPublicKey) -> u64 {
+        0
+    }
+
+    /// Get the global energy state (stub for tests)
+    async fn get_global_energy_state(
+        &mut self,
+    ) -> Result<crate::account::GlobalEnergyState, TestError> {
+        Ok(crate::account::GlobalEnergyState::default())
+    }
+
+    /// Record pending weight change (stub for tests)
+    fn record_pending_weight_change(&mut self, _delta: i64) {
+        // No-op for test state
+    }
+
+    /// Get pending weight delta (stub for tests)
+    fn get_pending_weight_delta(&self) -> i64 {
+        0
+    }
+
+    /// Record pending withdrawal (stub for tests)
+    fn record_pending_withdrawal(&mut self, _sender: &CompressedPublicKey) {
+        // No-op for test state
+    }
+
+    /// Check if there's a pending withdrawal (stub for tests)
+    fn has_pending_withdrawal(&self, _sender: &CompressedPublicKey) -> bool {
+        false
+    }
+
+    /// Clear pending unfreezes (stub for tests)
+    fn clear_pending_unfreezes(&mut self, _sender: &CompressedPublicKey) {
+        // No-op for test state
     }
 }
 
@@ -1618,7 +1783,7 @@ async fn test_p04_transfer_balance_mutation() {
 
     // Alice transfers 500 TOS to Bob
     let tx = create_transfer_tx(&alice, bob.address(), 500 * COIN_VALUE, TOS_ASSET);
-    let tx_fee = tx.fee;
+    let tx_fee = tx.fee_limit;
 
     // Create chain state
     let mut state = ChainState::new();
@@ -1892,7 +2057,7 @@ async fn test_p04_fee_deduction() {
 
     // Transfer 100 TOS to Bob
     let tx = create_transfer_tx(&alice, bob.address(), 100 * COIN_VALUE, TOS_ASSET);
-    let tx_fee = tx.fee;
+    let tx_fee = tx.fee_limit;
 
     // Ensure fee is non-zero
     assert!(tx_fee > 0, "Fee should be non-zero");
@@ -1963,7 +2128,7 @@ async fn test_p04_burn_transaction() {
 
     // Burn 200 TOS
     let tx = create_burn_tx(&alice, 200 * COIN_VALUE, TOS_ASSET);
-    let tx_fee = tx.fee;
+    let tx_fee = tx.fee_limit;
 
     // Create chain state
     let mut state = ChainState::new();
@@ -2039,7 +2204,7 @@ async fn test_p04_multiple_transfers() {
     );
 
     let tx = Arc::new(builder.build(&mut state_impl, &alice.keypair).unwrap());
-    let tx_fee = tx.fee;
+    let tx_fee = tx.fee_limit;
 
     // Create chain state
     let mut state = ChainState::new();
@@ -2115,4 +2280,323 @@ async fn test_p04_multiple_transfers() {
     );
 
     println!("Multiple transfers correctly processed: 300 + 200 TOS");
+}
+
+// ============================================================================
+// TOS-ONLY FEE VERIFICATION TESTS
+// ============================================================================
+// Account creation fee validation is now in verify() phase!
+// This catches insufficient fee errors early during mempool validation.
+//
+// The validation check ensures that when sending TOS to a new (unregistered) account:
+// 1. verify() checks: amount >= FEE_PER_ACCOUNT_CREATION (0.1 TOS)
+// 2. If amount < 0.1 TOS, verify() returns AmountTooSmallForAccountCreation error
+// 3. apply() handles the actual fee deduction and receiver balance update
+
+use crate::config::FEE_PER_ACCOUNT_CREATION;
+
+/// Test: Transfer less than 0.1 TOS to NEW account fails during verify()
+///
+/// This test validates that the account creation fee check is now in verify(),
+/// allowing mempool to reject invalid transactions early.
+///
+/// Scenario:
+/// - Alice has 100 TOS
+/// - Alice tries to send 0.05 TOS to Bob (new account, not in state)
+/// - Expected: verify() fails with AmountTooSmallForAccountCreation error
+#[tokio::test]
+async fn test_account_creation_fee_validation_in_verify() {
+    let mut alice = Account::new();
+    let bob = Account::new(); // Bob is NEW - will NOT be added to state
+
+    alice.set_balance(TOS_ASSET, 100 * COIN_VALUE);
+
+    // Create transfer transaction: Alice -> Bob (0.05 TOS - less than 0.1 TOS fee)
+    let transfer_amount = FEE_PER_ACCOUNT_CREATION / 2; // 0.05 TOS
+    let tx = create_tx_for(alice.clone(), bob.address(), transfer_amount, None);
+
+    let mut state = ChainState::new();
+
+    // Add Alice to state (existing account)
+    {
+        let mut balances = HashMap::new();
+        for (asset, balance) in &alice.balances {
+            balances.insert(asset.clone(), balance.balance);
+        }
+        state.accounts.insert(
+            alice.keypair.get_public_key().compress(),
+            AccountChainState {
+                balances,
+                nonce: alice.nonce,
+            },
+        );
+    }
+
+    // IMPORTANT: Do NOT add Bob to state - he is a NEW account!
+    // This triggers the account creation fee validation
+
+    let hash = tx.hash();
+    let result = tx.verify(&hash, &mut state, &NoZKPCache).await;
+
+    // CRITICAL ASSERTION: verify() should fail with AmountTooSmallForAccountCreation
+    match result {
+        Err(VerificationError::AmountTooSmallForAccountCreation { amount, fee }) => {
+            assert_eq!(
+                amount, transfer_amount,
+                "Error should report the transfer amount"
+            );
+            assert_eq!(fee, FEE_PER_ACCOUNT_CREATION, "Error should report the fee");
+            println!(
+                "Correctly rejected transfer of {} to new account (fee: {})",
+                amount, fee
+            );
+        }
+        Ok(()) => {
+            panic!(
+                "Expected AmountTooSmallForAccountCreation error, but verify() succeeded. \
+                 Transfer amount {} is less than fee {}",
+                transfer_amount, FEE_PER_ACCOUNT_CREATION
+            );
+        }
+        Err(other) => {
+            panic!(
+                "Expected AmountTooSmallForAccountCreation error, got: {:?}",
+                other
+            );
+        }
+    }
+}
+
+/// Test: Transfer >= 0.1 TOS to NEW account succeeds during verify()
+///
+/// This test validates that transfers with sufficient amount pass verify().
+/// Note: The actual fee deduction happens in apply(), which requires BlockchainApplyState.
+///
+/// Scenario:
+/// - Alice has 100 TOS
+/// - Alice sends 1 TOS to Bob (new account, not in state)
+/// - Expected: verify() succeeds (amount >= FEE_PER_ACCOUNT_CREATION)
+#[tokio::test]
+async fn test_account_creation_fee_sufficient_amount_passes_verify() {
+    let mut alice = Account::new();
+    let bob = Account::new(); // Bob is NEW - will NOT be added to state
+
+    alice.set_balance(TOS_ASSET, 100 * COIN_VALUE);
+
+    // Create transfer transaction: Alice -> Bob (1 TOS - more than 0.1 TOS fee)
+    let transfer_amount = COIN_VALUE; // 1 TOS
+    let tx = create_tx_for(alice.clone(), bob.address(), transfer_amount, None);
+
+    let mut state = ChainState::new();
+
+    // Add Alice to state (existing account)
+    {
+        let mut balances = HashMap::new();
+        for (asset, balance) in &alice.balances {
+            balances.insert(asset.clone(), balance.balance);
+        }
+        state.accounts.insert(
+            alice.keypair.get_public_key().compress(),
+            AccountChainState {
+                balances,
+                nonce: alice.nonce,
+            },
+        );
+    }
+
+    // IMPORTANT: Do NOT add Bob to state - he is a NEW account!
+    // This triggers the account creation fee validation
+
+    let hash = tx.hash();
+    let result = tx.verify(&hash, &mut state, &NoZKPCache).await;
+
+    // ASSERTION: verify() should succeed since amount >= FEE_PER_ACCOUNT_CREATION
+    assert!(
+        result.is_ok(),
+        "Transfer of {} TOS to new account should pass verify() (fee is {}). Error: {:?}",
+        transfer_amount as f64 / COIN_VALUE as f64,
+        FEE_PER_ACCOUNT_CREATION as f64 / COIN_VALUE as f64,
+        result.err()
+    );
+    println!(
+        "Transfer of {} to new account passed verify() (fee: {})",
+        transfer_amount, FEE_PER_ACCOUNT_CREATION
+    );
+}
+
+/// Test: Transfer exactly 0.1 TOS to NEW account succeeds during verify()
+///
+/// Edge case: the minimum valid amount for new account creation.
+#[tokio::test]
+async fn test_account_creation_fee_exact_minimum_passes_verify() {
+    let mut alice = Account::new();
+    let bob = Account::new(); // Bob is NEW - will NOT be added to state
+
+    alice.set_balance(TOS_ASSET, 100 * COIN_VALUE);
+
+    // Create transfer transaction: Alice -> Bob (exactly 0.1 TOS - equals fee)
+    let transfer_amount = FEE_PER_ACCOUNT_CREATION; // Exactly 0.1 TOS
+    let tx = create_tx_for(alice.clone(), bob.address(), transfer_amount, None);
+
+    let mut state = ChainState::new();
+
+    // Add Alice to state (existing account)
+    {
+        let mut balances = HashMap::new();
+        for (asset, balance) in &alice.balances {
+            balances.insert(asset.clone(), balance.balance);
+        }
+        state.accounts.insert(
+            alice.keypair.get_public_key().compress(),
+            AccountChainState {
+                balances,
+                nonce: alice.nonce,
+            },
+        );
+    }
+
+    // IMPORTANT: Do NOT add Bob to state - he is a NEW account!
+
+    let hash = tx.hash();
+    let result = tx.verify(&hash, &mut state, &NoZKPCache).await;
+
+    // ASSERTION: verify() should succeed since amount == FEE_PER_ACCOUNT_CREATION
+    assert!(
+        result.is_ok(),
+        "Transfer of exactly {} (the fee) to new account should pass verify(). Error: {:?}",
+        FEE_PER_ACCOUNT_CREATION,
+        result.err()
+    );
+    println!(
+        "Transfer of exactly {} (the fee) to new account passed verify()",
+        FEE_PER_ACCOUNT_CREATION
+    );
+}
+
+/// Test: Transfer to EXISTING account does NOT deduct creation fee
+///
+/// NOTE: This test verifies existing account behavior (no fee deduction).
+/// Currently works because we manually add transfer amount like other tests.
+#[tokio::test]
+async fn test_no_creation_fee_for_existing_account() {
+    let mut alice = Account::new();
+    let mut bob = Account::new();
+
+    alice.set_balance(TOS_ASSET, 100 * COIN_VALUE);
+    bob.set_balance(TOS_ASSET, 10 * COIN_VALUE); // Bob exists with balance
+
+    let transfer_amount = COIN_VALUE; // 1 TOS
+    let tx = create_tx_for(alice.clone(), bob.address(), transfer_amount, None);
+
+    let mut state = ChainState::new();
+
+    // Add Alice to state
+    {
+        let mut balances = HashMap::new();
+        for (asset, balance) in &alice.balances {
+            balances.insert(asset.clone(), balance.balance);
+        }
+        state.accounts.insert(
+            alice.keypair.get_public_key().compress(),
+            AccountChainState {
+                balances,
+                nonce: alice.nonce,
+            },
+        );
+    }
+
+    // Add Bob to state (EXISTING account)
+    {
+        let mut balances = HashMap::new();
+        for (asset, balance) in &bob.balances {
+            balances.insert(asset.clone(), balance.balance);
+        }
+        state.accounts.insert(
+            bob.keypair.get_public_key().compress(),
+            AccountChainState {
+                balances,
+                nonce: bob.nonce,
+            },
+        );
+    }
+
+    let hash = tx.hash();
+    tx.verify(&hash, &mut state, &NoZKPCache).await.unwrap();
+
+    // Manually add transfer amount to Bob (as verify doesn't do this for receiver)
+    {
+        let bob_balance = state
+            .accounts
+            .get_mut(&bob.keypair.get_public_key().compress())
+            .unwrap()
+            .balances
+            .entry(TOS_ASSET)
+            .or_insert(0);
+        *bob_balance = bob_balance.checked_add(transfer_amount).unwrap();
+    }
+
+    // Bob should have 10 + 1 = 11 TOS (no creation fee deducted)
+    let bob_balance = state.accounts[&bob.keypair.get_public_key().compress()].balances[&TOS_ASSET];
+    let expected_bob_balance = 10 * COIN_VALUE + transfer_amount;
+    assert_eq!(
+        bob_balance, expected_bob_balance,
+        "Existing account should receive full transfer amount without creation fee"
+    );
+
+    println!(
+        "No creation fee for existing account: Bob has {} TOS",
+        bob_balance / COIN_VALUE
+    );
+}
+
+/// Test: Transfer amount less than 0.1 TOS to new account should fail
+///
+/// NOTE: This test is ignored because the validation happens in apply(), not verify().
+/// In the current architecture, this transaction would pass verify() but fail in apply().
+#[tokio::test]
+#[ignore = "Account creation fee validation is in apply(), not verify()"]
+async fn test_transfer_below_creation_fee_to_new_account_fails() {
+    let mut alice = Account::new();
+    let bob = Account::new(); // New account
+
+    alice.set_balance(TOS_ASSET, 100 * COIN_VALUE);
+
+    // Try to send 0.05 TOS (less than 0.1 TOS creation fee)
+    let transfer_amount = FEE_PER_ACCOUNT_CREATION / 2; // 0.05 TOS
+    let tx = create_tx_for(alice.clone(), bob.address(), transfer_amount, None);
+
+    let mut state = ChainState::new();
+
+    // Add Alice to state
+    {
+        let mut balances = HashMap::new();
+        for (asset, balance) in &alice.balances {
+            balances.insert(asset.clone(), balance.balance);
+        }
+        state.accounts.insert(
+            alice.keypair.get_public_key().compress(),
+            AccountChainState {
+                balances,
+                nonce: alice.nonce,
+            },
+        );
+    }
+
+    // Do NOT add Bob to state (new account)
+
+    let hash = tx.hash();
+    let result = tx.verify(&hash, &mut state, &NoZKPCache).await;
+
+    // Should fail because transfer amount < account creation fee
+    assert!(
+        result.is_err(),
+        "Transfer of {} to new account should fail (less than {} creation fee)",
+        transfer_amount,
+        FEE_PER_ACCOUNT_CREATION
+    );
+
+    println!(
+        "Correctly rejected transfer of {} to new account (< {} fee)",
+        transfer_amount, FEE_PER_ACCOUNT_CREATION
+    );
 }

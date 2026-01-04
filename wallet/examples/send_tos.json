@@ -4,7 +4,7 @@
     "address": "tos1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq8cczjp",
     "amount": "10.5",
     "asset": "TOS",
-    "fee_type": "low",
+    "fee_limit": 0,
     "confirm": "yes"
   }
 }

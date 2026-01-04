@@ -12,30 +12,97 @@ pub const UNO_ASSET: Hash = Hash::new([
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
 ]);
 
-// ===== NEW ENERGY-BASED FEE MODEL =====
-
-// Energy-based fee model constants
-// Only transfer operations consume energy
-// Simplified model compared to TRON: 1 transfer = 1 energy (size-independent)
+// ===== ENERGY STAKE 2.0 MODEL =====
 //
-// Energy Model Overview:
-// - Each transfer consumes exactly 1 energy regardless of transaction size
-// - Energy is gained by freezing TOS with duration-based multipliers
-// - Energy formula: 1 TOS × (2 × freeze_days) = energy units
-// - Example: 1 TOS frozen for 7 days = 14 energy = 14 free transfers
-pub const ENERGY_PER_TRANSFER: u64 = 1; // Basic transfer (1 energy per transfer)
+// New proportional energy allocation model:
+// - Energy = (frozen_balance / total_energy_weight) × TOTAL_ENERGY_LIMIT
+// - 24-hour linear decay recovery
+// - Free quota for casual users (~3 transfers/day)
+// - 14-day unfreeze delay queue (max 32 entries)
+// - Delegation support (DelegateResource / UndelegateResource)
+//
+// Philosophy: "Casual free, power users stake"
+// - Casual users: ~3 free transfers/day
+// - Power users: stake TOS for more energy
+// - dApp users: pay for smart contract execution
+
+// Total energy available network-wide
+// 184M TOS × 100 = 18.4 billion energy (if all TOS staked)
+pub const TOTAL_ENERGY_LIMIT: u64 = 18_400_000_000;
+
+// Free energy quota per account per day
+// Provides ~3 free transfers for casual users
+// Transfer cost ≈ 500 energy → 1,500 ÷ 500 ≈ 3 transfers
+pub const FREE_ENERGY_QUOTA: u64 = 1_500;
+
+// Energy recovery window in milliseconds (24 hours)
+// Energy linearly recovers over this period after consumption
+pub const ENERGY_RECOVERY_WINDOW_MS: u64 = 86_400_000;
+
+// Maximum entries in unfreezing queue per account
+// Prevents unbounded storage growth
+pub const MAX_UNFREEZING_LIST_SIZE: usize = 32;
+
+// Delay in days before unfrozen TOS can be withdrawn
+pub const UNFREEZE_DELAY_DAYS: u32 = 14;
+
+// Auto-burn rate: atomic TOS units per energy unit
+// When frozen energy insufficient, TOS is burned at this rate
+// 100 atomic = 0.000001 TOS per energy
+pub const TOS_PER_ENERGY: u64 = 100;
+
+// Minimum TOS amount for delegation (1 TOS)
+pub const MIN_DELEGATION_AMOUNT: u64 = COIN_VALUE;
+
+// Maximum lock period for delegated resources (days)
+pub const MAX_DELEGATE_LOCK_DAYS: u32 = 365;
+
+// Default lock period for delegated resources (days)
+// 0 = no lock (can undelegate immediately after 3 days minimum)
+pub const DEFAULT_DELEGATE_LOCK_DAYS: u32 = 3;
+
+// ===== Batch Operation Limits (TOS Innovation) =====
+// Maximum accounts that can be activated in a single ActivateAccounts transaction
+pub const MAX_BATCH_ACTIVATE: usize = 500;
+
+// Maximum delegations in a single BatchDelegateResource transaction
+pub const MAX_BATCH_DELEGATE: usize = 500;
+
+// Maximum items in a single ActivateAndDelegate transaction
+pub const MAX_BATCH_ACTIVATE_DELEGATE: usize = 500;
+
+// Energy costs for different transaction types (Stake 2.0)
+pub const ENERGY_COST_TRANSFER_BASE: u64 = 0; // Base cost for transfer (size-based)
+pub const ENERGY_COST_TRANSFER_PER_OUTPUT: u64 = 100; // Per transfer output
+pub const ENERGY_COST_NEW_ACCOUNT: u64 = 25_000; // Creating new account
+pub const ENERGY_COST_BURN: u64 = 1_000; // Burn operation
+pub const ENERGY_COST_CONTRACT_DEPLOY_BASE: u64 = 32_000; // Base cost for contract deploy
+pub const ENERGY_COST_CONTRACT_DEPLOY_PER_BYTE: u64 = 10; // Per byte of bytecode
+
+// Maximum fee_limit per transaction
+// 1000 TOS = 1000 * COIN_VALUE = 100,000,000,000 atomic units
+// This limits the maximum TOS that can be burned for energy in a single transaction
+pub const MAX_FEE_LIMIT: u64 = 1000 * COIN_VALUE;
 
 // TOS-based fee model constants
 pub const FEE_PER_KB: u64 = 10000;
-pub const FEE_PER_ACCOUNT_CREATION: u64 = 100000;
 pub const FEE_PER_TRANSFER: u64 = 5000;
-pub const FEE_PER_MULTISIG_SIGNATURE: u64 = 500;
 
-// UNO-based fee model constants (privacy transfers)
-pub const UNO_FEE_PER_KB: u64 = 10000;
-pub const UNO_FEE_PER_ACCOUNT_CREATION: u64 = 100000;
-pub const UNO_FEE_PER_TRANSFER: u64 = 5000;
-pub const UNO_FEE_PER_MULTISIG_SIGNATURE: u64 = 500;
+// ===== TOS-Only Fees (cannot use Energy) =====
+// These fees must be paid in TOS, not Energy.
+
+/// Account creation fee - deducted from transfer amount when sending to new account
+/// 0.1 TOS = 10,000,000 atomic units
+/// This prevents Sybil attacks (mass account creation)
+pub const FEE_PER_ACCOUNT_CREATION: u64 = 10_000_000;
+
+/// MultiSig transaction fee - per signature, deducted from sender's TOS balance
+/// 1 TOS = 100,000,000 atomic units per signature
+/// Only charged when transaction has 2+ signatures
+pub const FEE_PER_MULTISIG_SIGNATURE: u64 = COIN_VALUE;
+
+// Note: UNO transfers use Energy model with 5x multiplier (see EnergyFeeCalculator)
+// Account creation fee for UNO is the same as TOS (FEE_PER_ACCOUNT_CREATION)
 
 // Contracts rules
 // 1 TOS per contract deployed
@@ -78,12 +145,6 @@ pub const COIN_DECIMALS: u8 = 8;
 pub const COIN_VALUE: u64 = 10u64.pow(COIN_DECIMALS as u32);
 // 184M full coin
 pub const MAXIMUM_SUPPLY: u64 = 184_000_000 * COIN_VALUE;
-
-// ===== FREEZE DURATION LIMITS =====
-// Minimum freeze duration in days
-pub const MIN_FREEZE_DURATION_DAYS: u32 = 3;
-// Maximum freeze duration in days
-pub const MAX_FREEZE_DURATION_DAYS: u32 = 180;
 
 // ===== TOS AMOUNT LIMITS =====
 // Minimum TOS amount for freeze operations (1 TOS)

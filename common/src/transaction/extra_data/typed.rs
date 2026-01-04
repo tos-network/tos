@@ -72,7 +72,7 @@ mod tests {
         let inner = vec![0; 2048];
         let v = ExtraDataType::Proprietary(inner.clone());
         let bytes = v.to_bytes();
-        let v2 = ExtraDataType::from_bytes(&bytes).unwrap();
+        let v2 = ExtraDataType::from_bytes(&bytes).expect("deserialization should succeed");
         let ExtraDataType::Proprietary(v2) = v2 else {
             panic!("invalid variant");
         };

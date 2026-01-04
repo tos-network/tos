@@ -20,6 +20,11 @@ pub enum Column {
     // {tx_hash} => {outputs}
     TransactionsOutputs,
 
+    // Transaction execution results (Stake 2.0)
+    // Stores actual fee burned and energy consumed after TX execution
+    // {tx_hash} => {TransactionResult}
+    TransactionResults,
+
     // ordered blocks hashes based on execution
     // {position} => {block_hash}
     BlocksExecutionOrder,
@@ -111,6 +116,29 @@ pub enum Column {
     // Energy pointer is now stored in Account.energy_pointer
     // {topoheight}_{account_address} => {energy_resource}
     VersionedEnergyResources,
+
+    // ===== Stake 2.0 Delegation =====
+
+    // Delegated resources: from -> to -> DelegatedResource
+    // Key: {from_pubkey (32 bytes)}{to_pubkey (32 bytes)} => {DelegatedResource}
+    DelegatedResources,
+    // Index for looking up delegations received by an account
+    // Key: {to_pubkey (32 bytes)}{from_pubkey (32 bytes)} => {}
+    DelegatedResourcesIndex,
+
+    // Global energy state for the network (Stake 2.0)
+    // Single key "GLOBAL" => {GlobalEnergyState}
+    GlobalEnergyState,
+
+    // ===== Stake 2.0 Versioned Delegation (Reorg Support) =====
+
+    // Versioned delegated resources for reorg support
+    // Key: {topoheight}_{from_address}_{to_address} => {DelegatedResource}
+    VersionedDelegatedResources,
+
+    // Versioned global energy state for reorg support
+    // Key: {topoheight} => {GlobalEnergyState}
+    VersionedGlobalEnergyState,
 
     // AI mining state pointer
     // AI_MINING_STATE_TOPOHEIGHT => {topoheight}
@@ -208,7 +236,9 @@ impl Column {
             | VersionedContractsData
             | PrefixedRegistrations
             | VersionedEnergyResources
-            | VersionedAIMiningStates => Some(PREFIX_TOPOHEIGHT_LEN),
+            | VersionedAIMiningStates
+            | VersionedDelegatedResources
+            | VersionedGlobalEnergyState => Some(PREFIX_TOPOHEIGHT_LEN),
 
             UnoBalances => Some(PREFIX_ID_LEN),
 
@@ -237,6 +267,11 @@ impl Column {
             CommitteesByRegion => Some(1),
             // Child committees: prefix by parent committee ID (32 bytes)
             ChildCommittees => Some(32),
+
+            // Delegated resources: prefix by from_pubkey (32 bytes)
+            DelegatedResources => Some(32),
+            // Delegated resources index: prefix by to_pubkey (32 bytes)
+            DelegatedResourcesIndex => Some(32),
 
             _ => None,
         }

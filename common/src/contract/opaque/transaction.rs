@@ -66,7 +66,7 @@ pub fn transaction_source(zelf: FnInstance, _: FnParams, context: &mut Context) 
 
 pub fn transaction_fee(zelf: FnInstance, _: FnParams, _: &mut Context) -> FnReturnType {
     let tx: &OpaqueTransaction = zelf?.as_opaque_type()?;
-    Ok(Some(Primitive::U64(tx.inner.get_fee()).into()))
+    Ok(Some(Primitive::U64(tx.inner.get_fee_limit()).into()))
 }
 
 pub fn transaction_signature(zelf: FnInstance, _: FnParams, _: &mut Context) -> FnReturnType {

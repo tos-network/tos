@@ -292,7 +292,7 @@ mod tests {
             1000,
             100,
         )
-        .unwrap();
+        .expect("test");
 
         assert_eq!(task.task_id, task_id);
         assert_eq!(task.status, TaskStatus::Active);
@@ -454,7 +454,7 @@ mod tests {
         assert_eq!(task.submitted_answers[1].average_score, Some(25)); // (25+30+20)/3 = 25
 
         // Check best answer selection
-        let best_answer = task.get_best_answer().unwrap();
+        let best_answer = task.get_best_answer().expect("test");
         assert_eq!(best_answer.answer_content, good_answer_content);
         assert_eq!(best_answer.average_score, Some(91));
 
@@ -577,7 +577,7 @@ mod tests {
     // Helper functions for tests
     fn create_test_pubkey(bytes: [u8; 32]) -> CompressedPublicKey {
         use tos_crypto::curve25519_dalek::ristretto::CompressedRistretto;
-        CompressedPublicKey::new(CompressedRistretto::from_slice(&bytes).unwrap())
+        CompressedPublicKey::new(CompressedRistretto::from_slice(&bytes).expect("test"))
     }
 
     fn create_test_task() -> AIMiningTask {
@@ -590,7 +590,7 @@ mod tests {
             1000, // deadline
             100,  // published_at
         )
-        .unwrap()
+        .expect("test assertion")
     }
 
     fn create_test_answer() -> SubmittedAnswer {
@@ -615,7 +615,7 @@ mod tests {
             1000, // deadline
             100,  // published_at
         )
-        .unwrap()
+        .expect("test assertion")
     }
 
     fn create_test_answer_for_task(answer_content: &str) -> SubmittedAnswer {

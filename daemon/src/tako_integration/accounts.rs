@@ -457,29 +457,29 @@ mod tests {
     #[test]
     fn test_get_balance_existing_account() {
         let mut provider = MockProvider::new();
-        let pubkey = PublicKey::from_bytes(&[1u8; 32]).unwrap();
+        let pubkey = PublicKey::from_bytes(&[1u8; 32]).expect("test");
         provider.set_balance(pubkey.clone(), Hash::zero(), 5000);
 
         let adapter = TosAccountAdapter::new(&provider, 100);
-        let balance = adapter.get_balance(pubkey.as_bytes()).unwrap();
+        let balance = adapter.get_balance(pubkey.as_bytes()).expect("test");
         assert_eq!(balance, 5000);
     }
 
     #[test]
     fn test_get_balance_nonexistent_account() {
         let provider = MockProvider::new();
-        let pubkey = PublicKey::from_bytes(&[2u8; 32]).unwrap();
+        let pubkey = PublicKey::from_bytes(&[2u8; 32]).expect("test");
 
         let adapter = TosAccountAdapter::new(&provider, 100);
-        let balance = adapter.get_balance(pubkey.as_bytes()).unwrap();
+        let balance = adapter.get_balance(pubkey.as_bytes()).expect("test");
         assert_eq!(balance, 0);
     }
 
     #[test]
     fn test_transfer_sufficient_balance() {
         let mut provider = MockProvider::new();
-        let from = PublicKey::from_bytes(&[1u8; 32]).unwrap();
-        let to = PublicKey::from_bytes(&[2u8; 32]).unwrap();
+        let from = PublicKey::from_bytes(&[1u8; 32]).expect("test");
+        let to = PublicKey::from_bytes(&[2u8; 32]).expect("test");
 
         provider.set_balance(from.clone(), Hash::zero(), 10000);
         provider.set_balance(to.clone(), Hash::zero(), 0);
@@ -506,8 +506,8 @@ mod tests {
     #[test]
     fn test_transfer_insufficient_balance() {
         let mut provider = MockProvider::new();
-        let from = PublicKey::from_bytes(&[1u8; 32]).unwrap();
-        let to = PublicKey::from_bytes(&[2u8; 32]).unwrap();
+        let from = PublicKey::from_bytes(&[1u8; 32]).expect("test");
+        let to = PublicKey::from_bytes(&[2u8; 32]).expect("test");
 
         provider.set_balance(from.clone(), Hash::zero(), 1000);
         provider.set_balance(to.clone(), Hash::zero(), 0);
@@ -524,8 +524,8 @@ mod tests {
     #[test]
     fn test_transfer_nonexistent_recipient() {
         let mut provider = MockProvider::new();
-        let from = PublicKey::from_bytes(&[1u8; 32]).unwrap();
-        let to = PublicKey::from_bytes(&[2u8; 32]).unwrap();
+        let from = PublicKey::from_bytes(&[1u8; 32]).expect("test");
+        let to = PublicKey::from_bytes(&[2u8; 32]).expect("test");
 
         provider.set_balance(from.clone(), Hash::zero(), 10000);
         // Don't add 'to' account
@@ -541,8 +541,8 @@ mod tests {
         // Test that multiple transfers are tracked with virtual balance
         // to prevent double-spend attacks
         let mut provider = MockProvider::new();
-        let from = PublicKey::from_bytes(&[1u8; 32]).unwrap();
-        let to = PublicKey::from_bytes(&[2u8; 32]).unwrap();
+        let from = PublicKey::from_bytes(&[1u8; 32]).expect("test");
+        let to = PublicKey::from_bytes(&[2u8; 32]).expect("test");
 
         // Sender has 1000 units
         provider.set_balance(from.clone(), Hash::zero(), 1000);
@@ -577,7 +577,7 @@ mod tests {
     fn test_transfer_to_self() {
         // Test transferring to self - balance delta should be zero
         let mut provider = MockProvider::new();
-        let account = PublicKey::from_bytes(&[1u8; 32]).unwrap();
+        let account = PublicKey::from_bytes(&[1u8; 32]).expect("test");
 
         provider.set_balance(account.clone(), Hash::zero(), 1000);
 
@@ -620,8 +620,8 @@ mod tests {
         // Attack scenario: Malicious contract tries to cause overflow by
         // manipulating balance_deltas to contain i128::MAX
         let mut provider = MockProvider::new();
-        let from = PublicKey::from_bytes(&[1u8; 32]).unwrap();
-        let to = PublicKey::from_bytes(&[2u8; 32]).unwrap();
+        let from = PublicKey::from_bytes(&[1u8; 32]).expect("test");
+        let to = PublicKey::from_bytes(&[2u8; 32]).expect("test");
 
         provider.set_balance(from.clone(), Hash::zero(), 1000);
         provider.set_balance(to.clone(), Hash::zero(), 0);
@@ -649,8 +649,8 @@ mod tests {
         //
         // Attack scenario: Contract has staged outgoing transfers exceeding balance
         let mut provider = MockProvider::new();
-        let from = PublicKey::from_bytes(&[1u8; 32]).unwrap();
-        let to = PublicKey::from_bytes(&[2u8; 32]).unwrap();
+        let from = PublicKey::from_bytes(&[1u8; 32]).expect("test");
+        let to = PublicKey::from_bytes(&[2u8; 32]).expect("test");
 
         // Account has 1000 units
         provider.set_balance(from.clone(), Hash::zero(), 1000);
@@ -683,8 +683,8 @@ mod tests {
         //
         // Attack scenario: Multiple incoming transfers push virtual balance over u64::MAX
         let mut provider = MockProvider::new();
-        let from = PublicKey::from_bytes(&[1u8; 32]).unwrap();
-        let to = PublicKey::from_bytes(&[2u8; 32]).unwrap();
+        let from = PublicKey::from_bytes(&[1u8; 32]).expect("test");
+        let to = PublicKey::from_bytes(&[2u8; 32]).expect("test");
 
         // Account has maximum balance
         provider.set_balance(from.clone(), Hash::zero(), u64::MAX);
@@ -716,8 +716,8 @@ mod tests {
         //
         // Edge case: Account has maximum possible balance
         let mut provider = MockProvider::new();
-        let from = PublicKey::from_bytes(&[1u8; 32]).unwrap();
-        let to = PublicKey::from_bytes(&[2u8; 32]).unwrap();
+        let from = PublicKey::from_bytes(&[1u8; 32]).expect("test");
+        let to = PublicKey::from_bytes(&[2u8; 32]).expect("test");
 
         // Set balance to maximum u64 value
         provider.set_balance(from.clone(), Hash::zero(), u64::MAX);
@@ -744,8 +744,8 @@ mod tests {
         //
         // Edge case: Delta is exactly zero
         let mut provider = MockProvider::new();
-        let from = PublicKey::from_bytes(&[1u8; 32]).unwrap();
-        let to = PublicKey::from_bytes(&[2u8; 32]).unwrap();
+        let from = PublicKey::from_bytes(&[1u8; 32]).expect("test");
+        let to = PublicKey::from_bytes(&[2u8; 32]).expect("test");
 
         provider.set_balance(from.clone(), Hash::zero(), 5000);
         provider.set_balance(to.clone(), Hash::zero(), 0);
@@ -770,8 +770,8 @@ mod tests {
         //
         // Valid scenario: Large positive delta that doesn't overflow
         let mut provider = MockProvider::new();
-        let from = PublicKey::from_bytes(&[1u8; 32]).unwrap();
-        let to = PublicKey::from_bytes(&[2u8; 32]).unwrap();
+        let from = PublicKey::from_bytes(&[1u8; 32]).expect("test");
+        let to = PublicKey::from_bytes(&[2u8; 32]).expect("test");
 
         provider.set_balance(from.clone(), Hash::zero(), 1_000_000);
         provider.set_balance(to.clone(), Hash::zero(), 0);
@@ -801,8 +801,8 @@ mod tests {
         //
         // Valid scenario: Large negative delta that doesn't exceed balance
         let mut provider = MockProvider::new();
-        let from = PublicKey::from_bytes(&[1u8; 32]).unwrap();
-        let to = PublicKey::from_bytes(&[2u8; 32]).unwrap();
+        let from = PublicKey::from_bytes(&[1u8; 32]).expect("test");
+        let to = PublicKey::from_bytes(&[2u8; 32]).expect("test");
 
         provider.set_balance(from.clone(), Hash::zero(), 1_000_000);
         provider.set_balance(to.clone(), Hash::zero(), 0);
@@ -830,8 +830,8 @@ mod tests {
     fn test_zero_amount_transfer_to_nonexistent_account() {
         // EVM-compatible: zero-amount transfers are no-ops, even to non-existent accounts
         let mut provider = MockProvider::new();
-        let from = PublicKey::from_bytes(&[1u8; 32]).unwrap();
-        let to = PublicKey::from_bytes(&[0x33u8; 32]).unwrap();
+        let from = PublicKey::from_bytes(&[1u8; 32]).expect("test");
+        let to = PublicKey::from_bytes(&[0x33u8; 32]).expect("test");
 
         // Sender has some balance
         provider.set_balance(from.clone(), Hash::zero(), 1000);
@@ -856,8 +856,8 @@ mod tests {
     fn test_zero_amount_transfer_to_existing_account() {
         // Zero-amount transfers should succeed without any checks
         let mut provider = MockProvider::new();
-        let from = PublicKey::from_bytes(&[1u8; 32]).unwrap();
-        let to = PublicKey::from_bytes(&[2u8; 32]).unwrap();
+        let from = PublicKey::from_bytes(&[1u8; 32]).expect("test");
+        let to = PublicKey::from_bytes(&[2u8; 32]).expect("test");
 
         provider.set_balance(from.clone(), Hash::zero(), 1000);
         provider.set_balance(to.clone(), Hash::zero(), 0);

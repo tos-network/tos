@@ -102,10 +102,10 @@ pub trait BlockchainVerificationState<'a, E> {
     /// Get the block version in which TX is executed
     fn get_block_version(&self) -> BlockVersion;
 
-    /// Get the timestamp to use for verification
+    /// Get the timestamp to use for verification (in milliseconds)
     ///
-    /// For block validation (consensus): returns the block timestamp
-    /// For mempool verification: returns current system time
+    /// For block validation (consensus): returns the block timestamp in ms
+    /// For mempool verification: returns current system time in ms
     ///
     /// This ensures deterministic consensus validation while allowing
     /// flexibility for mempool operations.
@@ -129,6 +129,227 @@ pub trait BlockchainVerificationState<'a, E> {
 
     /// Get the network type (for chain_id validation)
     fn get_network(&self) -> crate::network::Network;
+
+    /// Check if an account is registered (exists) on the blockchain
+    /// This is used to determine if account creation fee (TOS-Only) should be charged
+    ///
+    /// # Arguments
+    /// * `account` - The account's compressed public key
+    ///
+    /// # Returns
+    /// true if the account exists (has nonce > 0 or has any balance), false otherwise
+    async fn is_account_registered(&self, account: &CompressedPublicKey) -> Result<bool, E>;
+
+    // ===== Stake 2.0 Energy Methods (Verification Phase) =====
+
+    /// Get the account energy for an account (Stake 2.0)
+    ///
+    /// This method is available in verification phase to enable:
+    /// - available_for_delegation() check for DelegateResource
+    /// - Balance validation for batch delegation operations
+    ///
+    /// # Arguments
+    /// * `account` - The account's compressed public key
+    ///
+    /// # Returns
+    /// The account energy if it exists, None otherwise.
+    async fn get_account_energy(
+        &mut self,
+        account: &'a CompressedPublicKey,
+    ) -> Result<Option<crate::account::AccountEnergy>, E>;
+
+    // ===== Stake 2.0 Delegation Methods (Verification Phase) =====
+
+    /// Get a specific delegation from one account to another
+    ///
+    /// This method is available in the verification phase to enable:
+    /// - Lock expiry checking for UndelegateResource
+    /// - Receiver registration validation for batch delegations
+    ///
+    /// # Arguments
+    /// * `from` - The delegator's public key
+    /// * `to` - The receiver's public key
+    ///
+    /// # Returns
+    /// The delegation if it exists, None otherwise.
+    /// The returned frozen_balance accounts for any pending
+    /// undelegations that haven't been applied yet.
+    async fn get_delegated_resource(
+        &mut self,
+        from: &'a CompressedPublicKey,
+        to: &'a CompressedPublicKey,
+    ) -> Result<Option<crate::account::DelegatedResource>, E>;
+
+    /// Record a pending undelegation amount
+    ///
+    /// Called after UndelegateResource verification passes to track
+    /// the amount being undelegated. Subsequent transactions will see
+    /// reduced delegation balance via get_delegated_resource.
+    ///
+    /// # Arguments
+    /// * `from` - The delegator's public key
+    /// * `to` - The receiver's public key
+    /// * `amount` - The amount being undelegated
+    async fn record_pending_undelegation(
+        &mut self,
+        from: &'a CompressedPublicKey,
+        to: &'a CompressedPublicKey,
+        amount: u64,
+    ) -> Result<(), E>;
+
+    // ===== Pending Registration Tracking (Same-Block Visibility) =====
+
+    /// Check if an account is pending registration in the current block/batch
+    ///
+    /// This enables same-block visibility: when TX1 transfers to account A,
+    /// TX2's ActivateAccounts can see that A will be registered and skip
+    /// charging the activation fee for it.
+    ///
+    /// # Arguments
+    /// * `account` - The account's compressed public key
+    ///
+    /// # Returns
+    /// true if the account will be registered by an earlier transaction in the same block
+    fn is_pending_registration(&self, account: &CompressedPublicKey) -> bool;
+
+    /// Record that an account will be registered (received balance or delegation)
+    ///
+    /// Called when a transaction creates a new account (via transfer or delegation).
+    /// Subsequent transactions in the same block can see this pending registration.
+    ///
+    /// # Arguments
+    /// * `account` - The account's compressed public key
+    fn record_pending_registration(&mut self, account: &CompressedPublicKey);
+
+    // ===== Pending Delegation Tracking =====
+
+    /// Record a pending delegation amount
+    ///
+    /// Called after DelegateResource verification passes to track
+    /// the amount being delegated. Subsequent transactions will see
+    /// reduced available_for_delegation balance.
+    ///
+    /// # Arguments
+    /// * `sender` - The delegator's public key
+    /// * `amount` - The amount being delegated
+    async fn record_pending_delegation(
+        &mut self,
+        sender: &'a CompressedPublicKey,
+        amount: u64,
+    ) -> Result<(), E>;
+
+    /// Get pending delegation amount for sender
+    ///
+    /// Returns the total pending delegation amount for an account.
+    /// Used to calculate effective available_for_delegation balance.
+    ///
+    /// # Arguments
+    /// * `sender` - The delegator's public key
+    fn get_pending_delegation(&self, sender: &CompressedPublicKey) -> u64;
+
+    // ===== Pending Unfreeze Tracking =====
+
+    /// Record a pending unfreeze amount
+    ///
+    /// Called after UnfreezeTos verification passes to track
+    /// the amount and count being unfrozen. Subsequent transactions will see
+    /// reduced available_for_delegation balance and queue capacity.
+    ///
+    /// # Arguments
+    /// * `sender` - The account public key
+    /// * `amount` - The amount being unfrozen
+    async fn record_pending_unfreeze(
+        &mut self,
+        sender: &'a CompressedPublicKey,
+        amount: u64,
+    ) -> Result<(), E>;
+
+    /// Get pending unfreeze count for sender
+    ///
+    /// Returns the number of pending unfreeze entries for an account.
+    fn get_pending_unfreeze_count(&self, _sender: &CompressedPublicKey) -> usize {
+        0
+    }
+
+    /// Get pending unfreeze amount for sender
+    ///
+    /// Returns the total pending unfreeze amount for an account.
+    fn get_pending_unfreeze_amount(&self, _sender: &CompressedPublicKey) -> u64 {
+        0
+    }
+
+    // ===== Pending Energy Tracking =====
+
+    /// Record pending energy consumption
+    ///
+    /// Called after energy is consumed during verification to track
+    /// total energy used. Subsequent transactions will see reduced
+    /// available energy.
+    ///
+    /// # Arguments
+    /// * `sender` - The sender's public key
+    /// * `amount` - The energy amount consumed
+    async fn record_pending_energy(
+        &mut self,
+        sender: &'a CompressedPublicKey,
+        amount: u64,
+    ) -> Result<(), E>;
+
+    /// Get pending energy consumption for sender
+    ///
+    /// Returns the total pending energy consumption for an account.
+    /// Used to calculate effective available energy.
+    ///
+    /// # Arguments
+    /// * `sender` - The sender's public key
+    fn get_pending_energy(&self, sender: &CompressedPublicKey) -> u64;
+
+    /// Get the global energy state (Stake 2.0)
+    ///
+    /// This method is available in verification phase to enable:
+    /// - Energy availability calculation based on total_energy_weight
+    /// - Pending energy verification for transactions
+    ///
+    /// # Returns
+    /// The global energy state containing total_energy_weight
+    async fn get_global_energy_state(&mut self) -> Result<crate::account::GlobalEnergyState, E>;
+
+    // ===== Pending Weight Tracking =====
+
+    /// Record a pending weight change from FreezeTos/UnfreezeTos
+    ///
+    /// Called after FreezeTos/UnfreezeTos verification passes to track
+    /// the weight change. Subsequent transactions will see the updated
+    /// effective weight in energy calculations.
+    ///
+    /// # Arguments
+    /// * `delta` - The weight change (positive for freeze, negative for unfreeze)
+    fn record_pending_weight_change(&mut self, delta: i64);
+
+    /// Get the pending weight delta
+    ///
+    /// Returns the total pending weight change from earlier transactions
+    /// in the same block/batch.
+    fn get_pending_weight_delta(&self) -> i64;
+
+    // ===== Pending Withdrawal Tracking =====
+
+    /// Record a pending withdrawal
+    ///
+    /// Called after WithdrawExpireUnfreeze verification passes.
+    /// Prevents duplicate withdrawals in the same block.
+    fn record_pending_withdrawal(&mut self, sender: &CompressedPublicKey);
+
+    /// Check if a withdrawal is already pending for this sender
+    fn has_pending_withdrawal(&self, sender: &CompressedPublicKey) -> bool;
+
+    // ===== Pending Unfreeze Clearing =====
+
+    /// Clear pending unfreezes for a sender after CancelAllUnfreeze
+    ///
+    /// Called after CancelAllUnfreeze verification passes to reset
+    /// the pending unfreeze tracking for subsequent transactions.
+    fn clear_pending_unfreezes(&mut self, sender: &CompressedPublicKey);
 
     /// Set the contract module
     async fn set_contract_module(&mut self, hash: &Hash, module: &'a Module) -> Result<(), E>;
@@ -205,17 +426,44 @@ pub trait BlockchainApplyState<'a, P: ContractProvider, E>:
     /// as a None version
     async fn remove_contract_module(&mut self, hash: &Hash) -> Result<(), E>;
 
-    /// Get the energy resource for an account
-    async fn get_energy_resource(
-        &mut self,
-        account: &'a CompressedPublicKey,
-    ) -> Result<Option<crate::account::EnergyResource>, E>;
+    // Note: get_account_energy is inherited from BlockchainVerificationState
 
-    /// Set the energy resource for an account
-    async fn set_energy_resource(
+    /// Set the account energy for an account (Stake 2.0)
+    async fn set_account_energy(
         &mut self,
         account: &'a CompressedPublicKey,
-        energy_resource: crate::account::EnergyResource,
+        account_energy: crate::account::AccountEnergy,
+    ) -> Result<(), E>;
+
+    // Note: get_global_energy_state is inherited from BlockchainVerificationState
+
+    /// Set the global energy state (Stake 2.0)
+    async fn set_global_energy_state(
+        &mut self,
+        state: crate::account::GlobalEnergyState,
+    ) -> Result<(), E>;
+
+    // ===== Stake 2.0 Delegation Operations =====
+    // Note: get_delegated_resource is inherited from BlockchainVerificationState
+
+    /// Set or update a delegation from one account to another
+    ///
+    /// # Arguments
+    /// * `delegation` - The delegation record to store
+    async fn set_delegated_resource(
+        &mut self,
+        delegation: &crate::account::DelegatedResource,
+    ) -> Result<(), E>;
+
+    /// Delete a delegation from one account to another
+    ///
+    /// # Arguments
+    /// * `from` - The delegator's public key
+    /// * `to` - The receiver's public key
+    async fn delete_delegated_resource(
+        &mut self,
+        from: &'a CompressedPublicKey,
+        to: &'a CompressedPublicKey,
     ) -> Result<(), E>;
 
     /// Get the AI mining state
@@ -282,7 +530,7 @@ pub trait BlockchainApplyState<'a, P: ContractProvider, E>:
 
     /// Get the KYC level for a user
     ///
-    /// SECURITY FIX (Issue #45): Added to support binding TransferKyc approvals to current level
+    /// Added to support binding TransferKyc approvals to current level
     ///
     /// # Arguments
     /// * `user` - The user's public key
@@ -498,4 +746,20 @@ pub trait BlockchainApplyState<'a, P: ContractProvider, E>:
         total_amount: u64,
         ratios: &[u16],
     ) -> Result<crate::referral::DistributionResult, E>;
+
+    // ===== Transaction Result Storage (Stake 2.0) =====
+
+    /// Store the execution result for a transaction
+    ///
+    /// This records the actual fee burned and energy consumed after TX execution.
+    /// Called after each transaction is successfully applied to store its result.
+    ///
+    /// # Arguments
+    /// * `tx_hash` - The transaction hash
+    /// * `result` - The transaction execution result
+    async fn set_transaction_result(
+        &mut self,
+        tx_hash: &'a Hash,
+        result: &crate::transaction::TransactionResult,
+    ) -> Result<(), E>;
 }

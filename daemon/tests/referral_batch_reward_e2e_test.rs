@@ -5,7 +5,7 @@ use std::{borrow::Cow, collections::HashMap, sync::Arc};
 use async_trait::async_trait;
 use indexmap::{IndexMap, IndexSet};
 use tos_common::{
-    account::{EnergyResource, Nonce},
+    account::{AccountEnergy, Nonce},
     block::{Block, BlockHeader, BlockVersion, EXTRA_NONCE_SIZE},
     config::TOS_ASSET,
     contract::{
@@ -364,10 +364,10 @@ impl<'a> BlockchainVerificationState<'a, TestError> for TestChainState {
     }
 
     fn get_verification_timestamp(&self) -> u64 {
-        // Use current system time for tests
+        // Use current system time for tests (in milliseconds)
         std::time::SystemTime::now()
             .duration_since(std::time::SystemTime::UNIX_EPOCH)
-            .map(|d| d.as_secs())
+            .map(|d| d.as_millis() as u64)
             .unwrap_or(0)
     }
 
@@ -413,6 +413,14 @@ impl<'a> BlockchainVerificationState<'a, TestError> for TestChainState {
         Network::Devnet
     }
 
+    async fn is_account_registered(
+        &self,
+        _account: &CompressedPublicKey,
+    ) -> Result<bool, TestError> {
+        // For testing, assume all accounts are registered
+        Ok(true)
+    }
+
     async fn get_receiver_uno_balance<'b>(
         &'b mut self,
         _account: Cow<'a, CompressedPublicKey>,
@@ -437,6 +445,105 @@ impl<'a> BlockchainVerificationState<'a, TestError> for TestChainState {
         _output: Ciphertext,
     ) -> Result<(), TestError> {
         Err(TestError::Unsupported)
+    }
+
+    async fn get_account_energy(
+        &mut self,
+        _account: &'a CompressedPublicKey,
+    ) -> Result<Option<tos_common::account::AccountEnergy>, TestError> {
+        Ok(None)
+    }
+
+    async fn get_delegated_resource(
+        &mut self,
+        _from: &'a CompressedPublicKey,
+        _to: &'a CompressedPublicKey,
+    ) -> Result<Option<tos_common::account::DelegatedResource>, TestError> {
+        Ok(None)
+    }
+
+    async fn record_pending_undelegation(
+        &mut self,
+        _from: &'a CompressedPublicKey,
+        _to: &'a CompressedPublicKey,
+        _amount: u64,
+    ) -> Result<(), TestError> {
+        Ok(())
+    }
+
+    fn is_pending_registration(&self, _account: &CompressedPublicKey) -> bool {
+        false
+    }
+
+    fn record_pending_registration(&mut self, _account: &CompressedPublicKey) {}
+
+    // Stub implementations for test
+    async fn record_pending_delegation(
+        &mut self,
+        _sender: &'a CompressedPublicKey,
+        _amount: u64,
+    ) -> Result<(), TestError> {
+        Ok(())
+    }
+
+    fn get_pending_delegation(&self, _sender: &CompressedPublicKey) -> u64 {
+        0
+    }
+
+    // Stub implementations for test
+    async fn record_pending_unfreeze(
+        &mut self,
+        _sender: &'a CompressedPublicKey,
+        _amount: u64,
+    ) -> Result<(), TestError> {
+        Ok(())
+    }
+
+    fn get_pending_unfreeze_count(&self, _sender: &CompressedPublicKey) -> usize {
+        0
+    }
+
+    fn get_pending_unfreeze_amount(&self, _sender: &CompressedPublicKey) -> u64 {
+        0
+    }
+
+    // Stub implementations for test
+    async fn record_pending_energy(
+        &mut self,
+        _sender: &'a CompressedPublicKey,
+        _amount: u64,
+    ) -> Result<(), TestError> {
+        Ok(())
+    }
+
+    fn get_pending_energy(&self, _sender: &CompressedPublicKey) -> u64 {
+        0
+    }
+
+    async fn get_global_energy_state(
+        &mut self,
+    ) -> Result<tos_common::account::GlobalEnergyState, TestError> {
+        Ok(tos_common::account::GlobalEnergyState::default())
+    }
+
+    fn record_pending_weight_change(&mut self, _delta: i64) {
+        // No-op for test state
+    }
+
+    fn get_pending_weight_delta(&self) -> i64 {
+        0
+    }
+
+    fn record_pending_withdrawal(&mut self, _sender: &CompressedPublicKey) {
+        // No-op for test state
+    }
+
+    fn has_pending_withdrawal(&self, _sender: &CompressedPublicKey) -> bool {
+        false
+    }
+
+    fn clear_pending_unfreezes(&mut self, _sender: &CompressedPublicKey) {
+        // No-op for test state
     }
 }
 
@@ -501,17 +608,38 @@ impl<'a> BlockchainApplyState<'a, DummyContractProvider, TestError> for TestChai
         Err(TestError::Unsupported)
     }
 
-    async fn get_energy_resource(
+    // Note: get_account_energy is inherited from BlockchainVerificationState
+
+    async fn set_account_energy(
         &mut self,
         _account: &'a PublicKey,
-    ) -> Result<Option<EnergyResource>, TestError> {
-        Ok(None)
+        _energy: AccountEnergy,
+    ) -> Result<(), TestError> {
+        Ok(())
     }
 
-    async fn set_energy_resource(
+    // Note: get_global_energy_state is inherited from BlockchainVerificationState
+
+    async fn set_global_energy_state(
         &mut self,
-        _account: &'a PublicKey,
-        _energy_resource: EnergyResource,
+        _state: tos_common::account::GlobalEnergyState,
+    ) -> Result<(), TestError> {
+        Ok(())
+    }
+
+    // Note: get_delegated_resource is inherited from BlockchainVerificationState
+
+    async fn set_delegated_resource(
+        &mut self,
+        _delegation: &tos_common::account::DelegatedResource,
+    ) -> Result<(), TestError> {
+        Ok(())
+    }
+
+    async fn delete_delegated_resource(
+        &mut self,
+        _from: &'a PublicKey,
+        _to: &'a PublicKey,
     ) -> Result<(), TestError> {
         Ok(())
     }
@@ -722,6 +850,17 @@ impl<'a> BlockchainApplyState<'a, DummyContractProvider, TestError> for TestChai
     async fn is_global_committee_bootstrapped(&self) -> Result<bool, TestError> {
         Ok(false)
     }
+
+    // ===== Transaction Result Storage (Stake 2.0) =====
+
+    async fn set_transaction_result(
+        &mut self,
+        _tx_hash: &'a Hash,
+        _result: &tos_common::transaction::TransactionResult,
+    ) -> Result<(), TestError> {
+        // Test stub - no-op for now
+        Ok(())
+    }
 }
 
 #[tokio::test]
@@ -777,7 +916,8 @@ async fn test_batch_referral_reward_refunds_remainder_e2e() {
     let payload =
         BatchReferralRewardPayload::new(TOS_ASSET, alice_pk.clone(), 1000, 2, vec![2500, 1500]);
     let tx_type = TransactionTypeBuilder::BatchReferralReward(payload);
-    let fee_builder = FeeBuilder::Value(0);
+    // Provide sufficient fee_limit for energy model (batch referral + 2 levels as potential new accounts)
+    let fee_builder = FeeBuilder::Value(10_000_000);
     let builder = TransactionBuilder::new(
         TxVersion::T0,
         0,
@@ -788,7 +928,7 @@ async fn test_batch_referral_reward_refunds_remainder_e2e() {
     );
 
     let mut account_state = TestAccountState::new();
-    account_state.set_balance(TOS_ASSET, 10_000);
+    account_state.set_balance(TOS_ASSET, 100_000_000);
     account_state.set_nonce(0);
 
     let tx = builder.build(&mut account_state, &alice).unwrap();
@@ -801,7 +941,7 @@ async fn test_batch_referral_reward_refunds_remainder_e2e() {
     assert_eq!(tx.get_source(), &alice_pk);
 
     let mut chain_state = TestChainState::new();
-    chain_state.set_balance(&alice_pk, 10_000);
+    chain_state.set_balance(&alice_pk, 100_000_000);
     chain_state.set_balance(&bob_pk, 0);
     chain_state.set_balance(&charlie_pk, 0);
     chain_state.set_nonce(&alice_pk, 0);
@@ -820,9 +960,18 @@ async fn test_batch_referral_reward_refunds_remainder_e2e() {
     let bob_balance = chain_state.get_balance(&bob_pk);
     let charlie_balance = chain_state.get_balance(&charlie_pk);
 
+    // fee_refund = fee_limit - burned (energy model refunds unused fee)
+    let fee_limit = 10_000_000u64;
+    let fee_refund = fee_limit.saturating_sub(chain_state.burned);
+
+    // alice_receiver should include: remainder (600) + fee_refund
+    // Remainder = 1000 - 250 (bob) - 150 (charlie) = 600
+    let expected_remainder = 600u64;
+    let expected_alice_receiver = fee_refund + expected_remainder;
     assert_eq!(
-        alice_receiver, 600,
-        "Remainder should be credited to sender"
+        alice_receiver, expected_alice_receiver,
+        "Remainder should be credited to sender (got {}, expected {} = fee_refund {} + remainder {})",
+        alice_receiver, expected_alice_receiver, fee_refund, expected_remainder
     );
     assert_eq!(bob_balance, 250, "Bob should receive 25%");
     assert_eq!(charlie_balance, 150, "Charlie should receive 15%");

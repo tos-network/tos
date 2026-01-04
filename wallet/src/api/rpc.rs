@@ -1100,7 +1100,7 @@ async fn pay_request(context: &Context, body: Value) -> Result<Value, InternalRp
 
     let tx = wallet.create_transaction_with(&mut state, None, version, tx_type, fee)?;
     let tx_hash = tx.hash();
-    let tx_fee = tx.get_fee();
+    let tx_fee = tx.get_fee_limit();
 
     // Submit the transaction
     if let Err(e) = wallet.submit_transaction(&tx).await {

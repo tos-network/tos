@@ -5,7 +5,6 @@ use log::{debug, trace};
 use tos_kernel::ValueCell;
 
 use crate::{
-    config::{TOS_ASSET, TX_GAS_BURN_PERCENT},
     contract::ContractProvider,
     crypto::Hash,
     transaction::{ContractDeposit, Transaction},
@@ -35,6 +34,10 @@ impl Transaction {
 
     // Invoke a contract from a transaction using the ContractExecutor trait
     // This method supports both TOS Kernel(TAKO) (eBPF) and legacy contracts
+    //
+    // Returns: (is_success, used_gas)
+    // - is_success: true if contract execution succeeded (exit_code == 0)
+    // - used_gas: actual gas consumed by contract execution
     pub(super) async fn invoke_contract<
         'a,
         P: ContractProvider + Send,
@@ -49,7 +52,7 @@ impl Transaction {
         user_parameters: impl DoubleEndedIterator<Item = ValueCell>,
         max_gas: u64,
         invoke: InvokeContract,
-    ) -> Result<bool, VerificationError<E>> {
+    ) -> Result<(bool, u64), VerificationError<E>> {
         if log::log_enabled!(log::Level::Debug) {
             debug!("Invoking contract {contract} from TX {tx_hash}: {invoke:?}");
         }
@@ -126,10 +129,14 @@ impl Transaction {
         };
 
         // Execute the contract
+        // Convert execution errors to is_success=false instead of returning Err.
+        // This prevents state corruption when contract execution fails - balance was already
+        // deducted in apply_without_verify, so returning Err would leave state inconsistent.
+        // Instead, treat execution errors as failed executions with max_gas consumed.
         let execution_result = {
             let provider = contract_environment.provider;
             let tx_sender_hash = Hash::new(*self.get_source().as_bytes());
-            executor
+            match executor
                 .execute(
                     &bytecode,
                     provider,
@@ -144,9 +151,27 @@ impl Transaction {
                     parameters,
                 )
                 .await
-                .map_err(|e| {
-                    VerificationError::ModuleError(format!("Contract execution failed: {e:#}"))
-                })?
+            {
+                Ok(result) => result,
+                Err(e) => {
+                    // Log the error but don't propagate it as Err
+                    // This ensures deposits are refunded and state remains consistent
+                    if log::log_enabled!(log::Level::Error) {
+                        log::error!(
+                            "Contract {} execution error (treating as failure): {e:#}",
+                            contract
+                        );
+                    }
+                    // Return a failure result with max_gas consumed
+                    crate::contract::ContractExecutionResult {
+                        exit_code: None,
+                        gas_used: max_gas,
+                        return_data: Some(format!("Execution error: {e}").into_bytes()),
+                        transfers: vec![],
+                        events: vec![],
+                    }
+                }
+            }
         };
 
         let used_gas = execution_result.gas_used;
@@ -240,7 +265,7 @@ impl Transaction {
             .await
             .map_err(VerificationError::State)?;
 
-        Ok(is_success)
+        Ok((is_success, used_gas))
     }
 
     pub(super) async fn handle_gas<
@@ -250,48 +275,31 @@ impl Transaction {
         B: BlockchainApplyState<'a, P, E>,
     >(
         &'a self,
-        state: &mut B,
+        _state: &mut B,
         used_gas: u64,
         max_gas: u64,
     ) -> Result<u64, VerificationError<E>> {
-        // Part of the gas is burned
-        let burned_gas = used_gas * TX_GAS_BURN_PERCENT / 100;
-        // Part of the gas is given to the miners as fees
-        let gas_fee = used_gas
-            .checked_sub(burned_gas)
-            .ok_or(VerificationError::GasOverflow)?;
-        // The remaining gas is refunded to the sender
-        let refund_gas = max_gas
-            .checked_sub(used_gas)
-            .ok_or(VerificationError::GasOverflow)?;
+        // Under Stake 2.0, legacy gas handling is DISABLED.
+        // Contract execution costs are now handled via the Energy model:
+        // - Energy is consumed based on calculate_energy_cost() which includes max_gas
+        // - If energy is insufficient, TOS is burned from fee_limit
+        // - Unused fee_limit is refunded in apply_without_verify
+        //
+        // The legacy gas system (burn 30% + fee 70% + refund unused) is no longer used.
+        // This prevents double-charging and double-refunding that occurred when both
+        // systems ran simultaneously.
+
+        let refund_gas = max_gas.saturating_sub(used_gas);
 
         if log::log_enabled!(log::Level::Debug) {
             debug!(
-                "Invoke contract used gas: {used_gas}, burned: {burned_gas}, fee: {gas_fee}, refund: {refund_gas}"
+                "Stake 2.0: Contract used gas: {used_gas}, max_gas: {max_gas}, virtual_refund: {refund_gas} (handled by Energy model)"
             );
         }
-        state
-            .add_burned_coins(burned_gas)
-            .await
-            .map_err(VerificationError::State)?;
 
-        state
-            .add_gas_fee(gas_fee)
-            .await
-            .map_err(VerificationError::State)?;
-
-        if refund_gas > 0 {
-            // If we have some funds to refund, we add it to the sender balance
-            // But to prevent any front running, we add to the sender balance by considering him as a receiver.
-            let balance = state
-                .get_receiver_balance(Cow::Borrowed(self.get_source()), Cow::Owned(TOS_ASSET))
-                .await
-                .map_err(VerificationError::State)?;
-
-            *balance += refund_gas;
-        }
-
-        Ok(refund_gas)
+        // Return 0 - no TOS refund through this path
+        // The Energy model handles fee_limit refund in apply_without_verify
+        Ok(0)
     }
 
     // Refund the deposits made by the user to the contract

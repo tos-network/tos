@@ -6,12 +6,12 @@ use async_trait::async_trait;
 use log::{debug, trace};
 use std::{
     borrow::Cow,
-    collections::{hash_map::Entry, HashMap},
+    collections::{hash_map::Entry, HashMap, HashSet},
 };
 use tos_common::{
     account::{Nonce, VersionedBalance, VersionedNonce, VersionedUnoBalance},
     block::{BlockVersion, TopoHeight},
-    config::TOS_ASSET,
+    config::{TOS_ASSET, UNO_ASSET},
     crypto::{
         elgamal::{Ciphertext, CompressedPublicKey},
         Hash, PublicKey,
@@ -157,9 +157,21 @@ pub struct ChainState<'a, S: Storage> {
     block_version: BlockVersion,
     // All gas fees tracked
     gas_fee: u64,
-    // Block timestamp for deterministic verification (in seconds)
+    // Block timestamp for deterministic verification (in milliseconds)
     // None for mempool verification (uses system time)
-    block_timestamp: Option<u64>,
+    block_timestamp_ms: Option<u64>,
+    // Pending energy consumption per sender for intra-block tracking
+    // Enables accurate energy verification across multiple TXs from same sender
+    pending_energy: HashMap<CompressedPublicKey, u64>,
+    // Pending weight changes for intra-block tracking
+    // Tracks FreezeTos/UnfreezeTos weight changes during verification
+    pending_weight_delta: i64,
+    // Pending withdrawals: accounts that have pending WithdrawExpireUnfreeze
+    // Prevents duplicate withdrawals in the same block
+    pending_withdrawals: HashSet<CompressedPublicKey>,
+    // Pending registrations: accounts that will be registered by earlier TXs in this block
+    // Enables same-block visibility for fee calculation
+    pending_registrations: HashSet<CompressedPublicKey>,
 }
 
 impl<'a, S: Storage> ChainState<'a, S> {
@@ -169,7 +181,7 @@ impl<'a, S: Storage> ChainState<'a, S> {
         stable_topoheight: TopoHeight,
         topoheight: TopoHeight,
         block_version: BlockVersion,
-        block_timestamp: Option<u64>,
+        block_timestamp_ms: Option<u64>,
     ) -> Self {
         Self {
             storage,
@@ -182,7 +194,11 @@ impl<'a, S: Storage> ChainState<'a, S> {
             contracts: HashMap::new(),
             block_version,
             gas_fee: 0,
-            block_timestamp,
+            block_timestamp_ms,
+            pending_energy: HashMap::new(),
+            pending_weight_delta: 0,
+            pending_withdrawals: HashSet::new(),
+            pending_registrations: HashSet::new(),
         }
     }
 
@@ -206,14 +222,14 @@ impl<'a, S: Storage> ChainState<'a, S> {
     /// Create a new ChainState with block timestamp for deterministic consensus validation
     ///
     /// Use this when verifying transactions during block validation.
-    /// The block_timestamp_secs should be the block's timestamp in seconds.
+    /// The block_timestamp_ms should be the block's timestamp in milliseconds.
     pub fn new_with_timestamp(
         storage: &'a S,
         environment: &'a Environment,
         stable_topoheight: TopoHeight,
         topoheight: TopoHeight,
         block_version: BlockVersion,
-        block_timestamp_secs: u64,
+        block_timestamp_ms: u64,
     ) -> Self {
         Self::with(
             StorageReference::Immutable(storage),
@@ -221,7 +237,7 @@ impl<'a, S: Storage> ChainState<'a, S> {
             stable_topoheight,
             topoheight,
             block_version,
-            Some(block_timestamp_secs),
+            Some(block_timestamp_ms),
         )
     }
 
@@ -1023,15 +1039,15 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for ChainS
         self.block_version
     }
 
-    /// Get the timestamp to use for verification
+    /// Get the timestamp to use for verification (in milliseconds)
     ///
-    /// For block validation: returns the block timestamp (deterministic)
-    /// For mempool verification: returns current system time
+    /// For block validation: returns the block timestamp in ms (deterministic)
+    /// For mempool verification: returns current system time in ms
     fn get_verification_timestamp(&self) -> u64 {
-        self.block_timestamp.unwrap_or_else(|| {
+        self.block_timestamp_ms.unwrap_or_else(|| {
             std::time::SystemTime::now()
                 .duration_since(std::time::SystemTime::UNIX_EPOCH)
-                .map(|d| d.as_secs())
+                .map(|d| d.as_millis() as u64)
                 .unwrap_or(0)
         })
     }
@@ -1114,5 +1130,207 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for ChainS
         self.storage
             .get_network()
             .unwrap_or(tos_common::network::Network::Mainnet)
+    }
+
+    /// Check if an account is registered (exists) on the blockchain
+    ///
+    /// An account is considered registered if it has ever had a nonce
+    /// (i.e., has sent transactions before) or has any balance record (even zero).
+    /// This is used for TOS-Only account creation fee calculation.
+    ///
+    /// Note: Zero-balance accounts created by ActivateAccounts are considered
+    /// registered because they have a balance record in the receiver cache.
+    async fn is_account_registered(
+        &self,
+        account: &CompressedPublicKey,
+    ) -> Result<bool, BlockchainError> {
+        // Note: tos_common::crypto::PublicKey = CompressedPublicKey
+        // So we can use account directly
+
+        // Check if account has nonce (has sent transactions)
+        let has_nonce = self.storage.has_nonce(account).await?;
+        if has_nonce {
+            return Ok(true);
+        }
+
+        // Check if account has any balance record in receiver cache (any asset)
+        // Note: We check for record existence, not balance > 0, because
+        // ActivateAccounts creates zero-balance accounts that should be registered
+        if let Some(balances) = self.receiver_balances.get(&Cow::Borrowed(account)) {
+            if !balances.is_empty() {
+                return Ok(true);
+            }
+        }
+
+        // Check if account has any UNO balance in receiver cache (any asset)
+        if self
+            .receiver_uno_balances
+            .contains_key(&Cow::Borrowed(account))
+        {
+            return Ok(true);
+        }
+
+        // Check storage for any asset balance record at current topoheight
+        // Collect into Vec to avoid holding iterator across await (Send requirement)
+        let assets: Vec<_> = self.storage.get_assets_for(account).await?.collect();
+        for asset in assets {
+            let asset = asset?;
+            let balance_result = self
+                .storage
+                .get_balance_at_maximum_topoheight(account, &asset, self.topoheight)
+                .await?;
+            // Check for record existence, not balance > 0
+            if balance_result.is_some() {
+                return Ok(true);
+            }
+        }
+
+        // Check storage for UNO balance (privacy)
+        if self
+            .storage
+            .has_uno_balance_for(account, &UNO_ASSET)
+            .await?
+        {
+            return Ok(true);
+        }
+
+        // Account not registered
+        Ok(false)
+    }
+
+    /// Get account energy for stake 2.0 validation
+    async fn get_account_energy(
+        &mut self,
+        account: &'a CompressedPublicKey,
+    ) -> Result<Option<tos_common::account::AccountEnergy>, BlockchainError> {
+        self.storage.get_account_energy(account).await
+    }
+
+    /// Get a specific delegation from one account to another
+    async fn get_delegated_resource(
+        &mut self,
+        from: &'a CompressedPublicKey,
+        to: &'a CompressedPublicKey,
+    ) -> Result<Option<tos_common::account::DelegatedResource>, BlockchainError> {
+        self.storage.get_delegated_resource(from, to).await
+    }
+
+    /// Record a pending undelegation (no-op for ChainState)
+    ///
+    /// ChainState is used during block verification where transactions
+    /// are processed sequentially in the apply phase. Pending undelegation
+    /// tracking is only needed for mempool verification.
+    async fn record_pending_undelegation(
+        &mut self,
+        _from: &'a CompressedPublicKey,
+        _to: &'a CompressedPublicKey,
+        _amount: u64,
+    ) -> Result<(), BlockchainError> {
+        // No-op for block verification - apply phase handles state changes
+        Ok(())
+    }
+
+    /// Check if account is pending registration in current block
+    fn is_pending_registration(&self, account: &CompressedPublicKey) -> bool {
+        self.pending_registrations.contains(account)
+    }
+
+    /// Record that account will be registered by an earlier TX in this block
+    fn record_pending_registration(&mut self, account: &CompressedPublicKey) {
+        self.pending_registrations.insert(account.clone());
+    }
+
+    /// Record pending delegation (no-op for ChainState)
+    ///
+    /// ChainState is used during block verification where transactions
+    /// are processed sequentially. Pending delegation tracking is only
+    /// needed for mempool verification.
+    async fn record_pending_delegation(
+        &mut self,
+        _sender: &'a CompressedPublicKey,
+        _amount: u64,
+    ) -> Result<(), BlockchainError> {
+        // No-op for block verification - apply phase handles state changes
+        Ok(())
+    }
+
+    /// Get pending delegation (always 0 for ChainState)
+    fn get_pending_delegation(&self, _sender: &CompressedPublicKey) -> u64 {
+        0
+    }
+
+    /// Record pending unfreeze (no-op for ChainState)
+    ///
+    /// ChainState is used during block verification where transactions
+    /// are processed sequentially. Pending unfreeze tracking is only
+    /// needed for mempool verification.
+    async fn record_pending_unfreeze(
+        &mut self,
+        _sender: &'a CompressedPublicKey,
+        _amount: u64,
+    ) -> Result<(), BlockchainError> {
+        // No-op for block verification - apply phase handles state changes
+        Ok(())
+    }
+
+    /// Get pending unfreeze count (always 0 for ChainState)
+    fn get_pending_unfreeze_count(&self, _sender: &CompressedPublicKey) -> usize {
+        0
+    }
+
+    /// Get pending unfreeze amount (always 0 for ChainState)
+    fn get_pending_unfreeze_amount(&self, _sender: &CompressedPublicKey) -> u64 {
+        0
+    }
+
+    /// Record pending energy consumption for intra-block tracking
+    ///
+    /// Tracks energy consumed by earlier transactions in the same block
+    /// so that subsequent transactions see reduced available energy.
+    async fn record_pending_energy(
+        &mut self,
+        sender: &'a CompressedPublicKey,
+        amount: u64,
+    ) -> Result<(), BlockchainError> {
+        let entry = self.pending_energy.entry(sender.clone()).or_insert(0);
+        *entry = entry.saturating_add(amount);
+        Ok(())
+    }
+
+    /// Get pending energy consumption for sender
+    fn get_pending_energy(&self, sender: &CompressedPublicKey) -> u64 {
+        *self.pending_energy.get(sender).unwrap_or(&0)
+    }
+
+    /// Get the global energy state (Stake 2.0)
+    async fn get_global_energy_state(
+        &mut self,
+    ) -> Result<tos_common::account::GlobalEnergyState, BlockchainError> {
+        self.storage.get_global_energy_state().await
+    }
+
+    /// Record a pending weight change
+    fn record_pending_weight_change(&mut self, delta: i64) {
+        self.pending_weight_delta = self.pending_weight_delta.saturating_add(delta);
+    }
+
+    /// Get the pending weight delta
+    fn get_pending_weight_delta(&self) -> i64 {
+        self.pending_weight_delta
+    }
+
+    /// Record a pending withdrawal
+    fn record_pending_withdrawal(&mut self, sender: &CompressedPublicKey) {
+        self.pending_withdrawals.insert(sender.clone());
+    }
+
+    /// Check if a withdrawal is already pending
+    fn has_pending_withdrawal(&self, sender: &CompressedPublicKey) -> bool {
+        self.pending_withdrawals.contains(sender)
+    }
+
+    /// Clear pending unfreezes for a sender (no-op for ChainState since we track per-sender)
+    fn clear_pending_unfreezes(&mut self, _sender: &CompressedPublicKey) {
+        // No-op for ChainState - we don't track per-sender unfreezes in block verification
     }
 }

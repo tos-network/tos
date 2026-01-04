@@ -127,13 +127,14 @@ mod tests {
         let mut multisig = MultiSig::new();
         let mut signature = SignatureId {
             id: 0,
-            signature: Signature::from_bytes(&[0; 64]).unwrap(),
+            signature: Signature::from_bytes(&[0; 64]).expect("deserialization should succeed"),
         };
 
         assert!(multisig.add_signature(signature.clone()));
         assert!(!multisig.add_signature(signature.clone()));
 
-        signature.signature = Signature::from_bytes(&[1; 64]).unwrap();
+        signature.signature =
+            Signature::from_bytes(&[1; 64]).expect("deserialization should succeed");
         assert!(!multisig.add_signature(signature.clone()));
     }
 }

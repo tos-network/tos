@@ -399,18 +399,18 @@ mod tests {
         let work_hex = work.to_hex();
 
         let mut input = v1::AlignedInput::default();
-        let slice = input.as_mut_slice().unwrap();
+        let slice = input.as_mut_slice().expect("test");
         slice[0..BLOCK_WORK_SIZE].copy_from_slice(&work.to_bytes());
         let expected_hash = v1::tos_hash(slice, &mut v1::ScratchPad::default())
             .map(Hash::new)
-            .unwrap();
+            .expect("test");
         let block_hash = work.hash();
 
         let mut worker = Worker::new();
-        worker.set_work(work.clone(), Algorithm::V1).unwrap();
+        worker.set_work(work.clone(), Algorithm::V1).expect("test");
 
-        let worker_hash = worker.get_pow_hash().unwrap();
-        let next_worker_hash = worker.get_pow_hash().unwrap();
+        let worker_hash = worker.get_pow_hash().expect("test");
+        let next_worker_hash = worker.get_pow_hash().expect("test");
         let worker_block_hash = work.hash();
 
         assert_eq!(expected_hash, worker_hash);
@@ -419,6 +419,6 @@ mod tests {
         // Lets do another hash
         assert_eq!(expected_hash, next_worker_hash);
 
-        assert_eq!(work_hex, worker.take_work().unwrap().to_hex());
+        assert_eq!(work_hex, worker.take_work().expect("test").to_hex());
     }
 }

@@ -488,12 +488,41 @@ pub enum AccountHistoryType {
     // Contract hash is already stored
     // by the parent struct
     DeployContract,
+    // Stake 2.0 Energy operations
     FreezeTos {
         amount: u64,
-        duration: String,
     },
     UnfreezeTos {
         amount: u64,
+    },
+    WithdrawExpireUnfreeze {
+        amount: u64,
+    },
+    CancelAllUnfreeze {
+        withdrawn: u64,
+        cancelled: u64,
+    },
+    DelegateResource {
+        receiver: Address,
+        amount: u64,
+        lock: bool,
+        lock_period: u32,
+    },
+    UndelegateResource {
+        receiver: Address,
+        amount: u64,
+    },
+    // Batch operations (TOS Innovation)
+    BatchActivateAccounts {
+        count: u32,
+    },
+    BatchDelegateResource {
+        count: u32,
+        total_amount: u64,
+    },
+    ActivateAndDelegate {
+        count: u32,
+        total_delegation: u64,
     },
     BindReferrer {
         referrer: Address,
@@ -1347,25 +1376,190 @@ pub struct GetEnergyParams<'a> {
     pub address: Cow<'a, Address>,
 }
 
+/// Get energy result for Stake 2.0 model
 #[derive(Serialize, Deserialize)]
 pub struct GetEnergyResult {
-    pub frozen_tos: u64,
-    pub total_energy: u64,
-    pub used_energy: u64,
+    /// Total frozen TOS (own)
+    pub frozen_balance: u64,
+    /// Frozen TOS delegated to others
+    pub delegated_frozen_balance: u64,
+    /// Frozen TOS received from others via delegation
+    pub acquired_delegated_balance: u64,
+    /// Proportional energy limit based on frozen balance
+    pub energy_limit: u64,
+    /// Current energy usage (decays over 24h)
+    pub energy_usage: u64,
+    /// Available energy (limit - decayed usage)
     pub available_energy: u64,
-    pub last_update: u64,
-    pub freeze_records: Vec<FreezeRecordInfo>,
+    /// Free quota limit (1,500/day)
+    pub free_energy_limit: u64,
+    /// Free quota usage
+    pub free_energy_usage: u64,
+    /// Available free energy
+    pub free_energy_available: u64,
+    /// Pending unfreeze operations
+    pub unfreezing_list: Vec<UnfreezingInfo>,
+    /// Total amount in unfreezing queue
+    pub total_unfreezing: u64,
 }
 
+/// Unfreezing record info for Stake 2.0
 #[derive(Serialize, Deserialize)]
-pub struct FreezeRecordInfo {
+pub struct UnfreezingInfo {
+    /// Amount being unfrozen
     pub amount: u64,
-    pub duration: String,
-    pub freeze_topoheight: u64,
-    pub unlock_topoheight: u64,
-    pub energy_gained: u64,
-    pub can_unlock: bool,
-    pub remaining_blocks: u64,
+    /// Timestamp (ms) when this becomes withdrawable
+    pub expire_time: u64,
+    /// Whether this can be withdrawn now
+    pub can_withdraw: bool,
+}
+
+// ===== Stake 2.0 Delegation API Types =====
+
+/// Get delegated resources from an account
+#[derive(Serialize, Deserialize)]
+pub struct GetDelegationsFromParams<'a> {
+    /// The delegator's address
+    pub address: Cow<'a, Address>,
+}
+
+/// Get delegated resources to an account
+#[derive(Serialize, Deserialize)]
+pub struct GetDelegationsToParams<'a> {
+    /// The receiver's address
+    pub address: Cow<'a, Address>,
+}
+
+/// Get a specific delegation between two accounts
+#[derive(Serialize, Deserialize)]
+pub struct GetDelegationParams<'a> {
+    /// The delegator's address
+    pub from: Cow<'a, Address>,
+    /// The receiver's address
+    pub to: Cow<'a, Address>,
+}
+
+/// Delegation info for API response
+#[derive(Serialize, Deserialize, Clone)]
+pub struct DelegationInfo {
+    /// The delegator's address
+    pub from: Address,
+    /// The receiver's address
+    pub to: Address,
+    /// Amount of frozen TOS delegated
+    pub frozen_balance: u64,
+    /// Lock expiry timestamp (ms), 0 if unlocked
+    pub expire_time: u64,
+    /// Whether this delegation is currently locked
+    pub is_locked: bool,
+}
+
+/// Get delegations result
+#[derive(Serialize, Deserialize)]
+pub struct GetDelegationsResult {
+    /// List of delegations
+    pub delegations: Vec<DelegationInfo>,
+    /// Total delegated amount
+    pub total_amount: u64,
+}
+
+/// Global energy state info for the network (Stake 2.0)
+#[derive(Serialize, Deserialize)]
+pub struct GlobalEnergyInfo {
+    /// Total energy limit for the network (18.4 billion)
+    pub total_energy_limit: u64,
+    /// Sum of all frozen TOS across all accounts
+    pub total_energy_weight: u64,
+    /// Last update topoheight
+    pub last_update: TopoHeight,
+}
+
+/// Parameters for estimate_energy RPC
+#[derive(Serialize, Deserialize)]
+pub struct EstimateEnergyParams<'a> {
+    /// Address of the account that will execute the transaction
+    pub address: Cow<'a, Address>,
+    /// Transaction type for energy estimation
+    pub tx_type: EstimateTxType,
+    /// Transaction size in bytes (for transfers)
+    #[serde(default)]
+    pub tx_size: usize,
+    /// Number of outputs (for transfers)
+    #[serde(default)]
+    pub output_count: usize,
+    /// Number of new accounts being created
+    #[serde(default)]
+    pub new_accounts: usize,
+    /// Bytecode size for contract deployment
+    #[serde(default)]
+    pub bytecode_size: usize,
+    /// Fee limit (max TOS willing to burn)
+    #[serde(default)]
+    pub fee_limit: u64,
+    /// Max gas for contract invocation (required for InvokeContract)
+    /// Added for accurate contract energy estimation
+    #[serde(default)]
+    pub max_gas: u64,
+}
+
+/// Transaction type for energy estimation
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum EstimateTxType {
+    /// Regular TOS transfer
+    Transfer,
+    /// UNO privacy transfer
+    UnoTransfer,
+    /// Burn TOS
+    Burn,
+    /// Deploy contract
+    DeployContract,
+    /// Invoke contract (uses CU from contract execution)
+    InvokeContract,
+    /// Energy operations (free)
+    Energy,
+}
+
+/// Result of energy estimation
+#[derive(Serialize, Deserialize)]
+pub struct EstimateEnergyResult {
+    /// Energy required for the transaction
+    pub energy_required: u64,
+    /// Free energy available
+    pub free_energy_available: u64,
+    /// Frozen energy available
+    pub frozen_energy_available: u64,
+    /// Total energy available (free + frozen)
+    pub total_energy_available: u64,
+    /// TOS that would be burned (0 if energy covers it)
+    pub estimated_fee: u64,
+    /// Whether the transaction can be executed
+    pub will_succeed: bool,
+    /// Error message if will_succeed is false
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// Parameters for get_transaction_result RPC
+#[derive(Serialize, Deserialize)]
+pub struct GetTransactionResultParams<'a> {
+    /// Transaction hash
+    pub hash: Cow<'a, Hash>,
+}
+
+/// Transaction execution result (Stake 2.0)
+#[derive(Serialize, Deserialize)]
+pub struct TransactionResultInfo {
+    /// Actual TOS burned (0 if covered by frozen energy)
+    pub fee: u64,
+    /// Total energy consumed
+    pub energy_used: u64,
+    /// Free quota energy consumed
+    pub free_energy_used: u64,
+    /// Frozen energy consumed
+    pub frozen_energy_used: u64,
+    /// Energy paid via TOS burn
+    pub auto_burned_energy: u64,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -1596,7 +1790,7 @@ pub struct AddressPaymentEvent<'a> {
     pub tx_hash: Cow<'a, Hash>,
     /// Amount received in atomic units
     pub amount: u64,
-    /// Asset hash (native TOS if matches XELIS_ASSET)
+    /// Asset hash (native TOS if matches TOS_ASSET)
     pub asset: Cow<'a, Hash>,
     /// Block hash containing the transaction
     pub block_hash: Cow<'a, Hash>,

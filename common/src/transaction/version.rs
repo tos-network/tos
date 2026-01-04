@@ -7,7 +7,7 @@ use core::fmt;
 pub enum TxVersion {
     // Legacy: no chain_id in signing bytes
     T0 = 0,
-    // New: includes chain_id in signing bytes for cross-network replay protection
+    // Current: chain_id + fee_limit (Stake 2.0)
     #[default]
     T1 = 1,
 }
@@ -97,32 +97,34 @@ mod tests {
     #[test]
     fn test_tx_version_t0() {
         let version = TxVersion::T0;
-        let read_version = TxVersion::from_bytes(&version.to_bytes()).unwrap();
+        let read_version = TxVersion::from_bytes(&version.to_bytes()).expect("test");
         assert_eq!(version, read_version);
     }
 
     #[test]
     fn test_tx_version_t1() {
         let version = TxVersion::T1;
-        let read_version = TxVersion::from_bytes(&version.to_bytes()).unwrap();
+        let read_version = TxVersion::from_bytes(&version.to_bytes()).expect("test");
         assert_eq!(version, read_version);
     }
 
     #[test]
     fn test_tx_version_serde_t0() {
         let version = TxVersion::T0;
-        let serialized = serde_json::to_string(&version).unwrap();
+        let serialized = serde_json::to_string(&version).expect("test");
         assert!(serialized == "0");
-        let deserialized: TxVersion = serde_json::from_str(&serialized).unwrap();
+        let deserialized: TxVersion =
+            serde_json::from_str(&serialized).expect("JSON parsing should succeed");
         assert_eq!(version, deserialized);
     }
 
     #[test]
     fn test_tx_version_serde_t1() {
         let version = TxVersion::T1;
-        let serialized = serde_json::to_string(&version).unwrap();
+        let serialized = serde_json::to_string(&version).expect("test");
         assert!(serialized == "1");
-        let deserialized: TxVersion = serde_json::from_str(&serialized).unwrap();
+        let deserialized: TxVersion =
+            serde_json::from_str(&serialized).expect("JSON parsing should succeed");
         assert_eq!(version, deserialized);
     }
 

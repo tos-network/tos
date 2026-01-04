@@ -46,6 +46,9 @@ pub trait Storage:
     + CacheProvider
     + StateProvider
     + EnergyProvider
+    + DelegatedResourceProvider
+    + GlobalEnergyProvider
+    + TransactionResultProvider
     + AIMiningProvider
     + ReferralProvider
     + KycProvider

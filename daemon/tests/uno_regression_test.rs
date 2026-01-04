@@ -1,14 +1,14 @@
-//! Bug Regression Tests for UNO Privacy Transfers
+//! Regression Tests for UNO Privacy Transfers
 //!
-//! These tests verify that previously discovered bugs remain fixed.
+//! These tests verify that edge cases and previously discovered issues remain fixed.
 //!
-//! Bug Summary:
-//! - Bug #1 (BUG1-01 ~ BUG1-04): Unshield Fee Estimation
-//! - Bug #2 (BUG2-01 ~ BUG2-03): SenderIsReceiver Valid for Unshield
-//! - Bug #3 (BUG3-01 ~ BUG3-04): Shield + Unshield Same Block
-//! - Bug #4 (BUG4-01 ~ BUG4-03): Transcript Order Mismatch
-//! - Bug #5 (BUG5-01 ~ BUG5-03): UNO Balance Not Updated (Unshield - Block Execution)
-//! - Bug #6 (BUG6-01 ~ BUG6-04): UNO Balance Not Updated (UnoTransfer - Sender Side)
+//! Test Categories:
+//! - Category 1: Unshield Fee Estimation
+//! - Category 2: SenderIsReceiver Valid for Unshield
+//! - Category 3: Shield + Unshield Same Block
+//! - Category 4: Transcript Order Verification
+//! - Category 5: UNO Balance Update (Unshield - Block Execution)
+//! - Category 6: UNO Balance Update (UnoTransfer - Sender Side)
 
 mod common;
 
@@ -111,13 +111,13 @@ async fn setup_uno_balance(
 }
 
 // ============================================================================
-// Bug #1: Unshield Fee Estimation
+// Category 1: Unshield Fee Estimation
 // ============================================================================
 
-/// BUG1-01: Unshield TX fee meets minimum requirement
-/// Bug: estimate_fees did not use UNO fee schedule
+/// Unshield TX fee meets minimum requirement
+/// Verify: estimate_fees uses UNO fee schedule
 #[test]
-fn test_bug1_01_unshield_fee_meets_minimum() {
+fn test_unshield_fee_meets_minimum() {
     // Verify that source commitment serialization includes proper size
     let sender = KeyPair::new();
     let amount = 100u64;
@@ -141,9 +141,9 @@ fn test_bug1_01_unshield_fee_meets_minimum() {
     );
 }
 
-/// BUG1-02: estimate_size includes source_commitments
+/// estimate_size includes source_commitments
 #[test]
-fn test_bug1_02_estimate_size_includes_source_commitments() {
+fn test_estimate_size_includes_source_commitments() {
     // Source commitments are part of Unshield TX serialization
     let keypair = KeyPair::new();
     let amount = 100u64;
@@ -166,9 +166,9 @@ fn test_bug1_02_estimate_size_includes_source_commitments() {
     );
 }
 
-/// BUG1-03: estimate_size includes range_proof
+/// estimate_size includes range_proof
 #[test]
-fn test_bug1_03_estimate_size_includes_range_proof() {
+fn test_estimate_size_includes_range_proof() {
     // Range proof size is significant (> 600 bytes for bulletproof)
     // This test verifies the CiphertextValidityProof has reasonable size
 
@@ -194,9 +194,9 @@ fn test_bug1_03_estimate_size_includes_range_proof() {
     );
 }
 
-/// BUG1-04: estimate_fees uses UNO fee schedule for Unshield
+/// estimate_fees uses UNO fee schedule for Unshield
 #[test]
-fn test_bug1_04_unshield_payload_size_reasonable() {
+fn test_unshield_payload_size_reasonable() {
     // UnshieldTransferPayload should have substantial size due to proofs
     let sender = KeyPair::new();
     let amount = 100u64;
@@ -233,14 +233,13 @@ fn test_bug1_04_unshield_payload_size_reasonable() {
 }
 
 // ============================================================================
-// Bug #2: SenderIsReceiver Valid for Unshield
+// Category 2: SenderIsReceiver Valid for Unshield
 // ============================================================================
 
-/// BUG2-01: Unshield to self (sender == receiver) should be ACCEPTED
+/// Unshield to self (sender == receiver) should be ACCEPTED
 #[test]
-fn test_bug2_01_unshield_to_self_accepted() {
-    // Bug #2: pre_verify_unshield had SenderIsReceiver check
-    // but for Unshield, sender == receiver IS VALID (unshield to own TOS)
+fn test_unshield_to_self_accepted() {
+    // For Unshield, sender == receiver IS VALID (unshield to own TOS)
 
     let sender = KeyPair::new();
     let amount = 100u64;
@@ -277,9 +276,9 @@ fn test_bug2_01_unshield_to_self_accepted() {
     );
 }
 
-/// BUG2-02: UNO transfer to self should be ACCEPTED
+/// UNO transfer to self should be ACCEPTED
 #[test]
-fn test_bug2_02_uno_transfer_to_self_accepted() {
+fn test_uno_transfer_to_self_accepted() {
     // UNO transfer to self (Alice -> Alice) should work
     // This is a valid operation to "refresh" the ciphertext
 
@@ -296,9 +295,9 @@ fn test_bug2_02_uno_transfer_to_self_accepted() {
     );
 }
 
-/// BUG2-03: Shield to self should be ACCEPTED
+/// Shield to self should be ACCEPTED
 #[test]
-fn test_bug2_03_shield_to_self_accepted() {
+fn test_shield_to_self_accepted() {
     // Shield to self is the most common case (shield own TOS to own UNO)
     // This test verifies the commitment creation works for self-shield
 
@@ -320,15 +319,15 @@ fn test_bug2_03_shield_to_self_accepted() {
 }
 
 // ============================================================================
-// Bug #3: Shield + Unshield Same Block
+// Category 3: Shield + Unshield Same Block
 // ============================================================================
 
-/// BUG3-01: Shield then Unshield in same block - both TXs should succeed
+/// Shield then Unshield in same block - both TXs should succeed
 #[tokio::test]
 #[allow(clippy::result_large_err)]
-async fn test_bug3_01_shield_then_unshield_same_block() -> Result<(), BlockchainError> {
-    // Bug #3: internal_get_sender_uno_balance only checked storage,
-    // not receiver_uno_balances cache.
+async fn test_shield_then_unshield_same_block() -> Result<(), BlockchainError> {
+    // internal_get_sender_uno_balance must check receiver_uno_balances cache,
+    // not just storage.
 
     let storage = create_test_storage().await;
     setup_uno_asset(&storage).await?;
@@ -387,10 +386,10 @@ async fn test_bug3_01_shield_then_unshield_same_block() -> Result<(), Blockchain
     Ok(())
 }
 
-/// BUG3-02: receiver_uno_balances cache used for sender lookup
+/// receiver_uno_balances cache used for sender lookup
 #[tokio::test]
 #[allow(clippy::result_large_err)]
-async fn test_bug3_02_receiver_cache_priority() -> Result<(), BlockchainError> {
+async fn test_receiver_cache_priority() -> Result<(), BlockchainError> {
     let storage = create_test_storage().await;
     setup_uno_asset(&storage).await?;
 
@@ -443,13 +442,13 @@ async fn test_bug3_02_receiver_cache_priority() -> Result<(), BlockchainError> {
     Ok(())
 }
 
-/// BUG3-03: Multiple Shield+Unshield pairs in same block
+/// Multiple Shield+Unshield pairs in same block
 /// Note: This test verifies that Shield operations (receiver cache) and Unshield operations
 /// (sender deductions) can both occur in the same block. The final persisted balance is
 /// verified after apply_changes.
 #[tokio::test]
 #[allow(clippy::result_large_err)]
-async fn test_bug3_03_multiple_shield_unshield_same_block() -> Result<(), BlockchainError> {
+async fn test_multiple_shield_unshield_same_block() -> Result<(), BlockchainError> {
     let storage = create_test_storage().await;
     setup_uno_asset(&storage).await?;
 
@@ -516,10 +515,10 @@ async fn test_bug3_03_multiple_shield_unshield_same_block() -> Result<(), Blockc
     Ok(())
 }
 
-/// BUG3-04: Shield in block N, Unshield in block N+1
+/// Shield in block N, Unshield in block N+1
 #[tokio::test]
 #[allow(clippy::result_large_err)]
-async fn test_bug3_04_shield_unshield_sequential_blocks() -> Result<(), BlockchainError> {
+async fn test_shield_unshield_sequential_blocks() -> Result<(), BlockchainError> {
     let storage = create_test_storage().await;
     setup_uno_asset(&storage).await?;
 
@@ -606,13 +605,13 @@ async fn test_bug3_04_shield_unshield_sequential_blocks() -> Result<(), Blockcha
 }
 
 // ============================================================================
-// Bug #4: Transcript Order Mismatch (Proof Verification Failed)
+// Category 4: Transcript Order Verification
 // ============================================================================
 
-/// BUG4-01: Unshield proof verification passes (transcript order fixed)
+/// Unshield proof verification passes (transcript order fixed)
 #[test]
-fn test_bug4_01_unshield_proof_verification_order() {
-    // Bug #4: pre_verify_unshield verified CommitmentEqProof BEFORE
+fn test_unshield_proof_verification_order() {
+    // pre_verify_unshield verified CommitmentEqProof BEFORE
     // CiphertextValidityProof, but generation order was reversed.
 
     let sender = KeyPair::new();
@@ -649,9 +648,9 @@ fn test_bug4_01_unshield_proof_verification_order() {
     assert_eq!(payload.get_asset(), &TOS_ASSET);
 }
 
-/// BUG4-02: CiphertextValidityProof verified BEFORE CommitmentEqProof
+/// CiphertextValidityProof verified BEFORE CommitmentEqProof
 #[test]
-fn test_bug4_02_proof_order_ct_before_eq() {
+fn test_proof_order_ct_before_eq() {
     // Verify the transcript domain separators are in correct order
 
     let keypair = KeyPair::new();
@@ -678,9 +677,9 @@ fn test_bug4_02_proof_order_ct_before_eq() {
     // If we got here without panic, the order is correct
 }
 
-/// BUG4-03: Version-conditional append_ciphertext for T0+
+/// Version-conditional append_ciphertext for T0+
 #[test]
-fn test_bug4_03_version_conditional_append() {
+fn test_version_conditional_append() {
     // For TxVersion::T0 and later, append_ciphertext("source_ct") must be called
     // This test verifies that the transcript extension trait is available
     let keypair = KeyPair::new();
@@ -696,14 +695,14 @@ fn test_bug4_03_version_conditional_append() {
 }
 
 // ============================================================================
-// Bug #5: UNO Balance Not Updated (Unshield - Block Execution)
+// Category 5: UNO Balance Update (Unshield - Block Execution)
 // ============================================================================
 
-/// BUG5-01: Unshield TX mined -> UNO balance decreases
+/// Unshield TX mined -> UNO balance decreases
 #[tokio::test]
 #[allow(clippy::result_large_err)]
-async fn test_bug5_01_unshield_uno_balance_updated_after_mining() -> Result<(), BlockchainError> {
-    // Bug #5: apply() function had no handling for UNO balance deduction
+async fn test_unshield_uno_balance_updated_after_mining() -> Result<(), BlockchainError> {
+    // apply() function must handle UNO balance deduction
 
     let storage = create_test_storage().await;
     setup_uno_asset(&storage).await?;
@@ -764,10 +763,10 @@ async fn test_bug5_01_unshield_uno_balance_updated_after_mining() -> Result<(), 
     Ok(())
 }
 
-/// BUG5-02: apply() handles UnshieldTransfers UNO deduction
+/// apply() handles UnshieldTransfers UNO deduction
 #[tokio::test]
 #[allow(clippy::result_large_err)]
-async fn test_bug5_02_apply_handles_unshield_spending() -> Result<(), BlockchainError> {
+async fn test_apply_handles_unshield_spending() -> Result<(), BlockchainError> {
     let storage = create_test_storage().await;
     setup_uno_asset(&storage).await?;
 
@@ -824,10 +823,10 @@ async fn test_bug5_02_apply_handles_unshield_spending() -> Result<(), Blockchain
     Ok(())
 }
 
-/// BUG5-03: Multiple unshields in same block - balance tracking
+/// Multiple unshields in same block - balance tracking
 #[tokio::test]
 #[allow(clippy::result_large_err)]
-async fn test_bug5_03_multiple_unshields_balance_tracking() -> Result<(), BlockchainError> {
+async fn test_multiple_unshields_balance_tracking() -> Result<(), BlockchainError> {
     let storage = create_test_storage().await;
     setup_uno_asset(&storage).await?;
 
@@ -909,14 +908,14 @@ async fn test_bug5_03_multiple_unshields_balance_tracking() -> Result<(), Blockc
 }
 
 // ============================================================================
-// Bug #6: UNO Balance Not Updated (UnoTransfer - Sender Side)
+// Category 6: UNO Balance Update (UnoTransfer - Sender Side)
 // ============================================================================
 
-/// BUG6-01: UnoTransfer TX mined -> Sender UNO decreases
+/// UnoTransfer TX mined -> Sender UNO decreases
 #[tokio::test]
 #[allow(clippy::result_large_err)]
-async fn test_bug6_01_uno_transfer_sender_balance_updated() -> Result<(), BlockchainError> {
-    // Bug #6: apply() was missing handling for UnoTransfers sender deduction
+async fn test_uno_transfer_sender_balance_updated() -> Result<(), BlockchainError> {
+    // apply() must handle UnoTransfers sender deduction
 
     let storage = create_test_storage().await;
     setup_uno_asset(&storage).await?;
@@ -997,9 +996,9 @@ async fn test_bug6_01_uno_transfer_sender_balance_updated() -> Result<(), Blockc
     Ok(())
 }
 
-/// BUG6-02: apply() uses get_ciphertext(Role::Sender) for UnoTransfers
+/// apply() uses get_ciphertext(Role::Sender) for UnoTransfers
 #[test]
-fn test_bug6_02_apply_uses_sender_role() {
+fn test_apply_uses_sender_role() {
     // Verify that UnoTransferPayload::get_ciphertext(Role::Sender) returns sender handle
 
     let sender = KeyPair::new();
@@ -1019,10 +1018,10 @@ fn test_bug6_02_apply_uses_sender_role() {
     assert_ne!(sender_ct.handle(), receiver_ct.handle());
 }
 
-/// BUG6-03: Both sender and receiver balances updated correctly
+/// Both sender and receiver balances updated correctly
 #[tokio::test]
 #[allow(clippy::result_large_err)]
-async fn test_bug6_03_both_parties_updated() -> Result<(), BlockchainError> {
+async fn test_both_parties_updated() -> Result<(), BlockchainError> {
     let storage = create_test_storage().await;
     setup_uno_asset(&storage).await?;
 
@@ -1097,10 +1096,10 @@ async fn test_bug6_03_both_parties_updated() -> Result<(), BlockchainError> {
     Ok(())
 }
 
-/// BUG6-04: Multiple UnoTransfers in same block
+/// Multiple UnoTransfers in same block
 #[tokio::test]
 #[allow(clippy::result_large_err)]
-async fn test_bug6_04_multiple_uno_transfers_in_block() -> Result<(), BlockchainError> {
+async fn test_multiple_uno_transfers_in_block() -> Result<(), BlockchainError> {
     let storage = create_test_storage().await;
     setup_uno_asset(&storage).await?;
 

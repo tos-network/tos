@@ -194,7 +194,7 @@ impl<'a> From<&'a Hash> for Cow<'a, Hash> {
 /// use tos_common::crypto::{compute_deterministic_contract_address, elgamal::CompressedPublicKey};
 /// use tos_common::serializer::Serializer;
 ///
-/// let deployer = CompressedPublicKey::from_bytes(&[1u8; 32]).unwrap();
+/// let deployer = CompressedPublicKey::from_bytes(&[1u8; 32]).expect("deserialization should succeed");
 /// let bytecode = b"contract bytecode";
 /// let address = compute_deterministic_contract_address(&deployer, bytecode);
 /// ```
@@ -223,7 +223,8 @@ mod tests {
     #[test]
     fn test_deterministic_address_computation() {
         // Create a test deployer public key
-        let deployer = crate::crypto::elgamal::CompressedPublicKey::from_bytes(&[1u8; 32]).unwrap();
+        let deployer = crate::crypto::elgamal::CompressedPublicKey::from_bytes(&[1u8; 32])
+            .expect("deserialization should succeed");
         let bytecode = b"test contract bytecode";
 
         // Compute address
@@ -243,7 +244,8 @@ mod tests {
 
         // Different deployer = different address
         let different_deployer =
-            crate::crypto::elgamal::CompressedPublicKey::from_bytes(&[2u8; 32]).unwrap();
+            crate::crypto::elgamal::CompressedPublicKey::from_bytes(&[2u8; 32])
+                .expect("deserialization should succeed");
         let addr4 = compute_deterministic_contract_address(&different_deployer, bytecode);
         assert_ne!(
             addr1, addr4,
@@ -257,7 +259,8 @@ mod tests {
 
     #[test]
     fn test_deterministic_address_format() {
-        let deployer = crate::crypto::elgamal::CompressedPublicKey::from_bytes(&[1u8; 32]).unwrap();
+        let deployer = crate::crypto::elgamal::CompressedPublicKey::from_bytes(&[1u8; 32])
+            .expect("deserialization should succeed");
         let bytecode = b"test";
 
         let addr = compute_deterministic_contract_address(&deployer, bytecode);
@@ -286,10 +289,10 @@ mod tests {
     #[test]
     fn test_deterministic_address_uniqueness() {
         // Test that different combinations produce different addresses
-        let deployer1 =
-            crate::crypto::elgamal::CompressedPublicKey::from_bytes(&[1u8; 32]).unwrap();
-        let deployer2 =
-            crate::crypto::elgamal::CompressedPublicKey::from_bytes(&[2u8; 32]).unwrap();
+        let deployer1 = crate::crypto::elgamal::CompressedPublicKey::from_bytes(&[1u8; 32])
+            .expect("deserialization should succeed");
+        let deployer2 = crate::crypto::elgamal::CompressedPublicKey::from_bytes(&[2u8; 32])
+            .expect("deserialization should succeed");
         let bytecode1 = b"contract_v1";
         let bytecode2 = b"contract_v2";
 

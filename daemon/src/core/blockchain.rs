@@ -44,6 +44,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tos_common::{
+    account::GlobalEnergyState,
     api::{
         daemon::{
             AddressPaymentEvent, BlockOrderedEvent, BlockOrphanedEvent, BlockType, ContractEvent,
@@ -76,7 +77,7 @@ use tos_common::{
         sync::{Mutex, RwLock, Semaphore},
     },
     transaction::{verify::BlockchainVerificationState, Transaction, TransactionType},
-    utils::{calculate_tx_fee, format_tos},
+    utils::format_tos,
     varuint::VarUint,
 };
 use tos_kernel::Environment;
@@ -737,6 +738,17 @@ impl<S: Storage> Blockchain<S> {
                         None,
                     ),
                 )
+                .await?;
+
+            // Initialize GlobalEnergyState for Stake 2.0
+            // Starts with total_energy_weight = 0 (no frozen TOS at genesis)
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Initializing GlobalEnergyState at genesis");
+            }
+            let global_energy_state = GlobalEnergyState::new();
+            // Use topoheight 0 for genesis initialization
+            storage
+                .set_global_energy_state(&global_energy_state, 0)
                 .await?;
 
             let (genesis_block, genesis_hash) =
@@ -2220,7 +2232,7 @@ impl<S: Storage> Blockchain<S> {
                     let data = MempoolTransactionSummary {
                         size: tx_size,
                         hash: Cow::Borrowed(&hash),
-                        fee: tx.get_fee(),
+                        fee: tx.get_fee_limit(),
                         source: tx.get_source().as_address(self.network.is_mainnet()),
                         first_seen: get_current_time_in_seconds(),
                     };
@@ -2633,7 +2645,8 @@ impl<S: Storage> Blockchain<S> {
                 if log::log_enabled!(log::Level::Debug) {
                     debug!("Considering TX {} for inclusion in block template", hash);
                 }
-                if block_size + total_txs_size + size >= MAX_BLOCK_SIZE
+                // Include HASH_SIZE in size check to account for tx hash in block header
+                if block_size + total_txs_size + size + HASH_SIZE >= MAX_BLOCK_SIZE
                     || block.txs_hashes.len() >= u16::MAX as usize
                 {
                     if log::log_enabled!(log::Level::Debug) {
@@ -2721,7 +2734,7 @@ impl<S: Storage> Blockchain<S> {
                         "Selected {} (nonce: {}, fees: {}) for mining",
                         hash,
                         tx.get_nonce(),
-                        format_tos(tx.get_fee())
+                        format_tos(tx.get_fee_limit())
                     );
                 }
                 // TODO no clone
@@ -3289,8 +3302,8 @@ impl<S: Storage> Blockchain<S> {
                     // We run the batches in concurrent tasks
                     // But, because Transaction#verify_batch is actually spawning a blocking thread
                     // it will be multi-threaded by N threads
-                    // Use block timestamp for deterministic consensus validation
-                    let block_timestamp_secs = block.get_header().get_timestamp() / 1000;
+                    // Use block timestamp (in ms) for deterministic consensus validation
+                    let block_timestamp_ms = block.get_header().get_timestamp();
                     stream::iter(batches.into_iter().map(Ok))
                         .try_for_each_concurrent(self.txs_verification_threads_count, async |txs| {
                             let mut chain_state = ChainState::new_with_timestamp(
@@ -3299,22 +3312,22 @@ impl<S: Storage> Blockchain<S> {
                                 stable_topoheight,
                                 current_topoheight,
                                 version,
-                                block_timestamp_secs,
+                                block_timestamp_ms,
                             );
                             Transaction::verify_batch(txs.iter(), &mut chain_state, cache).await
                         })
                         .await
                 } else {
                     // Verify all valid transactions in one batch
-                    // Use block timestamp for deterministic consensus validation
-                    let block_timestamp_secs = block.get_header().get_timestamp() / 1000;
+                    // Use block timestamp (in ms) for deterministic consensus validation
+                    let block_timestamp_ms = block.get_header().get_timestamp();
                     let mut chain_state = ChainState::new_with_timestamp(
                         &*storage,
                         &self.environment,
                         stable_topoheight,
                         current_topoheight,
                         version,
-                        block_timestamp_secs,
+                        block_timestamp_ms,
                     );
                     let iter = txs_grouped.values().flatten();
                     Transaction::verify_batch(iter, &mut chain_state, &tx_cache).await
@@ -3944,7 +3957,7 @@ impl<S: Storage> Blockchain<S> {
                         }
 
                         // Increase total tx fees for miner
-                        total_fees += tx.get_fee();
+                        total_fees += tx.get_fee_limit();
                     }
                 }
 
@@ -4897,10 +4910,8 @@ pub async fn estimate_required_tx_fees<P: AccountProvider>(
     tx: &Transaction,
     _: BlockVersion,
 ) -> Result<u64, BlockchainError> {
-    let mut output_count = 0;
     let mut processed_keys = HashSet::new();
     if let TransactionType::Transfers(transfers) = tx.get_data() {
-        output_count = transfers.len();
         for transfer in transfers {
             if !processed_keys.contains(transfer.get_destination())
                 && !provider
@@ -4922,20 +4933,11 @@ pub async fn estimate_required_tx_fees<P: AccountProvider>(
         }
     }
 
-    // Check if this transaction uses energy fees
-    if tx.get_fee_type().is_energy() {
-        // For energy fees, we return 0 TOS fee requirement
-        // The energy consumption is handled separately in the transaction verification
-        Ok(0)
-    } else {
-        // For TOS fees, use the traditional fee calculation
-        Ok(calculate_tx_fee(
-            tx.size(),
-            output_count,
-            processed_keys.len(),
-            tx.get_multisig_count(),
-        ))
-    }
+    // Stake 2.0: All transactions use energy model
+    // The fee_limit is reserved for auto-burn if energy is insufficient
+    // Actual energy consumption is handled in apply() with EnergyResourceManager
+    // Return 0 TOS fee requirement since energy handles all fees
+    Ok(0)
 }
 
 // Get the block reward for a side block based on how many side blocks exists at same height

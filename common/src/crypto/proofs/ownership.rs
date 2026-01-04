@@ -222,7 +222,7 @@ mod tests {
         let ct = keypair.get_public_key().encrypt(balance);
 
         // Create proof
-        let proof = OwnershipProof::new(&keypair, balance, amount, ct.clone()).unwrap();
+        let proof = OwnershipProof::new(&keypair, balance, amount, ct.clone()).expect("test");
 
         // Verify the proof
         assert!(proof.verify(keypair.get_public_key(), ct).is_ok());
@@ -237,7 +237,7 @@ mod tests {
         let ct = keypair.get_public_key().encrypt(balance);
 
         // Create proof
-        let proof = OwnershipProof::new(&keypair, balance, amount, ct.clone()).unwrap();
+        let proof = OwnershipProof::new(&keypair, balance, amount, ct.clone()).expect("test");
 
         // Verify the proof with a different balance ct
         let ct = keypair.get_public_key().encrypt(balance);
@@ -265,11 +265,11 @@ mod tests {
         let ct = keypair.get_public_key().encrypt(balance);
 
         // Create proof
-        let mut proof = OwnershipProof::new(&keypair, balance, amount, ct.clone()).unwrap();
+        let mut proof = OwnershipProof::new(&keypair, balance, amount, ct.clone()).expect("test");
         let inflate = 100;
 
         proof.amount += inflate;
-        let mut decompressed = proof.commitment.decompress().unwrap();
+        let mut decompressed = proof.commitment.decompress().expect("test");
         decompressed -= Scalar::from((-(inflate as i64)) as u64);
 
         proof.commitment = decompressed.compress();
@@ -291,7 +291,7 @@ mod tests {
         // Current balance on chain
         let balance_ct = keypair.get_public_key().encrypt(balance);
 
-        let left = balance.checked_sub(amount).unwrap();
+        let left = balance.checked_sub(amount).expect("test");
 
         let mut transcript = Transcript::new(b"ownership_proof");
         // We don't want to reveal the whole balance, so we create a new Commitment with a random opening.
@@ -332,7 +332,7 @@ mod tests {
             &opening.as_scalar(),
             BULLET_PROOF_SIZE,
         )
-        .unwrap();
+        .expect("test");
 
         // Create proof
         let proof = OwnershipProof {

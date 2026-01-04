@@ -209,7 +209,7 @@ mod tests {
         let bytes = vec![1, 2, 3, 4, 5];
         let data = PlaintextData(bytes.clone());
         let cipher = data.encrypt_in_place_with_aead(&k);
-        let decrypted = cipher.decrypt_in_place(&k).unwrap();
+        let decrypted = cipher.decrypt_in_place(&k).expect("test");
         assert_eq!(decrypted.0, bytes);
     }
 
@@ -227,13 +227,13 @@ mod tests {
         // Decrypt for alice
         let decrypted = extra_data
             .decrypt(alice.get_private_key(), Role::Sender)
-            .unwrap();
+            .expect("test");
         assert_eq!(decrypted.0, bytes);
 
         // Decrypt for bob
         let decrypted = extra_data
             .decrypt(bob.get_private_key(), Role::Receiver)
-            .unwrap();
+            .expect("test");
         assert_eq!(decrypted.0, bytes);
     }
 

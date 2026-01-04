@@ -311,7 +311,7 @@ mod tests {
     fn serde_versioned_balance_zero() {
         let mut zero = VersionedBalance::zero();
         zero.set_balance_type(BalanceType::Input);
-        let zero_bis = VersionedBalance::from_bytes(&zero.to_bytes()).unwrap();
+        let zero_bis = VersionedBalance::from_bytes(&zero.to_bytes()).expect("test");
         assert_eq!(zero, zero_bis);
     }
 
@@ -320,7 +320,7 @@ mod tests {
         let mut zero = VersionedBalance::zero();
         zero.set_balance_type(BalanceType::Input);
         zero.set_previous_topoheight(Some(42));
-        let zero_bis = VersionedBalance::from_bytes(&zero.to_bytes()).unwrap();
+        let zero_bis = VersionedBalance::from_bytes(&zero.to_bytes()).expect("test");
         assert_eq!(zero, zero_bis);
     }
 
@@ -329,7 +329,7 @@ mod tests {
         let mut zero = VersionedBalance::zero();
         zero.set_balance_type(BalanceType::Output);
 
-        let zero_bis = VersionedBalance::from_bytes(&zero.to_bytes()).unwrap();
+        let zero_bis = VersionedBalance::from_bytes(&zero.to_bytes()).expect("test");
         assert_eq!(zero, zero_bis);
     }
 
@@ -339,7 +339,7 @@ mod tests {
         zero.set_balance_type(BalanceType::Both);
         zero.set_output_balance(Some(100));
 
-        let zero_bis = VersionedBalance::from_bytes(&zero.to_bytes()).unwrap();
+        let zero_bis = VersionedBalance::from_bytes(&zero.to_bytes()).expect("test");
         assert_eq!(zero, zero_bis);
     }
 
@@ -350,7 +350,7 @@ mod tests {
         zero.set_output_balance(Some(100));
         zero.set_previous_topoheight(Some(42));
 
-        let zero_bis = VersionedBalance::from_bytes(&zero.to_bytes()).unwrap();
+        let zero_bis = VersionedBalance::from_bytes(&zero.to_bytes()).expect("test");
         assert_eq!(zero, zero_bis);
     }
 }

@@ -134,6 +134,9 @@ async fn maybe_send_callback(
                 return;
             }
             if let (Some(tx_hash), Some(amount)) = (tx_hash, amount) {
+                // Pass expected amount to detect underpaid payments
+                // Use stored.amount if available, otherwise treat as fully paid (0 means no underpayment check)
+                let expected = stored.amount.unwrap_or(amount);
                 send_payment_callback(
                     Arc::clone(&CALLBACK_SERVICE),
                     callback_url,
@@ -141,6 +144,7 @@ async fn maybe_send_callback(
                     payment_id.to_string(),
                     tx_hash,
                     amount,
+                    expected,
                     confirmations,
                 );
                 update_payment_callback_status(payment_id, PaymentStatus::Confirmed).await;
@@ -163,6 +167,8 @@ async fn maybe_send_callback(
                 return;
             }
             if let (Some(tx_hash), Some(amount)) = (tx_hash, amount) {
+                // Pass expected amount to detect underpaid payments
+                let expected = stored.amount.unwrap_or(amount);
                 send_payment_callback(
                     Arc::clone(&CALLBACK_SERVICE),
                     callback_url,
@@ -170,6 +176,7 @@ async fn maybe_send_callback(
                     payment_id.to_string(),
                     tx_hash,
                     amount,
+                    expected,
                     confirmations,
                 );
                 update_payment_callback_status(payment_id, status).await;
@@ -321,7 +328,7 @@ where
                 .is_tx_executed_in_block(tx_hash, &hash)
                 .context("Error while checking if tx was executed")?
             {
-                total_fees += tx.get_fee();
+                total_fees += tx.get_fee_limit();
             }
         }
     }
@@ -798,6 +805,26 @@ pub fn register_methods<S: Storage>(
 
     // Energy management
     handler.register_method("get_energy", async_handler!(get_energy::<S>));
+    handler.register_method(
+        "get_global_energy_state",
+        async_handler!(get_global_energy_state::<S>),
+    );
+    handler.register_method("estimate_energy", async_handler!(estimate_energy::<S>));
+    handler.register_method(
+        "get_transaction_result",
+        async_handler!(get_transaction_result::<S>),
+    );
+
+    // Delegation management (Stake 2.0)
+    handler.register_method(
+        "get_delegations_from",
+        async_handler!(get_delegations_from::<S>),
+    );
+    handler.register_method(
+        "get_delegations_to",
+        async_handler!(get_delegations_to::<S>),
+    );
+    handler.register_method("get_delegation", async_handler!(get_delegation::<S>));
 
     // AI Mining management
     handler.register_method(
@@ -1802,7 +1829,7 @@ async fn get_mempool_summary<S: Storage>(
         let tx = MempoolTransactionSummary {
             hash: Cow::Borrowed(hash),
             source: sorted_tx.get_tx().get_source().as_address(mainnet),
-            fee: sorted_tx.get_fee(),
+            fee: sorted_tx.get_fee_limit(),
             first_seen: sorted_tx.get_first_seen(),
             size: sorted_tx.get_size(),
         };
@@ -2065,7 +2092,7 @@ async fn get_transactions_summary<S: Storage>(
                 source: tx
                     .get_source()
                     .as_address(blockchain.get_network().is_mainnet()),
-                fee: tx.get_fee(),
+                fee: tx.get_fee_limit(),
                 size: tx.size(),
             })
         } else {
@@ -2331,27 +2358,114 @@ async fn get_account_history<S: Storage>(
                 }
                 TransactionType::Energy(payload) => {
                     if is_sender {
+                        use tos_common::transaction::EnergyPayload;
                         match payload {
-                            tos_common::transaction::EnergyPayload::FreezeTos {
-                                amount,
-                                duration,
-                            } => {
+                            EnergyPayload::FreezeTos { amount } => {
                                 history.push(AccountHistoryEntry {
                                     topoheight: topo,
                                     hash: tx_hash.clone(),
-                                    history_type: AccountHistoryType::FreezeTos {
-                                        amount: *amount,
-                                        duration: format!("{}_days", duration.get_days()),
-                                    },
+                                    history_type: AccountHistoryType::FreezeTos { amount: *amount },
                                     block_timestamp: block_header.get_timestamp(),
                                 });
                             }
-                            tos_common::transaction::EnergyPayload::UnfreezeTos { amount } => {
+                            EnergyPayload::UnfreezeTos { amount } => {
                                 history.push(AccountHistoryEntry {
                                     topoheight: topo,
                                     hash: tx_hash.clone(),
                                     history_type: AccountHistoryType::UnfreezeTos {
                                         amount: *amount,
+                                    },
+                                    block_timestamp: block_header.get_timestamp(),
+                                });
+                            }
+                            EnergyPayload::WithdrawExpireUnfreeze => {
+                                // Amount is determined at execution time, not in history
+                                history.push(AccountHistoryEntry {
+                                    topoheight: topo,
+                                    hash: tx_hash.clone(),
+                                    history_type: AccountHistoryType::WithdrawExpireUnfreeze {
+                                        amount: 0, // Actual amount determined at execution
+                                    },
+                                    block_timestamp: block_header.get_timestamp(),
+                                });
+                            }
+                            EnergyPayload::CancelAllUnfreeze => {
+                                // Amounts determined at execution time
+                                history.push(AccountHistoryEntry {
+                                    topoheight: topo,
+                                    hash: tx_hash.clone(),
+                                    history_type: AccountHistoryType::CancelAllUnfreeze {
+                                        withdrawn: 0,
+                                        cancelled: 0,
+                                    },
+                                    block_timestamp: block_header.get_timestamp(),
+                                });
+                            }
+                            EnergyPayload::DelegateResource {
+                                receiver,
+                                amount,
+                                lock,
+                                lock_period,
+                            } => {
+                                let mainnet = blockchain.get_network().is_mainnet();
+                                history.push(AccountHistoryEntry {
+                                    topoheight: topo,
+                                    hash: tx_hash.clone(),
+                                    history_type: AccountHistoryType::DelegateResource {
+                                        receiver: receiver.as_address(mainnet),
+                                        amount: *amount,
+                                        lock: *lock,
+                                        lock_period: *lock_period,
+                                    },
+                                    block_timestamp: block_header.get_timestamp(),
+                                });
+                            }
+                            EnergyPayload::UndelegateResource { receiver, amount } => {
+                                let mainnet = blockchain.get_network().is_mainnet();
+                                history.push(AccountHistoryEntry {
+                                    topoheight: topo,
+                                    hash: tx_hash.clone(),
+                                    history_type: AccountHistoryType::UndelegateResource {
+                                        receiver: receiver.as_address(mainnet),
+                                        amount: *amount,
+                                    },
+                                    block_timestamp: block_header.get_timestamp(),
+                                });
+                            }
+                            EnergyPayload::ActivateAccounts { accounts } => {
+                                // Batch account activation - record summary
+                                history.push(AccountHistoryEntry {
+                                    topoheight: topo,
+                                    hash: tx_hash.clone(),
+                                    history_type: AccountHistoryType::BatchActivateAccounts {
+                                        count: accounts.len() as u32,
+                                    },
+                                    block_timestamp: block_header.get_timestamp(),
+                                });
+                            }
+                            EnergyPayload::BatchDelegateResource { delegations } => {
+                                // Batch delegation - record summary
+                                let total_amount: u64 = delegations.iter().map(|d| d.amount).sum();
+                                history.push(AccountHistoryEntry {
+                                    topoheight: topo,
+                                    hash: tx_hash.clone(),
+                                    history_type: AccountHistoryType::BatchDelegateResource {
+                                        count: delegations.len() as u32,
+                                        total_amount,
+                                    },
+                                    block_timestamp: block_header.get_timestamp(),
+                                });
+                            }
+                            EnergyPayload::ActivateAndDelegate { items } => {
+                                // Combined activation and delegation - record summary
+                                let total_delegation: u64 =
+                                    items.iter().map(|i| i.delegate_amount).sum();
+                                history.push(AccountHistoryEntry {
+                                    topoheight: topo,
+                                    hash: tx_hash.clone(),
+                                    history_type: AccountHistoryType::ActivateAndDelegate {
+                                        count: items.len() as u32,
+                                        total_delegation,
                                     },
                                     block_timestamp: block_header.get_timestamp(),
                                 });
@@ -3115,59 +3229,349 @@ async fn get_p2p_block_propagation<S: Storage>(
 
 // Energy management RPC methods
 
-/// Get energy information for an account
+/// Get energy information for an account (Stake 2.0)
 async fn get_energy<S: Storage>(context: &Context, body: Value) -> Result<Value, InternalRpcError> {
+    use tos_common::config::FREE_ENERGY_QUOTA;
+
     let params: GetEnergyParams = parse_params(body)?;
     let blockchain: &Arc<Blockchain<S>> = context.get()?;
     let storage = blockchain.get_storage().read().await;
 
-    // Get current topoheight
-    let current_topoheight = storage.get_top_height().await?;
+    // Use current system time for accurate energy recovery reporting
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
 
-    // Get energy resource for the account
+    // Get account energy for the account (Stake 2.0)
     let pubkey = params.address.into_owned().to_public_key();
-    let energy_resource = storage.get_energy_resource(&pubkey).await?;
+    let account_energy = storage.get_account_energy(&pubkey).await?;
 
-    let result = if let Some(energy_resource) = energy_resource {
-        // Convert freeze records to FreezeRecordInfo format
-        let freeze_records = energy_resource
-            .freeze_records
+    // Get global energy state for proportional energy calculation
+    let global_state = storage.get_global_energy_state().await?;
+    let total_energy_weight = global_state.total_energy_weight;
+
+    let result = if let Some(account_energy) = account_energy {
+        // Calculate energy metrics using Stake 2.0 model
+        let energy_limit = account_energy.calculate_energy_limit(total_energy_weight);
+        let available_energy =
+            account_energy.calculate_frozen_energy_available(now_ms, total_energy_weight);
+        let free_energy_available = account_energy.calculate_free_energy_available(now_ms);
+
+        // Convert unfreezing list to API format
+        let unfreezing_list = account_energy
+            .unfreezing_list
             .iter()
-            .map(|record| FreezeRecordInfo {
-                amount: record.amount,
-                duration: format!("{}_days", record.duration.get_days()),
-                freeze_topoheight: record.freeze_topoheight,
-                unlock_topoheight: record.unlock_topoheight,
-                energy_gained: record.energy_gained,
-                can_unlock: record.can_unlock(current_topoheight),
-                remaining_blocks: if record.can_unlock(current_topoheight) {
-                    0
-                } else {
-                    record.unlock_topoheight.saturating_sub(current_topoheight)
-                },
+            .map(|record| UnfreezingInfo {
+                amount: record.unfreeze_amount,
+                expire_time: record.unfreeze_expire_time,
+                can_withdraw: record.unfreeze_expire_time <= now_ms,
             })
             .collect::<Vec<_>>();
 
+        // Use saturating arithmetic to prevent overflow when summing unfreezing amounts
+        let total_unfreezing: u64 = account_energy
+            .unfreezing_list
+            .iter()
+            .fold(0u64, |acc, r| acc.saturating_add(r.unfreeze_amount));
+
         json!(GetEnergyResult {
-            frozen_tos: energy_resource.frozen_tos,
-            total_energy: energy_resource.total_energy,
-            used_energy: energy_resource.used_energy,
-            available_energy: energy_resource.available_energy(),
-            last_update: energy_resource.last_update,
-            freeze_records,
+            frozen_balance: account_energy.frozen_balance,
+            delegated_frozen_balance: account_energy.delegated_frozen_balance,
+            acquired_delegated_balance: account_energy.acquired_delegated_balance,
+            energy_limit,
+            energy_usage: account_energy.energy_usage,
+            available_energy,
+            free_energy_limit: FREE_ENERGY_QUOTA,
+            free_energy_usage: account_energy.free_energy_usage,
+            free_energy_available,
+            unfreezing_list,
+            total_unfreezing,
         })
     } else {
+        // Account has no energy resource yet - return defaults
         json!(GetEnergyResult {
-            frozen_tos: 0,
-            total_energy: 0,
-            used_energy: 0,
+            frozen_balance: 0,
+            delegated_frozen_balance: 0,
+            acquired_delegated_balance: 0,
+            energy_limit: 0,
+            energy_usage: 0,
             available_energy: 0,
-            last_update: current_topoheight,
-            freeze_records: Vec::new(),
+            free_energy_limit: FREE_ENERGY_QUOTA,
+            free_energy_usage: 0,
+            free_energy_available: FREE_ENERGY_QUOTA,
+            unfreezing_list: Vec::new(),
+            total_unfreezing: 0,
         })
     };
 
     Ok(result)
+}
+
+/// Get global energy state for the network (Stake 2.0)
+async fn get_global_energy_state<S: Storage>(
+    context: &Context,
+    _body: Value,
+) -> Result<Value, InternalRpcError> {
+    use tos_common::api::daemon::GlobalEnergyInfo;
+
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let storage = blockchain.get_storage().read().await;
+
+    let global_state = storage.get_global_energy_state().await?;
+
+    Ok(json!(GlobalEnergyInfo {
+        total_energy_limit: global_state.total_energy_limit,
+        total_energy_weight: global_state.total_energy_weight,
+        last_update: global_state.last_update,
+    }))
+}
+
+/// Estimate energy cost for a transaction (Stake 2.0)
+async fn estimate_energy<S: Storage>(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    use tos_common::api::daemon::{EstimateEnergyParams, EstimateEnergyResult, EstimateTxType};
+    use tos_common::config::TOS_PER_ENERGY;
+    use tos_common::utils::energy_fee::EnergyFeeCalculator;
+
+    let params: EstimateEnergyParams = parse_params(body)?;
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let storage = blockchain.get_storage().read().await;
+
+    // Use current system time for accurate energy availability
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    let pubkey = params.address.into_owned().to_public_key();
+
+    // Get account energy state
+    let account_energy = storage
+        .get_account_energy(&pubkey)
+        .await?
+        .unwrap_or_default();
+    let global_state = storage.get_global_energy_state().await?;
+    let total_energy_weight = global_state.total_energy_weight;
+
+    // Calculate energy required based on transaction type
+    let energy_required = match params.tx_type {
+        EstimateTxType::Transfer => {
+            EnergyFeeCalculator::calculate_transfer_cost(params.tx_size, params.output_count)
+                + EnergyFeeCalculator::calculate_new_account_cost(params.new_accounts)
+        }
+        EstimateTxType::UnoTransfer => {
+            EnergyFeeCalculator::calculate_uno_transfer_cost(params.tx_size, params.output_count)
+                + EnergyFeeCalculator::calculate_new_account_cost(params.new_accounts)
+        }
+        EstimateTxType::Burn => EnergyFeeCalculator::calculate_burn_cost(),
+        EstimateTxType::DeployContract => {
+            // Include constructor execution gas (max_gas) in deploy cost
+            EnergyFeeCalculator::calculate_deploy_cost(params.bytecode_size)
+                .saturating_add(params.max_gas)
+        }
+        EstimateTxType::InvokeContract => {
+            // Use max_gas parameter for contract invocation energy estimate
+            // The actual cost will be the base transaction size + user-specified max_gas
+            // Include new account creation costs if contract creates accounts
+            // Unused gas is refunded after execution
+            (params.tx_size as u64)
+                .saturating_add(params.max_gas)
+                .saturating_add(EnergyFeeCalculator::calculate_new_account_cost(
+                    params.new_accounts,
+                ))
+        }
+        EstimateTxType::Energy => 0, // Energy operations are free
+    };
+
+    // Calculate available energy
+    let free_energy_available = account_energy.calculate_free_energy_available(now_ms);
+    let frozen_energy_available =
+        account_energy.calculate_frozen_energy_available(now_ms, total_energy_weight);
+    // Use saturating arithmetic to prevent overflow when summing energy
+    let total_energy_available = free_energy_available.saturating_add(frozen_energy_available);
+
+    // Calculate if TOS burn is needed
+    let (estimated_fee, will_succeed, error) = if total_energy_available >= energy_required {
+        // Energy covers the cost
+        (0, true, None)
+    } else {
+        // Need to burn TOS for the shortfall
+        // Use saturating_mul to prevent overflow
+        let shortfall = energy_required - total_energy_available;
+        let tos_needed = shortfall.saturating_mul(TOS_PER_ENERGY);
+
+        if params.fee_limit >= tos_needed {
+            // fee_limit covers the shortfall
+            (tos_needed, true, None)
+        } else if params.fee_limit == 0 {
+            // No fee_limit set, would fail
+            (
+                tos_needed,
+                false,
+                Some(format!(
+                    "Insufficient energy: need {} but only {} available. Set fee_limit >= {} to auto-burn TOS",
+                    energy_required, total_energy_available, tos_needed
+                )),
+            )
+        } else {
+            // fee_limit is too low
+            (
+                tos_needed,
+                false,
+                Some(format!(
+                    "fee_limit {} is too low, need {} TOS to cover energy shortfall",
+                    params.fee_limit, tos_needed
+                )),
+            )
+        }
+    };
+
+    Ok(json!(EstimateEnergyResult {
+        energy_required,
+        free_energy_available,
+        frozen_energy_available,
+        total_energy_available,
+        estimated_fee,
+        will_succeed,
+        error,
+    }))
+}
+
+/// Get transaction execution result (Stake 2.0)
+async fn get_transaction_result<S: Storage>(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    use tos_common::api::daemon::{GetTransactionResultParams, TransactionResultInfo};
+
+    let params: GetTransactionResultParams = parse_params(body)?;
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let storage = blockchain.get_storage().read().await;
+
+    let hash = params.hash.into_owned();
+    let result = storage.get_transaction_result(&hash).await?;
+
+    match result {
+        Some(result) => Ok(json!(TransactionResultInfo {
+            fee: result.fee,
+            energy_used: result.energy_used,
+            free_energy_used: result.free_energy_used,
+            frozen_energy_used: result.frozen_energy_used,
+            auto_burned_energy: result.auto_burned_energy(),
+        })),
+        None => Err(InternalRpcError::InvalidParamsAny(anyhow::anyhow!(
+            "No execution result found for transaction {}",
+            hash
+        ))),
+    }
+}
+
+// ===== Stake 2.0 Delegation RPC Methods =====
+
+/// Get all delegations from an account (delegator)
+async fn get_delegations_from<S: Storage>(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    use tos_common::api::daemon::{DelegationInfo, GetDelegationsFromParams, GetDelegationsResult};
+
+    let params: GetDelegationsFromParams = parse_params(body)?;
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let storage = blockchain.get_storage().read().await;
+
+    let now_ms = tos_common::time::get_current_time_in_millis();
+    let pubkey = params.address.into_owned().to_public_key();
+    let delegations = storage.get_delegations_from(&pubkey).await?;
+
+    let is_mainnet = storage.is_mainnet();
+    let delegation_infos: Vec<DelegationInfo> = delegations
+        .iter()
+        .map(|d| DelegationInfo {
+            from: d.from.as_address(is_mainnet),
+            to: d.to.as_address(is_mainnet),
+            frozen_balance: d.frozen_balance,
+            expire_time: d.expire_time,
+            is_locked: d.expire_time > now_ms,
+        })
+        .collect();
+
+    let total_amount = delegations.iter().map(|d| d.frozen_balance).sum();
+
+    Ok(json!(GetDelegationsResult {
+        delegations: delegation_infos,
+        total_amount,
+    }))
+}
+
+/// Get all delegations to an account (receiver)
+async fn get_delegations_to<S: Storage>(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    use tos_common::api::daemon::{DelegationInfo, GetDelegationsResult, GetDelegationsToParams};
+
+    let params: GetDelegationsToParams = parse_params(body)?;
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let storage = blockchain.get_storage().read().await;
+
+    let now_ms = tos_common::time::get_current_time_in_millis();
+    let pubkey = params.address.into_owned().to_public_key();
+    let delegations = storage.get_delegations_to(&pubkey).await?;
+
+    let is_mainnet = storage.is_mainnet();
+    let delegation_infos: Vec<DelegationInfo> = delegations
+        .iter()
+        .map(|d| DelegationInfo {
+            from: d.from.as_address(is_mainnet),
+            to: d.to.as_address(is_mainnet),
+            frozen_balance: d.frozen_balance,
+            expire_time: d.expire_time,
+            is_locked: d.expire_time > now_ms,
+        })
+        .collect();
+
+    let total_amount = delegations.iter().map(|d| d.frozen_balance).sum();
+
+    Ok(json!(GetDelegationsResult {
+        delegations: delegation_infos,
+        total_amount,
+    }))
+}
+
+/// Get a specific delegation between two accounts
+async fn get_delegation<S: Storage>(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    use tos_common::api::daemon::{DelegationInfo, GetDelegationParams};
+
+    let params: GetDelegationParams = parse_params(body)?;
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let storage = blockchain.get_storage().read().await;
+
+    let now_ms = tos_common::time::get_current_time_in_millis();
+    let from_pubkey = params.from.into_owned().to_public_key();
+    let to_pubkey = params.to.into_owned().to_public_key();
+
+    let delegation = storage
+        .get_delegated_resource(&from_pubkey, &to_pubkey)
+        .await?;
+
+    match delegation {
+        Some(d) => {
+            let is_mainnet = storage.is_mainnet();
+            Ok(json!(DelegationInfo {
+                from: d.from.as_address(is_mainnet),
+                to: d.to.as_address(is_mainnet),
+                frozen_balance: d.frozen_balance,
+                expire_time: d.expire_time,
+                is_locked: d.expire_time > now_ms,
+            }))
+        }
+        None => Ok(json!(null)),
+    }
 }
 
 // Get the current AI mining state

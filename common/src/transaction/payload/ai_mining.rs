@@ -159,7 +159,7 @@ mod tests {
 
         let serialized = payload.to_bytes();
         let mut reader = Reader::new(&serialized);
-        let deserialized = AIMiningPayload::read(&mut reader).unwrap();
+        let deserialized = AIMiningPayload::read(&mut reader).expect("test");
 
         assert_eq!(payload, deserialized);
     }
@@ -176,7 +176,7 @@ mod tests {
         for level in levels {
             let serialized = level.to_bytes();
             let mut reader = Reader::new(&serialized);
-            let deserialized = DifficultyLevel::read(&mut reader).unwrap();
+            let deserialized = DifficultyLevel::read(&mut reader).expect("test");
 
             assert_eq!(level, deserialized);
         }

@@ -19,7 +19,7 @@ use tos_common::{
     },
     serializer::{Reader, Serializer},
     transaction::{
-        FeeType, Reference, Role, SourceCommitment, Transaction, TransactionType, TransferPayload,
+        Reference, Role, SourceCommitment, Transaction, TransactionType, TransferPayload,
         TxVersion, UnoTransferPayload,
     },
 };
@@ -183,12 +183,10 @@ fn test_transaction_prepare_transcript() {
     let nonce = 5u64;
 
     // Create transcript using the static method
-    let transcript1 =
-        Transaction::prepare_transcript(TxVersion::T0, &source, fee, &FeeType::TOS, nonce);
+    let transcript1 = Transaction::prepare_transcript(TxVersion::T0, &source, fee, nonce);
 
     // Create another transcript with same parameters
-    let transcript2 =
-        Transaction::prepare_transcript(TxVersion::T0, &source, fee, &FeeType::TOS, nonce);
+    let transcript2 = Transaction::prepare_transcript(TxVersion::T0, &source, fee, nonce);
 
     // Transcripts should be created without error
     drop(transcript1);
@@ -221,7 +219,6 @@ fn test_transaction_with_uno_transfers_hashable() {
         sender.get_public_key().compress(),
         tx_type,
         1000,
-        FeeType::TOS,
         0,
         reference,
         None,
@@ -297,7 +294,6 @@ fn test_plaintext_transaction_hashable() {
         keypair.get_public_key().compress(),
         TransactionType::Transfers(vec![transfer]),
         1000,
-        FeeType::TOS,
         0,
         reference,
         None,

@@ -405,7 +405,8 @@ mod tests {
 
     #[test]
     fn test_reputation_calculation() {
-        let account = CompressedPublicKey::from_bytes(&[0u8; 32]).unwrap();
+        let account =
+            CompressedPublicKey::from_bytes(&[0u8; 32]).expect("deserialization should succeed");
         let created_at = 1000000;
         let current_time = 1000000 + 30 * 24 * 3600; // 30 days later
 
@@ -426,7 +427,8 @@ mod tests {
 
     #[test]
     fn test_anti_sybil_detection() {
-        let account = CompressedPublicKey::from_bytes(&[0u8; 32]).unwrap();
+        let account =
+            CompressedPublicKey::from_bytes(&[0u8; 32]).expect("deserialization should succeed");
         let current_time = 1000000;
 
         // Test new account (high risk)
@@ -439,7 +441,8 @@ mod tests {
 
     #[test]
     fn test_secure_gas_calculation() {
-        let account = CompressedPublicKey::from_bytes(&[0u8; 32]).unwrap();
+        let account =
+            CompressedPublicKey::from_bytes(&[0u8; 32]).expect("deserialization should succeed");
         let mut reputation = AccountReputation::new(account, 1000000);
         reputation.reputation_score = 5_000; // Medium reputation (0.5 in SCALE units)
 
@@ -456,7 +459,8 @@ mod tests {
 
     #[test]
     fn test_reward_calculation() {
-        let account = CompressedPublicKey::from_bytes(&[0u8; 32]).unwrap();
+        let account =
+            CompressedPublicKey::from_bytes(&[0u8; 32]).expect("deserialization should succeed");
         let mut reputation = AccountReputation::new(account, 1000000);
         reputation.reputation_score = 9_500; // High reputation (0.95 in SCALE units)
 

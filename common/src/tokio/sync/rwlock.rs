@@ -321,21 +321,21 @@ mod tests {
         {
             let read_guard = lock.read().await;
             {
-                let locations = lock.active_read_locations.lock().unwrap();
+                let locations = lock.active_read_locations.lock().expect("test");
                 assert_eq!(locations.len(), 1);
             }
             assert_eq!(*read_guard, 42);
         }
 
         {
-            let locations = lock.active_read_locations.lock().unwrap();
+            let locations = lock.active_read_locations.lock().expect("test");
             assert!(locations.is_empty());
         }
 
         {
             let mut write_guard = lock.write().await;
             {
-                let location = lock.active_write_location.lock().unwrap();
+                let location = lock.active_write_location.lock().expect("test");
                 assert!(location.is_some());
             }
 

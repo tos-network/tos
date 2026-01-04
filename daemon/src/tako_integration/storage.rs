@@ -429,7 +429,7 @@ mod tests {
         assert!(adapter.set(contract_hash.as_bytes(), key, value).is_ok());
 
         // Test read from cache
-        let result = adapter.get(contract_hash.as_bytes(), key).unwrap();
+        let result = adapter.get(contract_hash.as_bytes(), key).expect("test");
         assert_eq!(result, Some(value.to_vec()));
 
         // Ensure cache keeps the exact ValueCell::Bytes entries for key/value
@@ -440,7 +440,7 @@ mod tests {
     fn test_storage_adapter_contract_isolation() {
         let provider = MockProvider::new();
         let contract_hash = Hash::zero();
-        let other_contract = <Hash as Serializer>::from_bytes(&[1u8; 32]).unwrap();
+        let other_contract = <Hash as Serializer>::from_bytes(&[1u8; 32]).expect("test");
         let mut cache = ContractCache::default();
         let topoheight = 100;
 
@@ -463,19 +463,19 @@ mod tests {
 
         adapter
             .set(contract_hash.as_bytes(), b"key_a", b"value_a")
-            .unwrap();
+            .expect("test");
         adapter
             .set(contract_hash.as_bytes(), b"key_b", b"value_b")
-            .unwrap();
+            .expect("test");
 
         let value_a = adapter
             .get(contract_hash.as_bytes(), b"key_a")
-            .unwrap()
-            .unwrap();
+            .expect("test")
+            .expect("test");
         let value_b = adapter
             .get(contract_hash.as_bytes(), b"key_b")
-            .unwrap()
-            .unwrap();
+            .expect("test")
+            .expect("test");
 
         assert_eq!(value_a, b"value_a");
         assert_eq!(value_b, b"value_b");

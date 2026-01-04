@@ -751,8 +751,8 @@ mod tests {
         );
 
         // Genesis blocks should have reasonable size (header only, no transactions)
-        let mainnet_len = mainnet_bytes.unwrap().len();
-        let testnet_len = testnet_bytes.unwrap().len();
+        let mainnet_len = mainnet_bytes.expect("test").len();
+        let testnet_len = testnet_bytes.expect("test").len();
 
         assert!(
             mainnet_len > 50 && mainnet_len < 500,

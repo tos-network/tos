@@ -1710,7 +1710,7 @@ async fn show_mempool<S: Storage>(
         manager.message(format!(
             "- {}: {} TOS fee for {}",
             hash,
-            format_tos(tx.get_fee()),
+            format_tos(tx.get_fee_limit()),
             human_bytes(tx.get_size() as f64)
         ));
     }

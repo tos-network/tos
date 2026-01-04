@@ -298,7 +298,7 @@ mod tests {
 
         let bytes = writer.as_bytes();
         let mut reader = Reader::new(bytes);
-        let decoded = StoredContractEvent::read(&mut reader).unwrap();
+        let decoded = StoredContractEvent::read(&mut reader).expect("test");
 
         assert_eq!(event, decoded);
     }

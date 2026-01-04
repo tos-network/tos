@@ -12,7 +12,7 @@ use std::{borrow::Cow, collections::HashMap, sync::Arc};
 use async_trait::async_trait;
 use indexmap::{IndexMap, IndexSet};
 use tos_common::{
-    account::{EnergyResource, Nonce},
+    account::{AccountEnergy, Nonce},
     block::{Block, BlockHeader, BlockVersion, EXTRA_NONCE_SIZE},
     contract::{
         AssetChanges, ChainState as ContractChainState, ContractCache, ContractEvent,
@@ -659,6 +659,14 @@ impl<'a> BlockchainVerificationState<'a, TestError> for EdgeCaseTestState {
         Network::Devnet
     }
 
+    async fn is_account_registered(
+        &self,
+        _account: &CompressedPublicKey,
+    ) -> Result<bool, TestError> {
+        // For testing, assume all accounts are registered
+        Ok(true)
+    }
+
     async fn get_receiver_uno_balance<'b>(
         &'b mut self,
         _account: Cow<'a, CompressedPublicKey>,
@@ -683,6 +691,105 @@ impl<'a> BlockchainVerificationState<'a, TestError> for EdgeCaseTestState {
         _output: Ciphertext,
     ) -> Result<(), TestError> {
         Err(TestError::Unsupported)
+    }
+
+    async fn get_account_energy(
+        &mut self,
+        _account: &'a CompressedPublicKey,
+    ) -> Result<Option<tos_common::account::AccountEnergy>, TestError> {
+        Ok(None)
+    }
+
+    async fn get_delegated_resource(
+        &mut self,
+        _from: &'a CompressedPublicKey,
+        _to: &'a CompressedPublicKey,
+    ) -> Result<Option<tos_common::account::DelegatedResource>, TestError> {
+        Ok(None)
+    }
+
+    async fn record_pending_undelegation(
+        &mut self,
+        _from: &'a CompressedPublicKey,
+        _to: &'a CompressedPublicKey,
+        _amount: u64,
+    ) -> Result<(), TestError> {
+        Ok(())
+    }
+
+    fn is_pending_registration(&self, _account: &CompressedPublicKey) -> bool {
+        false
+    }
+
+    fn record_pending_registration(&mut self, _account: &CompressedPublicKey) {}
+
+    // Stub implementations for test
+    async fn record_pending_delegation(
+        &mut self,
+        _sender: &'a CompressedPublicKey,
+        _amount: u64,
+    ) -> Result<(), TestError> {
+        Ok(())
+    }
+
+    fn get_pending_delegation(&self, _sender: &CompressedPublicKey) -> u64 {
+        0
+    }
+
+    // Stub implementations for test
+    async fn record_pending_unfreeze(
+        &mut self,
+        _sender: &'a CompressedPublicKey,
+        _amount: u64,
+    ) -> Result<(), TestError> {
+        Ok(())
+    }
+
+    fn get_pending_unfreeze_count(&self, _sender: &CompressedPublicKey) -> usize {
+        0
+    }
+
+    fn get_pending_unfreeze_amount(&self, _sender: &CompressedPublicKey) -> u64 {
+        0
+    }
+
+    // Stub implementations for test
+    async fn record_pending_energy(
+        &mut self,
+        _sender: &'a CompressedPublicKey,
+        _amount: u64,
+    ) -> Result<(), TestError> {
+        Ok(())
+    }
+
+    fn get_pending_energy(&self, _sender: &CompressedPublicKey) -> u64 {
+        0
+    }
+
+    async fn get_global_energy_state(
+        &mut self,
+    ) -> Result<tos_common::account::GlobalEnergyState, TestError> {
+        Ok(tos_common::account::GlobalEnergyState::default())
+    }
+
+    fn record_pending_weight_change(&mut self, _delta: i64) {
+        // No-op for test state
+    }
+
+    fn get_pending_weight_delta(&self) -> i64 {
+        0
+    }
+
+    fn record_pending_withdrawal(&mut self, _sender: &CompressedPublicKey) {
+        // No-op for test state
+    }
+
+    fn has_pending_withdrawal(&self, _sender: &CompressedPublicKey) -> bool {
+        false
+    }
+
+    fn clear_pending_unfreezes(&mut self, _sender: &CompressedPublicKey) {
+        // No-op for test state
     }
 }
 
@@ -751,17 +858,38 @@ impl<'a> BlockchainApplyState<'a, DummyContractProvider, TestError> for EdgeCase
         Err(TestError::Unsupported)
     }
 
-    async fn get_energy_resource(
+    // Note: get_account_energy is inherited from BlockchainVerificationState
+
+    async fn set_account_energy(
         &mut self,
         _account: &'a CompressedPublicKey,
-    ) -> Result<Option<EnergyResource>, TestError> {
-        Ok(None)
+        _energy: AccountEnergy,
+    ) -> Result<(), TestError> {
+        Ok(())
     }
 
-    async fn set_energy_resource(
+    // Note: get_global_energy_state is inherited from BlockchainVerificationState
+
+    async fn set_global_energy_state(
         &mut self,
-        _account: &'a CompressedPublicKey,
-        _energy_resource: EnergyResource,
+        _state: tos_common::account::GlobalEnergyState,
+    ) -> Result<(), TestError> {
+        Ok(())
+    }
+
+    // Note: get_delegated_resource is inherited from BlockchainVerificationState
+
+    async fn set_delegated_resource(
+        &mut self,
+        _delegation: &tos_common::account::DelegatedResource,
+    ) -> Result<(), TestError> {
+        Ok(())
+    }
+
+    async fn delete_delegated_resource(
+        &mut self,
+        _from: &'a CompressedPublicKey,
+        _to: &'a CompressedPublicKey,
     ) -> Result<(), TestError> {
         Ok(())
     }
@@ -1046,6 +1174,17 @@ impl<'a> BlockchainApplyState<'a, DummyContractProvider, TestError> for EdgeCase
             }
             _ => {}
         }
+        Ok(())
+    }
+
+    // ===== Transaction Result Storage (Stake 2.0) =====
+
+    async fn set_transaction_result(
+        &mut self,
+        _tx_hash: &'a Hash,
+        _result: &tos_common::transaction::TransactionResult,
+    ) -> Result<(), TestError> {
+        // Test stub - no-op for now
         Ok(())
     }
 }

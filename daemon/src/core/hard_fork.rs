@@ -461,27 +461,27 @@ mod tests {
     #[test]
     fn test_version_matching_requirement() {
         assert_eq!(
-            is_version_matching_requirement("1.0.0-abcdef", ">=1.0.0").unwrap(),
+            is_version_matching_requirement("1.0.0-abcdef", ">=1.0.0").expect("test"),
             true
         );
         assert_eq!(
-            is_version_matching_requirement("1.0.0-999", ">=1.0.0").unwrap(),
+            is_version_matching_requirement("1.0.0-999", ">=1.0.0").expect("test"),
             true
         );
         assert_eq!(
-            is_version_matching_requirement("1.0.0-abcdef999", ">=1.0.0").unwrap(),
+            is_version_matching_requirement("1.0.0-abcdef999", ">=1.0.0").expect("test"),
             true
         );
         assert_eq!(
-            is_version_matching_requirement("1.0.0", ">=1.0.1").unwrap(),
+            is_version_matching_requirement("1.0.0", ">=1.0.1").expect("test"),
             false
         );
         assert_eq!(
-            is_version_matching_requirement("1.0.0", "<1.0.1").unwrap(),
+            is_version_matching_requirement("1.0.0", "<1.0.1").expect("test"),
             true
         );
         assert_eq!(
-            is_version_matching_requirement("1.0.0", "<1.0.0").unwrap(),
+            is_version_matching_requirement("1.0.0", "<1.0.0").expect("test"),
             false
         );
     }
@@ -492,7 +492,8 @@ mod tests {
 
         // At height 0, No version requires
         for version in VERSIONS {
-            let allowed = is_version_allowed_at_height(&Network::Mainnet, 0, version).unwrap();
+            let allowed =
+                is_version_allowed_at_height(&Network::Mainnet, 0, version).expect("test");
             println!("Version {} allowed at height 0: {}", version, allowed);
             assert!(allowed);
         }
@@ -842,12 +843,12 @@ mod tests {
         // Test with current Nobunaga configuration
         let hard_fork = get_activated_hard_fork(&Network::Mainnet, 0, 0, 0);
         assert!(hard_fork.is_some());
-        assert_eq!(hard_fork.unwrap().version, BlockVersion::Nobunaga);
+        assert_eq!(hard_fork.expect("test").version, BlockVersion::Nobunaga);
 
         // Test at various heights - all should return Nobunaga
         let hard_fork = get_activated_hard_fork(&Network::Mainnet, 1_000_000, 0, 0);
         assert!(hard_fork.is_some());
-        assert_eq!(hard_fork.unwrap().version, BlockVersion::Nobunaga);
+        assert_eq!(hard_fork.expect("test").version, BlockVersion::Nobunaga);
     }
 
     #[test]
@@ -935,8 +936,8 @@ mod tests {
         ];
 
         for condition in conditions {
-            let serialized = serde_json::to_string(&condition).unwrap();
-            let deserialized: ForkCondition = serde_json::from_str(&serialized).unwrap();
+            let serialized = serde_json::to_string(&condition).expect("test");
+            let deserialized: ForkCondition = serde_json::from_str(&serialized).expect("test");
             assert_eq!(condition, deserialized);
         }
     }
@@ -952,7 +953,7 @@ mod tests {
             "changelog": "Test fork"
         }"#;
 
-        let hard_fork: HardFork = serde_json::from_str(json).unwrap();
+        let hard_fork: HardFork = serde_json::from_str(json).expect("test");
         assert_eq!(hard_fork.condition, ForkCondition::Block(1000));
         assert_eq!(hard_fork.version, BlockVersion::Nobunaga);
     }

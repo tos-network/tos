@@ -293,7 +293,7 @@ mod tests {
         // Register miner first
         state
             .register_miner(publisher.clone(), 1_000_000_000, 100)
-            .unwrap();
+            .expect("test");
 
         let task = create_test_task(publisher);
         let task_id = task.task_id.clone();
@@ -321,18 +321,18 @@ mod tests {
 
         state
             .register_miner(publisher.clone(), 1_000_000_000, 100)
-            .unwrap();
+            .expect("test");
 
         let task = create_test_task(publisher);
         let task_id = task.task_id.clone();
-        state.publish_task(task).unwrap();
+        state.publish_task(task).expect("test");
 
         assert_eq!(state.statistics.active_tasks, 1);
 
         // Update with time past deadline
         state.update_task_statuses(2000);
 
-        let task = state.get_task(&task_id).unwrap();
+        let task = state.get_task(&task_id).expect("test");
         assert_eq!(task.status, TaskStatus::Expired);
         assert_eq!(state.statistics.active_tasks, 0);
     }
@@ -344,7 +344,7 @@ mod tests {
 
         state
             .register_miner(publisher.clone(), 1_000_000_000, 100)
-            .unwrap();
+            .expect("test");
 
         let mut task = create_test_task(publisher);
         let answer = SubmittedAnswer::new(
@@ -355,9 +355,9 @@ mod tests {
             2_000_000_000,
             150,
         );
-        task.add_answer(answer).unwrap();
+        task.add_answer(answer).expect("test");
 
-        state.publish_task(task).unwrap();
+        state.publish_task(task).expect("test");
         state.refresh_statistics();
 
         assert_eq!(state.statistics.total_staked, 2_000_000_000);
@@ -366,7 +366,7 @@ mod tests {
     // Helper functions
     fn create_test_pubkey(bytes: [u8; 32]) -> CompressedPublicKey {
         use tos_crypto::curve25519_dalek::ristretto::CompressedRistretto;
-        CompressedPublicKey::new(CompressedRistretto::from_slice(&bytes).unwrap())
+        CompressedPublicKey::new(CompressedRistretto::from_slice(&bytes).expect("test"))
     }
 
     fn create_test_task(publisher: CompressedPublicKey) -> AIMiningTask {
@@ -381,6 +381,6 @@ mod tests {
             1000, // deadline
             100,  // published_at
         )
-        .unwrap()
+        .expect("test assertion")
     }
 }

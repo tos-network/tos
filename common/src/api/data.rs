@@ -642,11 +642,13 @@ mod tests {
         let value = DataValue::U8(10);
         let element = DataElement::Value(value.clone());
         assert_eq!(element.size(), element.to_bytes().len());
-        let value2: u8 = element.try_into().unwrap();
+        let value2: u8 = element.try_into().expect("u8 conversion should succeed");
         assert_eq!(value2, 10);
 
         let array: DataElement = vec![0u64, 24u64, 37u64, 55u64].into();
-        let array2: Vec<u64> = array.try_into().unwrap();
+        let array2: Vec<u64> = array
+            .try_into()
+            .expect("Vec<u64> conversion should succeed");
         assert_eq!(array2, vec![0, 24, 37, 55]);
     }
 
@@ -654,11 +656,12 @@ mod tests {
     fn test_serialize_vec_u64() {
         let val = vec![0u64; 5];
         let data: DataElement = val.clone().into();
-        let elem = DataElement::from_bytes(&data.to_bytes()).unwrap();
+        let elem =
+            DataElement::from_bytes(&data.to_bytes()).expect("deserialization should succeed");
         assert_eq!(data, elem);
         assert_eq!(data.size(), elem.to_bytes().len());
 
-        let val2: Vec<u64> = elem.try_into().unwrap();
+        let val2: Vec<u64> = elem.try_into().expect("Vec<u64> conversion should succeed");
         assert_eq!(val, val2);
     }
 
@@ -666,11 +669,13 @@ mod tests {
     fn test_blob() {
         let data = vec![0u8; 1000];
         let element: DataElement = data.clone().into();
-        let element2: Vec<u8> = element.try_into().unwrap();
+        let element2: Vec<u8> = element
+            .try_into()
+            .expect("Vec<u8> conversion should succeed");
         assert_eq!(data, element2);
 
         let json = "[0, 55, 77, 99, 88, 77]";
-        let element: DataElement = serde_json::from_str(json).unwrap();
+        let element: DataElement = serde_json::from_str(json).expect("JSON parsing should succeed");
         assert_eq!(element.kind(), ElementType::Value(ValueType::Blob));
     }
 
@@ -678,34 +683,34 @@ mod tests {
     fn test_array() {
         // Mixed types
         let json = "[0, 55, 77, 99, 88, 77, false]";
-        let element: DataElement = serde_json::from_str(json).unwrap();
+        let element: DataElement = serde_json::from_str(json).expect("JSON parsing should succeed");
         assert_eq!(element.kind(), ElementType::Array);
 
         // Using integer types
         let json = "[0, 55, 77, 99, 88, 777777]";
-        let element: DataElement = serde_json::from_str(json).unwrap();
+        let element: DataElement = serde_json::from_str(json).expect("JSON parsing should succeed");
         assert_eq!(element.kind(), ElementType::Array);
     }
 
     #[test]
     fn test_map() {
         let json = r#"{"name": "John", "age": 25, "is_active": true}"#;
-        let element: DataElement = serde_json::from_str(json).unwrap();
+        let element: DataElement = serde_json::from_str(json).expect("JSON parsing should succeed");
         assert_eq!(element.kind(), ElementType::Fields);
 
         let bytes = element.to_bytes();
-        let element2 = DataElement::from_bytes(&bytes).unwrap();
+        let element2 = DataElement::from_bytes(&bytes).expect("deserialization should succeed");
         assert_eq!(element, element2);
     }
 
     #[test]
     fn test_map_array() {
         let json = r#"{"name": "John", "age": 25, "is_active": true, "friends": [0, 1, 2, 3, 4]}"#;
-        let element: DataElement = serde_json::from_str(json).unwrap();
+        let element: DataElement = serde_json::from_str(json).expect("JSON parsing should succeed");
         assert_eq!(element.kind(), ElementType::Fields);
 
         let bytes = element.to_bytes();
-        let element2 = DataElement::from_bytes(&bytes).unwrap();
+        let element2 = DataElement::from_bytes(&bytes).expect("deserialization should succeed");
         assert_eq!(element, element2);
     }
 
@@ -755,7 +760,7 @@ mod tests {
         let value = DataValue::Blob(dummy.to_bytes());
         assert_eq!(value.kind(), ValueType::Blob);
 
-        let dummy: Dummy = value.to_type().unwrap();
+        let dummy: Dummy = value.to_type().expect("Dummy conversion should succeed");
         assert_eq!(dummy.name, "John");
         assert_eq!(dummy.age, 25);
         assert!(dummy.is_active);

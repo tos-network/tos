@@ -705,7 +705,7 @@ mod tests {
         );
 
         assert!(result.is_ok());
-        let handle = result.unwrap();
+        let handle = result.expect("test");
         assert!(handle > 0); // Valid handle (non-zero)
     }
 
@@ -1118,10 +1118,13 @@ mod tests {
                 150,
                 false,
             )
-            .unwrap();
+            .expect("test");
 
         // Query
-        let info = adapter.get_scheduled_execution(handle).unwrap().unwrap();
+        let info = adapter
+            .get_scheduled_execution(handle)
+            .expect("test")
+            .expect("test");
 
         assert_eq!(info.handle, handle);
         assert_eq!(info.target_contract, target_contract);
@@ -1150,7 +1153,7 @@ mod tests {
         let result = adapter.get_scheduled_execution(12345);
 
         assert!(result.is_ok());
-        assert!(result.unwrap().is_none());
+        assert!(result.expect("test").is_none());
     }
 
     #[test]
@@ -1177,9 +1180,12 @@ mod tests {
                 0,    // ignored
                 true, // is_block_end
             )
-            .unwrap();
+            .expect("test");
 
-        let info = adapter.get_scheduled_execution(handle).unwrap().unwrap();
+        let info = adapter
+            .get_scheduled_execution(handle)
+            .expect("test")
+            .expect("test");
         assert!(info.is_block_end);
     }
 
@@ -1212,22 +1218,28 @@ mod tests {
                 200, // Far enough in future to allow cancellation
                 false,
             )
-            .unwrap();
+            .expect("test");
 
         // Verify execution exists
-        assert!(adapter.get_scheduled_execution(handle).unwrap().is_some());
+        assert!(adapter
+            .get_scheduled_execution(handle)
+            .expect("test")
+            .is_some());
 
         // Cancel
         let refund = adapter
             .cancel_scheduled_execution(scheduler_contract.as_bytes(), handle)
-            .unwrap();
+            .expect("test");
 
         // Verify refund is 70% of offer (miner portion)
         let expected_refund = calculate_offer_miner_reward(1000);
         assert_eq!(refund, expected_refund);
 
         // Verify execution was removed
-        assert!(adapter.get_scheduled_execution(handle).unwrap().is_none());
+        assert!(adapter
+            .get_scheduled_execution(handle)
+            .expect("test")
+            .is_none());
     }
 
     #[test]
@@ -1276,7 +1288,7 @@ mod tests {
                 200,
                 false,
             )
-            .unwrap();
+            .expect("test");
 
         // Try to cancel with wrong scheduler
         let result = adapter.cancel_scheduled_execution(&wrong_scheduler, handle);
@@ -1311,7 +1323,7 @@ mod tests {
                 101, // Just 1 topoheight ahead
                 false,
             )
-            .unwrap();
+            .expect("test");
 
         // Try to cancel - should fail because too close to execution
         let result = adapter.cancel_scheduled_execution(scheduler_contract.as_bytes(), handle);
@@ -1346,7 +1358,7 @@ mod tests {
                 0,    // ignored for block end
                 true, // is_block_end
             )
-            .unwrap();
+            .expect("test");
 
         // Try to cancel BlockEnd - should fail
         let result = adapter.cancel_scheduled_execution(scheduler_contract.as_bytes(), handle);

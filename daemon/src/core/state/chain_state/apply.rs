@@ -14,7 +14,7 @@ use std::{
     ops::{Deref, DerefMut},
 };
 use tos_common::{
-    account::{BalanceType, EnergyResource, Nonce, VersionedNonce},
+    account::{AccountEnergy, BalanceType, Nonce, VersionedNonce},
     ai_mining::AIMiningState,
     asset::VersionedAssetData,
     block::{Block, BlockVersion, TopoHeight},
@@ -219,6 +219,128 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError>
             .get_network()
             .unwrap_or(tos_common::network::Network::Mainnet)
     }
+
+    /// Check if an account is registered (exists) on the blockchain
+    async fn is_account_registered(
+        &self,
+        account: &CompressedPublicKey,
+    ) -> Result<bool, BlockchainError> {
+        // Delegate to inner ChainState implementation
+        self.inner.is_account_registered(account).await
+    }
+
+    /// Get account energy for stake 2.0 validation
+    async fn get_account_energy(
+        &mut self,
+        account: &'a CompressedPublicKey,
+    ) -> Result<Option<tos_common::account::AccountEnergy>, BlockchainError> {
+        self.inner.get_account_energy(account).await
+    }
+
+    /// Get a specific delegation from one account to another
+    async fn get_delegated_resource(
+        &mut self,
+        from: &'a CompressedPublicKey,
+        to: &'a CompressedPublicKey,
+    ) -> Result<Option<tos_common::account::DelegatedResource>, BlockchainError> {
+        self.inner.get_delegated_resource(from, to).await
+    }
+
+    /// Record a pending undelegation (delegates to inner)
+    async fn record_pending_undelegation(
+        &mut self,
+        from: &'a CompressedPublicKey,
+        to: &'a CompressedPublicKey,
+        amount: u64,
+    ) -> Result<(), BlockchainError> {
+        self.inner
+            .record_pending_undelegation(from, to, amount)
+            .await
+    }
+
+    /// Check if account is pending registration in current block
+    fn is_pending_registration(&self, account: &CompressedPublicKey) -> bool {
+        self.inner.is_pending_registration(account)
+    }
+
+    /// Record that account will be registered by an earlier TX in this block
+    fn record_pending_registration(&mut self, account: &CompressedPublicKey) {
+        self.inner.record_pending_registration(account)
+    }
+
+    /// Record pending delegation (delegated to inner)
+    async fn record_pending_delegation(
+        &mut self,
+        sender: &'a CompressedPublicKey,
+        amount: u64,
+    ) -> Result<(), BlockchainError> {
+        self.inner.record_pending_delegation(sender, amount).await
+    }
+
+    /// Get pending delegation (delegated to inner)
+    fn get_pending_delegation(&self, sender: &CompressedPublicKey) -> u64 {
+        self.inner.get_pending_delegation(sender)
+    }
+
+    /// Record pending unfreeze (delegated to inner)
+    async fn record_pending_unfreeze(
+        &mut self,
+        sender: &'a CompressedPublicKey,
+        amount: u64,
+    ) -> Result<(), BlockchainError> {
+        self.inner.record_pending_unfreeze(sender, amount).await
+    }
+
+    /// Get pending unfreeze count (delegated to inner)
+    fn get_pending_unfreeze_count(&self, sender: &CompressedPublicKey) -> usize {
+        self.inner.get_pending_unfreeze_count(sender)
+    }
+
+    /// Get pending unfreeze amount (delegated to inner)
+    fn get_pending_unfreeze_amount(&self, sender: &CompressedPublicKey) -> u64 {
+        self.inner.get_pending_unfreeze_amount(sender)
+    }
+
+    /// Record pending energy (delegated to inner)
+    async fn record_pending_energy(
+        &mut self,
+        sender: &'a CompressedPublicKey,
+        amount: u64,
+    ) -> Result<(), BlockchainError> {
+        self.inner.record_pending_energy(sender, amount).await
+    }
+
+    /// Get pending energy (delegated to inner)
+    fn get_pending_energy(&self, sender: &CompressedPublicKey) -> u64 {
+        self.inner.get_pending_energy(sender)
+    }
+
+    /// Get the global energy state (delegated to inner)
+    async fn get_global_energy_state(
+        &mut self,
+    ) -> Result<tos_common::account::GlobalEnergyState, BlockchainError> {
+        self.inner.get_global_energy_state().await
+    }
+
+    fn record_pending_weight_change(&mut self, delta: i64) {
+        self.inner.record_pending_weight_change(delta)
+    }
+
+    fn get_pending_weight_delta(&self) -> i64 {
+        self.inner.get_pending_weight_delta()
+    }
+
+    fn record_pending_withdrawal(&mut self, sender: &CompressedPublicKey) {
+        self.inner.record_pending_withdrawal(sender)
+    }
+
+    fn has_pending_withdrawal(&self, sender: &CompressedPublicKey) -> bool {
+        self.inner.has_pending_withdrawal(sender)
+    }
+
+    fn clear_pending_unfreezes(&mut self, sender: &CompressedPublicKey) {
+        self.inner.clear_pending_unfreezes(sender)
+    }
 }
 
 #[async_trait]
@@ -384,21 +506,56 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for Applicable
         self.remove_contract_module_internal(hash).await
     }
 
-    async fn get_energy_resource(
-        &mut self,
-        account: &'a CompressedPublicKey,
-    ) -> Result<Option<EnergyResource>, BlockchainError> {
-        self.inner.storage.get_energy_resource(account).await
-    }
+    // Note: get_account_energy is inherited from BlockchainVerificationState
 
-    async fn set_energy_resource(
+    async fn set_account_energy(
         &mut self,
         account: &'a CompressedPublicKey,
-        energy_resource: EnergyResource,
+        account_energy: AccountEnergy,
     ) -> Result<(), BlockchainError> {
         self.inner
             .storage
-            .set_energy_resource(account, self.inner.topoheight, &energy_resource)
+            .set_account_energy(account, self.inner.topoheight, &account_energy)
+            .await
+    }
+
+    // Note: get_global_energy_state is inherited from BlockchainVerificationState
+
+    async fn set_global_energy_state(
+        &mut self,
+        mut state: tos_common::account::GlobalEnergyState,
+    ) -> Result<(), BlockchainError> {
+        // Automatically update last_update to current topoheight
+        state.last_update = self.inner.topoheight;
+        // Pass topoheight for versioned storage
+        self.inner
+            .storage
+            .set_global_energy_state(&state, self.inner.topoheight)
+            .await
+    }
+
+    // Note: get_delegated_resource is inherited from BlockchainVerificationState
+
+    async fn set_delegated_resource(
+        &mut self,
+        delegation: &tos_common::account::DelegatedResource,
+    ) -> Result<(), BlockchainError> {
+        // Pass topoheight for versioned storage
+        self.inner
+            .storage
+            .set_delegated_resource(delegation, self.inner.topoheight)
+            .await
+    }
+
+    async fn delete_delegated_resource(
+        &mut self,
+        from: &'a CompressedPublicKey,
+        to: &'a CompressedPublicKey,
+    ) -> Result<(), BlockchainError> {
+        // Pass topoheight for versioned storage
+        self.inner
+            .storage
+            .delete_delegated_resource(from, to, self.inner.topoheight)
             .await
     }
 
@@ -466,17 +623,47 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for Applicable
         contract: &Hash,
         tx_hash: &'a Hash,
     ) -> Result<(), BlockchainError> {
-        // Contract events are logged but not persisted in this simplified version
-        // In the full version, these would be stored for event filtering
+        // Persist contract events to storage
+        // This enables event filtering and querying
+        use crate::core::storage::StoredContractEvent;
+        use tos_common::crypto::Hashable;
+
         let event_count = events.len();
-        if event_count > 0 {
-            if log::log_enabled!(log::Level::Debug) {
-                debug!(
-                    "Contract {} emitted {} events in TX {} (not persisted)",
-                    contract, event_count, tx_hash
-                );
-            }
+        if event_count == 0 {
+            return Ok(());
         }
+
+        let block_hash = self.block.hash();
+        let topoheight = self.inner.topoheight;
+
+        // Convert common::ContractEvent to storage::StoredContractEvent
+        let stored_events: Vec<StoredContractEvent> = events
+            .into_iter()
+            .enumerate()
+            .map(|(idx, event)| StoredContractEvent {
+                contract: contract.clone(),
+                tx_hash: tx_hash.clone(),
+                block_hash: block_hash.clone(),
+                topoheight,
+                log_index: idx as u32,
+                topics: event.topics,
+                data: event.data,
+            })
+            .collect();
+
+        // Store events to persistent storage
+        self.inner
+            .storage
+            .store_contract_events(stored_events)
+            .await?;
+
+        if log::log_enabled!(log::Level::Debug) {
+            debug!(
+                "Contract {} emitted {} events in TX {} (persisted at topoheight {})",
+                contract, event_count, tx_hash, topoheight
+            );
+        }
+
         Ok(())
     }
 
@@ -807,7 +994,29 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for Applicable
         user: &'a CompressedPublicKey,
     ) -> Result<Option<tos_common::kyc::KycStatus>, BlockchainError> {
         let kyc_data = self.inner.storage.get_kyc(user).await?;
-        Ok(kyc_data.map(|d| d.status))
+        if let Some(data) = kyc_data {
+            if data.status == tos_common::kyc::KycStatus::Suspended {
+                if let Some((_reason_hash, expires_at)) =
+                    self.inner.storage.get_emergency_suspension(user).await?
+                {
+                    let current_time = self.get_verification_timestamp();
+                    if current_time >= expires_at {
+                        // Get previous status, but if missing, keep user as Suspended
+                        // to prevent unauthorized status elevation from missing data
+                        let previous_status = self
+                            .inner
+                            .storage
+                            .get_emergency_previous_status(user)
+                            .await?
+                            .unwrap_or(data.status); // Fall back to stored status (Suspended)
+                        return Ok(Some(previous_status));
+                    }
+                }
+            }
+            Ok(Some(data.status))
+        } else {
+            Ok(None)
+        }
     }
 
     async fn get_kyc_level(
@@ -820,6 +1029,27 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for Applicable
 
     async fn is_global_committee_bootstrapped(&self) -> Result<bool, BlockchainError> {
         self.inner.storage.is_global_committee_bootstrapped().await
+    }
+
+    // ===== Transaction Result Storage (Stake 2.0) =====
+
+    async fn set_transaction_result(
+        &mut self,
+        tx_hash: &'a Hash,
+        result: &tos_common::transaction::TransactionResult,
+    ) -> Result<(), BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "set transaction result {}: fee={}, energy_used={}",
+                tx_hash,
+                result.fee,
+                result.energy_used
+            );
+        }
+        self.inner
+            .storage
+            .set_transaction_result(tx_hash, result)
+            .await
     }
 }
 
@@ -861,8 +1091,8 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
         block: &'a Block,
         executor: std::sync::Arc<dyn tos_common::contract::ContractExecutor>,
     ) -> Self {
-        // Use block timestamp for deterministic consensus validation
-        let block_timestamp_secs = block.get_header().get_timestamp() / 1000;
+        // Use block timestamp in milliseconds for deterministic consensus validation
+        let block_timestamp_ms = block.get_header().get_timestamp();
         Self {
             inner: ChainState::with(
                 StorageReference::Mutable(storage),
@@ -870,7 +1100,7 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
                 stable_topoheight,
                 topoheight,
                 block_version,
-                Some(block_timestamp_secs),
+                Some(block_timestamp_ms),
             ),
             burned_supply,
             contract_manager: ContractManager {

@@ -70,6 +70,9 @@ impl AccountProvider for RocksStorage {
     }
 
     // Check if account is registered
+    // An account is considered registered if it has registered_at set,
+    // not just if an account row exists (account rows can be created for
+    // energy updates without registration)
     async fn is_account_registered(&self, key: &PublicKey) -> Result<bool, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!(
@@ -77,7 +80,8 @@ impl AccountProvider for RocksStorage {
                 key.as_address(self.is_mainnet())
             );
         }
-        self.has_account_type(key)
+        let account = self.get_optional_account_type(key)?;
+        Ok(account.is_some_and(|a| a.registered_at.is_some()))
     }
 
     // Check if account is registered at topoheight
@@ -287,13 +291,6 @@ impl RocksStorage {
         bytes[8..16].copy_from_slice(&key.to_be_bytes());
 
         bytes
-    }
-
-    pub(super) fn has_account_type(&self, key: &PublicKey) -> Result<bool, BlockchainError> {
-        if log::log_enabled!(log::Level::Trace) {
-            trace!("has account {}", key.as_address(self.is_mainnet()));
-        }
-        self.contains_data(Column::Account, key.as_bytes())
     }
 
     pub(super) fn get_account_id(&self, key: &PublicKey) -> Result<u64, BlockchainError> {

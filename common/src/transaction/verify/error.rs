@@ -62,6 +62,27 @@ pub enum VerificationError<T> {
     InsufficientFunds { available: u64, required: u64 },
     #[error("Arithmetic overflow during balance calculation")]
     Overflow,
+    #[error("Arithmetic underflow during balance calculation")]
+    Underflow,
     #[error("Invalid transfer amount")]
     InvalidTransferAmount,
+    // Stake 2.0 Delegation errors
+    #[error("Insufficient frozen balance for delegation")]
+    InsufficientFrozenBalance,
+    #[error("Delegation not found")]
+    DelegationNotFound,
+    #[error("Delegation is still locked")]
+    DelegationStillLocked,
+    #[error("Insufficient delegated balance")]
+    InsufficientDelegatedBalance,
+    // TOS-Only Fee errors
+    #[error("Transfer amount too small for account creation: amount {amount}, fee required {fee}")]
+    AmountTooSmallForAccountCreation { amount: u64, fee: u64 },
+    #[error("Insufficient balance for multisig fee: available {available}, required {required}")]
+    InsufficientBalanceForMultisigFee { available: u64, required: u64 },
+    // Energy fee errors
+    #[error("Insufficient fee_limit: required {required} TOS, provided {provided} TOS")]
+    InsufficientFeeLimit { required: u64, provided: u64 },
+    #[error("fee_limit exceeds maximum: provided {provided}, max {max}")]
+    FeeLimitExceedsMax { provided: u64, max: u64 },
 }

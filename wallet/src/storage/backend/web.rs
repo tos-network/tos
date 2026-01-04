@@ -539,135 +539,168 @@ mod tests {
 
     #[test]
     fn test_db() {
-        let db = open("test").unwrap();
-        let tree = db.open_tree("test").unwrap();
-        tree.insert("test", "test").unwrap();
+        let db = open("test").expect("test");
+        let tree = db.open_tree("test").expect("test");
+        tree.insert("test", "test").expect("test");
 
-        assert_eq!(tree.get("test").unwrap().unwrap(), b"test".into());
-        assert_eq!(tree.remove("test").unwrap().unwrap(), b"test".into());
-        assert!(tree.get("test").unwrap().is_none());
+        assert_eq!(
+            tree.get("test").expect("test").expect("test"),
+            b"test".into()
+        );
+        assert_eq!(
+            tree.remove("test").expect("test").expect("test"),
+            b"test".into()
+        );
+        assert!(tree.get("test").expect("test").is_none());
         assert!(tree.is_empty());
         assert_eq!(tree.len(), 0);
 
-        tree.insert("tos", "sonimret").unwrap();
+        tree.insert("tos", "sonimret").expect("test");
         assert_eq!(tree.len(), 1);
 
-        tree.clear().unwrap();
+        tree.clear().expect("test");
         assert!(tree.is_empty());
         assert_eq!(tree.len(), 0);
 
         let mut iter = tree.iter();
         assert!(iter.next().is_none());
 
-        tree.insert("a", "b").unwrap();
-        let mut iter = tree.iter();
-        assert_eq!(iter.next().unwrap().unwrap(), (b"a".into(), b"b".into()));
-        assert!(iter.next().is_none());
-
-        tree.insert("b", "c").unwrap();
+        tree.insert("a", "b").expect("test");
         let mut iter = tree.iter();
         assert_eq!(
-            iter.next_back().unwrap().unwrap(),
+            iter.next().expect("test").expect("test"),
+            (b"a".into(), b"b".into())
+        );
+        assert!(iter.next().is_none());
+
+        tree.insert("b", "c").expect("test");
+        let mut iter = tree.iter();
+        assert_eq!(
+            iter.next_back().expect("test").expect("test"),
             (b"b".into(), b"c".into())
         );
         assert_eq!(
-            iter.next_back().unwrap().unwrap(),
+            iter.next_back().expect("test").expect("test"),
             (b"a".into(), b"b".into())
         );
         assert!(iter.next_back().is_none());
 
-        db.flush().unwrap();
+        db.flush().expect("test");
     }
 
     #[test]
     fn test_db_serialization() {
-        let db = open("test").unwrap();
-        db.insert("hello", "world").unwrap();
+        let db = open("test").expect("test");
+        db.insert("hello", "world").expect("test");
 
-        let tree = db.open_tree("test").unwrap();
-        tree.insert("test", "test").unwrap();
-        tree.insert("tos", "sonimret").unwrap();
+        let tree = db.open_tree("test").expect("test");
+        tree.insert("test", "test").expect("test");
+        tree.insert("tos", "sonimret").expect("test");
 
         let mut buffer = Vec::new();
         let mut writer = Writer::new(&mut buffer);
-        db.export(&mut writer).unwrap();
+        db.export(&mut writer).expect("test");
 
-        let db = open("test").unwrap();
+        let db = open("test").expect("test");
         assert_eq!(db.name(), "test");
         assert!(db.tree_names().is_empty());
         assert!(db.import(&buffer).is_ok());
         assert_eq!(db.tree_names().len(), 1);
 
-        let tree = db.open_tree("test").unwrap();
+        let tree = db.open_tree("test").expect("test");
         assert_eq!(tree.name(), b"test".into());
         assert_eq!(tree.len(), 2);
-        assert_eq!(tree.get("test").unwrap().unwrap(), b"test".into());
-        assert!(tree.contains_key("tos").unwrap());
-        assert_eq!(tree.get("tos").unwrap().unwrap(), b"sonimret".into());
+        assert_eq!(
+            tree.get("test").expect("test").expect("test"),
+            b"test".into()
+        );
+        assert!(tree.contains_key("tos").expect("test"));
+        assert_eq!(
+            tree.get("tos").expect("test").expect("test"),
+            b"sonimret".into()
+        );
 
-        assert_eq!(db.get("hello").unwrap().unwrap(), b"world".into());
-        db.flush().unwrap();
+        assert_eq!(
+            db.get("hello").expect("test").expect("test"),
+            b"world".into()
+        );
+        db.flush().expect("test");
 
-        db.drop_tree("test").unwrap();
+        db.drop_tree("test").expect("test");
         assert_eq!(db.tree_names().len(), 0);
     }
 
     #[test]
     fn test_db_iter() {
-        let db = open("test").unwrap();
-        let tree = db.open_tree("test").unwrap();
-        tree.insert("a", "999").unwrap();
-        tree.insert("b", "666").unwrap();
-        tree.insert("c", "333").unwrap();
+        let db = open("test").expect("test");
+        let tree = db.open_tree("test").expect("test");
+        tree.insert("a", "999").expect("test");
+        tree.insert("b", "666").expect("test");
+        tree.insert("c", "333").expect("test");
 
         let mut iter = tree.iter().keys();
-        assert_eq!(iter.next().unwrap().unwrap(), b"a".into());
-        assert_eq!(iter.next().unwrap().unwrap(), b"b".into());
-        assert_eq!(iter.next().unwrap().unwrap(), b"c".into());
+        assert_eq!(iter.next().expect("test").expect("test"), b"a".into());
+        assert_eq!(iter.next().expect("test").expect("test"), b"b".into());
+        assert_eq!(iter.next().expect("test").expect("test"), b"c".into());
         assert!(iter.next().is_none());
 
         let mut iter = tree.iter().values();
-        assert_eq!(iter.next_back().unwrap().unwrap(), b"333".into());
-        assert_eq!(iter.next_back().unwrap().unwrap(), b"666".into());
-        assert_eq!(iter.next_back().unwrap().unwrap(), b"999".into());
+        assert_eq!(
+            iter.next_back().expect("test").expect("test"),
+            b"333".into()
+        );
+        assert_eq!(
+            iter.next_back().expect("test").expect("test"),
+            b"666".into()
+        );
+        assert_eq!(
+            iter.next_back().expect("test").expect("test"),
+            b"999".into()
+        );
 
         let mut iter = tree.iter();
-        assert_eq!(iter.next().unwrap().unwrap(), (b"a".into(), b"999".into()));
         assert_eq!(
-            iter.next_back().unwrap().unwrap(),
+            iter.next().expect("test").expect("test"),
+            (b"a".into(), b"999".into())
+        );
+        assert_eq!(
+            iter.next_back().expect("test").expect("test"),
             (b"c".into(), b"333".into())
         );
-        assert_eq!(iter.next().unwrap().unwrap(), (b"b".into(), b"666".into()));
+        assert_eq!(
+            iter.next().expect("test").expect("test"),
+            (b"b".into(), b"666".into())
+        );
         assert!(iter.next_back().is_none());
         assert!(iter.next().is_none());
     }
 
     #[test]
     fn test_db_range() {
-        let db = open("test").unwrap();
-        let tree = db.open_tree("test").unwrap();
-        tree.insert(50u64.to_be_bytes(), "c").unwrap();
-        tree.insert(10u64.to_be_bytes(), "a").unwrap();
-        tree.insert(25u64.to_be_bytes(), "b").unwrap();
+        let db = open("test").expect("test");
+        let tree = db.open_tree("test").expect("test");
+        tree.insert(50u64.to_be_bytes(), "c").expect("test");
+        tree.insert(10u64.to_be_bytes(), "a").expect("test");
+        tree.insert(25u64.to_be_bytes(), "b").expect("test");
 
         let mut range = tree.range(0u64.to_be_bytes()..).keys();
         assert_eq!(
-            range.next().unwrap().unwrap(),
+            range.next().expect("test").expect("test"),
             IVec::from(&10u64.to_be_bytes())
         );
         assert_eq!(
-            range.next().unwrap().unwrap(),
+            range.next().expect("test").expect("test"),
             IVec::from(&25u64.to_be_bytes())
         );
         assert_eq!(
-            range.next().unwrap().unwrap(),
+            range.next().expect("test").expect("test"),
             IVec::from(&50u64.to_be_bytes())
         );
         assert!(range.next().is_none());
 
         let mut range = tree.range(10u64.to_be_bytes()..=10u64.to_be_bytes()).keys();
         assert_eq!(
-            range.next().unwrap().unwrap(),
+            range.next().expect("test").expect("test"),
             IVec::from(&10u64.to_be_bytes())
         );
         assert!(range.next().is_none());
@@ -675,13 +708,13 @@ mod tests {
 
     #[test]
     fn test_db_last() {
-        let db = open("test").unwrap();
-        let tree = db.open_tree("test").unwrap();
-        assert!(tree.last().unwrap().is_none());
+        let db = open("test").expect("test");
+        let tree = db.open_tree("test").expect("test");
+        assert!(tree.last().expect("test").is_none());
 
-        tree.insert(50u64.to_be_bytes(), "c").unwrap();
+        tree.insert(50u64.to_be_bytes(), "c").expect("test");
         assert_eq!(
-            tree.last().unwrap().unwrap(),
+            tree.last().expect("test").expect("test"),
             (IVec::from(&50u64.to_be_bytes()), IVec::from("c".as_bytes()))
         );
     }

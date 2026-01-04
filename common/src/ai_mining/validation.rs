@@ -629,7 +629,7 @@ mod tests {
     use tos_crypto::curve25519_dalek::ristretto::CompressedRistretto;
 
     fn create_test_pubkey(bytes: [u8; 32]) -> CompressedPublicKey {
-        CompressedPublicKey::new(CompressedRistretto::from_slice(&bytes).unwrap())
+        CompressedPublicKey::new(CompressedRistretto::from_slice(&bytes).expect("test"))
     }
 
     #[test]
@@ -669,7 +669,7 @@ mod tests {
         // Register miner first
         state
             .register_miner(publisher.clone(), 1_000_000_000, 100)
-            .unwrap();
+            .expect("test");
 
         let mut validator = AIMiningValidator::new(&mut state, 100, 1000, publisher.clone());
 
@@ -692,7 +692,7 @@ mod tests {
 
         state
             .register_miner(publisher.clone(), 1_000_000_000, 100)
-            .unwrap();
+            .expect("test");
 
         let mut validator = AIMiningValidator::new(&mut state, 100, 1000, publisher.clone());
 
@@ -716,10 +716,10 @@ mod tests {
         // Register both users
         state
             .register_miner(publisher.clone(), 1_000_000_000, 100)
-            .unwrap();
+            .expect("test");
         state
             .register_miner(submitter.clone(), 1_000_000_000, 100)
-            .unwrap();
+            .expect("test");
 
         // Create task
         let task_id = Hash::new([1u8; 32]);
@@ -732,8 +732,8 @@ mod tests {
             2000,
             100,
         )
-        .unwrap();
-        state.publish_task(task).unwrap();
+        .expect("test");
+        state.publish_task(task).expect("test");
 
         // Submit answer
         let mut validator = AIMiningValidator::new(&mut state, 150, 1500, submitter.clone());
@@ -756,7 +756,7 @@ mod tests {
 
         state
             .register_miner(publisher.clone(), 1_000_000_000, 100)
-            .unwrap();
+            .expect("test");
 
         let task_id = Hash::new([1u8; 32]);
         let task = AIMiningTask::new(
@@ -768,8 +768,8 @@ mod tests {
             2000,
             100,
         )
-        .unwrap();
-        state.publish_task(task).unwrap();
+        .expect("test");
+        state.publish_task(task).expect("test");
 
         // Try to submit answer to own task
         let mut validator = AIMiningValidator::new(&mut state, 150, 1500, publisher.clone());
@@ -792,7 +792,7 @@ mod tests {
 
         state
             .register_miner(miner.clone(), 1_000_000_000, 100)
-            .unwrap();
+            .expect("test");
 
         let validator = AIMiningValidator::new(&mut state, 100, 1000, miner);
         let summary = validator.get_validation_summary();

@@ -2,7 +2,7 @@ use crate::core::{error::BlockchainError, mempool::Mempool, storage::Storage};
 use async_trait::async_trait;
 use std::{
     borrow::Cow,
-    collections::{hash_map::Entry, HashMap},
+    collections::{hash_map::Entry, HashMap, HashSet},
 };
 use tos_common::{
     account::Nonce,
@@ -52,6 +52,28 @@ pub struct MempoolState<'a, S: Storage> {
     topoheight: TopoHeight,
     // Block header version
     block_version: BlockVersion,
+    // Pending delegation amounts per sender
+    // Tracks delegations that passed verification but not yet applied
+    pending_delegations: HashMap<CompressedPublicKey, u64>,
+    // Pending undelegation amounts: (from, to) -> amount
+    // Tracks undelegations that passed verification but not yet applied
+    pending_undelegations: HashMap<(CompressedPublicKey, CompressedPublicKey), u64>,
+    // Pending unfreeze counts per sender
+    // Tracks unfreeze entries that passed verification but not yet applied
+    pending_unfreezes_count: HashMap<CompressedPublicKey, usize>,
+    // Pending unfreeze amounts per sender
+    // Tracks unfreeze amounts that passed verification but not yet applied
+    pending_unfreezes_amount: HashMap<CompressedPublicKey, u64>,
+    // Pending energy consumption per sender
+    // Tracks energy used that passed verification but not yet applied
+    pending_energy_consumption: HashMap<CompressedPublicKey, u64>,
+    // Pending weight changes from FreezeTos/UnfreezeTos
+    pending_weight_delta: i64,
+    // Pending withdrawals: accounts with pending WithdrawExpireUnfreeze
+    pending_withdrawals: HashSet<CompressedPublicKey>,
+    // Pending registrations: accounts that will be registered by earlier TXs in this block
+    // Enables same-block visibility for fee calculation
+    pending_registrations: HashSet<CompressedPublicKey>,
 }
 
 impl<'a, S: Storage> MempoolState<'a, S> {
@@ -64,6 +86,7 @@ impl<'a, S: Storage> MempoolState<'a, S> {
         block_version: BlockVersion,
         mainnet: bool,
     ) -> Self {
+        // Initialize from mempool's existing pending state
         Self {
             mainnet,
             mempool,
@@ -76,7 +99,37 @@ impl<'a, S: Storage> MempoolState<'a, S> {
             stable_topoheight,
             topoheight,
             block_version,
+            pending_delegations: mempool.get_pending_delegations().clone(),
+            pending_undelegations: mempool.get_pending_undelegations().clone(),
+            pending_unfreezes_count: mempool.get_pending_unfreezes_count().clone(),
+            pending_unfreezes_amount: mempool.get_pending_unfreezes_amount().clone(),
+            pending_energy_consumption: mempool.get_pending_energy_consumption().clone(),
+            pending_weight_delta: 0,
+            pending_withdrawals: mempool.get_pending_withdrawals().clone(),
+            pending_registrations: HashSet::new(),
         }
+    }
+
+    // Get pending state to update mempool after successful verification
+    // Uses mem::take to extract the state without consuming self
+    pub fn get_pending_state(
+        &mut self,
+    ) -> (
+        HashMap<CompressedPublicKey, u64>,
+        HashMap<(CompressedPublicKey, CompressedPublicKey), u64>,
+        HashMap<CompressedPublicKey, usize>,
+        HashMap<CompressedPublicKey, u64>,
+        HashMap<CompressedPublicKey, u64>,
+        HashSet<CompressedPublicKey>,
+    ) {
+        (
+            std::mem::take(&mut self.pending_delegations),
+            std::mem::take(&mut self.pending_undelegations),
+            std::mem::take(&mut self.pending_unfreezes_count),
+            std::mem::take(&mut self.pending_unfreezes_amount),
+            std::mem::take(&mut self.pending_energy_consumption),
+            std::mem::take(&mut self.pending_withdrawals),
+        )
     }
 
     // Retrieve the sender cache (inclunding balances and multisig)
@@ -470,11 +523,11 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Mempoo
         self.block_version
     }
 
-    /// Get the timestamp to use for verification (uses current system time for mempool)
+    /// Get the timestamp to use for verification in milliseconds (uses current system time for mempool)
     fn get_verification_timestamp(&self) -> u64 {
         std::time::SystemTime::now()
             .duration_since(std::time::SystemTime::UNIX_EPOCH)
-            .map(|d| d.as_secs())
+            .map(|d| d.as_millis() as u64)
             .unwrap_or(0)
     }
 
@@ -577,5 +630,256 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Mempoo
         self.storage
             .get_network()
             .unwrap_or(tos_common::network::Network::Mainnet)
+    }
+
+    /// Check if an account is registered (exists) on the blockchain
+    ///
+    /// An account is considered registered if it has ever had a nonce
+    /// (i.e., has sent transactions before) or has any balance record (even zero).
+    /// This is used for TOS-Only account creation fee calculation.
+    ///
+    /// Note: Zero-balance accounts created by ActivateAccounts are considered
+    /// registered because they have a balance record in the receiver cache.
+    async fn is_account_registered(
+        &self,
+        account: &CompressedPublicKey,
+    ) -> Result<bool, BlockchainError> {
+        use tos_common::config::UNO_ASSET;
+
+        // Note: tos_common::crypto::PublicKey = CompressedPublicKey
+        // So we can use account directly
+
+        // Check if account has nonce (has sent transactions)
+        let has_nonce = self.storage.has_nonce(account).await?;
+        if has_nonce {
+            return Ok(true);
+        }
+
+        // Check if account has any balance record in receiver_balances cache (any asset)
+        // Note: We check for record existence, not balance > 0, because
+        // ActivateAccounts creates zero-balance accounts that should be registered
+        if let Some(balances) = self.receiver_balances.get(&Cow::Borrowed(account)) {
+            if !balances.is_empty() {
+                return Ok(true);
+            }
+        }
+
+        // Check if account has any UNO balance in receiver cache (any asset)
+        if self
+            .receiver_uno_balances
+            .contains_key(&Cow::Borrowed(account))
+        {
+            return Ok(true);
+        }
+
+        // Check storage for any asset balance record at current topoheight
+        // Collect into Vec to avoid holding iterator across await (Send requirement)
+        let assets: Vec<_> = self.storage.get_assets_for(account).await?.collect();
+        for asset in assets {
+            let asset = asset?;
+            let balance_result = self
+                .storage
+                .get_balance_at_maximum_topoheight(account, &asset, self.topoheight)
+                .await?;
+            // Check for record existence, not balance > 0
+            if balance_result.is_some() {
+                return Ok(true);
+            }
+        }
+
+        // Check storage for UNO balance (privacy)
+        if self
+            .storage
+            .has_uno_balance_for(account, &UNO_ASSET)
+            .await?
+        {
+            return Ok(true);
+        }
+
+        // Account not registered
+        Ok(false)
+    }
+
+    /// Get account energy for stake 2.0 validation
+    ///
+    /// This enables available_for_delegation check in verification phase
+    /// to reject delegation transactions that exceed available frozen balance.
+    async fn get_account_energy(
+        &mut self,
+        account: &'a CompressedPublicKey,
+    ) -> Result<Option<tos_common::account::AccountEnergy>, BlockchainError> {
+        self.storage.get_account_energy(account).await
+    }
+
+    /// Get a specific delegation from one account to another
+    ///
+    /// This enables lock expiry checking and receiver validation
+    /// in the verification phase. Returns delegation with frozen_balance
+    /// reduced by any pending undelegation amounts.
+    async fn get_delegated_resource(
+        &mut self,
+        from: &'a CompressedPublicKey,
+        to: &'a CompressedPublicKey,
+    ) -> Result<Option<tos_common::account::DelegatedResource>, BlockchainError> {
+        // Get delegation from storage
+        let delegation = self.storage.get_delegated_resource(from, to).await?;
+
+        // Adjust for pending undelegations
+        match delegation {
+            Some(mut d) => {
+                let key = (from.clone(), to.clone());
+                if let Some(&pending_amount) = self.pending_undelegations.get(&key) {
+                    // Reduce frozen_balance by pending undelegation amount
+                    d.frozen_balance = d.frozen_balance.saturating_sub(pending_amount);
+                }
+                Ok(Some(d))
+            }
+            None => Ok(None),
+        }
+    }
+
+    /// Record a pending undelegation amount
+    ///
+    /// Called after UndelegateResource verification passes to track
+    /// the amount being undelegated. Subsequent transactions will see
+    /// reduced delegation balance via get_delegated_resource.
+    async fn record_pending_undelegation(
+        &mut self,
+        from: &'a CompressedPublicKey,
+        to: &'a CompressedPublicKey,
+        amount: u64,
+    ) -> Result<(), BlockchainError> {
+        let key = (from.clone(), to.clone());
+        *self.pending_undelegations.entry(key).or_insert(0) += amount;
+        Ok(())
+    }
+
+    /// Check if account is pending registration in current block
+    fn is_pending_registration(&self, account: &CompressedPublicKey) -> bool {
+        self.pending_registrations.contains(account)
+    }
+
+    /// Record that account will be registered by an earlier TX in this block
+    fn record_pending_registration(&mut self, account: &CompressedPublicKey) {
+        self.pending_registrations.insert(account.clone());
+    }
+
+    /// Record a pending delegation amount (uses saturating_add to prevent overflow)
+    ///
+    /// Called after DelegateResource verification passes to track
+    /// the amount being delegated. Subsequent transactions will see
+    /// reduced available_for_delegation balance.
+    async fn record_pending_delegation(
+        &mut self,
+        sender: &'a CompressedPublicKey,
+        amount: u64,
+    ) -> Result<(), BlockchainError> {
+        let entry = self.pending_delegations.entry(sender.clone()).or_insert(0);
+        *entry = entry.saturating_add(amount);
+        Ok(())
+    }
+
+    /// Get pending delegation amount for sender
+    fn get_pending_delegation(&self, sender: &CompressedPublicKey) -> u64 {
+        *self.pending_delegations.get(sender).unwrap_or(&0)
+    }
+
+    /// Record a pending unfreeze amount (uses saturating_add to prevent overflow)
+    async fn record_pending_unfreeze(
+        &mut self,
+        sender: &'a CompressedPublicKey,
+        amount: u64,
+    ) -> Result<(), BlockchainError> {
+        let count_entry = self
+            .pending_unfreezes_count
+            .entry(sender.clone())
+            .or_insert(0);
+        *count_entry = count_entry.saturating_add(1);
+        let amount_entry = self
+            .pending_unfreezes_amount
+            .entry(sender.clone())
+            .or_insert(0);
+        *amount_entry = amount_entry.saturating_add(amount);
+        Ok(())
+    }
+
+    /// Get pending unfreeze count for sender
+    fn get_pending_unfreeze_count(&self, sender: &CompressedPublicKey) -> usize {
+        *self.pending_unfreezes_count.get(sender).unwrap_or(&0)
+    }
+
+    /// Get pending unfreeze amount for sender
+    fn get_pending_unfreeze_amount(&self, sender: &CompressedPublicKey) -> u64 {
+        *self.pending_unfreezes_amount.get(sender).unwrap_or(&0)
+    }
+
+    /// Record pending energy consumption (uses saturating_add to prevent overflow)
+    ///
+    /// Called after energy is consumed during verification to track
+    /// total energy used. Subsequent transactions will see reduced
+    /// available energy.
+    async fn record_pending_energy(
+        &mut self,
+        sender: &'a CompressedPublicKey,
+        amount: u64,
+    ) -> Result<(), BlockchainError> {
+        let entry = self
+            .pending_energy_consumption
+            .entry(sender.clone())
+            .or_insert(0);
+        *entry = entry.saturating_add(amount);
+        Ok(())
+    }
+
+    /// Get pending energy consumption for sender
+    fn get_pending_energy(&self, sender: &CompressedPublicKey) -> u64 {
+        *self.pending_energy_consumption.get(sender).unwrap_or(&0)
+    }
+
+    /// Get the global energy state (Stake 2.0)
+    /// Applies pending weight changes from Freeze/Unfreeze operations in mempool
+    async fn get_global_energy_state(
+        &mut self,
+    ) -> Result<tos_common::account::GlobalEnergyState, BlockchainError> {
+        let mut state = self.storage.get_global_energy_state().await?;
+
+        // Apply pending weight changes from Freeze/Unfreeze/CancelAllUnfreeze
+        if self.pending_weight_delta > 0 {
+            state.total_energy_weight = state
+                .total_energy_weight
+                .saturating_add(self.pending_weight_delta as u64);
+        } else if self.pending_weight_delta < 0 {
+            state.total_energy_weight = state
+                .total_energy_weight
+                .saturating_sub((-self.pending_weight_delta) as u64);
+        }
+
+        Ok(state)
+    }
+
+    /// Record a pending weight change
+    fn record_pending_weight_change(&mut self, delta: i64) {
+        self.pending_weight_delta = self.pending_weight_delta.saturating_add(delta);
+    }
+
+    /// Get the pending weight delta
+    fn get_pending_weight_delta(&self) -> i64 {
+        self.pending_weight_delta
+    }
+
+    /// Record a pending withdrawal
+    fn record_pending_withdrawal(&mut self, sender: &CompressedPublicKey) {
+        self.pending_withdrawals.insert(sender.clone());
+    }
+
+    /// Check if a withdrawal is already pending
+    fn has_pending_withdrawal(&self, sender: &CompressedPublicKey) -> bool {
+        self.pending_withdrawals.contains(sender)
+    }
+
+    /// Clear pending unfreezes for a sender after CancelAllUnfreeze
+    fn clear_pending_unfreezes(&mut self, sender: &CompressedPublicKey) {
+        self.pending_unfreezes_count.remove(sender);
+        self.pending_unfreezes_amount.remove(sender);
     }
 }
