@@ -102,10 +102,10 @@ pub trait BlockchainVerificationState<'a, E> {
     /// Get the block version in which TX is executed
     fn get_block_version(&self) -> BlockVersion;
 
-    /// Get the timestamp to use for verification
+    /// Get the timestamp to use for verification (in milliseconds)
     ///
-    /// For block validation (consensus): returns the block timestamp
-    /// For mempool verification: returns current system time
+    /// For block validation (consensus): returns the block timestamp in ms
+    /// For mempool verification: returns current system time in ms
     ///
     /// This ensures deterministic consensus validation while allowing
     /// flexibility for mempool operations.
@@ -313,6 +313,43 @@ pub trait BlockchainVerificationState<'a, E> {
     /// # Returns
     /// The global energy state containing total_energy_weight
     async fn get_global_energy_state(&mut self) -> Result<crate::account::GlobalEnergyState, E>;
+
+    // ===== Pending Weight Tracking =====
+
+    /// Record a pending weight change from FreezeTos/UnfreezeTos
+    ///
+    /// Called after FreezeTos/UnfreezeTos verification passes to track
+    /// the weight change. Subsequent transactions will see the updated
+    /// effective weight in energy calculations.
+    ///
+    /// # Arguments
+    /// * `delta` - The weight change (positive for freeze, negative for unfreeze)
+    fn record_pending_weight_change(&mut self, delta: i64);
+
+    /// Get the pending weight delta
+    ///
+    /// Returns the total pending weight change from earlier transactions
+    /// in the same block/batch.
+    fn get_pending_weight_delta(&self) -> i64;
+
+    // ===== Pending Withdrawal Tracking =====
+
+    /// Record a pending withdrawal
+    ///
+    /// Called after WithdrawExpireUnfreeze verification passes.
+    /// Prevents duplicate withdrawals in the same block.
+    fn record_pending_withdrawal(&mut self, sender: &CompressedPublicKey);
+
+    /// Check if a withdrawal is already pending for this sender
+    fn has_pending_withdrawal(&self, sender: &CompressedPublicKey) -> bool;
+
+    // ===== Pending Unfreeze Clearing =====
+
+    /// Clear pending unfreezes for a sender after CancelAllUnfreeze
+    ///
+    /// Called after CancelAllUnfreeze verification passes to reset
+    /// the pending unfreeze tracking for subsequent transactions.
+    fn clear_pending_unfreezes(&mut self, sender: &CompressedPublicKey);
 
     /// Set the contract module
     async fn set_contract_module(&mut self, hash: &Hash, module: &'a Module) -> Result<(), E>;

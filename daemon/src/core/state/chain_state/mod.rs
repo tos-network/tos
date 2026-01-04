@@ -157,9 +157,18 @@ pub struct ChainState<'a, S: Storage> {
     block_version: BlockVersion,
     // All gas fees tracked
     gas_fee: u64,
-    // Block timestamp for deterministic verification (in seconds)
+    // Block timestamp for deterministic verification (in milliseconds)
     // None for mempool verification (uses system time)
-    block_timestamp: Option<u64>,
+    block_timestamp_ms: Option<u64>,
+    // Pending energy consumption per sender for intra-block tracking
+    // Enables accurate energy verification across multiple TXs from same sender
+    pending_energy: HashMap<CompressedPublicKey, u64>,
+    // Pending weight changes for intra-block tracking
+    // Tracks FreezeTos/UnfreezeTos weight changes during verification
+    pending_weight_delta: i64,
+    // Pending withdrawals: accounts that have pending WithdrawExpireUnfreeze
+    // Prevents duplicate withdrawals in the same block
+    pending_withdrawals: HashSet<CompressedPublicKey>,
     // Pending registrations: accounts that will be registered by earlier TXs in this block
     // Enables same-block visibility for fee calculation
     pending_registrations: HashSet<CompressedPublicKey>,
@@ -172,7 +181,7 @@ impl<'a, S: Storage> ChainState<'a, S> {
         stable_topoheight: TopoHeight,
         topoheight: TopoHeight,
         block_version: BlockVersion,
-        block_timestamp: Option<u64>,
+        block_timestamp_ms: Option<u64>,
     ) -> Self {
         Self {
             storage,
@@ -185,7 +194,10 @@ impl<'a, S: Storage> ChainState<'a, S> {
             contracts: HashMap::new(),
             block_version,
             gas_fee: 0,
-            block_timestamp,
+            block_timestamp_ms,
+            pending_energy: HashMap::new(),
+            pending_weight_delta: 0,
+            pending_withdrawals: HashSet::new(),
             pending_registrations: HashSet::new(),
         }
     }
@@ -210,14 +222,14 @@ impl<'a, S: Storage> ChainState<'a, S> {
     /// Create a new ChainState with block timestamp for deterministic consensus validation
     ///
     /// Use this when verifying transactions during block validation.
-    /// The block_timestamp_secs should be the block's timestamp in seconds.
+    /// The block_timestamp_ms should be the block's timestamp in milliseconds.
     pub fn new_with_timestamp(
         storage: &'a S,
         environment: &'a Environment,
         stable_topoheight: TopoHeight,
         topoheight: TopoHeight,
         block_version: BlockVersion,
-        block_timestamp_secs: u64,
+        block_timestamp_ms: u64,
     ) -> Self {
         Self::with(
             StorageReference::Immutable(storage),
@@ -225,7 +237,7 @@ impl<'a, S: Storage> ChainState<'a, S> {
             stable_topoheight,
             topoheight,
             block_version,
-            Some(block_timestamp_secs),
+            Some(block_timestamp_ms),
         )
     }
 
@@ -1027,15 +1039,15 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for ChainS
         self.block_version
     }
 
-    /// Get the timestamp to use for verification
+    /// Get the timestamp to use for verification (in milliseconds)
     ///
-    /// For block validation: returns the block timestamp (deterministic)
-    /// For mempool verification: returns current system time
+    /// For block validation: returns the block timestamp in ms (deterministic)
+    /// For mempool verification: returns current system time in ms
     fn get_verification_timestamp(&self) -> u64 {
-        self.block_timestamp.unwrap_or_else(|| {
+        self.block_timestamp_ms.unwrap_or_else(|| {
             std::time::SystemTime::now()
                 .duration_since(std::time::SystemTime::UNIX_EPOCH)
-                .map(|d| d.as_secs())
+                .map(|d| d.as_millis() as u64)
                 .unwrap_or(0)
         })
     }
@@ -1271,23 +1283,23 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for ChainS
         0
     }
 
-    /// Record pending energy (no-op for ChainState)
+    /// Record pending energy consumption for intra-block tracking
     ///
-    /// ChainState is used during block verification where transactions
-    /// are processed sequentially. Pending energy tracking is only
-    /// needed for mempool verification.
+    /// Tracks energy consumed by earlier transactions in the same block
+    /// so that subsequent transactions see reduced available energy.
     async fn record_pending_energy(
         &mut self,
-        _sender: &'a CompressedPublicKey,
-        _amount: u64,
+        sender: &'a CompressedPublicKey,
+        amount: u64,
     ) -> Result<(), BlockchainError> {
-        // No-op for block verification - apply phase handles state changes
+        let entry = self.pending_energy.entry(sender.clone()).or_insert(0);
+        *entry = entry.saturating_add(amount);
         Ok(())
     }
 
-    /// Get pending energy (always 0 for ChainState)
-    fn get_pending_energy(&self, _sender: &CompressedPublicKey) -> u64 {
-        0
+    /// Get pending energy consumption for sender
+    fn get_pending_energy(&self, sender: &CompressedPublicKey) -> u64 {
+        *self.pending_energy.get(sender).unwrap_or(&0)
     }
 
     /// Get the global energy state (Stake 2.0)
@@ -1295,5 +1307,30 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for ChainS
         &mut self,
     ) -> Result<tos_common::account::GlobalEnergyState, BlockchainError> {
         self.storage.get_global_energy_state().await
+    }
+
+    /// Record a pending weight change
+    fn record_pending_weight_change(&mut self, delta: i64) {
+        self.pending_weight_delta = self.pending_weight_delta.saturating_add(delta);
+    }
+
+    /// Get the pending weight delta
+    fn get_pending_weight_delta(&self) -> i64 {
+        self.pending_weight_delta
+    }
+
+    /// Record a pending withdrawal
+    fn record_pending_withdrawal(&mut self, sender: &CompressedPublicKey) {
+        self.pending_withdrawals.insert(sender.clone());
+    }
+
+    /// Check if a withdrawal is already pending
+    fn has_pending_withdrawal(&self, sender: &CompressedPublicKey) -> bool {
+        self.pending_withdrawals.contains(sender)
+    }
+
+    /// Clear pending unfreezes for a sender (no-op for ChainState since we track per-sender)
+    fn clear_pending_unfreezes(&mut self, _sender: &CompressedPublicKey) {
+        // No-op for ChainState - we don't track per-sender unfreezes in block verification
     }
 }

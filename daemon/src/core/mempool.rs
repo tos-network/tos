@@ -3,7 +3,11 @@ use indexmap::IndexSet;
 use linked_hash_map::LinkedHashMap;
 use log::{debug, info, trace, warn};
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, mem, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    mem,
+    sync::Arc,
+};
 use tos_common::{
     account::Nonce,
     api::daemon::FeeRatesEstimated,
@@ -73,6 +77,8 @@ pub struct Mempool {
     // Track pending energy consumption per sender
     // Key: sender address, Value: total pending energy consumed
     pending_energy_consumption: HashMap<CompressedPublicKey, u64>,
+    // Track pending withdrawals (WithdrawExpireUnfreeze) to prevent duplicates
+    pending_withdrawals: HashSet<CompressedPublicKey>,
 }
 
 impl Mempool {
@@ -88,6 +94,7 @@ impl Mempool {
             pending_unfreezes_count: HashMap::new(),
             pending_unfreezes_amount: HashMap::new(),
             pending_energy_consumption: HashMap::new(),
+            pending_withdrawals: HashSet::new(),
         }
     }
 
@@ -112,6 +119,10 @@ impl Mempool {
 
     pub fn get_pending_energy_consumption(&self) -> &HashMap<CompressedPublicKey, u64> {
         &self.pending_energy_consumption
+    }
+
+    pub fn get_pending_withdrawals(&self) -> &HashSet<CompressedPublicKey> {
+        &self.pending_withdrawals
     }
 
     fn internal_estimate_fee_rates(mut fee_rates: Vec<u64>) -> FeeRatesEstimated {
@@ -188,6 +199,7 @@ impl Mempool {
             pending_unfreezes_count,
             pending_unfreezes_amount,
             pending_energy,
+            pending_withdrawals,
         ) = {
             let mut state = MempoolState::new(
                 &self,
@@ -220,6 +232,7 @@ impl Mempool {
                 pending_unfreezes_count,
                 pending_unfreezes_amount,
                 pending_energy,
+                pending_withdrawals,
             ) = state.get_pending_state();
 
             (
@@ -230,6 +243,7 @@ impl Mempool {
                 pending_unfreezes_count,
                 pending_unfreezes_amount,
                 pending_energy,
+                pending_withdrawals,
             )
         };
 
@@ -239,6 +253,7 @@ impl Mempool {
         self.pending_unfreezes_count = pending_unfreezes_count;
         self.pending_unfreezes_amount = pending_unfreezes_amount;
         self.pending_energy_consumption = pending_energy;
+        self.pending_withdrawals = pending_withdrawals;
 
         let nonce = tx.get_nonce();
         // update the cache for this owner
@@ -428,6 +443,13 @@ impl Mempool {
     pub fn clear(&mut self) {
         self.txs.clear();
         self.caches.clear();
+        // Clear all pending state
+        self.pending_delegations.clear();
+        self.pending_undelegations.clear();
+        self.pending_unfreezes_count.clear();
+        self.pending_unfreezes_amount.clear();
+        self.pending_energy_consumption.clear();
+        self.pending_withdrawals.clear();
     }
 
     // Drain all txs from mempool
@@ -438,6 +460,13 @@ impl Mempool {
         }
 
         self.caches.clear();
+        // Clear all pending state
+        self.pending_delegations.clear();
+        self.pending_undelegations.clear();
+        self.pending_unfreezes_count.clear();
+        self.pending_unfreezes_amount.clear();
+        self.pending_energy_consumption.clear();
+        self.pending_withdrawals.clear();
 
         txs
     }
@@ -695,6 +724,16 @@ impl Mempool {
                 self.caches.insert(key, cache);
             }
         }
+
+        // Clear all pending state after cleanup
+        // This prevents stale pending tracking from causing false rejections
+        // The pending state will be rebuilt as new transactions are verified
+        self.pending_delegations.clear();
+        self.pending_undelegations.clear();
+        self.pending_unfreezes_count.clear();
+        self.pending_unfreezes_amount.clear();
+        self.pending_energy_consumption.clear();
+        self.pending_withdrawals.clear();
 
         deleted_transactions
     }

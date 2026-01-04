@@ -522,7 +522,7 @@ impl Transaction {
                         )));
                     }
 
-                    let now_ms = state.get_verification_timestamp() * 1000;
+                    let now_ms = state.get_verification_timestamp();
                     let has_expired = sender_energy
                         .unfreezing_list
                         .iter()
@@ -632,8 +632,8 @@ impl Transaction {
                         .await
                         .map_err(VerificationError::State)?
                     {
-                        // Check lock has expired (use verification timestamp)
-                        let now_ms = state.get_verification_timestamp() * 1000; // Convert to ms
+                        // Check lock has expired (use verification timestamp in ms)
+                        let now_ms = state.get_verification_timestamp();
                         if delegation.expire_time > now_ms {
                             return Err(VerificationError::DelegationStillLocked);
                         }
@@ -1149,6 +1149,8 @@ impl Transaction {
                             let is_pending = state.is_pending_registration(account);
                             if !is_registered && !is_pending {
                                 unregistered_count += 1;
+                                // Record pending registration for same-block visibility
+                                state.record_pending_registration(account);
                             }
                         }
                         new_accounts_created =
@@ -1192,6 +1194,8 @@ impl Transaction {
                             let is_pending = state.is_pending_registration(&item.account);
                             if !is_registered && !is_pending {
                                 unregistered_count += 1;
+                                // Record pending registration for same-block visibility
+                                state.record_pending_registration(&item.account);
                             }
                         }
                         new_accounts_created =
@@ -2340,7 +2344,7 @@ impl Transaction {
                         )));
                     }
 
-                    let now_ms = state.get_verification_timestamp() * 1000;
+                    let now_ms = state.get_verification_timestamp();
                     let has_expired = sender_energy
                         .unfreezing_list
                         .iter()
@@ -2450,8 +2454,8 @@ impl Transaction {
                         .await
                         .map_err(VerificationError::State)?
                     {
-                        // Check lock has expired (use verification timestamp)
-                        let now_ms = state.get_verification_timestamp() * 1000; // Convert to ms
+                        // Check lock has expired (use verification timestamp in ms)
+                        let now_ms = state.get_verification_timestamp();
                         if delegation.expire_time > now_ms {
                             return Err(VerificationError::DelegationStillLocked);
                         }
@@ -3162,6 +3166,8 @@ impl Transaction {
                             let is_pending = state.is_pending_registration(account);
                             if !is_registered && !is_pending {
                                 unregistered_count += 1;
+                                // Record pending registration for same-block visibility
+                                state.record_pending_registration(account);
                             }
                         }
                         new_accounts_created =
@@ -3205,6 +3211,8 @@ impl Transaction {
                             let is_pending = state.is_pending_registration(&item.account);
                             if !is_registered && !is_pending {
                                 unregistered_count += 1;
+                                // Record pending registration for same-block visibility
+                                state.record_pending_registration(&item.account);
                             }
                         }
                         new_accounts_created =
@@ -3697,6 +3705,8 @@ impl Transaction {
                             let is_pending = state.is_pending_registration(account);
                             if !is_registered && !is_pending {
                                 unregistered_count += 1;
+                                // Record pending registration for same-block visibility
+                                state.record_pending_registration(account);
                             }
                         }
                         let total_fee = unregistered_count
@@ -3720,6 +3730,8 @@ impl Transaction {
                                 *current = current
                                     .checked_add(FEE_PER_ACCOUNT_CREATION)
                                     .ok_or(VerificationError::Overflow)?;
+                                // Record pending registration for same-block visibility
+                                state.record_pending_registration(receiver);
                             }
                         }
                     }
@@ -3736,6 +3748,8 @@ impl Transaction {
                             let is_pending = state.is_pending_registration(&item.account);
                             if !is_registered && !is_pending {
                                 unregistered_count += 1;
+                                // Record pending registration for same-block visibility
+                                state.record_pending_registration(&item.account);
                             }
                         }
                         let total_fee = unregistered_count
@@ -4307,17 +4321,19 @@ impl Transaction {
                             .map_err(VerificationError::State)?;
 
                         // Apply account creation fee for new accounts
+                        // Note: Only check is_registered here, not is_pending
+                        // Verification already counted the fee in spending_per_asset
+                        // and recorded pending. Apply should burn the fee unconditionally
+                        // for unregistered accounts (the fee was already validated).
                         let is_registered = state
                             .is_account_registered(receiver)
                             .await
                             .map_err(VerificationError::State)?;
-                        let is_pending = state.is_pending_registration(receiver);
-                        if !is_registered && !is_pending {
+                        if !is_registered {
                             state
                                 .add_burned_coins(FEE_PER_ACCOUNT_CREATION)
                                 .await
                                 .map_err(VerificationError::State)?;
-                            state.record_pending_registration(receiver);
                             new_accounts_created += 1;
                         }
                     }
@@ -4335,10 +4351,9 @@ impl Transaction {
                             .map_err(VerificationError::State)?
                             .ok_or(VerificationError::DelegationNotFound)?;
 
-                        // Use same timestamp calculation as verification phase
-                        // Verification uses: get_verification_timestamp() * 1000
+                        // Use same timestamp from verification phase (in ms)
                         // This ensures consistent lock expiry checks between verify and apply
-                        let now_ms = state.get_verification_timestamp() * 1000;
+                        let now_ms = state.get_verification_timestamp();
                         if delegation.expire_time > now_ms {
                             return Err(VerificationError::DelegationStillLocked);
                         }
@@ -4360,11 +4375,6 @@ impl Transaction {
                             .await
                             .map_err(VerificationError::State)?
                             .unwrap_or_default();
-
-                        let global_energy = state
-                            .get_global_energy_state()
-                            .await
-                            .map_err(VerificationError::State)?;
 
                         // Update delegation record
                         let remaining = delegation
@@ -4403,11 +4413,12 @@ impl Transaction {
                             .ok_or(VerificationError::Underflow)?;
 
                         // Transfer proportional energy usage back to sender
-                        let receiver_limit = receiver_energy
-                            .calculate_energy_limit(global_energy.total_energy_weight);
-                        let transfer_usage = if receiver_limit > 0 {
+                        // Use effective_frozen_balance (in TOS units) for correct proportional calculation
+                        // receiver_limit is in energy units, amount is in TOS units - mixing these was incorrect
+                        let effective_balance = receiver_energy.effective_frozen_balance();
+                        let transfer_usage = if effective_balance > 0 {
                             (receiver_energy.energy_usage as u128 * *amount as u128
-                                / receiver_limit as u128) as u64
+                                / effective_balance as u128) as u64
                         } else {
                             0
                         };
@@ -4415,6 +4426,15 @@ impl Transaction {
                             receiver_energy.energy_usage.saturating_sub(transfer_usage);
                         sender_energy.energy_usage =
                             sender_energy.energy_usage.saturating_add(transfer_usage);
+
+                        // Update sender's latest_consume_time when transferring energy usage
+                        // Use the later of sender's or receiver's consume time to ensure
+                        // the transferred usage decays correctly (not treated as already recovered)
+                        if transfer_usage > 0 {
+                            sender_energy.latest_consume_time = sender_energy
+                                .latest_consume_time
+                                .max(receiver_energy.latest_consume_time);
+                        }
 
                         // Update receiver's energy: remove acquired
                         receiver_energy.acquired_delegated_balance = receiver_energy
@@ -4442,21 +4462,18 @@ impl Transaction {
                         let mut activated_count = 0u64;
 
                         for account in accounts {
-                            // Check if account is already registered OR pending registration
-                            // (same-block visibility fix)
+                            // Note: Only check is_registered, not is_pending
+                            // Verification already counted the fee in spending_per_asset
+                            // and recorded pending. Apply should activate unregistered accounts.
                             let is_registered = state
                                 .is_account_registered(account)
                                 .await
                                 .map_err(VerificationError::State)?;
-                            let is_pending = state.is_pending_registration(account);
 
-                            if is_registered || is_pending {
-                                // Skip already-activated or pending-activation accounts
+                            if is_registered {
+                                // Skip already-activated accounts
                                 if log::log_enabled!(log::Level::Debug) {
-                                    debug!(
-                                        "Skipping account: {:?} (registered={}, pending={})",
-                                        account, is_registered, is_pending
-                                    );
+                                    debug!("Skipping account: {:?} (already registered)", account);
                                 }
                                 continue;
                             }
@@ -4472,9 +4489,6 @@ impl Transaction {
                                 .map_err(VerificationError::State)?;
                             // Balance stays at 0 - we're just activating the account
                             let _ = balance;
-
-                            // Record as pending registration for subsequent TXs in this block
-                            state.record_pending_registration(account);
 
                             activated_count += 1;
                             new_accounts_created += 1;
@@ -4532,13 +4546,42 @@ impl Transaction {
                             return Err(VerificationError::InsufficientFrozenBalance);
                         }
 
-                        // Process each delegation
-                        for delegation_item in delegations {
+                        // Pre-validation phase: Check all overflow conditions before any writes
+                        // This ensures atomicity - either all delegations succeed or none
+                        for delegation_item in delegations.iter() {
                             let receiver = &delegation_item.receiver;
 
-                            // NOTE: Registration check removed for implicit account model
-                            // Receivers are implicitly created when they receive delegation.
-                            // Energy state will be created via get_account_energy if needed.
+                            // Get receiver's energy to check for overflow
+                            let receiver_energy = state
+                                .get_account_energy(receiver)
+                                .await
+                                .map_err(VerificationError::State)?
+                                .unwrap_or_default();
+
+                            // Get existing delegation to check for overflow
+                            let existing_delegation = state
+                                .get_delegated_resource(sender, receiver)
+                                .await
+                                .map_err(VerificationError::State)?;
+
+                            // Check delegation frozen balance overflow
+                            if let Some(existing) = &existing_delegation {
+                                existing
+                                    .frozen_balance
+                                    .checked_add(delegation_item.amount)
+                                    .ok_or(VerificationError::Overflow)?;
+                            }
+
+                            // Check receiver's acquired balance overflow
+                            receiver_energy
+                                .acquired_delegated_balance
+                                .checked_add(delegation_item.amount)
+                                .ok_or(VerificationError::Overflow)?;
+                        }
+
+                        // Apply phase: All validations passed, now apply changes
+                        for delegation_item in delegations {
+                            let receiver = &delegation_item.receiver;
 
                             // Get receiver's energy (creates default if not exists)
                             let mut receiver_energy = state
@@ -4565,12 +4608,10 @@ impl Transaction {
                             let (new_frozen_balance, final_expire_time) = match existing_delegation
                             {
                                 Some(existing) => {
+                                    // Safe: already validated in pre-validation
                                     let balance = existing
                                         .frozen_balance
-                                        .checked_add(delegation_item.amount)
-                                        .ok_or(VerificationError::Overflow)?;
-                                    // Preserve the longer lock period (protect receiver)
-                                    // New delegations cannot shorten existing lock periods
+                                        .saturating_add(delegation_item.amount);
                                     let expire = existing.expire_time.max(new_expire_time);
                                     (balance, expire)
                                 }
@@ -4589,11 +4630,10 @@ impl Transaction {
                                 .await
                                 .map_err(VerificationError::State)?;
 
-                            // Update receiver's acquired balance
+                            // Update receiver's acquired balance (safe: pre-validated)
                             receiver_energy.acquired_delegated_balance = receiver_energy
                                 .acquired_delegated_balance
-                                .checked_add(delegation_item.amount)
-                                .ok_or(VerificationError::Overflow)?;
+                                .saturating_add(delegation_item.amount);
 
                             state
                                 .set_account_energy(receiver, receiver_energy)
@@ -4601,17 +4641,17 @@ impl Transaction {
                                 .map_err(VerificationError::State)?;
 
                             // Apply account creation fee for new accounts
+                            // Note: Only check is_registered, not is_pending
+                            // Verification already counted the fee and recorded pending
                             let is_registered = state
                                 .is_account_registered(receiver)
                                 .await
                                 .map_err(VerificationError::State)?;
-                            let is_pending = state.is_pending_registration(receiver);
-                            if !is_registered && !is_pending {
+                            if !is_registered {
                                 state
                                     .add_burned_coins(FEE_PER_ACCOUNT_CREATION)
                                     .await
                                     .map_err(VerificationError::State)?;
-                                state.record_pending_registration(receiver);
                                 new_accounts_created += 1;
                             }
                         }
@@ -4664,15 +4704,15 @@ impl Transaction {
                         for item in items {
                             let account = &item.account;
 
-                            // Check if account is already registered OR pending registration
-                            // (same-block visibility fix)
+                            // Note: Only check is_registered, not is_pending
+                            // Verification already counted the fee in spending_per_asset
+                            // and recorded pending. Apply should activate unregistered accounts.
                             let is_registered = state
                                 .is_account_registered(account)
                                 .await
                                 .map_err(VerificationError::State)?;
-                            let is_pending = state.is_pending_registration(account);
 
-                            if !is_registered && !is_pending {
+                            if !is_registered {
                                 // Activate the account by creating balance entry
                                 let balance = state
                                     .get_receiver_balance(
@@ -4684,9 +4724,6 @@ impl Transaction {
                                 // Balance stays at 0 - we're just activating the account
                                 let _ = balance;
 
-                                // Record as pending registration for subsequent TXs in this block
-                                state.record_pending_registration(account);
-
                                 activated_count += 1;
 
                                 if log::log_enabled!(log::Level::Debug) {
@@ -4694,8 +4731,8 @@ impl Transaction {
                                 }
                             } else if log::log_enabled!(log::Level::Debug) {
                                 debug!(
-                                    "Skipping activation for account: {:?} (registered={}, pending={})",
-                                    account, is_registered, is_pending
+                                    "Skipping activation for account: {:?} (already registered)",
+                                    account
                                 );
                             }
 
@@ -5981,6 +6018,12 @@ impl Transaction {
             }
         }
 
+        // Persist transaction result for RPC queries and explorers
+        state
+            .set_transaction_result(tx_hash, &tx_result)
+            .await
+            .map_err(VerificationError::State)?;
+
         Ok(())
     }
 
@@ -6109,6 +6152,8 @@ impl Transaction {
                             let is_pending = state.is_pending_registration(account);
                             if !is_registered && !is_pending {
                                 unregistered_count += 1;
+                                // Record pending registration for same-block visibility
+                                state.record_pending_registration(account);
                             }
                         }
                         let total_fee = unregistered_count
@@ -6132,6 +6177,8 @@ impl Transaction {
                                 *current = current
                                     .checked_add(FEE_PER_ACCOUNT_CREATION)
                                     .ok_or(VerificationError::Overflow)?;
+                                // Record pending registration for same-block visibility
+                                state.record_pending_registration(receiver);
                             }
                         }
                     }
@@ -6148,6 +6195,8 @@ impl Transaction {
                             let is_pending = state.is_pending_registration(&item.account);
                             if !is_registered && !is_pending {
                                 unregistered_count += 1;
+                                // Record pending registration for same-block visibility
+                                state.record_pending_registration(&item.account);
                             }
                         }
                         let total_fee = unregistered_count

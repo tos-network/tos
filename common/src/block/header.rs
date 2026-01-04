@@ -392,4 +392,167 @@ mod tests {
         let header = BlockHeader::from_hex(serialized).expect("test");
         assert!(header.to_hex() == serialized);
     }
+
+    // ============================================================================
+    // BUG-085: extra_nonce Deserialization Boundary Tests
+    // Verifies that deserialize_extra_nonce properly validates input length
+    // ============================================================================
+
+    mod extra_nonce_deserialization_tests {
+        use crate::block::EXTRA_NONCE_SIZE;
+        use serde::de::IntoDeserializer;
+
+        /// Test valid 32-byte hex string (64 hex chars) deserializes correctly
+        #[test]
+        fn test_valid_extra_nonce_deserializes() {
+            // Valid 32-byte hex string (64 hex characters)
+            let valid_hex = "00".repeat(32);
+            assert_eq!(valid_hex.len(), 64);
+
+            // Create a deserializer from the string
+            let deserializer: serde::de::value::StrDeserializer<serde_json::Error> =
+                valid_hex.as_str().into_deserializer();
+
+            let result = super::super::deserialize_extra_nonce(deserializer);
+            assert!(result.is_ok(), "Valid 32-byte hex should deserialize");
+            assert_eq!(result.unwrap(), [0u8; EXTRA_NONCE_SIZE]);
+        }
+
+        /// Test hex string with all 0xFF bytes
+        #[test]
+        fn test_max_value_extra_nonce_deserializes() {
+            let max_hex = "ff".repeat(32);
+            assert_eq!(max_hex.len(), 64);
+
+            let deserializer: serde::de::value::StrDeserializer<serde_json::Error> =
+                max_hex.as_str().into_deserializer();
+
+            let result = super::super::deserialize_extra_nonce(deserializer);
+            assert!(result.is_ok());
+            assert_eq!(result.unwrap(), [0xFFu8; EXTRA_NONCE_SIZE]);
+        }
+
+        /// Test that hex string too short fails
+        #[test]
+        fn test_short_extra_nonce_fails() {
+            // 31 bytes = 62 hex chars (too short)
+            let short_hex = "00".repeat(31);
+            assert_eq!(short_hex.len(), 62);
+
+            let deserializer: serde::de::value::StrDeserializer<serde_json::Error> =
+                short_hex.as_str().into_deserializer();
+
+            let result = super::super::deserialize_extra_nonce(deserializer);
+            assert!(result.is_err(), "31-byte hex should fail");
+            let err_msg = result.unwrap_err().to_string();
+            assert!(
+                err_msg.contains("expected 32 bytes"),
+                "Error should mention expected length: {}",
+                err_msg
+            );
+        }
+
+        /// Test that hex string too long fails (exceeds max length limit)
+        #[test]
+        fn test_long_extra_nonce_fails() {
+            // 33 bytes = 66 hex chars (too long, but within limit)
+            let long_hex = "00".repeat(33);
+            assert_eq!(long_hex.len(), 66);
+
+            let deserializer: serde::de::value::StrDeserializer<serde_json::Error> =
+                long_hex.as_str().into_deserializer();
+
+            let result = super::super::deserialize_extra_nonce(deserializer);
+            assert!(result.is_err(), "33-byte hex should fail");
+        }
+
+        /// Test that extremely long hex string is rejected early (DoS prevention)
+        #[test]
+        fn test_extremely_long_hex_rejected_early() {
+            // Create hex string much longer than max allowed
+            // MAX_HEX_LENGTH = EXTRA_NONCE_SIZE * 2 = 64
+            let extremely_long_hex = "00".repeat(1000);
+            assert_eq!(extremely_long_hex.len(), 2000);
+
+            let deserializer: serde::de::value::StrDeserializer<serde_json::Error> =
+                extremely_long_hex.as_str().into_deserializer();
+
+            let result = super::super::deserialize_extra_nonce(deserializer);
+            assert!(result.is_err(), "Extremely long hex should be rejected");
+            let err_msg = result.unwrap_err().to_string();
+            assert!(
+                err_msg.contains("exceeds maximum"),
+                "Error should mention max length exceeded: {}",
+                err_msg
+            );
+        }
+
+        /// Test empty hex string fails
+        #[test]
+        fn test_empty_extra_nonce_fails() {
+            let empty_hex = "";
+
+            let deserializer: serde::de::value::StrDeserializer<serde_json::Error> =
+                empty_hex.into_deserializer();
+
+            let result = super::super::deserialize_extra_nonce(deserializer);
+            assert!(result.is_err(), "Empty hex should fail");
+        }
+
+        /// Test invalid hex characters fail
+        #[test]
+        fn test_invalid_hex_chars_fail() {
+            // 'gg' is not valid hex
+            let invalid_hex = "gg".to_string() + &"00".repeat(31);
+            assert_eq!(invalid_hex.len(), 64);
+
+            let deserializer: serde::de::value::StrDeserializer<serde_json::Error> =
+                invalid_hex.as_str().into_deserializer();
+
+            let result = super::super::deserialize_extra_nonce(deserializer);
+            assert!(result.is_err(), "Invalid hex chars should fail");
+        }
+
+        /// Test odd-length hex string fails
+        #[test]
+        fn test_odd_length_hex_fails() {
+            // 63 chars = odd length, invalid hex
+            let odd_hex = "0".repeat(63);
+            assert_eq!(odd_hex.len(), 63);
+
+            let deserializer: serde::de::value::StrDeserializer<serde_json::Error> =
+                odd_hex.as_str().into_deserializer();
+
+            let result = super::super::deserialize_extra_nonce(deserializer);
+            assert!(result.is_err(), "Odd-length hex should fail");
+        }
+
+        /// Test boundary: exactly at max length limit
+        #[test]
+        fn test_boundary_at_max_length() {
+            // Exactly 64 hex chars = 32 bytes = EXTRA_NONCE_SIZE
+            let boundary_hex = "ab".repeat(32);
+            assert_eq!(boundary_hex.len(), 64);
+
+            let deserializer: serde::de::value::StrDeserializer<serde_json::Error> =
+                boundary_hex.as_str().into_deserializer();
+
+            let result = super::super::deserialize_extra_nonce(deserializer);
+            assert!(result.is_ok(), "Boundary length should succeed");
+        }
+
+        /// Test boundary: one byte over max length limit
+        #[test]
+        fn test_boundary_one_over_max() {
+            // 65 hex chars = one char over limit
+            let over_boundary_hex = "0".repeat(65);
+            assert_eq!(over_boundary_hex.len(), 65);
+
+            let deserializer: serde::de::value::StrDeserializer<serde_json::Error> =
+                over_boundary_hex.as_str().into_deserializer();
+
+            let result = super::super::deserialize_extra_nonce(deserializer);
+            assert!(result.is_err(), "One over boundary should fail");
+        }
+    }
 }

@@ -627,6 +627,26 @@ impl<'a> BlockchainVerificationState<'a, TestError> for BatchTestChainState {
     ) -> Result<tos_common::account::GlobalEnergyState, TestError> {
         Ok(self.global_energy_state.clone())
     }
+
+    fn record_pending_weight_change(&mut self, _delta: i64) {
+        // No-op for test state
+    }
+
+    fn get_pending_weight_delta(&self) -> i64 {
+        0
+    }
+
+    fn record_pending_withdrawal(&mut self, _sender: &CompressedPublicKey) {
+        // No-op for test state
+    }
+
+    fn has_pending_withdrawal(&self, _sender: &CompressedPublicKey) -> bool {
+        false
+    }
+
+    fn clear_pending_unfreezes(&mut self, _sender: &CompressedPublicKey) {
+        // No-op for test state
+    }
 }
 
 // =============================================================================

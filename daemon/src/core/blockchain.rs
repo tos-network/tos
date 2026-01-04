@@ -746,8 +746,9 @@ impl<S: Storage> Blockchain<S> {
                 debug!("Initializing GlobalEnergyState at genesis");
             }
             let global_energy_state = GlobalEnergyState::new();
+            // Use topoheight 0 for genesis initialization
             storage
-                .set_global_energy_state(&global_energy_state)
+                .set_global_energy_state(&global_energy_state, 0)
                 .await?;
 
             let (genesis_block, genesis_hash) =
@@ -3301,8 +3302,8 @@ impl<S: Storage> Blockchain<S> {
                     // We run the batches in concurrent tasks
                     // But, because Transaction#verify_batch is actually spawning a blocking thread
                     // it will be multi-threaded by N threads
-                    // Use block timestamp for deterministic consensus validation
-                    let block_timestamp_secs = block.get_header().get_timestamp() / 1000;
+                    // Use block timestamp (in ms) for deterministic consensus validation
+                    let block_timestamp_ms = block.get_header().get_timestamp();
                     stream::iter(batches.into_iter().map(Ok))
                         .try_for_each_concurrent(self.txs_verification_threads_count, async |txs| {
                             let mut chain_state = ChainState::new_with_timestamp(
@@ -3311,22 +3312,22 @@ impl<S: Storage> Blockchain<S> {
                                 stable_topoheight,
                                 current_topoheight,
                                 version,
-                                block_timestamp_secs,
+                                block_timestamp_ms,
                             );
                             Transaction::verify_batch(txs.iter(), &mut chain_state, cache).await
                         })
                         .await
                 } else {
                     // Verify all valid transactions in one batch
-                    // Use block timestamp for deterministic consensus validation
-                    let block_timestamp_secs = block.get_header().get_timestamp() / 1000;
+                    // Use block timestamp (in ms) for deterministic consensus validation
+                    let block_timestamp_ms = block.get_header().get_timestamp();
                     let mut chain_state = ChainState::new_with_timestamp(
                         &*storage,
                         &self.environment,
                         stable_topoheight,
                         current_topoheight,
                         version,
-                        block_timestamp_secs,
+                        block_timestamp_ms,
                     );
                     let iter = txs_grouped.values().flatten();
                     Transaction::verify_batch(iter, &mut chain_state, &tx_cache).await

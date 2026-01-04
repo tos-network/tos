@@ -92,18 +92,19 @@ impl AccountEnergy {
     ///
     /// Formula: (effective_frozen / total_weight) × TOTAL_ENERGY_LIMIT
     ///
-    /// Safety: Result is clamped to TOTAL_ENERGY_LIMIT to prevent
-    /// exceeding the global limit in case of state corruption.
+    /// Safety: Result is clamped to TOTAL_ENERGY_LIMIT in u128 before casting
+    /// to prevent truncation in case of state corruption.
     pub fn calculate_energy_limit(&self, total_energy_weight: u64) -> u64 {
         if total_energy_weight == 0 {
             return 0;
         }
         let effective = self.effective_frozen_balance();
-        // Use u128 to prevent overflow
-        let raw_limit =
-            ((effective as u128 * TOTAL_ENERGY_LIMIT as u128) / total_energy_weight as u128) as u64;
-        // Clamp to TOTAL_ENERGY_LIMIT to handle state corruption
-        raw_limit.min(TOTAL_ENERGY_LIMIT)
+        // Use u128 to prevent overflow during multiplication
+        let raw_limit_u128 =
+            (effective as u128 * TOTAL_ENERGY_LIMIT as u128) / total_energy_weight as u128;
+        // Clamp to TOTAL_ENERGY_LIMIT in u128 BEFORE casting to u64 to prevent truncation
+        let clamped = raw_limit_u128.min(TOTAL_ENERGY_LIMIT as u128);
+        clamped as u64
     }
 
     /// Calculate available free energy (with 24h decay recovery)

@@ -35,16 +35,20 @@ pub trait DelegatedResourceProvider {
     ) -> Result<Option<DelegatedResource>, BlockchainError>;
 
     /// Set or update a delegation from `from` to `to`
+    /// Also stores a versioned record at the given topoheight for reorg support
     async fn set_delegated_resource(
         &mut self,
         delegation: &DelegatedResource,
+        topoheight: TopoHeight,
     ) -> Result<(), BlockchainError>;
 
     /// Delete a delegation from `from` to `to`
+    /// Also stores a versioned deletion record at the given topoheight for reorg support
     async fn delete_delegated_resource(
         &mut self,
         from: &PublicKey,
         to: &PublicKey,
+        topoheight: TopoHeight,
     ) -> Result<(), BlockchainError>;
 
     /// Get all delegations sent by an account (from -> [to1, to2, ...])
@@ -67,9 +71,11 @@ pub trait GlobalEnergyProvider {
     async fn get_global_energy_state(&self) -> Result<GlobalEnergyState, BlockchainError>;
 
     /// Set the global energy state for the network
+    /// Also stores a versioned record at the given topoheight for reorg support
     async fn set_global_energy_state(
         &mut self,
         state: &GlobalEnergyState,
+        topoheight: TopoHeight,
     ) -> Result<(), BlockchainError>;
 }
 
@@ -108,6 +114,7 @@ impl DelegatedResourceProvider for MockEnergyProvider {
     async fn set_delegated_resource(
         &mut self,
         _delegation: &DelegatedResource,
+        _topoheight: TopoHeight,
     ) -> Result<(), BlockchainError> {
         Ok(())
     }
@@ -116,6 +123,7 @@ impl DelegatedResourceProvider for MockEnergyProvider {
         &mut self,
         _from: &PublicKey,
         _to: &PublicKey,
+        _topoheight: TopoHeight,
     ) -> Result<(), BlockchainError> {
         Ok(())
     }
@@ -144,6 +152,7 @@ impl GlobalEnergyProvider for MockEnergyProvider {
     async fn set_global_energy_state(
         &mut self,
         _state: &GlobalEnergyState,
+        _topoheight: TopoHeight,
     ) -> Result<(), BlockchainError> {
         Ok(())
     }

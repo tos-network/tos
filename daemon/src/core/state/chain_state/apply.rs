@@ -321,6 +321,26 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError>
     ) -> Result<tos_common::account::GlobalEnergyState, BlockchainError> {
         self.inner.get_global_energy_state().await
     }
+
+    fn record_pending_weight_change(&mut self, delta: i64) {
+        self.inner.record_pending_weight_change(delta)
+    }
+
+    fn get_pending_weight_delta(&self) -> i64 {
+        self.inner.get_pending_weight_delta()
+    }
+
+    fn record_pending_withdrawal(&mut self, sender: &CompressedPublicKey) {
+        self.inner.record_pending_withdrawal(sender)
+    }
+
+    fn has_pending_withdrawal(&self, sender: &CompressedPublicKey) -> bool {
+        self.inner.has_pending_withdrawal(sender)
+    }
+
+    fn clear_pending_unfreezes(&mut self, sender: &CompressedPublicKey) {
+        self.inner.clear_pending_unfreezes(sender)
+    }
 }
 
 #[async_trait]
@@ -507,7 +527,11 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for Applicable
     ) -> Result<(), BlockchainError> {
         // Automatically update last_update to current topoheight
         state.last_update = self.inner.topoheight;
-        self.inner.storage.set_global_energy_state(&state).await
+        // Pass topoheight for versioned storage (BUG-130 fix)
+        self.inner
+            .storage
+            .set_global_energy_state(&state, self.inner.topoheight)
+            .await
     }
 
     // Note: get_delegated_resource is inherited from BlockchainVerificationState
@@ -516,7 +540,11 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for Applicable
         &mut self,
         delegation: &tos_common::account::DelegatedResource,
     ) -> Result<(), BlockchainError> {
-        self.inner.storage.set_delegated_resource(delegation).await
+        // Pass topoheight for versioned storage (BUG-129 fix)
+        self.inner
+            .storage
+            .set_delegated_resource(delegation, self.inner.topoheight)
+            .await
     }
 
     async fn delete_delegated_resource(
@@ -524,7 +552,11 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for Applicable
         from: &'a CompressedPublicKey,
         to: &'a CompressedPublicKey,
     ) -> Result<(), BlockchainError> {
-        self.inner.storage.delete_delegated_resource(from, to).await
+        // Pass topoheight for versioned storage (BUG-129 fix)
+        self.inner
+            .storage
+            .delete_delegated_resource(from, to, self.inner.topoheight)
+            .await
     }
 
     async fn get_ai_mining_state(&mut self) -> Result<Option<AIMiningState>, BlockchainError> {
@@ -1059,8 +1091,8 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
         block: &'a Block,
         executor: std::sync::Arc<dyn tos_common::contract::ContractExecutor>,
     ) -> Self {
-        // Use block timestamp for deterministic consensus validation
-        let block_timestamp_secs = block.get_header().get_timestamp() / 1000;
+        // Use block timestamp in milliseconds for deterministic consensus validation
+        let block_timestamp_ms = block.get_header().get_timestamp();
         Self {
             inner: ChainState::with(
                 StorageReference::Mutable(storage),
@@ -1068,7 +1100,7 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
                 stable_topoheight,
                 topoheight,
                 block_version,
-                Some(block_timestamp_secs),
+                Some(block_timestamp_ms),
             ),
             burned_supply,
             contract_manager: ContractManager {

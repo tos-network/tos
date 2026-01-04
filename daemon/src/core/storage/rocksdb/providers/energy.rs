@@ -96,6 +96,23 @@ fn build_delegation_index_key(to: &PublicKey, from: &PublicKey) -> Vec<u8> {
     key
 }
 
+/// Build versioned delegation key: {topoheight}_{from_hex}_{to_hex}
+/// Uses string format for consistency with VersionedEnergyResources
+fn build_versioned_delegation_key(
+    topoheight: TopoHeight,
+    from: &PublicKey,
+    to: &PublicKey,
+    is_mainnet: bool,
+) -> Vec<u8> {
+    let key = format!(
+        "{}_{}_{}",
+        topoheight,
+        from.as_address(is_mainnet),
+        to.as_address(is_mainnet)
+    );
+    key.into_bytes()
+}
+
 #[async_trait]
 impl DelegatedResourceProvider for RocksStorage {
     async fn get_delegated_resource(
@@ -118,17 +135,19 @@ impl DelegatedResourceProvider for RocksStorage {
     async fn set_delegated_resource(
         &mut self,
         delegation: &DelegatedResource,
+        topoheight: TopoHeight,
     ) -> Result<(), BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!(
-                "set delegated resource from {} to {}: {} TOS",
+                "set delegated resource from {} to {}: {} TOS at topoheight {}",
                 delegation.from.as_address(self.is_mainnet()),
                 delegation.to.as_address(self.is_mainnet()),
-                delegation.frozen_balance
+                delegation.frozen_balance,
+                topoheight
             );
         }
 
-        // Store delegation record
+        // Store delegation record (current state)
         let key = build_delegation_key(&delegation.from, &delegation.to);
         self.insert_into_disk(Column::DelegatedResources, &key, delegation)?;
 
@@ -137,6 +156,20 @@ impl DelegatedResourceProvider for RocksStorage {
         // Index value is empty - we just need to know the key exists
         self.insert_into_disk(Column::DelegatedResourcesIndex, &index_key, &())?;
 
+        // Store versioned record for reorg support
+        // Use DelegatedResource directly (it already implements Serializer)
+        let versioned_key = build_versioned_delegation_key(
+            topoheight,
+            &delegation.from,
+            &delegation.to,
+            self.is_mainnet(),
+        );
+        self.insert_into_disk(
+            Column::VersionedDelegatedResources,
+            &versioned_key,
+            delegation,
+        )?;
+
         Ok(())
     }
 
@@ -144,12 +177,14 @@ impl DelegatedResourceProvider for RocksStorage {
         &mut self,
         from: &PublicKey,
         to: &PublicKey,
+        topoheight: TopoHeight,
     ) -> Result<(), BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!(
-                "delete delegated resource from {} to {}",
+                "delete delegated resource from {} to {} at topoheight {}",
                 from.as_address(self.is_mainnet()),
-                to.as_address(self.is_mainnet())
+                to.as_address(self.is_mainnet()),
+                topoheight
             );
         }
 
@@ -160,6 +195,21 @@ impl DelegatedResourceProvider for RocksStorage {
         // Delete index
         let index_key = build_delegation_index_key(to, from);
         self.remove_from_disk(Column::DelegatedResourcesIndex, &index_key)?;
+
+        // Store versioned deletion record for reorg support
+        // Use a delegation with frozen_balance = 0 to mark as deleted
+        let versioned_key = build_versioned_delegation_key(topoheight, from, to, self.is_mainnet());
+        let deletion_record = DelegatedResource {
+            from: from.clone(),
+            to: to.clone(),
+            frozen_balance: 0, // Marks as deleted
+            expire_time: 0,
+        };
+        self.insert_into_disk(
+            Column::VersionedDelegatedResources,
+            &versioned_key,
+            &deletion_record,
+        )?;
 
         Ok(())
     }
@@ -238,28 +288,49 @@ impl GlobalEnergyProvider for RocksStorage {
             trace!("get global energy state");
         }
 
-        // Try to load from storage, return default if not found
+        // Try to load from storage
         let state = self.load_optional_from_disk::<&[u8], GlobalEnergyState>(
             Column::GlobalEnergyState,
             &GLOBAL_ENERGY_STATE_KEY,
         )?;
 
-        Ok(state.unwrap_or_default())
+        // GlobalEnergyState is initialized at genesis, so if missing post-genesis
+        // this indicates potential data corruption - log warning but continue with default
+        match state {
+            Some(s) => Ok(s),
+            None => {
+                if log::log_enabled!(log::Level::Warn) {
+                    log::warn!(
+                        "GlobalEnergyState not found in storage - using default. \
+                         This may indicate data corruption if not at genesis."
+                    );
+                }
+                Ok(GlobalEnergyState::default())
+            }
+        }
     }
 
     async fn set_global_energy_state(
         &mut self,
         state: &GlobalEnergyState,
+        topoheight: TopoHeight,
     ) -> Result<(), BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!(
-                "set global energy state: total_weight={}, last_update={}",
+                "set global energy state: total_weight={}, last_update={} at topoheight {}",
                 state.total_energy_weight,
-                state.last_update
+                state.last_update,
+                topoheight
             );
         }
 
+        // Store current state
         self.insert_into_disk(Column::GlobalEnergyState, GLOBAL_ENERGY_STATE_KEY, state)?;
+
+        // Store versioned record for reorg support
+        // Key format: {topoheight} as 8-byte big-endian
+        let versioned_key = topoheight.to_be_bytes();
+        self.insert_into_disk(Column::VersionedGlobalEnergyState, &versioned_key, state)?;
 
         Ok(())
     }

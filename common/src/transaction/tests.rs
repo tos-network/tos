@@ -1618,6 +1618,31 @@ impl<'a> BlockchainVerificationState<'a, TestError> for ChainState {
     ) -> Result<crate::account::GlobalEnergyState, TestError> {
         Ok(crate::account::GlobalEnergyState::default())
     }
+
+    /// Record pending weight change (stub for tests)
+    fn record_pending_weight_change(&mut self, _delta: i64) {
+        // No-op for test state
+    }
+
+    /// Get pending weight delta (stub for tests)
+    fn get_pending_weight_delta(&self) -> i64 {
+        0
+    }
+
+    /// Record pending withdrawal (stub for tests)
+    fn record_pending_withdrawal(&mut self, _sender: &CompressedPublicKey) {
+        // No-op for test state
+    }
+
+    /// Check if there's a pending withdrawal (stub for tests)
+    fn has_pending_withdrawal(&self, _sender: &CompressedPublicKey) -> bool {
+        false
+    }
+
+    /// Clear pending unfreezes (stub for tests)
+    fn clear_pending_unfreezes(&mut self, _sender: &CompressedPublicKey) {
+        // No-op for test state
+    }
 }
 
 impl FeeHelper for AccountStateImpl {

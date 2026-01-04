@@ -130,6 +130,16 @@ pub enum Column {
     // Single key "GLOBAL" => {GlobalEnergyState}
     GlobalEnergyState,
 
+    // ===== Stake 2.0 Versioned Delegation (Reorg Support) =====
+
+    // Versioned delegated resources for reorg support
+    // Key: {topoheight}_{from_address}_{to_address} => {DelegatedResource}
+    VersionedDelegatedResources,
+
+    // Versioned global energy state for reorg support
+    // Key: {topoheight} => {GlobalEnergyState}
+    VersionedGlobalEnergyState,
+
     // AI mining state pointer
     // AI_MINING_STATE_TOPOHEIGHT => {topoheight}
     AIMiningState,
@@ -226,7 +236,9 @@ impl Column {
             | VersionedContractsData
             | PrefixedRegistrations
             | VersionedEnergyResources
-            | VersionedAIMiningStates => Some(PREFIX_TOPOHEIGHT_LEN),
+            | VersionedAIMiningStates
+            | VersionedDelegatedResources
+            | VersionedGlobalEnergyState => Some(PREFIX_TOPOHEIGHT_LEN),
 
             UnoBalances => Some(PREFIX_ID_LEN),
 

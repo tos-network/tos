@@ -69,6 +69,14 @@ pub trait VersionedProvider:
         self.delete_versioned_energy_at_topoheight(topoheight)
             .await?;
 
+        // Delete versioned delegations at this topoheight (BUG-129 fix)
+        self.delete_versioned_delegations_at_topoheight(topoheight)
+            .await?;
+
+        // Delete versioned global energy state at this topoheight (BUG-130 fix)
+        self.delete_versioned_global_energy_at_topoheight(topoheight)
+            .await?;
+
         // Delete scheduled executions registered at this topoheight
         self.delete_scheduled_executions_registered_at_topoheight(topoheight)
             .await?;
@@ -116,6 +124,14 @@ pub trait VersionedProvider:
         self.delete_versioned_energy_below_topoheight(topoheight, keep_last)
             .await?;
 
+        // Delete versioned delegations below this topoheight (BUG-129 fix)
+        self.delete_versioned_delegations_below_topoheight(topoheight, keep_last)
+            .await?;
+
+        // Delete versioned global energy state below this topoheight (BUG-130 fix)
+        self.delete_versioned_global_energy_below_topoheight(topoheight, keep_last)
+            .await?;
+
         // Delete scheduled executions registered below this topoheight
         self.delete_scheduled_executions_registered_below_topoheight(topoheight)
             .await?;
@@ -154,6 +170,14 @@ pub trait VersionedProvider:
 
         // Delete versioned energy above this topoheight
         self.delete_versioned_energy_above_topoheight(topoheight)
+            .await?;
+
+        // Delete versioned delegations above this topoheight (BUG-129 fix)
+        self.delete_versioned_delegations_above_topoheight(topoheight)
+            .await?;
+
+        // Delete versioned global energy state above this topoheight (BUG-130 fix)
+        self.delete_versioned_global_energy_above_topoheight(topoheight)
             .await?;
 
         // Delete scheduled executions registered above this topoheight

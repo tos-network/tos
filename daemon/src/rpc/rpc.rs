@@ -3237,8 +3237,11 @@ async fn get_energy<S: Storage>(context: &Context, body: Value) -> Result<Value,
     let blockchain: &Arc<Blockchain<S>> = context.get()?;
     let storage = blockchain.get_storage().read().await;
 
-    // Get latest block timestamp for consistency with apply phase
-    let now_ms = storage.get_top_block_header().await?.0.get_timestamp();
+    // Use current system time for accurate energy recovery reporting
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
 
     // Get account energy for the account (Stake 2.0)
     let pubkey = params.address.into_owned().to_public_key();
@@ -3337,8 +3340,11 @@ async fn estimate_energy<S: Storage>(
     let blockchain: &Arc<Blockchain<S>> = context.get()?;
     let storage = blockchain.get_storage().read().await;
 
-    // Get latest block timestamp for consistency with apply phase
-    let now_ms = storage.get_top_block_header().await?.0.get_timestamp();
+    // Use current system time for accurate energy availability
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
     let pubkey = params.address.into_owned().to_public_key();
 
     // Get account energy state
@@ -3361,13 +3367,20 @@ async fn estimate_energy<S: Storage>(
         }
         EstimateTxType::Burn => EnergyFeeCalculator::calculate_burn_cost(),
         EstimateTxType::DeployContract => {
+            // Include constructor execution gas (max_gas) in deploy cost
             EnergyFeeCalculator::calculate_deploy_cost(params.bytecode_size)
+                .saturating_add(params.max_gas)
         }
         EstimateTxType::InvokeContract => {
             // Use max_gas parameter for contract invocation energy estimate
             // The actual cost will be the base transaction size + user-specified max_gas
+            // Include new account creation costs if contract creates accounts
             // Unused gas is refunded after execution
-            (params.tx_size as u64).saturating_add(params.max_gas)
+            (params.tx_size as u64)
+                .saturating_add(params.max_gas)
+                .saturating_add(EnergyFeeCalculator::calculate_new_account_cost(
+                    params.new_accounts,
+                ))
         }
         EstimateTxType::Energy => 0, // Energy operations are free
     };

@@ -67,6 +67,10 @@ pub struct MempoolState<'a, S: Storage> {
     // Pending energy consumption per sender
     // Tracks energy used that passed verification but not yet applied
     pending_energy_consumption: HashMap<CompressedPublicKey, u64>,
+    // Pending weight changes from FreezeTos/UnfreezeTos
+    pending_weight_delta: i64,
+    // Pending withdrawals: accounts with pending WithdrawExpireUnfreeze
+    pending_withdrawals: HashSet<CompressedPublicKey>,
     // Pending registrations: accounts that will be registered by earlier TXs in this block
     // Enables same-block visibility for fee calculation
     pending_registrations: HashSet<CompressedPublicKey>,
@@ -100,6 +104,8 @@ impl<'a, S: Storage> MempoolState<'a, S> {
             pending_unfreezes_count: mempool.get_pending_unfreezes_count().clone(),
             pending_unfreezes_amount: mempool.get_pending_unfreezes_amount().clone(),
             pending_energy_consumption: mempool.get_pending_energy_consumption().clone(),
+            pending_weight_delta: 0,
+            pending_withdrawals: mempool.get_pending_withdrawals().clone(),
             pending_registrations: HashSet::new(),
         }
     }
@@ -114,6 +120,7 @@ impl<'a, S: Storage> MempoolState<'a, S> {
         HashMap<CompressedPublicKey, usize>,
         HashMap<CompressedPublicKey, u64>,
         HashMap<CompressedPublicKey, u64>,
+        HashSet<CompressedPublicKey>,
     ) {
         (
             std::mem::take(&mut self.pending_delegations),
@@ -121,6 +128,7 @@ impl<'a, S: Storage> MempoolState<'a, S> {
             std::mem::take(&mut self.pending_unfreezes_count),
             std::mem::take(&mut self.pending_unfreezes_amount),
             std::mem::take(&mut self.pending_energy_consumption),
+            std::mem::take(&mut self.pending_withdrawals),
         )
     }
 
@@ -515,11 +523,11 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Mempoo
         self.block_version
     }
 
-    /// Get the timestamp to use for verification (uses current system time for mempool)
+    /// Get the timestamp to use for verification in milliseconds (uses current system time for mempool)
     fn get_verification_timestamp(&self) -> u64 {
         std::time::SystemTime::now()
             .duration_since(std::time::SystemTime::UNIX_EPOCH)
-            .map(|d| d.as_secs())
+            .map(|d| d.as_millis() as u64)
             .unwrap_or(0)
     }
 
@@ -756,7 +764,7 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Mempoo
         self.pending_registrations.insert(account.clone());
     }
 
-    /// Record a pending delegation amount
+    /// Record a pending delegation amount (uses saturating_add to prevent overflow)
     ///
     /// Called after DelegateResource verification passes to track
     /// the amount being delegated. Subsequent transactions will see
@@ -766,7 +774,8 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Mempoo
         sender: &'a CompressedPublicKey,
         amount: u64,
     ) -> Result<(), BlockchainError> {
-        *self.pending_delegations.entry(sender.clone()).or_insert(0) += amount;
+        let entry = self.pending_delegations.entry(sender.clone()).or_insert(0);
+        *entry = entry.saturating_add(amount);
         Ok(())
     }
 
@@ -775,20 +784,22 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Mempoo
         *self.pending_delegations.get(sender).unwrap_or(&0)
     }
 
-    /// Record a pending unfreeze amount
+    /// Record a pending unfreeze amount (uses saturating_add to prevent overflow)
     async fn record_pending_unfreeze(
         &mut self,
         sender: &'a CompressedPublicKey,
         amount: u64,
     ) -> Result<(), BlockchainError> {
-        *self
+        let count_entry = self
             .pending_unfreezes_count
             .entry(sender.clone())
-            .or_insert(0) += 1;
-        *self
+            .or_insert(0);
+        *count_entry = count_entry.saturating_add(1);
+        let amount_entry = self
             .pending_unfreezes_amount
             .entry(sender.clone())
-            .or_insert(0) += amount;
+            .or_insert(0);
+        *amount_entry = amount_entry.saturating_add(amount);
         Ok(())
     }
 
@@ -802,7 +813,7 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Mempoo
         *self.pending_unfreezes_amount.get(sender).unwrap_or(&0)
     }
 
-    /// Record pending energy consumption
+    /// Record pending energy consumption (uses saturating_add to prevent overflow)
     ///
     /// Called after energy is consumed during verification to track
     /// total energy used. Subsequent transactions will see reduced
@@ -812,10 +823,11 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Mempoo
         sender: &'a CompressedPublicKey,
         amount: u64,
     ) -> Result<(), BlockchainError> {
-        *self
+        let entry = self
             .pending_energy_consumption
             .entry(sender.clone())
-            .or_insert(0) += amount;
+            .or_insert(0);
+        *entry = entry.saturating_add(amount);
         Ok(())
     }
 
@@ -829,5 +841,31 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Mempoo
         &mut self,
     ) -> Result<tos_common::account::GlobalEnergyState, BlockchainError> {
         self.storage.get_global_energy_state().await
+    }
+
+    /// Record a pending weight change
+    fn record_pending_weight_change(&mut self, delta: i64) {
+        self.pending_weight_delta = self.pending_weight_delta.saturating_add(delta);
+    }
+
+    /// Get the pending weight delta
+    fn get_pending_weight_delta(&self) -> i64 {
+        self.pending_weight_delta
+    }
+
+    /// Record a pending withdrawal
+    fn record_pending_withdrawal(&mut self, sender: &CompressedPublicKey) {
+        self.pending_withdrawals.insert(sender.clone());
+    }
+
+    /// Check if a withdrawal is already pending
+    fn has_pending_withdrawal(&self, sender: &CompressedPublicKey) -> bool {
+        self.pending_withdrawals.contains(sender)
+    }
+
+    /// Clear pending unfreezes for a sender after CancelAllUnfreeze
+    fn clear_pending_unfreezes(&mut self, sender: &CompressedPublicKey) {
+        self.pending_unfreezes_count.remove(sender);
+        self.pending_unfreezes_amount.remove(sender);
     }
 }
