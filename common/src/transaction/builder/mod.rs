@@ -328,12 +328,16 @@ impl TransactionBuilder {
                     } => EnergyPayload::UnfreezeTos {
                         amount: *amount,
                         from_delegation: false,
+                        record_index: None,
+                        delegatee_address: None,
                     },
                     _ => {
                         // This should not happen due to validation, but handle gracefully
                         EnergyPayload::UnfreezeTos {
                             amount: 0,
                             from_delegation: false,
+                            record_index: None,
+                            delegatee_address: None,
                         }
                     }
                 };
@@ -908,6 +912,8 @@ impl TransactionBuilder {
                     } => EnergyPayload::UnfreezeTos {
                         amount: *amount,
                         from_delegation: false,
+                        record_index: None,
+                        delegatee_address: None,
                     },
                     _ => {
                         return Err(GenerationError::State(

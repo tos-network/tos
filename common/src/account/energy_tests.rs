@@ -84,10 +84,11 @@ fn test_energy_resource_management() {
     let unfreeze_result = EnergyResourceManager::unfreeze_tos(
         &mut resource,
         100000000, // 1 TOS
-        topoheight + 10000 // After unlock time
+        topoheight + 10000, // After unlock time
+        None, // FIFO mode
     );
     assert!(unfreeze_result.is_ok());
-    let energy_removed = unfreeze_result.unwrap();
+    let (energy_removed, _pending_amount) = unfreeze_result.unwrap();
     assert_eq!(energy_removed, 6); // 1 TOS * 6 = 6 energy removed
 }
 
@@ -110,15 +111,17 @@ fn test_energy_unfreeze_mechanism() {
     let result = EnergyResourceManager::unfreeze_tos(
         &mut resource,
         100000000, // 1 TOS (minimum unit)
-        unlock_topoheight_7d - 1
+        unlock_topoheight_7d - 1,
+        None, // FIFO mode
     );
     assert!(result.is_err());
-    
+
     // Unfreeze after unlock time
-    let energy_removed = EnergyResourceManager::unfreeze_tos(
+    let (energy_removed, _pending_amount) = EnergyResourceManager::unfreeze_tos(
         &mut resource,
         100000000, // 1 TOS
-        unlock_topoheight_7d
+        unlock_topoheight_7d,
+        None, // FIFO mode
     ).unwrap();
     assert_eq!(energy_removed, 14); // 1 TOS * 14 energy units removed
     assert_eq!(resource.frozen_tos, 0);

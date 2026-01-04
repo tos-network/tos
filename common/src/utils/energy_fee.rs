@@ -78,12 +78,16 @@ impl EnergyResourceManager {
     }
 
     /// Unfreeze TOS (two-phase unfreeze - returns energy removed and pending amount)
+    ///
+    /// # Arguments
+    /// - `record_index`: Optional record index for selective unfreeze (None = FIFO mode)
     pub fn unfreeze_tos(
         energy_resource: &mut EnergyResource,
         tos_amount: u64,
         topoheight: TopoHeight,
+        record_index: Option<u32>,
     ) -> Result<(u64, u64), String> {
-        energy_resource.unfreeze_tos(tos_amount, topoheight)
+        energy_resource.unfreeze_tos(tos_amount, topoheight, record_index)
     }
 
     /// Withdraw unfrozen TOS after cooldown period

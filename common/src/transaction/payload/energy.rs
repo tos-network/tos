@@ -77,6 +77,14 @@ pub enum EnergyPayload {
         amount: u64,
         /// Whether to unfreeze from delegation records (true) or self-freeze records (false)
         from_delegation: bool,
+        /// Optional record index for selective unfreeze (0-based)
+        /// - None: Use FIFO order for self-freeze, or implicit selection for single delegation
+        /// - Some(idx): Unfreeze specific record at that index
+        record_index: Option<u32>,
+        /// Optional delegatee address for batch delegation unfreeze
+        /// - Required when unfreezing from a batch delegation record
+        /// - Specifies which delegatee's entry to unfreeze
+        delegatee_address: Option<PublicKey>,
     },
     /// Withdraw unfrozen TOS - Phase 2: After 14-day cooldown, TOS returned to balance
     WithdrawUnfrozen,
@@ -189,10 +197,28 @@ impl Serializer for EnergyPayload {
             Self::UnfreezeTos {
                 amount,
                 from_delegation,
+                record_index,
+                delegatee_address,
             } => {
                 writer.write_u8(2);
                 writer.write_u64(amount);
                 writer.write_bool(*from_delegation);
+                // Write record_index as Option: 0 for None, 1 + value for Some
+                match record_index {
+                    None => writer.write_u8(0),
+                    Some(idx) => {
+                        writer.write_u8(1);
+                        writer.write_u32(idx);
+                    }
+                }
+                // Write delegatee_address as Option: 0 for None, 1 + pubkey for Some
+                match delegatee_address {
+                    None => writer.write_u8(0),
+                    Some(addr) => {
+                        writer.write_u8(1);
+                        addr.write(writer);
+                    }
+                }
             }
             Self::WithdrawUnfrozen => {
                 writer.write_u8(3);
@@ -226,9 +252,23 @@ impl Serializer for EnergyPayload {
             2 => {
                 let amount = reader.read_u64()?;
                 let from_delegation = reader.read_bool()?;
+                // Read record_index as Option: 0 for None, 1 + value for Some
+                let record_index = match reader.read_u8()? {
+                    0 => None,
+                    1 => Some(reader.read_u32()?),
+                    _ => return Err(ReaderError::InvalidValue),
+                };
+                // Read delegatee_address as Option: 0 for None, 1 + pubkey for Some
+                let delegatee_address = match reader.read_u8()? {
+                    0 => None,
+                    1 => Some(PublicKey::read(reader)?),
+                    _ => return Err(ReaderError::InvalidValue),
+                };
                 Ok(Self::UnfreezeTos {
                     amount,
                     from_delegation,
+                    record_index,
+                    delegatee_address,
                 })
             }
             3 => Ok(Self::WithdrawUnfrozen),
@@ -243,7 +283,24 @@ impl Serializer for EnergyPayload {
                 delegatees,
                 duration,
             } => 1 + 8 + delegatees.iter().map(|e| e.size()).sum::<usize>() + duration.size(),
-            Self::UnfreezeTos { amount, .. } => 1 + amount.size() + 1, // +1 for bool
+            Self::UnfreezeTos {
+                amount,
+                record_index,
+                delegatee_address,
+                ..
+            } => {
+                // 1 (variant) + 8 (amount) + 1 (bool) + 1 (option tag) + optional 4 (u32)
+                let record_index_size = match record_index {
+                    None => 1,        // Just the 0 tag
+                    Some(_) => 1 + 4, // 1 tag + 4 bytes for u32
+                };
+                // delegatee_address: 1 (option tag) + optional 32 (pubkey)
+                let delegatee_size = match delegatee_address {
+                    None => 1,
+                    Some(addr) => 1 + addr.size(),
+                };
+                1 + amount.size() + 1 + record_index_size + delegatee_size
+            }
             Self::WithdrawUnfrozen => 1,
         }
     }
@@ -309,6 +366,8 @@ mod tests {
         let payload = EnergyPayload::UnfreezeTos {
             amount: COIN_VALUE,
             from_delegation: false,
+            record_index: None,
+            delegatee_address: None,
         };
 
         assert_eq!(payload.get_amount(), COIN_VALUE);
@@ -318,13 +377,42 @@ mod tests {
     }
 
     #[test]
+    fn test_unfreeze_tos_with_record_index() {
+        let payload = EnergyPayload::UnfreezeTos {
+            amount: COIN_VALUE,
+            from_delegation: false,
+            record_index: Some(2),
+            delegatee_address: None,
+        };
+
+        assert_eq!(payload.get_amount(), COIN_VALUE);
+        assert!(!payload.is_unfreeze_from_delegation());
+    }
+
+    #[test]
     fn test_unfreeze_from_delegation() {
         let payload = EnergyPayload::UnfreezeTos {
             amount: COIN_VALUE,
             from_delegation: true,
+            record_index: None,
+            delegatee_address: None,
         };
 
         assert!(payload.is_unfreeze_from_delegation());
+    }
+
+    #[test]
+    fn test_unfreeze_with_delegatee_address() {
+        let delegatee = create_test_pubkey();
+        let payload = EnergyPayload::UnfreezeTos {
+            amount: COIN_VALUE,
+            from_delegation: true,
+            record_index: Some(0),
+            delegatee_address: Some(delegatee),
+        };
+
+        assert!(payload.is_unfreeze_from_delegation());
+        assert_eq!(payload.get_amount(), COIN_VALUE);
     }
 
     #[test]
@@ -351,6 +439,8 @@ mod tests {
         let unfreeze_payload = EnergyPayload::UnfreezeTos {
             amount: COIN_VALUE,
             from_delegation: false,
+            record_index: None,
+            delegatee_address: None,
         };
         let withdraw_payload = EnergyPayload::WithdrawUnfrozen;
 
@@ -394,9 +484,12 @@ mod tests {
 
     #[test]
     fn test_serialization_unfreeze_tos() {
+        // Test with record_index = None, delegatee_address = None
         let payload = EnergyPayload::UnfreezeTos {
             amount: COIN_VALUE,
             from_delegation: true,
+            record_index: None,
+            delegatee_address: None,
         };
 
         let mut bytes = Vec::new();
@@ -410,9 +503,80 @@ mod tests {
             EnergyPayload::UnfreezeTos {
                 amount,
                 from_delegation,
+                record_index,
+                delegatee_address,
             } => {
                 assert_eq!(amount, COIN_VALUE);
                 assert!(from_delegation);
+                assert_eq!(record_index, None);
+                assert_eq!(delegatee_address, None);
+            }
+            _ => panic!("Expected UnfreezeTos payload"),
+        }
+    }
+
+    #[test]
+    fn test_serialization_unfreeze_tos_with_index() {
+        // Test with record_index = Some(5), delegatee_address = None
+        let payload = EnergyPayload::UnfreezeTos {
+            amount: COIN_VALUE * 3,
+            from_delegation: false,
+            record_index: Some(5),
+            delegatee_address: None,
+        };
+
+        let mut bytes = Vec::new();
+        let mut writer = crate::serializer::Writer::new(&mut bytes);
+        payload.write(&mut writer);
+
+        let mut reader = crate::serializer::Reader::new(&bytes);
+        let deserialized = EnergyPayload::read(&mut reader).unwrap();
+
+        match deserialized {
+            EnergyPayload::UnfreezeTos {
+                amount,
+                from_delegation,
+                record_index,
+                delegatee_address,
+            } => {
+                assert_eq!(amount, COIN_VALUE * 3);
+                assert!(!from_delegation);
+                assert_eq!(record_index, Some(5));
+                assert_eq!(delegatee_address, None);
+            }
+            _ => panic!("Expected UnfreezeTos payload"),
+        }
+    }
+
+    #[test]
+    fn test_serialization_unfreeze_tos_with_delegatee() {
+        // Test with record_index and delegatee_address
+        let delegatee = create_test_pubkey();
+        let payload = EnergyPayload::UnfreezeTos {
+            amount: COIN_VALUE * 2,
+            from_delegation: true,
+            record_index: Some(0),
+            delegatee_address: Some(delegatee.clone()),
+        };
+
+        let mut bytes = Vec::new();
+        let mut writer = crate::serializer::Writer::new(&mut bytes);
+        payload.write(&mut writer);
+
+        let mut reader = crate::serializer::Reader::new(&bytes);
+        let deserialized = EnergyPayload::read(&mut reader).unwrap();
+
+        match deserialized {
+            EnergyPayload::UnfreezeTos {
+                amount,
+                from_delegation,
+                record_index,
+                delegatee_address,
+            } => {
+                assert_eq!(amount, COIN_VALUE * 2);
+                assert!(from_delegation);
+                assert_eq!(record_index, Some(0));
+                assert_eq!(delegatee_address, Some(delegatee));
             }
             _ => panic!("Expected UnfreezeTos payload"),
         }

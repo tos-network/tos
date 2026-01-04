@@ -2971,6 +2971,8 @@ impl Transaction {
                     EnergyPayload::UnfreezeTos {
                         amount,
                         from_delegation,
+                        record_index,
+                        delegatee_address: _, // TODO: Use for batch delegation unfreeze
                     } => {
                         // Get current energy resource for the account
                         let energy_resource = state
@@ -3034,7 +3036,7 @@ impl Transaction {
                             } else {
                                 // Unfreeze from self-freeze records (two-phase: creates pending)
                                 energy_resource
-                                    .unfreeze_tos(*amount, topoheight)
+                                    .unfreeze_tos(*amount, topoheight, *record_index)
                                     .map_err(|e| {
                                         VerificationError::AnyError(anyhow::anyhow!("{e}"))
                                     })?;

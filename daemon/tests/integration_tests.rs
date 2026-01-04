@@ -2030,6 +2030,7 @@ fn test_energy_system_demo() {
         &mut alice_energy,
         50000000, // 0.5 TOS
         unlock_topoheight_7d - 1,
+        None, // FIFO mode
     );
 
     match result {
@@ -2050,6 +2051,7 @@ fn test_energy_system_demo() {
         &mut alice_energy,
         100000000, // 1 TOS (integer)
         unlock_topoheight_7d,
+        None, // FIFO mode
     );
 
     match result {

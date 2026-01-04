@@ -3214,10 +3214,18 @@ async fn transaction(
                     EnergyPayload::UnfreezeTos {
                         amount,
                         from_delegation,
+                        record_index,
+                        delegatee_address,
                     } => {
                         manager.message("Type: UnfreezeTos".to_string());
                         manager.message(format!("  Amount: {} TOS", format_tos(*amount)));
                         manager.message(format!("  From Delegation: {}", from_delegation));
+                        if let Some(idx) = record_index {
+                            manager.message(format!("  Record Index: {}", idx));
+                        }
+                        if let Some(addr) = delegatee_address {
+                            manager.message(format!("  Delegatee: {:?}", addr));
+                        }
                     }
                     EnergyPayload::WithdrawUnfrozen => {
                         manager.message("Type: WithdrawUnfrozen".to_string());
@@ -5192,6 +5200,8 @@ async fn unfreeze_tos(
     let _payload = tos_common::transaction::EnergyPayload::UnfreezeTos {
         amount,
         from_delegation: false,
+        record_index: None,      // Use FIFO mode by default
+        delegatee_address: None, // No specific delegatee
     };
 
     manager.message("Building transaction...");
