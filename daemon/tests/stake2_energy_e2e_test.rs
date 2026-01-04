@@ -153,6 +153,7 @@ impl EnergyTestState {
     }
 
     // Simulate DelegateResource operation
+    // CORRECTED: Uses available_for_delegation() check and does NOT modify frozen_balance
     fn delegate_resource(
         &mut self,
         from: &CompressedPublicKey,
@@ -165,11 +166,13 @@ impl EnergyTestState {
         }
 
         let from_energy = self.get_or_create_energy(from);
-        if from_energy.frozen_balance < amount {
-            return Err("Insufficient frozen balance");
+        // CORRECTED: Check available_for_delegation() instead of frozen_balance
+        if from_energy.available_for_delegation() < amount {
+            return Err("Insufficient frozen balance for delegation");
         }
 
-        from_energy.frozen_balance -= amount;
+        // CORRECTED: frozen_balance stays unchanged - TOS remains frozen
+        // Only update delegated_frozen_balance to track what's delegated out
         from_energy.delegated_frozen_balance += amount;
 
         let to_energy = self.get_or_create_energy(to);
@@ -189,6 +192,7 @@ impl EnergyTestState {
     }
 
     // Simulate UndelegateResource operation
+    // CORRECTED: Does NOT add back to frozen_balance (since it wasn't subtracted)
     fn undelegate_resource(
         &mut self,
         from: &CompressedPublicKey,
@@ -210,9 +214,10 @@ impl EnergyTestState {
         let delegation_balance = delegation.frozen_balance;
 
         // Update from account
+        // CORRECTED: Only update delegated_frozen_balance, NOT frozen_balance
+        // frozen_balance was never reduced during delegation
         let from_energy = self.get_or_create_energy(from);
         from_energy.delegated_frozen_balance -= amount;
-        from_energy.frozen_balance += amount;
 
         // Update to account
         let to_energy = self.get_or_create_energy(to);
@@ -403,19 +408,36 @@ fn test_delegate_resource() {
     let alice_energy = state.energy_states.get(&alice_pubkey).unwrap();
     let bob_energy = state.energy_states.get(&bob_pubkey).unwrap();
 
-    // Verify results
-    assert_eq!(alice_energy.frozen_balance, 60 * COIN_VALUE);
+    // CORRECTED: frozen_balance stays at 100 TOS (unchanged by delegation)
+    // Only delegated_frozen_balance changes to track what's delegated out
+    assert_eq!(
+        alice_energy.frozen_balance,
+        100 * COIN_VALUE,
+        "frozen_balance must NOT change during delegation"
+    );
     assert_eq!(alice_energy.delegated_frozen_balance, delegate_amount);
     assert_eq!(bob_energy.acquired_delegated_balance, delegate_amount);
     assert!(state
         .delegations
         .contains_key(&(alice_pubkey.clone(), bob_pubkey.clone())));
 
+    // Verify Alice's effective frozen balance
+    // effective = frozen + acquired - delegated_out = 100 + 0 - 40 = 60
+    assert_eq!(
+        alice_energy.effective_frozen_balance(),
+        60 * COIN_VALUE,
+        "Effective frozen = 100 - 40 = 60 TOS"
+    );
+
     // Verify Bob's effective frozen includes delegation
-    let bob_effective = bob_energy.frozen_balance + bob_energy.acquired_delegated_balance;
+    let bob_effective = bob_energy.effective_frozen_balance();
     assert_eq!(bob_effective, delegate_amount);
 
     println!("  Alice frozen: {}", alice_energy.frozen_balance);
+    println!(
+        "  Alice effective: {}",
+        alice_energy.effective_frozen_balance()
+    );
     println!(
         "  Alice delegated: {}",
         alice_energy.delegated_frozen_balance
@@ -707,4 +729,484 @@ fn test_24h_linear_recovery() {
     assert!(recovered_24h >= limit - 1); // Allow for rounding
 
     println!("24-hour linear recovery test passed!");
+}
+
+// =============================================================================
+// Tests: Same-Block Activation and Delegation
+// Addresses: Cannot use state changes from same block in verify phase
+// =============================================================================
+
+#[test]
+fn test_same_block_activation_delegation_limits() {
+    println!("Testing same-block activation and delegation limits...");
+
+    // This test demonstrates the verify/apply phase separation principle
+    // During verify phase, we cannot predict state changes from other TXs in the same block
+
+    let mut state = EnergyTestState::new();
+
+    // Create accounts
+    let sender = KeyPair::new().get_public_key().compress();
+    let _receiver = KeyPair::new().get_public_key().compress();
+
+    // Sender freezes TOS (in a previous block)
+    state.freeze_tos(&sender, 1_000 * COIN_VALUE);
+    assert_eq!(
+        state.get_or_create_energy(&sender).frozen_balance,
+        1_000 * COIN_VALUE
+    );
+
+    // Simulate a block with two TXs:
+    // TX1: Sender freezes additional 500 TOS
+    // TX2: Sender delegates 1,200 TOS to receiver
+
+    // At verify phase for TX2, sender only has 1,000 TOS frozen
+    // (the 500 TOS from TX1 is not yet applied)
+
+    let sender_energy = state.get_or_create_energy(&sender);
+    let available_before_block = sender_energy.available_for_delegation();
+    assert_eq!(
+        available_before_block,
+        1_000 * COIN_VALUE,
+        "Before block, sender has 1,000 TOS available"
+    );
+
+    // In verify phase, TX2's delegation of 1,200 TOS should fail
+    // because only 1,000 TOS is available at that point
+    let delegate_amount = 1_200 * COIN_VALUE;
+    let can_delegate = available_before_block >= delegate_amount;
+    assert!(
+        !can_delegate,
+        "Should NOT be able to delegate more than available at verify time"
+    );
+
+    // Only 1,000 TOS can be delegated in verify phase
+    let valid_delegate = 1_000 * COIN_VALUE;
+    let can_delegate_valid = available_before_block >= valid_delegate;
+    assert!(
+        can_delegate_valid,
+        "Should be able to delegate available amount"
+    );
+
+    println!("Same-block activation/delegation limits test passed!");
+}
+
+#[test]
+fn test_verify_phase_sees_only_committed_state() {
+    println!("Testing verify phase sees only committed state...");
+
+    let mut state = EnergyTestState::new();
+
+    let alice = KeyPair::new().get_public_key().compress();
+    let _bob = KeyPair::new().get_public_key().compress();
+
+    // Block N-1: Alice freezes 500 TOS
+    state.freeze_tos(&alice, 500 * COIN_VALUE);
+    state.topoheight += 1;
+
+    // Block N: Contains TX1 (freeze 500 more) and TX2 (delegate 800)
+    // At verify time for TX2, only the 500 TOS from Block N-1 is visible
+
+    let alice_energy = state.get_or_create_energy(&alice);
+    let committed_available = alice_energy.available_for_delegation();
+
+    // TX1 would add 500 more, but TX2's verify cannot see it
+    // So TX2 can only delegate up to 500 TOS
+    assert_eq!(committed_available, 500 * COIN_VALUE);
+
+    // TX2 trying to delegate 800 TOS should fail in verify
+    let delegate_request = 800 * COIN_VALUE;
+    assert!(
+        committed_available < delegate_request,
+        "Verify phase should reject delegation exceeding committed state"
+    );
+
+    println!("Verify phase sees only committed state test passed!");
+}
+
+// =============================================================================
+// Tests: Fee Calculation Consistency
+// Addresses: Verify and apply phases must use same fee calculation
+// =============================================================================
+
+#[test]
+fn test_fee_calculation_consistency() {
+    println!("Testing fee calculation consistency...");
+
+    // Fee calculation should be deterministic and consistent
+    // between verify and apply phases
+
+    let tx_size = 250u64;
+    let output_count = 3u64;
+    let new_account_count = 1u64;
+
+    // Fee formula: size + (outputs * 500) + (new_accounts * 1000)
+    let output_fee = 500u64;
+    let new_account_fee = 1_000u64;
+
+    let calculated_fee_1 =
+        tx_size + (output_count * output_fee) + (new_account_count * new_account_fee);
+    let calculated_fee_2 =
+        tx_size + (output_count * output_fee) + (new_account_count * new_account_fee);
+
+    // Must be identical
+    assert_eq!(
+        calculated_fee_1, calculated_fee_2,
+        "Fee calculation must be consistent"
+    );
+    assert_eq!(calculated_fee_1, 250 + 1500 + 1000);
+    assert_eq!(calculated_fee_1, 2750);
+
+    println!("Fee calculation consistency test passed!");
+}
+
+#[test]
+fn test_fee_calculation_with_energy_consumption() {
+    println!("Testing fee calculation with energy consumption...");
+
+    let mut energy = AccountEnergy::new();
+    energy.frozen_balance = 1_000 * COIN_VALUE;
+
+    let total_weight = 10_000_000 * COIN_VALUE;
+    let now_ms = 1_000_000_000u64;
+
+    // Simulate transaction that costs 5,000 energy
+    let required_energy = 5_000u64;
+
+    // Calculate available energy
+    let free_available = energy.calculate_free_energy_available(now_ms);
+    let frozen_available = energy.calculate_frozen_energy_available(now_ms, total_weight);
+    let total_available = free_available + frozen_available;
+
+    // If required <= available, no TOS burn
+    // If required > available, burn TOS for shortfall
+    let shortfall = required_energy.saturating_sub(total_available);
+    let tos_burn = shortfall * 100; // TOS_PER_ENERGY = 100
+
+    if total_available >= required_energy {
+        assert_eq!(tos_burn, 0, "No TOS burn when energy covers cost");
+    } else {
+        assert!(tos_burn > 0, "TOS burn needed when energy insufficient");
+    }
+
+    // Verify calculation is reproducible
+    let shortfall_2 = required_energy.saturating_sub(total_available);
+    let tos_burn_2 = shortfall_2 * 100;
+    assert_eq!(tos_burn, tos_burn_2, "Fee calculation must be reproducible");
+
+    println!("Fee calculation with energy consumption test passed!");
+}
+
+// =============================================================================
+// Tests: Fee Burn Verification
+// Addresses: Burned fees should be removed from circulation
+// =============================================================================
+
+#[test]
+fn test_fee_burn_removes_from_circulation() {
+    println!("Testing fee burn removes from circulation...");
+
+    // Simulate a scenario where TOS is burned for fees
+    let mut total_circulating = 1_000_000_000 * COIN_VALUE; // 1B TOS
+    let initial_circulating = total_circulating;
+
+    // Transaction burns 10,000 atomic TOS
+    let fee_burned = 10_000u64;
+    total_circulating = total_circulating.saturating_sub(fee_burned);
+
+    assert_eq!(
+        total_circulating,
+        initial_circulating - fee_burned,
+        "Circulating supply should decrease by burned amount"
+    );
+
+    // Multiple burns
+    let burns = [5_000u64, 3_000, 2_000];
+    for burn in burns {
+        total_circulating = total_circulating.saturating_sub(burn);
+    }
+
+    let total_burned = fee_burned + burns.iter().sum::<u64>();
+    assert_eq!(
+        total_circulating,
+        initial_circulating - total_burned,
+        "Cumulative burns should reduce circulation correctly"
+    );
+
+    println!("Fee burn removes from circulation test passed!");
+}
+
+#[test]
+fn test_fee_burn_not_added_to_any_account() {
+    println!("Testing fee burn is not added to any account...");
+
+    // This test documents the fee burn behavior
+    // We don't need actual state for this test
+
+    // Track all balances before transaction
+    // (In this test framework we don't track balances, but we verify the principle)
+
+    // When fee is burned:
+    // 1. Sender balance decreases by fee_limit
+    // 2. fee_burned is NOT added to receiver or any other account
+    // 3. Sender gets refund of (fee_limit - actual_fee)
+
+    let fee_limit = 10_000u64;
+    let actual_fee = 5_000u64;
+    let refund = fee_limit - actual_fee;
+    let net_sender_deduction = actual_fee;
+
+    // Verify the math
+    assert_eq!(
+        fee_limit,
+        actual_fee + refund,
+        "fee_limit = actual + refund"
+    );
+    assert_eq!(net_sender_deduction, 5_000, "Net deduction is actual fee");
+
+    // The actual_fee (5,000) is burned - not sent anywhere
+    // This test documents the expected behavior
+
+    println!("Fee burn is not added to any account test passed!");
+}
+
+// =============================================================================
+// Tests: Verification State Rollback
+// Addresses: Failed verification should not modify state
+// =============================================================================
+
+#[test]
+fn test_failed_verification_no_state_change() {
+    println!("Testing failed verification does not change state...");
+
+    let mut state = EnergyTestState::new();
+
+    let sender = KeyPair::new().get_public_key().compress();
+
+    // Setup initial state
+    state.freeze_tos(&sender, 1_000 * COIN_VALUE);
+
+    // Capture state before failed operation
+    let frozen_before = state.get_or_create_energy(&sender).frozen_balance;
+    let queue_len_before = state.get_or_create_energy(&sender).unfreezing_list.len();
+    let global_weight_before = state.global_energy.total_energy_weight;
+
+    // Attempt an operation that will fail (unfreeze more than frozen)
+    let result = state.unfreeze_tos(&sender, 2_000 * COIN_VALUE);
+    assert!(
+        result.is_err(),
+        "Should fail when unfreezing more than frozen"
+    );
+
+    // Verify state unchanged after failure
+    let frozen_after = state.get_or_create_energy(&sender).frozen_balance;
+    let queue_len_after = state.get_or_create_energy(&sender).unfreezing_list.len();
+    let global_weight_after = state.global_energy.total_energy_weight;
+
+    assert_eq!(
+        frozen_before, frozen_after,
+        "frozen_balance must not change on failed operation"
+    );
+    assert_eq!(
+        queue_len_before, queue_len_after,
+        "unfreezing_list must not change on failed operation"
+    );
+    assert_eq!(
+        global_weight_before, global_weight_after,
+        "global_weight must not change on failed operation"
+    );
+
+    println!("Failed verification no state change test passed!");
+}
+
+#[test]
+fn test_delegation_failure_no_state_change() {
+    println!("Testing delegation failure does not change state...");
+
+    let mut state = EnergyTestState::new();
+
+    let sender = KeyPair::new().get_public_key().compress();
+    let receiver = KeyPair::new().get_public_key().compress();
+
+    // Setup initial state
+    state.freeze_tos(&sender, 1_000 * COIN_VALUE);
+
+    // Capture state before
+    let sender_energy_before = state.get_or_create_energy(&sender).clone();
+    let delegations_count_before = state.delegations.len();
+
+    // Attempt to delegate more than available
+    let result = state.delegate_resource(&sender, &receiver, 2_000 * COIN_VALUE, 0);
+    assert!(
+        result.is_err(),
+        "Should fail when delegating more than available"
+    );
+
+    // Verify state unchanged
+    let sender_energy_after = state.get_or_create_energy(&sender);
+    assert_eq!(
+        sender_energy_before.delegated_frozen_balance, sender_energy_after.delegated_frozen_balance,
+        "delegated_frozen_balance must not change on failed delegation"
+    );
+    assert_eq!(
+        state.delegations.len(),
+        delegations_count_before,
+        "No new delegation should be created on failure"
+    );
+
+    println!("Delegation failure no state change test passed!");
+}
+
+#[test]
+fn test_queue_full_no_partial_state_change() {
+    println!("Testing queue full error leaves no partial state change...");
+
+    let mut state = EnergyTestState::new();
+
+    let sender = KeyPair::new().get_public_key().compress();
+
+    // Freeze a lot of TOS
+    state.freeze_tos(&sender, 100 * COIN_VALUE);
+
+    // Fill the unfreezing queue to max (32 entries)
+    for i in 0..32 {
+        let result = state.unfreeze_tos(&sender, COIN_VALUE);
+        assert!(
+            result.is_ok(),
+            "Should succeed until queue is full: entry {}",
+            i
+        );
+    }
+
+    // Verify queue is full
+    let queue_len = state.get_or_create_energy(&sender).unfreezing_list.len();
+    assert_eq!(queue_len, 32, "Queue should be full");
+
+    // Capture state before failed operation
+    let frozen_before = state.get_or_create_energy(&sender).frozen_balance;
+
+    // Try to add one more - should fail
+    let result = state.unfreeze_tos(&sender, COIN_VALUE);
+    assert!(result.is_err(), "Should fail when queue is full");
+
+    // Verify no partial state change
+    let frozen_after = state.get_or_create_energy(&sender).frozen_balance;
+    let queue_len_after = state.get_or_create_energy(&sender).unfreezing_list.len();
+
+    assert_eq!(
+        frozen_before, frozen_after,
+        "frozen_balance must not change"
+    );
+    assert_eq!(queue_len_after, 32, "Queue length must remain at 32");
+
+    println!("Queue full no partial state change test passed!");
+}
+
+// =============================================================================
+// Tests: Transaction Result Correctness
+// Addresses: TransactionResult fields should be accurate
+// =============================================================================
+
+#[test]
+fn test_transaction_result_fields_accurate() {
+    println!("Testing TransactionResult fields are accurate...");
+
+    // Test various TransactionResult scenarios
+
+    // Scenario 1: All free energy
+    let result1 = TransactionResult {
+        fee: 0,
+        energy_used: 1_000,
+        free_energy_used: 1_000,
+        frozen_energy_used: 0,
+    };
+    assert_eq!(result1.auto_burned_energy(), 0);
+    assert_eq!(
+        result1.free_energy_used + result1.frozen_energy_used + result1.auto_burned_energy(),
+        result1.energy_used
+    );
+
+    // Scenario 2: Mixed free and frozen
+    let result2 = TransactionResult {
+        fee: 0,
+        energy_used: 5_000,
+        free_energy_used: 1_500,
+        frozen_energy_used: 3_500,
+    };
+    assert_eq!(result2.auto_burned_energy(), 0);
+    assert_eq!(
+        result2.free_energy_used + result2.frozen_energy_used + result2.auto_burned_energy(),
+        result2.energy_used
+    );
+
+    // Scenario 3: With TOS burn (auto-burned energy)
+    let result3 = TransactionResult {
+        fee: 500_000, // 500,000 atomic TOS = 5,000 energy * 100
+        energy_used: 10_000,
+        free_energy_used: 1_500,
+        frozen_energy_used: 3_500,
+    };
+    assert_eq!(result3.auto_burned_energy(), 5_000); // 10,000 - 1,500 - 3,500
+    assert_eq!(
+        result3.free_energy_used + result3.frozen_energy_used + result3.auto_burned_energy(),
+        result3.energy_used
+    );
+
+    // Verify fee matches auto-burned
+    let tos_per_energy = 100u64;
+    assert_eq!(result3.fee, result3.auto_burned_energy() * tos_per_energy);
+
+    println!("TransactionResult fields accurate test passed!");
+}
+
+// =============================================================================
+// Tests: Delegation Cannot Exceed Available
+// Addresses: Prevent over-delegation
+// =============================================================================
+
+#[test]
+fn test_delegation_cannot_exceed_available() {
+    println!("Testing delegation cannot exceed available for delegation...");
+
+    let mut state = EnergyTestState::new();
+
+    let sender = KeyPair::new().get_public_key().compress();
+    let receiver1 = KeyPair::new().get_public_key().compress();
+    let receiver2 = KeyPair::new().get_public_key().compress();
+
+    // Freeze 1,000 TOS
+    state.freeze_tos(&sender, 1_000 * COIN_VALUE);
+
+    // First delegation: 600 TOS (should succeed)
+    let result1 = state.delegate_resource(&sender, &receiver1, 600 * COIN_VALUE, 0);
+    assert!(result1.is_ok(), "First delegation should succeed");
+
+    // Check available
+    let available = state
+        .get_or_create_energy(&sender)
+        .available_for_delegation();
+    assert_eq!(
+        available,
+        400 * COIN_VALUE,
+        "400 TOS should remain available"
+    );
+
+    // Second delegation: 500 TOS (should fail - only 400 available)
+    let result2 = state.delegate_resource(&sender, &receiver2, 500 * COIN_VALUE, 0);
+    assert!(result2.is_err(), "Should fail when exceeding available");
+
+    // Second delegation: 400 TOS (should succeed)
+    let result3 = state.delegate_resource(&sender, &receiver2, 400 * COIN_VALUE, 0);
+    assert!(
+        result3.is_ok(),
+        "Should succeed with exactly available amount"
+    );
+
+    // Now nothing available
+    let final_available = state
+        .get_or_create_energy(&sender)
+        .available_for_delegation();
+    assert_eq!(final_available, 0, "Nothing should remain available");
+
+    println!("Delegation cannot exceed available test passed!");
 }

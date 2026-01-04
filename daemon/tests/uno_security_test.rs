@@ -886,3 +886,179 @@ fn test_security_shield_amount_mismatch() {
     let mismatch_failed = result.is_err() || batch_collector.verify().is_err();
     assert!(mismatch_failed, "Shield amount mismatch MUST FAIL");
 }
+
+// ============================================================================
+// SEC-16 ~ SEC-19: Serialization Boundary Tests
+// ============================================================================
+// Tests for serialization edge cases with extreme values
+
+/// SEC-16: Source Commitments Length Boundary
+/// Test source_commitments array with various lengths
+#[test]
+fn test_security_source_commitments_length_boundary() {
+    // Test empty source_commitments
+    let empty_commitments: Vec<CompressedCommitment> = vec![];
+    assert_eq!(empty_commitments.len(), 0);
+
+    // Test single commitment
+    let opening = PedersenOpening::generate_new();
+    let commitment = PedersenCommitment::new_with_opening(100u64, &opening);
+    let single: Vec<CompressedCommitment> = vec![commitment.compress()];
+    assert_eq!(single.len(), 1);
+
+    // Test maximum practical size (e.g., 64 commitments)
+    let max_practical = 64;
+    let many_commitments: Vec<CompressedCommitment> = (0..max_practical)
+        .map(|_| {
+            let op = PedersenOpening::generate_new();
+            PedersenCommitment::new_with_opening(1u64, &op).compress()
+        })
+        .collect();
+    assert_eq!(many_commitments.len(), max_practical);
+
+    // Verify serialization/deserialization works for all sizes
+    for commitment in &many_commitments {
+        let bytes = commitment.to_bytes();
+        assert_eq!(bytes.len(), 32, "Each commitment should be 32 bytes");
+    }
+}
+
+/// SEC-17: Ciphertext Serialization Boundary
+/// Test ciphertext with extreme values
+#[test]
+fn test_security_ciphertext_serialization_boundary() {
+    let keypair = KeyPair::new();
+
+    // Test with zero amount
+    let zero_ct = keypair.get_public_key().encrypt(0u64);
+    let zero_compressed = zero_ct.compress();
+    let zero_bytes = zero_compressed.to_bytes();
+    assert!(!zero_bytes.is_empty(), "Zero ciphertext should serialize");
+
+    // Test with max u64 (will wrap in scalar field)
+    let max_ct = keypair.get_public_key().encrypt(u64::MAX);
+    let max_compressed = max_ct.compress();
+    let max_bytes = max_compressed.to_bytes();
+    assert_eq!(
+        max_bytes.len(),
+        zero_bytes.len(),
+        "Ciphertexts should have consistent size"
+    );
+
+    // Decompress and verify
+    let zero_deser = zero_compressed.decompress();
+    assert!(zero_deser.is_ok(), "Zero ciphertext should decompress");
+
+    let max_deser = max_compressed.decompress();
+    assert!(max_deser.is_ok(), "Max ciphertext should decompress");
+}
+
+/// SEC-18: Proof Serialization Size Limits
+/// Test proof with various sizes and malformed inputs
+#[test]
+fn test_security_proof_serialization_size_limits() {
+    let sender = KeyPair::new();
+    let receiver = KeyPair::new();
+    let amount = 100u64;
+    let opening = PedersenOpening::generate_new();
+
+    let mut transcript = tos_common::crypto::new_proof_transcript(b"size_test");
+    let proof = CiphertextValidityProof::new(
+        receiver.get_public_key(),
+        sender.get_public_key(),
+        amount,
+        &opening,
+        TxVersion::T1,
+        &mut transcript,
+    );
+
+    let valid_bytes = proof.to_bytes();
+    let expected_size = valid_bytes.len();
+
+    // Test undersized input (1 byte)
+    let tiny_bytes = vec![0u8; 1];
+    let tiny_result = CiphertextValidityProof::from_bytes(&tiny_bytes);
+    assert!(tiny_result.is_err(), "Tiny bytes should fail");
+
+    // Test oversized input
+    let oversized_bytes: Vec<u8> = (0..expected_size + 100).map(|i| i as u8).collect();
+    let _oversized_result = CiphertextValidityProof::from_bytes(&oversized_bytes);
+    // May or may not fail depending on implementation - the point is it shouldn't crash
+
+    // Test exact size with corrupted data
+    let mut corrupted_bytes = valid_bytes.clone();
+    corrupted_bytes[0] ^= 0xFF;
+    corrupted_bytes[expected_size / 2] ^= 0xFF;
+    corrupted_bytes[expected_size - 1] ^= 0xFF;
+
+    let corrupted_result = CiphertextValidityProof::from_bytes(&corrupted_bytes);
+    if let Ok(corrupted_proof) = corrupted_result {
+        // Even if deserialization succeeded, verification should fail
+        let commitment = PedersenCommitment::new_with_opening(amount, &opening);
+        let sender_handle = sender.get_public_key().decrypt_handle(&opening);
+        let receiver_handle = receiver.get_public_key().decrypt_handle(&opening);
+
+        let mut verify_transcript = tos_common::crypto::new_proof_transcript(b"size_test");
+        let mut batch_collector = BatchCollector::default();
+        let verify_result = corrupted_proof.pre_verify(
+            &commitment,
+            receiver.get_public_key(),
+            sender.get_public_key(),
+            &receiver_handle,
+            &sender_handle,
+            TxVersion::T1,
+            &mut verify_transcript,
+            &mut batch_collector,
+        );
+
+        let corrupted_failed = verify_result.is_err() || batch_collector.verify().is_err();
+        assert!(corrupted_failed, "Corrupted proof should fail verification");
+    }
+}
+
+/// SEC-19: UNO Balance Versioning Edge Cases
+/// Test version boundaries and migration scenarios
+#[tokio::test]
+#[allow(clippy::result_large_err)]
+async fn test_security_uno_balance_version_edge_cases() -> Result<(), BlockchainError> {
+    let storage = create_test_storage().await;
+    setup_uno_asset(&storage).await?;
+
+    let alice = KeyPair::new();
+    let alice_pub = alice.get_public_key().compress();
+
+    // Setup with various version numbers
+    let topoheight_v0 = 0u64;
+    let topoheight_v1 = 1000u64;
+    let topoheight_v2 = 2000u64;
+
+    setup_account_safe(&storage, &alice_pub, 1000 * COIN_VALUE, 0).await?;
+
+    // Version 0: Initial balance
+    setup_uno_balance(&storage, &alice, 100 * COIN_VALUE, topoheight_v0).await?;
+
+    // Version 1: Updated balance
+    setup_uno_balance(&storage, &alice, 150 * COIN_VALUE, topoheight_v1).await?;
+
+    // Version 2: Another update
+    setup_uno_balance(&storage, &alice, 200 * COIN_VALUE, topoheight_v2).await?;
+
+    // Verify latest version is retrieved
+    let storage_read = storage.read().await;
+    let (topo, mut versioned) = storage_read
+        .get_last_uno_balance(&alice_pub, &UNO_ASSET)
+        .await?;
+
+    assert_eq!(topo, topoheight_v2, "Should get latest topoheight");
+
+    // Verify balance decryption
+    let balance = versioned.get_mut_balance().decompressed()?;
+    let decrypted = alice.get_private_key().decrypt_to_point(&balance);
+    assert_eq!(
+        decrypted,
+        Scalar::from(200 * COIN_VALUE) * *G,
+        "Should get latest balance value"
+    );
+
+    Ok(())
+}

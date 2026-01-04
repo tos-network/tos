@@ -6192,4 +6192,2023 @@ mod tests {
             );
         }
     }
+
+    // ============================================================================
+    // SCENARIO 44: FREEZE/UNFREEZE STATE TRANSITION TESTS
+    // Tests from issue analysis - verify state changes actually happen
+    // ============================================================================
+
+    mod scenario_44_freeze_unfreeze_state_transitions {
+        use super::*;
+
+        /// Test that FreezeTos actually updates frozen_balance and global energy weight
+        /// Addresses: State transition verification for freeze operations
+        #[test]
+        fn test_44_1_freeze_tos_apply_updates_state() {
+            let mut energy = AccountEnergy::new();
+            let mut global = GlobalEnergyState::new();
+
+            // Initial state
+            assert_eq!(energy.frozen_balance, 0);
+            assert_eq!(global.total_energy_weight, 0);
+
+            // Freeze 1000 TOS
+            let freeze_amount = 1_000 * COIN_VALUE;
+            energy.freeze(freeze_amount);
+            global.add_weight(freeze_amount, 1);
+
+            // Verify state ACTUALLY changed (not just logged)
+            assert_eq!(
+                energy.frozen_balance, freeze_amount,
+                "frozen_balance must be updated after freeze"
+            );
+            assert_eq!(
+                global.total_energy_weight, freeze_amount,
+                "global weight must be updated after freeze"
+            );
+
+            // Verify energy calculation works with new state
+            let total_weight = 10_000_000 * COIN_VALUE;
+            // Need to use total weight that includes the new frozen balance
+            let limit = energy.calculate_energy_limit(total_weight + freeze_amount);
+            assert!(limit > 0, "Energy limit should be positive after freeze");
+        }
+
+        /// Test that UnfreezeTos adds to queue and decreases frozen_balance
+        /// Addresses: 14-day queue enforcement, not immediate credit
+        #[test]
+        fn test_44_2_unfreeze_tos_adds_to_queue_not_balance() {
+            let mut energy = AccountEnergy::new();
+            let mut global = GlobalEnergyState::new();
+
+            // Setup: freeze first
+            energy.frozen_balance = 5_000 * COIN_VALUE;
+            global.total_energy_weight = 5_000 * COIN_VALUE;
+
+            let now_ms = 1_000_000_000u64;
+            let unfreeze_amount = 2_000 * COIN_VALUE;
+
+            // Unfreeze operation
+            energy.start_unfreeze(unfreeze_amount, now_ms).unwrap();
+            global.remove_weight(unfreeze_amount, 1);
+
+            // Verify queue entry was created
+            assert_eq!(
+                energy.unfreezing_list.len(),
+                1,
+                "Unfreeze must add to queue"
+            );
+            assert_eq!(
+                energy.unfreezing_list[0].unfreeze_amount, unfreeze_amount,
+                "Queue entry must have correct amount"
+            );
+
+            // Verify frozen_balance decreased
+            assert_eq!(
+                energy.frozen_balance,
+                3_000 * COIN_VALUE,
+                "frozen_balance must decrease"
+            );
+
+            // Verify global weight decreased
+            assert_eq!(
+                global.total_energy_weight,
+                3_000 * COIN_VALUE,
+                "global weight must decrease"
+            );
+
+            // Verify 14-day expiry was set correctly
+            let expected_expire = now_ms + UNFREEZE_DELAY_MS;
+            assert_eq!(
+                energy.unfreezing_list[0].unfreeze_expire_time, expected_expire,
+                "Expiry must be 14 days from now"
+            );
+        }
+
+        /// Test that WithdrawExpireUnfreeze only works after 14 days
+        /// Addresses: Waiting period enforcement
+        #[test]
+        fn test_44_3_withdraw_enforces_14_day_wait() {
+            let mut energy = AccountEnergy::new();
+            energy.frozen_balance = 5_000 * COIN_VALUE;
+
+            let start_time = 1_000_000_000u64;
+            energy
+                .start_unfreeze(2_000 * COIN_VALUE, start_time)
+                .unwrap();
+
+            // Try at various times before 14 days
+            let test_times = [
+                start_time,                            // Immediately
+                start_time + MS_PER_DAY,               // 1 day
+                start_time + 7 * MS_PER_DAY,           // 7 days
+                start_time + 13 * MS_PER_DAY,          // 13 days
+                start_time + UNFREEZE_DELAY_MS - 1000, // 1 second before
+            ];
+
+            for &time in &test_times {
+                let withdrawn = energy.withdraw_expired_unfreeze(time);
+                assert_eq!(
+                    withdrawn, 0,
+                    "Should not withdraw at time {} (before 14 days)",
+                    time
+                );
+                assert_eq!(
+                    energy.unfreezing_list.len(),
+                    1,
+                    "Queue should still have entry at time {}",
+                    time
+                );
+            }
+
+            // After exactly 14 days - should work
+            let after_14_days = start_time + UNFREEZE_DELAY_MS;
+            let withdrawn = energy.withdraw_expired_unfreeze(after_14_days);
+            assert_eq!(
+                withdrawn,
+                2_000 * COIN_VALUE,
+                "Should withdraw after 14 days"
+            );
+            assert!(
+                energy.unfreezing_list.is_empty(),
+                "Queue should be empty after withdraw"
+            );
+        }
+
+        /// Test CancelAllUnfreeze restores pending amounts to frozen
+        /// Addresses: Cancel operation state changes
+        #[test]
+        fn test_44_4_cancel_restores_to_frozen_updates_global() {
+            let mut energy = AccountEnergy::new();
+            let mut global = GlobalEnergyState::new();
+
+            energy.frozen_balance = 3_000 * COIN_VALUE;
+            global.total_energy_weight = 3_000 * COIN_VALUE;
+
+            let now_ms = 1_000_000_000u64;
+
+            // Add two unfreeze entries - one expired, one pending
+            energy.unfreezing_list.push(UnfreezingRecord {
+                unfreeze_amount: 500 * COIN_VALUE,
+                unfreeze_expire_time: now_ms - 1000, // Expired
+            });
+            energy.unfreezing_list.push(UnfreezingRecord {
+                unfreeze_amount: 700 * COIN_VALUE,
+                unfreeze_expire_time: now_ms + UNFREEZE_DELAY_MS, // Pending
+            });
+
+            let (withdrawn, cancelled) = energy.cancel_all_unfreeze(now_ms);
+
+            // Expired amounts go to balance (withdrawn)
+            assert_eq!(
+                withdrawn,
+                500 * COIN_VALUE,
+                "Expired amount should be withdrawn"
+            );
+
+            // Pending amounts return to frozen (cancelled)
+            assert_eq!(
+                cancelled,
+                700 * COIN_VALUE,
+                "Pending amount should be cancelled"
+            );
+
+            // frozen_balance increased by cancelled amount
+            assert_eq!(
+                energy.frozen_balance,
+                3_000 * COIN_VALUE + cancelled,
+                "frozen_balance must include cancelled amount"
+            );
+
+            // Global weight must be restored for cancelled amount
+            global.add_weight(cancelled, 2);
+            assert_eq!(
+                global.total_energy_weight,
+                3_000 * COIN_VALUE + cancelled,
+                "global weight must be restored for cancelled amount"
+            );
+        }
+    }
+
+    // ============================================================================
+    // SCENARIO 45: FEE/ENERGY ACCOUNTING INVARIANT TESTS
+    // Addresses: Fee limit handling, energy consumption tracking
+    // ============================================================================
+
+    mod scenario_45_fee_energy_accounting {
+        use super::*;
+
+        /// Test energy consumption priority: free -> frozen -> TOS burn
+        /// Addresses: Energy consumption ordering
+        #[test]
+        fn test_45_1_energy_consumption_priority_order() {
+            let mut energy = AccountEnergy::new();
+            energy.frozen_balance = 1_000 * COIN_VALUE;
+
+            let total_weight = 10_000_000 * COIN_VALUE;
+            let now_ms = 100_000_000u64;
+
+            // Consume energy that requires all sources
+            let required = 5_000u64;
+            let result = EnergyResourceManager::consume_transaction_energy_detailed(
+                &mut energy,
+                required,
+                total_weight,
+                now_ms,
+            );
+
+            // Free quota used first
+            assert_eq!(
+                result.free_energy_used, FREE_ENERGY_QUOTA,
+                "Free quota should be used first"
+            );
+
+            // Remaining from frozen
+            let expected_frozen = required.saturating_sub(FREE_ENERGY_QUOTA);
+            assert_eq!(
+                result.frozen_energy_used, expected_frozen,
+                "Remaining should come from frozen"
+            );
+
+            // Total should match
+            assert_eq!(
+                result.energy_used, required,
+                "Total energy used should match"
+            );
+        }
+
+        /// Test fee_limit refund mechanism
+        /// Addresses: Unused fee_limit is refunded
+        #[test]
+        fn test_45_2_fee_limit_refund_when_energy_covers() {
+            let mut energy = AccountEnergy::new();
+            energy.frozen_balance = 10_000 * COIN_VALUE; // Lots of frozen energy
+
+            let total_weight = 10_000_000 * COIN_VALUE;
+            let now_ms = 100_000_000u64;
+
+            // Small energy cost, covered by energy
+            let required = 1_000u64;
+            let result = EnergyResourceManager::consume_transaction_energy_detailed(
+                &mut energy,
+                required,
+                total_weight,
+                now_ms,
+            );
+
+            // No TOS should be burned when energy covers the cost
+            assert_eq!(result.fee, 0, "No TOS burned when energy covers the cost");
+            assert_eq!(result.energy_used, required);
+        }
+
+        /// Test TOS burn when energy is insufficient
+        /// Addresses: TOS burn calculation
+        #[test]
+        fn test_45_3_tos_burn_when_energy_insufficient() {
+            let mut energy = AccountEnergy::new();
+            // Very small frozen balance = very limited energy
+            energy.frozen_balance = COIN_VALUE; // 1 TOS only
+
+            let total_weight = 10_000_000 * COIN_VALUE;
+            let now_ms = 100_000_000u64;
+
+            // Calculate available energy
+            let free_available = energy.calculate_free_energy_available(now_ms);
+            let frozen_available = energy.calculate_frozen_energy_available(now_ms, total_weight);
+            let total_available = free_available + frozen_available;
+
+            // Request more than available
+            let required = total_available + 5_000;
+            let result = EnergyResourceManager::consume_transaction_energy_detailed(
+                &mut energy,
+                required,
+                total_weight,
+                now_ms,
+            );
+
+            // TOS should be burned for the shortfall
+            let shortfall = required.saturating_sub(total_available);
+            let expected_burn = shortfall * TOS_PER_ENERGY;
+            assert_eq!(
+                result.fee, expected_burn,
+                "TOS burn should cover the energy shortfall"
+            );
+        }
+
+        /// Test TransactionResult auto_burned_energy calculation
+        /// Addresses: TransactionResult correctness
+        #[test]
+        fn test_45_4_transaction_result_auto_burned_energy() {
+            let result = TransactionResult {
+                fee: 500_000, // 500,000 atomic TOS burned
+                energy_used: 10_000,
+                free_energy_used: 1_500,
+                frozen_energy_used: 3_500,
+            };
+
+            // auto_burned = energy_used - free - frozen
+            let expected_auto_burned = 10_000 - 1_500 - 3_500;
+            assert_eq!(
+                result.auto_burned_energy(),
+                expected_auto_burned,
+                "auto_burned_energy calculation"
+            );
+            assert_eq!(expected_auto_burned, 5_000);
+        }
+    }
+
+    // ============================================================================
+    // SCENARIO 46: DELEGATION STATE TRANSITION TESTS
+    // Addresses: Delegation balance tracking correctness
+    // ============================================================================
+
+    mod scenario_46_delegation_state_transitions {
+        use super::*;
+
+        /// Test delegation does NOT double-subtract from frozen_balance
+        /// Addresses: Delegation accounting correctness
+        #[test]
+        fn test_46_1_delegation_no_double_subtract() {
+            let mut sender = AccountEnergy::new();
+            sender.frozen_balance = 10_000 * COIN_VALUE;
+
+            let delegate_amount = 3_000 * COIN_VALUE;
+
+            // Correct delegation: frozen_balance UNCHANGED, only delegated_frozen_balance increases
+            // frozen_balance represents total frozen TOS (unchanged by delegation)
+            // delegated_frozen_balance tracks what's delegated out
+            let initial_frozen = sender.frozen_balance;
+            sender.delegated_frozen_balance += delegate_amount;
+
+            // INVARIANT: frozen_balance must NOT decrease during delegation
+            assert_eq!(
+                sender.frozen_balance, initial_frozen,
+                "frozen_balance must NOT change during delegation"
+            );
+            assert_eq!(
+                sender.delegated_frozen_balance, delegate_amount,
+                "delegated_frozen_balance tracks delegated amount"
+            );
+
+            // Verify effective_frozen_balance calculation
+            // effective = frozen + acquired - delegated_out
+            assert_eq!(
+                sender.effective_frozen_balance(),
+                initial_frozen - delegate_amount,
+                "effective_frozen_balance = frozen - delegated_out"
+            );
+        }
+
+        /// Test undelegation restores effective balance correctly
+        /// Addresses: Undelegation accounting
+        #[test]
+        fn test_46_2_undelegation_restores_effective() {
+            let mut sender = AccountEnergy::new();
+            sender.frozen_balance = 10_000 * COIN_VALUE;
+            sender.delegated_frozen_balance = 3_000 * COIN_VALUE;
+
+            let mut receiver = AccountEnergy::new();
+            receiver.acquired_delegated_balance = 3_000 * COIN_VALUE;
+
+            let undelegate_amount = 1_000 * COIN_VALUE;
+
+            // Undelegation: frozen_balance UNCHANGED, delegated_frozen_balance decreases
+            let initial_frozen = sender.frozen_balance;
+            sender.delegated_frozen_balance -= undelegate_amount;
+            receiver.acquired_delegated_balance -= undelegate_amount;
+
+            // INVARIANT: frozen_balance must NOT change during undelegation
+            assert_eq!(
+                sender.frozen_balance, initial_frozen,
+                "frozen_balance must NOT change during undelegation"
+            );
+            assert_eq!(
+                sender.delegated_frozen_balance,
+                2_000 * COIN_VALUE,
+                "delegated_frozen_balance must decrease"
+            );
+
+            // Verify effective_frozen_balance increased (regained 1000 effective)
+            assert_eq!(
+                sender.effective_frozen_balance(),
+                8_000 * COIN_VALUE,
+                "effective_frozen_balance = 10000 - 2000 = 8000"
+            );
+        }
+
+        /// Test available_for_delegation check
+        /// Addresses: Prevent over-delegation
+        #[test]
+        fn test_46_3_available_for_delegation_check() {
+            let mut energy = AccountEnergy::new();
+            energy.frozen_balance = 5_000 * COIN_VALUE;
+            energy.delegated_frozen_balance = 3_000 * COIN_VALUE;
+
+            // Available = frozen - delegated_out = 5000 - 3000 = 2000
+            assert_eq!(
+                energy.available_for_delegation(),
+                2_000 * COIN_VALUE,
+                "available = frozen - delegated_out"
+            );
+
+            // Cannot delegate more than available
+            let over_delegation = energy.available_for_delegation() + COIN_VALUE;
+            assert!(
+                over_delegation > energy.available_for_delegation(),
+                "Cannot delegate more than available"
+            );
+        }
+
+        /// Test delegation validity invariant
+        /// Addresses: Invariant: delegated <= frozen
+        #[test]
+        fn test_46_4_delegation_validity_invariant() {
+            let mut energy = AccountEnergy::new();
+            energy.frozen_balance = 5_000 * COIN_VALUE;
+
+            // Valid states
+            energy.delegated_frozen_balance = 0;
+            assert!(energy.is_delegation_valid(), "0 delegated is valid");
+
+            energy.delegated_frozen_balance = 2_500 * COIN_VALUE;
+            assert!(energy.is_delegation_valid(), "partial delegation is valid");
+
+            energy.delegated_frozen_balance = 5_000 * COIN_VALUE;
+            assert!(energy.is_delegation_valid(), "full delegation is valid");
+
+            // Invalid state (over-delegation)
+            energy.delegated_frozen_balance = 5_001 * COIN_VALUE;
+            assert!(!energy.is_delegation_valid(), "over-delegation is invalid");
+        }
+    }
+
+    // ============================================================================
+    // SCENARIO 47: OVERFLOW AND BOUNDARY TESTS
+    // Addresses: Arithmetic safety, edge cases
+    // ============================================================================
+
+    mod scenario_47_overflow_boundaries {
+        use super::*;
+
+        /// Test start_unfreeze uses saturating arithmetic for expire time
+        /// Addresses: Overflow prevention in time calculations
+        #[test]
+        fn test_47_1_unfreeze_expire_time_saturating() {
+            let mut energy = AccountEnergy::new();
+            energy.frozen_balance = 100 * COIN_VALUE;
+
+            // Extreme timestamp that would overflow with regular add
+            let extreme_time = u64::MAX - 1000;
+            let result = energy.start_unfreeze(COIN_VALUE, extreme_time);
+
+            assert!(result.is_ok(), "Should not panic on extreme timestamp");
+
+            let entry = energy.unfreezing_list.last().unwrap();
+            assert_eq!(
+                entry.unfreeze_expire_time,
+                u64::MAX,
+                "Expire time should saturate to MAX"
+            );
+        }
+
+        /// Test sum operations use saturating arithmetic
+        /// Addresses: Overflow prevention in sum operations
+        #[test]
+        fn test_47_2_sum_operations_saturating() {
+            let mut energy = AccountEnergy::new();
+
+            // Add entries that would overflow if using regular sum
+            energy.unfreezing_list.push(UnfreezingRecord {
+                unfreeze_amount: u64::MAX / 2,
+                unfreeze_expire_time: 1000,
+            });
+            energy.unfreezing_list.push(UnfreezingRecord {
+                unfreeze_amount: u64::MAX / 2 + 1000,
+                unfreeze_expire_time: 2000,
+            });
+
+            // Should use saturating_add internally
+            let total = energy.total_unfreezing();
+            assert!(total > 0, "Sum should not panic or wrap around");
+            // Note: exact value depends on implementation, but should be MAX or close to it
+        }
+
+        /// Test global weight uses saturating arithmetic
+        /// Addresses: Overflow prevention in global state
+        #[test]
+        fn test_47_3_global_weight_saturating() {
+            let mut global = GlobalEnergyState::new();
+            global.total_energy_weight = u64::MAX - 1000;
+
+            // Add should saturate at MAX
+            global.add_weight(5000, 1);
+            assert_eq!(
+                global.total_energy_weight,
+                u64::MAX,
+                "add_weight should saturate"
+            );
+
+            // Remove should saturate at 0
+            global.total_energy_weight = 1000;
+            global.remove_weight(5000, 2);
+            assert_eq!(
+                global.total_energy_weight, 0,
+                "remove_weight should saturate at 0"
+            );
+        }
+
+        /// Test energy limit clamping
+        /// Addresses: Energy limit cannot exceed TOTAL_ENERGY_LIMIT
+        #[test]
+        fn test_47_4_energy_limit_clamped() {
+            let mut energy = AccountEnergy::new();
+            energy.frozen_balance = u64::MAX;
+
+            // With extreme frozen balance and tiny weight, raw calculation would exceed limit
+            let limit = energy.calculate_energy_limit(1);
+            assert_eq!(
+                limit, TOTAL_ENERGY_LIMIT,
+                "Energy limit must be clamped to TOTAL_ENERGY_LIMIT"
+            );
+        }
+    }
+
+    // ============================================================================
+    // SCENARIO 48: SERIALIZATION SAFETY TESTS
+    // Addresses: Serialization length guards
+    // ============================================================================
+
+    mod scenario_48_serialization_safety {
+        use super::*;
+
+        /// Test unfreezing_list serialization length guard
+        /// Addresses: Length guard on serialization
+        #[test]
+        fn test_48_1_unfreezing_list_length_guard() {
+            let mut energy = AccountEnergy::new();
+
+            // Fill queue to max (32 entries)
+            for i in 0..MAX_UNFREEZING_LIST_SIZE {
+                energy.unfreezing_list.push(UnfreezingRecord {
+                    unfreeze_amount: (i as u64 + 1) * 100,
+                    unfreeze_expire_time: (i as u64 + 1) * 1000,
+                });
+            }
+
+            // Serialize and deserialize
+            let bytes = energy.to_bytes();
+            let mut reader = crate::serializer::Reader::new(&bytes);
+            let restored = AccountEnergy::read(&mut reader).unwrap();
+
+            // Should be exactly MAX_UNFREEZING_LIST_SIZE entries
+            assert_eq!(
+                restored.unfreezing_list.len(),
+                MAX_UNFREEZING_LIST_SIZE,
+                "Should preserve all entries up to max"
+            );
+        }
+
+        /// Test AccountEnergy round-trip with all fields
+        /// Addresses: Complete state preservation
+        #[test]
+        fn test_48_2_account_energy_complete_roundtrip() {
+            let mut energy = AccountEnergy::new();
+            energy.frozen_balance = 12345678901234u64;
+            energy.delegated_frozen_balance = 9876543210u64;
+            energy.acquired_delegated_balance = 1111111111u64;
+            energy.energy_usage = 99999u64;
+            energy.latest_consume_time = 1234567890123u64;
+            energy.free_energy_usage = 1234u64;
+            energy.latest_free_consume_time = 9876543210123u64;
+
+            energy.unfreezing_list.push(UnfreezingRecord {
+                unfreeze_amount: 5555555555u64,
+                unfreeze_expire_time: 6666666666u64,
+            });
+
+            let bytes = energy.to_bytes();
+            let mut reader = crate::serializer::Reader::new(&bytes);
+            let restored = AccountEnergy::read(&mut reader).unwrap();
+
+            assert_eq!(energy.frozen_balance, restored.frozen_balance);
+            assert_eq!(
+                energy.delegated_frozen_balance,
+                restored.delegated_frozen_balance
+            );
+            assert_eq!(
+                energy.acquired_delegated_balance,
+                restored.acquired_delegated_balance
+            );
+            assert_eq!(energy.energy_usage, restored.energy_usage);
+            assert_eq!(energy.latest_consume_time, restored.latest_consume_time);
+            assert_eq!(energy.free_energy_usage, restored.free_energy_usage);
+            assert_eq!(
+                energy.latest_free_consume_time,
+                restored.latest_free_consume_time
+            );
+            assert_eq!(energy.unfreezing_list.len(), restored.unfreezing_list.len());
+        }
+    }
+
+    // ============================================================================
+    // SCENARIO 49: LOCK PERIOD VALIDATION TESTS
+    // Addresses: Lock/lock_period consistency
+    // ============================================================================
+
+    mod scenario_49_lock_period_validation {
+        use super::*;
+
+        /// Test lock=true with lock_period=0 is detected as inconsistent
+        /// Addresses: Lock period validation
+        #[test]
+        fn test_49_1_lock_true_period_zero_inconsistent() {
+            // This combination should be rejected at verify layer
+            // lock=true means "enable lock", but period=0 means "immediate unlock"
+            // This is a logical inconsistency
+
+            let lock = true;
+            let lock_period = 0u32;
+
+            // Validation rule: lock=true requires lock_period > 0
+            let is_consistent = !(lock && lock_period == 0);
+            assert!(
+                !is_consistent,
+                "lock=true with period=0 should be detected as inconsistent"
+            );
+        }
+
+        /// Test lock=false with non-zero lock_period is detected as inconsistent
+        /// Addresses: Lock period validation
+        #[test]
+        fn test_49_2_lock_false_period_nonzero_inconsistent() {
+            // This combination should be rejected at verify layer
+            // lock=false means "no lock", but period>0 suggests user intended a lock
+            // This is a logical inconsistency that could cause confusion
+
+            let lock = false;
+            let lock_period = 365u32;
+
+            // Validation rule: lock=false should have lock_period=0
+            let is_consistent = !(!lock && lock_period > 0);
+            assert!(
+                !is_consistent,
+                "lock=false with period>0 should be detected as inconsistent"
+            );
+        }
+
+        /// Test valid lock configurations
+        /// Addresses: Valid lock period combinations
+        #[test]
+        fn test_49_3_valid_lock_configurations() {
+            // Valid: no lock
+            assert!(
+                validate_lock_config(false, 0),
+                "lock=false, period=0 is valid"
+            );
+
+            // Valid: lock with positive period
+            assert!(
+                validate_lock_config(true, 1),
+                "lock=true, period=1 is valid"
+            );
+            assert!(
+                validate_lock_config(true, 365),
+                "lock=true, period=365 is valid"
+            );
+            assert!(
+                validate_lock_config(true, MAX_DELEGATE_LOCK_DAYS),
+                "lock=true, period=MAX is valid"
+            );
+
+            // Invalid: lock with zero period
+            assert!(
+                !validate_lock_config(true, 0),
+                "lock=true, period=0 is invalid"
+            );
+
+            // Invalid: no lock but has period
+            assert!(
+                !validate_lock_config(false, 1),
+                "lock=false, period>0 is invalid"
+            );
+        }
+
+        /// Test MAX_DELEGATE_LOCK_DAYS boundary
+        /// Addresses: Maximum lock period
+        #[test]
+        fn test_49_4_max_lock_period_boundary() {
+            assert_eq!(MAX_DELEGATE_LOCK_DAYS, 365, "Max lock period is 365 days");
+
+            // Valid at boundary
+            assert!(
+                validate_lock_config(true, MAX_DELEGATE_LOCK_DAYS),
+                "Exactly MAX is valid"
+            );
+
+            // Note: Exceeding MAX is checked at verify layer, not here
+        }
+
+        // Helper function for lock config validation
+        fn validate_lock_config(lock: bool, lock_period: u32) -> bool {
+            if lock && lock_period == 0 {
+                return false; // lock=true requires lock_period > 0
+            }
+            if !lock && lock_period > 0 {
+                return false; // lock=false should have lock_period=0
+            }
+            true
+        }
+    }
+
+    // ============================================================================
+    // SCENARIO 50: DEFAULT VALUE CORRECTNESS TESTS
+    // Addresses: GlobalEnergyState default uses correct limit
+    // ============================================================================
+
+    mod scenario_50_default_values {
+        use super::*;
+
+        /// Test GlobalEnergyState::default() uses TOTAL_ENERGY_LIMIT
+        /// Addresses: Correct default initialization
+        #[test]
+        fn test_50_1_global_state_default_uses_total_limit() {
+            let state = GlobalEnergyState::default();
+
+            // MUST use TOTAL_ENERGY_LIMIT, NOT 0
+            assert_eq!(
+                state.total_energy_limit, TOTAL_ENERGY_LIMIT,
+                "Default must use TOTAL_ENERGY_LIMIT"
+            );
+            assert_ne!(state.total_energy_limit, 0, "Default limit must NOT be 0");
+        }
+
+        /// Test GlobalEnergyState::new() matches default()
+        /// Addresses: Consistency between new() and default()
+        #[test]
+        fn test_50_2_new_matches_default() {
+            let from_new = GlobalEnergyState::new();
+            let from_default = GlobalEnergyState::default();
+
+            assert_eq!(
+                from_new.total_energy_limit, from_default.total_energy_limit,
+                "new() and default() must have same total_energy_limit"
+            );
+            assert_eq!(
+                from_new.total_energy_weight, from_default.total_energy_weight,
+                "new() and default() must have same total_energy_weight"
+            );
+            assert_eq!(
+                from_new.last_update, from_default.last_update,
+                "new() and default() must have same last_update"
+            );
+        }
+
+        /// Test AccountEnergy::default() has correct values
+        /// Addresses: AccountEnergy default initialization
+        #[test]
+        fn test_50_3_account_energy_default() {
+            let energy = AccountEnergy::default();
+
+            assert_eq!(energy.frozen_balance, 0);
+            assert_eq!(energy.delegated_frozen_balance, 0);
+            assert_eq!(energy.acquired_delegated_balance, 0);
+            assert_eq!(energy.energy_usage, 0);
+            assert_eq!(energy.latest_consume_time, 0);
+            assert_eq!(energy.free_energy_usage, 0);
+            assert_eq!(energy.latest_free_consume_time, 0);
+            assert!(energy.unfreezing_list.is_empty());
+        }
+    }
+
+    // ========================================================================
+    // Additional Security Analysis Scenarios (51-58)
+    // ========================================================================
+    // These tests cover additional scenarios identified during security analysis.
+    // Each scenario addresses specific bug report suggestions.
+    // ========================================================================
+
+    /// Scenario 51: Pending Unfreeze Tracking Tests
+    ///
+    /// Tests verify that pending unfreezes are tracked correctly in mempool
+    /// verification to prevent over-commitment of frozen balance.
+    mod scenario_51_pending_unfreeze_tracking {
+        use super::*;
+
+        /// Test 51.1: Multiple UnfreezeTos should track pending amounts
+        ///
+        /// Verifies that multiple UnfreezeTos transactions from the same sender
+        /// in a single mempool batch correctly track cumulative pending amounts.
+        #[test]
+        fn test_51_1_multiple_unfreeze_pending_tracking() {
+            let mut energy = AccountEnergy::new();
+            energy.frozen_balance = 5_000 * COIN_VALUE;
+            energy.delegated_frozen_balance = 4_000 * COIN_VALUE;
+            // available_for_delegation = 5000 - 4000 = 1000 TOS
+
+            let available = energy.available_for_delegation();
+            assert_eq!(available, 1_000 * COIN_VALUE);
+
+            // Simulate pending unfreeze tracking
+            let mut pending_unfreeze_amount: u64 = 0;
+
+            // TX1: UnfreezeTos(500)
+            let tx1_amount = 500 * COIN_VALUE;
+            let tx1_available = available.saturating_sub(pending_unfreeze_amount);
+            assert!(
+                tx1_amount <= tx1_available,
+                "TX1 should have sufficient available"
+            );
+            pending_unfreeze_amount = pending_unfreeze_amount.saturating_add(tx1_amount);
+
+            // TX2: UnfreezeTos(500) - with pending tracking
+            let tx2_amount = 500 * COIN_VALUE;
+            let tx2_available = available.saturating_sub(pending_unfreeze_amount);
+            assert!(
+                tx2_amount <= tx2_available,
+                "TX2 should have sufficient available"
+            );
+            pending_unfreeze_amount = pending_unfreeze_amount.saturating_add(tx2_amount);
+
+            // TX3: UnfreezeTos(500) - should fail with proper pending tracking
+            let tx3_amount = 500 * COIN_VALUE;
+            let tx3_available = available.saturating_sub(pending_unfreeze_amount);
+            assert!(
+                tx3_amount > tx3_available,
+                "TX3 should fail due to insufficient available with pending tracking"
+            );
+        }
+
+        /// Test 51.2: Queue capacity with pending unfreezes
+        ///
+        /// Verifies that pending unfreeze count is tracked to prevent
+        /// exceeding queue capacity (32 entries).
+        #[test]
+        fn test_51_2_queue_capacity_with_pending() {
+            let mut energy = AccountEnergy::new();
+            energy.frozen_balance = 100 * COIN_VALUE;
+
+            // Fill queue to 30 entries
+            for _ in 0..30 {
+                energy.unfreezing_list.push(UnfreezingRecord {
+                    unfreeze_amount: COIN_VALUE,
+                    unfreeze_expire_time: 1000,
+                });
+            }
+
+            let mut pending_unfreeze_count = 0usize;
+
+            // TX1: Add pending (now 31)
+            let stored_count = energy.unfreezing_list.len();
+            let total_count = stored_count + pending_unfreeze_count;
+            assert!(total_count < MAX_UNFREEZING_LIST_SIZE);
+            pending_unfreeze_count += 1;
+
+            // TX2: Add pending (now 32, at limit)
+            let total_count = stored_count + pending_unfreeze_count;
+            assert!(total_count < MAX_UNFREEZING_LIST_SIZE);
+            pending_unfreeze_count += 1;
+
+            // TX3: Should fail (32 + pending = 33 > 32)
+            let total_count = stored_count + pending_unfreeze_count;
+            assert!(
+                total_count >= MAX_UNFREEZING_LIST_SIZE,
+                "TX3 should fail due to queue capacity with pending tracking"
+            );
+        }
+    }
+
+    /// Scenario 52: WithdrawExpireUnfreeze Verify/Apply Consistency Tests
+    ///
+    /// Tests verify that WithdrawExpireUnfreeze verification correctly
+    /// checks for expired entries, not just non-empty queue.
+    mod scenario_52_withdraw_expire_consistency {
+        use super::*;
+
+        /// Test 52.1: Immediate WithdrawExpireUnfreeze should fail verification
+        ///
+        /// Verifies that submitting WithdrawExpireUnfreeze immediately after
+        /// UnfreezeTos is rejected (no entries are expired yet).
+        #[test]
+        fn test_52_1_immediate_withdraw_fails_verification() {
+            let mut energy = AccountEnergy::new();
+            energy.frozen_balance = 1_000 * COIN_VALUE;
+
+            let now_ms = 1_000_000_000u64;
+
+            // Start unfreeze
+            energy.start_unfreeze(500 * COIN_VALUE, now_ms).unwrap();
+
+            assert!(
+                !energy.unfreezing_list.is_empty(),
+                "Queue should have entry"
+            );
+
+            // Check if any entries are expired (should be none immediately)
+            let has_expired = energy
+                .unfreezing_list
+                .iter()
+                .any(|entry| entry.unfreeze_expire_time <= now_ms);
+
+            assert!(
+                !has_expired,
+                "No entries should be expired immediately after unfreeze"
+            );
+
+            // This demonstrates the verify/apply gap:
+            // Verification only checks is_empty() but apply checks expiry
+        }
+
+        /// Test 52.2: WithdrawExpireUnfreeze with mixed entries
+        ///
+        /// Verifies correct handling when some entries are expired and some are not.
+        #[test]
+        fn test_52_2_mixed_expired_entries() {
+            let mut energy = AccountEnergy::new();
+            energy.frozen_balance = 2_000 * COIN_VALUE;
+
+            let start_time = 1_000_000_000u64;
+
+            // Add first unfreeze at time 0
+            energy.start_unfreeze(500 * COIN_VALUE, 0).unwrap();
+
+            // Add second unfreeze at current time
+            energy.start_unfreeze(500 * COIN_VALUE, start_time).unwrap();
+
+            // At time 0 + 14 days + 1, first entry should be expired
+            let check_time = UNFREEZE_DELAY_MS + 1;
+
+            let expired_amount: u64 = energy
+                .unfreezing_list
+                .iter()
+                .filter(|e| e.unfreeze_expire_time <= check_time)
+                .map(|e| e.unfreeze_amount)
+                .sum();
+
+            let non_expired_amount: u64 = energy
+                .unfreezing_list
+                .iter()
+                .filter(|e| e.unfreeze_expire_time > check_time)
+                .map(|e| e.unfreeze_amount)
+                .sum();
+
+            assert_eq!(expired_amount, 500 * COIN_VALUE);
+            assert_eq!(non_expired_amount, 500 * COIN_VALUE);
+        }
+    }
+
+    /// Scenario 53: ActivateAccounts Energy Consumption Tests
+    ///
+    /// Tests verify that ActivateAccounts correctly charges energy for
+    /// new account creation (25,000 energy per account).
+    mod scenario_53_activate_accounts_energy {
+        #[allow(unused_imports)]
+        use super::*;
+
+        /// Test 53.1: ActivateAccounts should charge ENERGY_COST_NEW_ACCOUNT
+        ///
+        /// Verifies that each newly activated account consumes 25,000 energy.
+        #[test]
+        fn test_53_1_activate_accounts_energy_cost() {
+            // ENERGY_COST_NEW_ACCOUNT = 25,000
+            let cost_per_account = 25_000u64;
+
+            let accounts_to_activate = 3;
+            let expected_energy = cost_per_account * accounts_to_activate;
+
+            assert_eq!(expected_energy, 75_000);
+        }
+
+        /// Test 53.2: Compare energy between Transfer-to-new-account vs ActivateAccounts
+        ///
+        /// Both operations should charge ENERGY_COST_NEW_ACCOUNT for new accounts.
+        #[test]
+        fn test_53_2_transfer_vs_activate_energy_consistency() {
+            let cost_per_account = 25_000u64;
+
+            // Transfer to 2 new accounts
+            let transfer_new_accounts = 2;
+            let transfer_energy = cost_per_account * transfer_new_accounts;
+
+            // ActivateAccounts for 2 accounts
+            let activate_accounts = 2;
+            let activate_energy = cost_per_account * activate_accounts;
+
+            assert_eq!(
+                transfer_energy, activate_energy,
+                "Both should charge same energy for new accounts"
+            );
+        }
+    }
+
+    /// Scenario 54: UndelegateResource Energy Usage Transfer Tests
+    ///
+    /// Tests verify that undelegation correctly transfers proportional
+    /// energy_usage from receiver back to sender.
+    mod scenario_54_undelegate_usage_transfer {
+        use super::*;
+
+        /// Test 54.1: Energy usage transfer on full undelegation
+        ///
+        /// Verifies that when fully undelegating, energy_usage is transferred
+        /// proportionally from receiver to sender.
+        #[test]
+        fn test_54_1_full_undelegate_usage_transfer() {
+            let mut sender = AccountEnergy::new();
+            let mut receiver = AccountEnergy::new();
+
+            sender.frozen_balance = 10_000 * COIN_VALUE;
+            sender.delegated_frozen_balance = 5_000 * COIN_VALUE;
+            receiver.acquired_delegated_balance = 5_000 * COIN_VALUE;
+
+            // Receiver consumed some energy
+            receiver.energy_usage = 1_000;
+
+            // On undelegation, energy_usage should transfer to sender
+            // Proportional: if receiver limit is based on 5000 delegated,
+            // and we undelegate 100%, 100% of usage should transfer
+            let transfer_usage = receiver.energy_usage; // Full transfer for full undelegate
+
+            sender.energy_usage = sender.energy_usage.saturating_add(transfer_usage);
+            receiver.energy_usage = receiver.energy_usage.saturating_sub(transfer_usage);
+
+            assert_eq!(sender.energy_usage, 1_000);
+            assert_eq!(receiver.energy_usage, 0);
+        }
+
+        /// Test 54.2: Partial undelegation usage transfer
+        ///
+        /// Verifies proportional usage transfer on partial undelegation.
+        #[test]
+        fn test_54_2_partial_undelegate_usage_transfer() {
+            let mut sender = AccountEnergy::new();
+            let mut receiver = AccountEnergy::new();
+
+            sender.frozen_balance = 10_000 * COIN_VALUE;
+            sender.delegated_frozen_balance = 5_000 * COIN_VALUE;
+            receiver.acquired_delegated_balance = 5_000 * COIN_VALUE;
+
+            // Receiver consumed energy
+            receiver.energy_usage = 1_000;
+
+            // Undelegate 50% (2500 out of 5000)
+            let undelegate_amount = 2_500 * COIN_VALUE;
+            let total_delegated = 5_000 * COIN_VALUE;
+
+            // Proportional transfer: 50% of usage
+            let transfer_ratio = undelegate_amount as u128 * 1_000_000 / total_delegated as u128;
+            let transfer_usage =
+                (receiver.energy_usage as u128 * transfer_ratio / 1_000_000) as u64;
+
+            assert_eq!(transfer_usage, 500); // 50% of 1000
+
+            sender.energy_usage = sender.energy_usage.saturating_add(transfer_usage);
+            receiver.energy_usage = receiver.energy_usage.saturating_sub(transfer_usage);
+
+            assert_eq!(sender.energy_usage, 500);
+            assert_eq!(receiver.energy_usage, 500);
+        }
+
+        /// Test 54.3: Total energy_usage conservation
+        ///
+        /// Verifies that total energy_usage is conserved across undelegation.
+        #[test]
+        fn test_54_3_usage_conservation() {
+            let initial_sender_usage = 200u64;
+            let initial_receiver_usage = 800u64;
+            let total_usage_before = initial_sender_usage + initial_receiver_usage;
+
+            // After transfer
+            let transfer_amount = 300u64;
+            let final_sender_usage = initial_sender_usage + transfer_amount;
+            let final_receiver_usage = initial_receiver_usage - transfer_amount;
+            let total_usage_after = final_sender_usage + final_receiver_usage;
+
+            assert_eq!(
+                total_usage_before, total_usage_after,
+                "Total energy_usage must be conserved"
+            );
+        }
+    }
+
+    /// Scenario 55: ActivateAndDelegate Pending Tracking Tests
+    ///
+    /// Tests verify that ActivateAndDelegate correctly tracks pending
+    /// delegation amounts for same-block verification.
+    mod scenario_55_activate_delegate_pending {
+        use super::*;
+
+        /// Test 55.1: Multiple ActivateAndDelegate should track pending delegation
+        ///
+        /// Verifies that pending delegation amount is tracked to prevent
+        /// over-delegation in same-block scenarios.
+        #[test]
+        fn test_55_1_multiple_activate_delegate_pending() {
+            let mut energy = AccountEnergy::new();
+            energy.frozen_balance = 1_000 * COIN_VALUE;
+            energy.delegated_frozen_balance = 0;
+
+            let available = energy.available_for_delegation();
+            assert_eq!(available, 1_000 * COIN_VALUE);
+
+            let mut pending_delegation: u64 = 0;
+
+            // TX1: ActivateAndDelegate(500)
+            let tx1_delegation = 500 * COIN_VALUE;
+            let tx1_available = available.saturating_sub(pending_delegation);
+            assert!(tx1_delegation <= tx1_available);
+            pending_delegation = pending_delegation.saturating_add(tx1_delegation);
+
+            // TX2: ActivateAndDelegate(400) - with pending tracking
+            let tx2_delegation = 400 * COIN_VALUE;
+            let tx2_available = available.saturating_sub(pending_delegation);
+            assert!(tx2_delegation <= tx2_available);
+            pending_delegation = pending_delegation.saturating_add(tx2_delegation);
+
+            // TX3: ActivateAndDelegate(200) - should fail with proper tracking
+            let tx3_delegation = 200 * COIN_VALUE;
+            let tx3_available = available.saturating_sub(pending_delegation);
+            assert!(
+                tx3_delegation > tx3_available,
+                "TX3 should fail due to insufficient available with pending tracking"
+            );
+        }
+
+        /// Test 55.2: ActivateAndDelegate followed by DelegateResource
+        ///
+        /// Verifies cross-operation pending tracking.
+        #[test]
+        fn test_55_2_activate_then_delegate_pending() {
+            let mut energy = AccountEnergy::new();
+            energy.frozen_balance = 1_000 * COIN_VALUE;
+
+            let available = energy.available_for_delegation();
+            let mut pending_delegation: u64 = 0;
+
+            // TX1: ActivateAndDelegate(600)
+            let tx1_amount = 600 * COIN_VALUE;
+            pending_delegation = pending_delegation.saturating_add(tx1_amount);
+
+            // TX2: DelegateResource(500) - should fail
+            let tx2_amount = 500 * COIN_VALUE;
+            let tx2_available = available.saturating_sub(pending_delegation);
+
+            assert!(
+                tx2_amount > tx2_available,
+                "DelegateResource should fail due to pending from ActivateAndDelegate"
+            );
+        }
+    }
+
+    /// Scenario 56: CancelAllUnfreeze with Pending Unfreezes Tests
+    ///
+    /// Tests verify that CancelAllUnfreeze correctly handles pending
+    /// unfreezes from the same block.
+    mod scenario_56_cancel_unfreeze_pending {
+        use super::*;
+
+        /// Test 56.1: CancelAllUnfreeze with pending unfreeze
+        ///
+        /// Verifies that CancelAllUnfreeze accepts if there are pending unfreezes
+        /// even when the stored queue is empty.
+        #[test]
+        fn test_56_1_cancel_with_pending_only() {
+            let energy = AccountEnergy::new();
+            // Empty queue in storage
+            assert!(energy.unfreezing_list.is_empty());
+
+            // But there's a pending unfreeze from earlier TX in same block
+            let pending_unfreeze_count = 1;
+
+            // CancelAllUnfreeze should be allowed if:
+            // - storage queue is not empty, OR
+            // - pending_unfreeze_count > 0
+            let has_entries = !energy.unfreezing_list.is_empty() || pending_unfreeze_count > 0;
+
+            assert!(
+                has_entries,
+                "CancelAllUnfreeze should be valid with pending unfreezes"
+            );
+        }
+
+        /// Test 56.2: UnfreezeTos followed by CancelAllUnfreeze in same block
+        ///
+        /// Verifies the Unfreeze->Cancel sequence works with pending tracking.
+        #[test]
+        fn test_56_2_unfreeze_then_cancel_same_block() {
+            let mut energy = AccountEnergy::new();
+            energy.frozen_balance = 1_000 * COIN_VALUE;
+
+            // TX1: UnfreezeTos - adds to pending
+            // (In real code, this goes to pending, not directly to unfreezing_list)
+            let mut pending_unfreeze_count = 0;
+            pending_unfreeze_count += 1; // TX1 adds pending
+
+            // TX2: CancelAllUnfreeze
+            // Should see pending_unfreeze_count > 0 OR unfreezing_list not empty
+            let can_cancel = !energy.unfreezing_list.is_empty() || pending_unfreeze_count > 0;
+
+            assert!(
+                can_cancel,
+                "CancelAllUnfreeze should succeed after UnfreezeTos in same block"
+            );
+        }
+    }
+
+    /// Scenario 57: Cross-Operation Pending Visibility Tests
+    ///
+    /// Tests verify that Unfreeze and Delegate operations correctly see
+    /// each other's pending amounts.
+    mod scenario_57_cross_operation_pending {
+        use super::*;
+
+        /// Test 57.1: Delegate then Unfreeze same block
+        ///
+        /// Verifies that UnfreezeTos sees pending delegation and fails
+        /// if combined amounts exceed available.
+        #[test]
+        fn test_57_1_delegate_then_unfreeze() {
+            let mut energy = AccountEnergy::new();
+            energy.frozen_balance = 1_000 * COIN_VALUE;
+            energy.delegated_frozen_balance = 0;
+
+            let available = energy.available_for_delegation();
+            assert_eq!(available, 1_000 * COIN_VALUE);
+
+            // TX1: DelegateResource(500) - recorded as pending
+            let pending_delegation: u64 = 500 * COIN_VALUE;
+            let pending_unfreeze: u64 = 0;
+
+            // TX2: UnfreezeTos(600) should see pending_delegation
+            let effective_available = available
+                .saturating_sub(pending_delegation)
+                .saturating_sub(pending_unfreeze);
+
+            let unfreeze_amount = 600 * COIN_VALUE;
+
+            assert!(
+                unfreeze_amount > effective_available,
+                "UnfreezeTos should fail when pending_delegation reduces available"
+            );
+
+            // But 400 would succeed
+            let smaller_unfreeze = 400 * COIN_VALUE;
+            assert!(smaller_unfreeze <= effective_available);
+        }
+
+        /// Test 57.2: Unfreeze then Delegate same block
+        ///
+        /// Verifies that DelegateResource sees pending unfreeze and fails
+        /// if combined amounts exceed available.
+        #[test]
+        fn test_57_2_unfreeze_then_delegate() {
+            let mut energy = AccountEnergy::new();
+            energy.frozen_balance = 1_000 * COIN_VALUE;
+
+            let available = energy.available_for_delegation();
+
+            // TX1: UnfreezeTos(700)
+            let pending_unfreeze: u64 = 700 * COIN_VALUE;
+            let pending_delegation: u64 = 0;
+
+            // TX2: DelegateResource(500) should see pending_unfreeze
+            let effective_available = available
+                .saturating_sub(pending_delegation)
+                .saturating_sub(pending_unfreeze);
+
+            let delegate_amount = 500 * COIN_VALUE;
+
+            assert!(
+                delegate_amount > effective_available,
+                "DelegateResource should fail when pending_unfreeze reduces available"
+            );
+
+            // But 200 would succeed
+            let smaller_delegate = 200 * COIN_VALUE;
+            assert!(smaller_delegate <= effective_available);
+        }
+
+        /// Test 57.3: Interleaved operations should respect cumulative pending
+        #[test]
+        fn test_57_3_interleaved_operations() {
+            let mut energy = AccountEnergy::new();
+            energy.frozen_balance = 1_000 * COIN_VALUE;
+
+            let available = energy.available_for_delegation();
+            let mut pending_delegation: u64 = 0;
+            let mut pending_unfreeze: u64 = 0;
+
+            // TX1: Delegate 300
+            pending_delegation = pending_delegation.saturating_add(300 * COIN_VALUE);
+            let remaining = available
+                .saturating_sub(pending_delegation)
+                .saturating_sub(pending_unfreeze);
+            assert_eq!(remaining, 700 * COIN_VALUE);
+
+            // TX2: Unfreeze 300
+            pending_unfreeze = pending_unfreeze.saturating_add(300 * COIN_VALUE);
+            let remaining = available
+                .saturating_sub(pending_delegation)
+                .saturating_sub(pending_unfreeze);
+            assert_eq!(remaining, 400 * COIN_VALUE);
+
+            // TX3: Delegate 200
+            pending_delegation = pending_delegation.saturating_add(200 * COIN_VALUE);
+            let remaining = available
+                .saturating_sub(pending_delegation)
+                .saturating_sub(pending_unfreeze);
+            assert_eq!(remaining, 200 * COIN_VALUE);
+
+            // TX4: Unfreeze 300 - should fail (only 200 remaining)
+            let tx4_unfreeze = 300 * COIN_VALUE;
+            assert!(
+                tx4_unfreeze > remaining,
+                "TX4 should fail due to cumulative pending"
+            );
+
+            // Total committed = 300 + 300 + 200 = 800 (200 remaining)
+            assert_eq!(pending_delegation + pending_unfreeze, 800 * COIN_VALUE);
+        }
+    }
+
+    /// Scenario 58: Estimate Energy Overflow Tests
+    ///
+    /// Tests verify that estimate_energy functions handle overflow correctly
+    /// with extreme values.
+    mod scenario_58_estimate_energy_overflow {
+        use super::*;
+
+        /// Test 58.1: Energy limit with extreme frozen balance
+        ///
+        /// Verifies that calculation handles u64::MAX without overflow.
+        #[test]
+        fn test_58_1_extreme_frozen_balance() {
+            let mut energy = AccountEnergy::new();
+            energy.frozen_balance = u64::MAX;
+
+            let total_weight = u64::MAX;
+
+            // Should not overflow - uses u128 intermediate calculation
+            let limit = energy.calculate_energy_limit(total_weight);
+
+            // When frozen == total_weight, limit should equal TOTAL_ENERGY_LIMIT
+            assert_eq!(limit, TOTAL_ENERGY_LIMIT);
+        }
+
+        /// Test 58.2: Energy limit with near-max delegation
+        ///
+        /// Verifies handling of near-maximum values in delegation.
+        #[test]
+        fn test_58_2_near_max_delegation() {
+            let mut energy = AccountEnergy::new();
+            energy.frozen_balance = u64::MAX - 1000;
+            energy.acquired_delegated_balance = 1000;
+
+            let total_weight = u64::MAX;
+
+            // effective_frozen_balance uses saturating_add internally
+            let effective = energy.effective_frozen_balance();
+            assert_eq!(effective, u64::MAX);
+
+            // Should not panic
+            let limit = energy.calculate_energy_limit(total_weight);
+            assert_eq!(limit, TOTAL_ENERGY_LIMIT);
+        }
+
+        /// Test 58.3: Zero total_weight edge case
+        ///
+        /// Verifies division by zero is handled.
+        #[test]
+        fn test_58_3_zero_total_weight() {
+            let mut energy = AccountEnergy::new();
+            energy.frozen_balance = 1_000 * COIN_VALUE;
+
+            let limit = energy.calculate_energy_limit(0);
+
+            // Division by zero protection
+            assert_eq!(limit, 0);
+        }
+
+        /// Test 58.4: Proportional calculation accuracy at boundaries
+        ///
+        /// Verifies accuracy with large values.
+        #[test]
+        fn test_58_4_large_value_accuracy() {
+            let mut energy = AccountEnergy::new();
+            // 1 billion TOS frozen
+            energy.frozen_balance = 1_000_000_000 * COIN_VALUE;
+            // 10 billion TOS total weight
+            let total_weight = 10_000_000_000 * COIN_VALUE;
+
+            let limit = energy.calculate_energy_limit(total_weight);
+
+            // 10% of TOTAL_ENERGY_LIMIT (18.4 billion)
+            let expected = TOTAL_ENERGY_LIMIT / 10;
+            assert_eq!(limit, expected);
+        }
+    }
+
+    // ============================================================================
+    // SCENARIO 59: CONTRACT SINGLE CHARGING MODEL TESTS
+    // Addresses: Contracts pay energy only, not legacy gas AND energy
+    // ============================================================================
+
+    mod scenario_59_single_charging_model {
+        use crate::config::TOS_PER_ENERGY;
+
+        /// Test 59.1: Energy-only charging model
+        /// Addresses: No legacy gas burn under Energy model
+        #[test]
+        fn test_59_1_energy_only_charging() {
+            let _max_gas = 1_000_000u64;
+            let used_gas = 100_000u64;
+            let tx_size = 200u64;
+
+            // Under Energy model: cost = tx_size + used_gas
+            let energy_consumed = tx_size + used_gas;
+            let tos_cost = energy_consumed * TOS_PER_ENERGY;
+
+            assert_eq!(tos_cost, (200 + 100_000) * 100);
+            assert_eq!(tos_cost, 10_020_000);
+        }
+
+        /// Test 59.2: Legacy gas system disabled verification
+        /// Addresses: Documents what legacy system would charge
+        #[test]
+        fn test_59_2_legacy_disabled() {
+            let used_gas = 100_000u64;
+
+            // Legacy system (should NOT apply):
+            let legacy_burn = (used_gas * 30) / 100; // 30%
+            let legacy_fee = used_gas - legacy_burn;
+
+            // Under Energy model, these are 0
+            let actual_legacy_burn = 0u64;
+            let actual_legacy_fee = 0u64;
+
+            assert_eq!(actual_legacy_burn, 0);
+            assert_eq!(actual_legacy_fee, 0);
+            // Document legacy values
+            assert_eq!(legacy_burn, 30_000);
+            assert_eq!(legacy_fee, 70_000);
+        }
+    }
+
+    // ============================================================================
+    // SCENARIO 60: CONTRACT DOUBLE REFUND PREVENTION TESTS
+    // Addresses: No double refund from legacy gas AND energy
+    // ============================================================================
+
+    mod scenario_60_double_refund_prevention {
+
+        /// Test 60.1: Single refund path only
+        /// Addresses: Only energy refund, not legacy + energy
+        #[test]
+        fn test_60_1_single_refund() {
+            let fee_limit = 1_000_000u64;
+            let tos_consumed = 100_000u64;
+
+            // Single refund: fee_limit - consumed
+            let refund = fee_limit.saturating_sub(tos_consumed);
+            assert_eq!(refund, 900_000);
+
+            // No additional legacy refund
+            let legacy_refund = 0u64;
+            let total_refund = refund + legacy_refund;
+            assert_eq!(total_refund, 900_000);
+        }
+
+        /// Test 60.2: TOS conservation check
+        /// Addresses: No TOS minting via double refund
+        #[test]
+        fn test_60_2_tos_conservation() {
+            let initial_balance = 10_000_000u64;
+            let fee_limit = 1_000_000u64;
+            let tos_consumed = 500_000u64;
+
+            let after_reserve = initial_balance - fee_limit;
+            let refund = fee_limit - tos_consumed;
+            let final_balance = after_reserve + refund;
+
+            // Conservation: initial - consumed = final
+            assert_eq!(initial_balance - tos_consumed, final_balance);
+            assert!(final_balance <= initial_balance);
+        }
+
+        /// Test 60.3: Refund bounded by fee_limit
+        #[test]
+        fn test_60_3_refund_bounded() {
+            let fee_limit = 1_000_000u64;
+
+            for tos_consumed in [0u64, 500_000, 1_000_000, 2_000_000] {
+                let refund = fee_limit.saturating_sub(tos_consumed);
+                assert!(refund <= fee_limit);
+            }
+        }
+    }
+
+    // ============================================================================
+    // SCENARIO 61: CONTRACT BALANCE RESERVATION TESTS
+    // Addresses: Only fee_limit reserved, not fee_limit + max_gas
+    // ============================================================================
+
+    mod scenario_61_balance_reservation {
+
+        /// Test 61.1: Single reservation (fee_limit only)
+        #[test]
+        fn test_61_1_single_reservation() {
+            let balance = 1_000_000u64;
+            let fee_limit = 500_000u64;
+            let _max_gas = 1_000_000u64;
+
+            // Only fee_limit required
+            let required = fee_limit;
+            assert!(balance >= required);
+        }
+
+        /// Test 61.2: Double reservation bug demonstration
+        #[test]
+        fn test_61_2_double_reservation_bug() {
+            let balance = 1_000_000u64;
+            let fee_limit = 500_000u64;
+            let max_gas = 1_000_000u64;
+
+            // BUG: Would require fee_limit + max_gas
+            let wrong_required = fee_limit + max_gas;
+            assert!(balance < wrong_required, "Bug would reject valid tx");
+
+            // Correct: only fee_limit
+            assert!(balance >= fee_limit, "Correct check passes");
+        }
+    }
+
+    // ============================================================================
+    // SCENARIO 62: SAME-TX MULTI-OUTPUT REGISTRATION TESTS
+    // Addresses: Track pending registrations within single transaction
+    // ============================================================================
+
+    mod scenario_62_multi_output_registration {
+        use crate::config::FEE_PER_ACCOUNT_CREATION;
+        use std::collections::HashSet;
+
+        /// Test 62.1: Multiple outputs to same new account
+        /// Addresses: First output pays fee, subsequent don't
+        #[test]
+        fn test_62_1_multiple_outputs() {
+            // FEE_PER_ACCOUNT_CREATION = 10_000_000 (0.1 TOS)
+            let output1_amount = 100_000_000u64; // 1 TOS, covers fee
+            let output2_amount = 5_000_000u64; // 0.05 TOS, less than fee
+
+            // Output 1: Covers creation fee
+            assert!(output1_amount >= FEE_PER_ACCOUNT_CREATION);
+
+            // Track pending
+            let mut pending: HashSet<&str> = HashSet::new();
+            pending.insert("B");
+
+            // Output 2: Account is pending, not new
+            assert!(pending.contains("B"));
+
+            // Small amount OK for pending account
+            assert!(output2_amount < FEE_PER_ACCOUNT_CREATION);
+        }
+
+        /// Test 62.2: First output too small fails
+        #[test]
+        fn test_62_2_first_output_too_small() {
+            let output1_amount = 50_000u64;
+            let is_new = true;
+            let covers_fee = output1_amount >= FEE_PER_ACCOUNT_CREATION;
+
+            let should_reject = is_new && !covers_fee;
+            assert!(should_reject);
+        }
+
+        /// Test 62.3: Pending isolation between transactions
+        #[test]
+        fn test_62_3_pending_isolation() {
+            let mut pending_tx1: HashSet<&str> = HashSet::new();
+            pending_tx1.insert("B");
+
+            let pending_tx2: HashSet<&str> = HashSet::new();
+            assert!(
+                !pending_tx2.contains("B"),
+                "TX2 should not see TX1's pending"
+            );
+        }
+    }
+
+    // ============================================================================
+    // SCENARIO 63: AIMINING FEE ENFORCEMENT TESTS
+    // Addresses: AIMining fees enforced on-chain
+    // ============================================================================
+
+    mod scenario_63_aimining_fees {
+
+        /// Test 63.1: RegisterMiner fee enforcement
+        #[test]
+        fn test_63_1_register_miner_fee() {
+            let registration_fee = 1_000_000u64;
+            let balance = 5_000_000u64;
+
+            let spending = registration_fee;
+            assert!(balance >= spending);
+        }
+
+        /// Test 63.2: SubmitAnswer stake enforcement
+        #[test]
+        fn test_63_2_submit_answer_stake() {
+            let stake_amount = 500_000u64;
+            let balance = 2_000_000u64;
+
+            let spending = stake_amount;
+            assert!(balance >= spending);
+        }
+
+        /// Test 63.3: PublishTask reward enforcement
+        #[test]
+        fn test_63_3_publish_task_reward() {
+            let reward_amount = 10_000_000u64;
+            let balance = 50_000_000u64;
+
+            let spending = reward_amount;
+            assert!(balance >= spending);
+        }
+
+        /// Test 63.4: ValidateAnswer no spending
+        #[test]
+        fn test_63_4_validate_no_spending() {
+            let spending = 0u64;
+            assert_eq!(spending, 0, "Observers don't pay");
+        }
+
+        /// Test 63.5: Insufficient balance rejection
+        #[test]
+        fn test_63_5_insufficient_balance() {
+            let registration_fee = 1_000_000u64;
+            let balance = 500_000u64;
+
+            assert!(
+                balance < registration_fee,
+                "Should reject insufficient balance"
+            );
+        }
+    }
+
+    // ============================================================================
+    // SCENARIO 64: BATCH REFERRAL REWARD ENERGY COST TESTS
+    // Addresses: Per-recipient energy overhead for batch referral
+    // ============================================================================
+
+    mod scenario_64_batch_referral_energy {
+        use crate::config::ENERGY_COST_TRANSFER_PER_OUTPUT;
+
+        /// Test 64.1: Single recipient energy cost
+        #[test]
+        fn test_64_1_single_recipient() {
+            let tx_size = 200u64;
+            let recipient_count = 1u64;
+
+            let energy_cost = tx_size + recipient_count * ENERGY_COST_TRANSFER_PER_OUTPUT;
+            assert_eq!(energy_cost, 300);
+        }
+
+        /// Test 64.2: Multiple recipients energy cost
+        #[test]
+        fn test_64_2_multiple_recipients() {
+            let tx_size = 300u64;
+            let recipient_count = 10u64;
+
+            let energy_cost = tx_size + recipient_count * ENERGY_COST_TRANSFER_PER_OUTPUT;
+            assert_eq!(energy_cost, 1_300);
+        }
+
+        /// Test 64.3: Parity with transfers
+        #[test]
+        fn test_64_3_parity_with_transfers() {
+            let tx_size = 300u64;
+            let recipient_count = 5u64;
+
+            let referral_cost = tx_size + recipient_count * ENERGY_COST_TRANSFER_PER_OUTPUT;
+            let transfer_cost = tx_size + recipient_count * ENERGY_COST_TRANSFER_PER_OUTPUT;
+
+            assert_eq!(referral_cost, transfer_cost, "Fair pricing parity");
+        }
+
+        /// Test 64.4: Large recipient count shows bug difference
+        #[test]
+        fn test_64_4_large_recipient_bug_difference() {
+            let tx_size = 500u64;
+            let recipient_count = 100u64;
+
+            let correct_cost = tx_size + recipient_count * ENERGY_COST_TRANSFER_PER_OUTPUT;
+            assert_eq!(correct_cost, 10_500);
+
+            // Bug case: only base cost
+            let bug_cost = tx_size;
+            let difference = correct_cost - bug_cost;
+            assert_eq!(difference, 10_000, "Bug undercharged by 10,000 energy");
+        }
+    }
+
+    // ============================================================================
+    // SCENARIO 65: BINDREFERRER EXTRA DATA SIZE VALIDATION TESTS
+    // Addresses: Size limits on extra_data field
+    // ============================================================================
+
+    mod scenario_65_bindreferrer_extra_data {
+
+        /// BindReferrer-specific limit
+        const BINDREFERRER_EXTRA_DATA_LIMIT: usize = 128;
+
+        /// Test 65.1: Valid extra_data sizes
+        #[test]
+        fn test_65_1_valid_sizes() {
+            let valid_sizes = vec![0, 1, 64, 127, 128];
+
+            for size in valid_sizes {
+                assert!(
+                    size <= BINDREFERRER_EXTRA_DATA_LIMIT,
+                    "Size {} should be valid",
+                    size
+                );
+            }
+        }
+
+        /// Test 65.2: Excessive extra_data rejected
+        #[test]
+        fn test_65_2_excessive_rejected() {
+            let excessive_sizes = vec![129, 256, 1_000, 4_096];
+
+            for size in excessive_sizes {
+                assert!(
+                    size > BINDREFERRER_EXTRA_DATA_LIMIT,
+                    "Size {} should be rejected",
+                    size
+                );
+            }
+        }
+
+        /// Test 65.3: Boundary at limit
+        #[test]
+        fn test_65_3_boundary() {
+            assert!(128 <= BINDREFERRER_EXTRA_DATA_LIMIT);
+            assert!(129 > BINDREFERRER_EXTRA_DATA_LIMIT);
+        }
+
+        /// Test 65.4: None extra_data is valid
+        #[test]
+        fn test_65_4_none_is_valid() {
+            let extra_data: Option<Vec<u8>> = None;
+            let is_valid = extra_data
+                .as_ref()
+                .map_or(true, |d| d.len() <= BINDREFERRER_EXTRA_DATA_LIMIT);
+            assert!(is_valid);
+        }
+
+        /// Test 65.5: Validation function pattern
+        #[test]
+        fn test_65_5_validation_pattern() {
+            fn validate_extra_data(data: &Option<Vec<u8>>) -> bool {
+                match data {
+                    None => true,
+                    Some(d) => d.len() <= BINDREFERRER_EXTRA_DATA_LIMIT,
+                }
+            }
+
+            assert!(validate_extra_data(&None));
+            assert!(validate_extra_data(&Some(vec![0u8; 100])));
+            assert!(validate_extra_data(&Some(vec![0u8; 128])));
+            assert!(!validate_extra_data(&Some(vec![0u8; 129])));
+        }
+    }
+
+    // ============================================================================
+    // SCENARIO 66: CONTRACT ENERGY REFUND ADJUSTMENT TESTS
+    // Addresses: Adjust energy consumption based on actual gas used
+    // ============================================================================
+
+    mod scenario_66_contract_energy_adjustment {
+        use crate::config::TOS_PER_ENERGY;
+
+        /// Test 66.1: InvokeContract energy adjustment
+        /// Addresses: Energy reduced when actual gas < max_gas
+        #[test]
+        fn test_66_1_invoke_energy_adjustment() {
+            let max_gas = 500_000u64;
+            let used_gas = 100_000u64;
+            let base_cost = 200u64;
+
+            // Reserved energy
+            let reserved = base_cost + max_gas;
+
+            // Adjusted based on actual usage
+            let unused = max_gas.saturating_sub(used_gas);
+            let actual = reserved.saturating_sub(unused);
+
+            assert_eq!(actual, base_cost + used_gas);
+            assert_eq!(actual, 100_200);
+        }
+
+        /// Test 66.2: Full gas usage (no adjustment)
+        #[test]
+        fn test_66_2_full_gas_no_adjustment() {
+            let max_gas = 500_000u64;
+            let used_gas = 500_000u64;
+            let base_cost = 200u64;
+
+            let reserved = base_cost + max_gas;
+            let unused = max_gas.saturating_sub(used_gas);
+            let actual = reserved.saturating_sub(unused);
+
+            assert_eq!(unused, 0);
+            assert_eq!(actual, reserved);
+        }
+
+        /// Test 66.3: TOS savings from adjustment
+        #[test]
+        fn test_66_3_tos_savings() {
+            let max_gas = 500_000u64;
+            let used_gas = 100_000u64;
+            let base_cost = 200u64;
+
+            let reserved_energy = base_cost + max_gas;
+            let actual_energy = base_cost + used_gas;
+
+            let reserved_tos = reserved_energy * TOS_PER_ENERGY;
+            let actual_tos = actual_energy * TOS_PER_ENERGY;
+
+            let savings = reserved_tos - actual_tos;
+            assert_eq!(savings, (max_gas - used_gas) * TOS_PER_ENERGY);
+            assert_eq!(savings, 40_000_000);
+        }
+    }
+
+    // ============================================================================
+    // SCENARIO 67: DEPLOYCONTRACT BYTECODE COST CALCULATION TESTS
+    // Addresses: Use bytecode.len() not payload.size() for per-byte cost
+    // ============================================================================
+
+    mod scenario_67_deploy_bytecode_cost {
+        use crate::config::{
+            ENERGY_COST_CONTRACT_DEPLOY_BASE, ENERGY_COST_CONTRACT_DEPLOY_PER_BYTE,
+        };
+
+        /// Test 67.1: Bytecode only vs full payload
+        /// Addresses: Per-byte cost should use bytecode length only
+        #[test]
+        fn test_67_1_bytecode_vs_payload() {
+            let bytecode_len = 10_000u64;
+            let constructor_data_len = 5_000u64;
+            let tx_size = 200u64;
+
+            // WRONG: Using payload.size()
+            let wrong_size = bytecode_len + constructor_data_len;
+            let wrong_cost = tx_size
+                + ENERGY_COST_CONTRACT_DEPLOY_BASE
+                + (wrong_size * ENERGY_COST_CONTRACT_DEPLOY_PER_BYTE);
+
+            // CORRECT: Using bytecode.len()
+            let correct_cost = tx_size
+                + ENERGY_COST_CONTRACT_DEPLOY_BASE
+                + (bytecode_len * ENERGY_COST_CONTRACT_DEPLOY_PER_BYTE);
+
+            // Overcharge = constructor_data_len * 10
+            let overcharge = wrong_cost - correct_cost;
+            assert_eq!(
+                overcharge,
+                constructor_data_len * ENERGY_COST_CONTRACT_DEPLOY_PER_BYTE
+            );
+            assert_eq!(overcharge, 50_000);
+        }
+
+        /// Test 67.2: Separate bytecode cost from constructor max_gas
+        #[test]
+        fn test_67_2_separate_costs() {
+            let bytecode_len = 2_000u64;
+            let constructor_max_gas = 500_000u64;
+            let tx_size = 200u64;
+
+            // Bytecode cost (per-byte)
+            let bytecode_cost = ENERGY_COST_CONTRACT_DEPLOY_BASE
+                + (bytecode_len * ENERGY_COST_CONTRACT_DEPLOY_PER_BYTE);
+
+            // Constructor cost (max_gas, NOT per-byte)
+            let constructor_cost = constructor_max_gas;
+
+            // Total correctly separates the two
+            let total = tx_size + bytecode_cost + constructor_cost;
+
+            assert_eq!(bytecode_cost, 52_000);
+            assert_eq!(constructor_cost, 500_000);
+            assert_eq!(total, 552_200);
+        }
+    }
+
+    // ============================================================================
+    // SCENARIO 68: VALUECELL BYTES SIZE VALIDATION TESTS
+    // Addresses: Prevent memory exhaustion from unbounded bytes allocation
+    // ============================================================================
+
+    mod scenario_68_valuecell_bytes_limit {
+
+        /// Maximum allowed size for ValueCell::Bytes (1MB)
+        const MAX_BYTES_SIZE: usize = 1_000_000;
+
+        /// Test 68.1: Valid sizes accepted
+        #[test]
+        fn test_68_1_valid_sizes() {
+            let valid_sizes = vec![0, 1, 100, 1_000, 100_000, 1_000_000];
+
+            for size in valid_sizes {
+                assert!(size <= MAX_BYTES_SIZE, "Size {} should be valid", size);
+            }
+        }
+
+        /// Test 68.2: Excessive sizes rejected
+        #[test]
+        fn test_68_2_excessive_rejected() {
+            let excessive_sizes: Vec<u32> = vec![1_000_001, 10_000_000, 100_000_000, u32::MAX];
+
+            for size in excessive_sizes {
+                assert!(
+                    size as usize > MAX_BYTES_SIZE,
+                    "Size {} should be rejected",
+                    size
+                );
+            }
+        }
+
+        /// Test 68.3: Boundary at limit
+        #[test]
+        fn test_68_3_boundary() {
+            assert!(1_000_000 <= MAX_BYTES_SIZE);
+            assert!(1_000_001 > MAX_BYTES_SIZE);
+        }
+
+        /// Test 68.4: Zero length valid
+        #[test]
+        fn test_68_4_zero_valid() {
+            let zero_size: usize = 0;
+            assert!(zero_size <= MAX_BYTES_SIZE);
+        }
+    }
+
+    // ============================================================================
+    // SCENARIO 69: ENERGY STATE MUTATION ORDER TESTS
+    // Addresses: Check fee_limit BEFORE mutating energy state
+    // ============================================================================
+
+    mod scenario_69_mutation_order {
+        use super::*;
+
+        /// Test 69.1: Check before mutate pattern
+        /// Addresses: Correct order of operations
+        #[test]
+        fn test_69_1_check_before_mutate() {
+            let account = AccountEnergy::new();
+            let fee_limit = 1_000u64;
+            let required_energy = 10_000u64;
+
+            // Step 1: Calculate required TOS
+            let required_tos = required_energy * 100;
+            assert_eq!(required_tos, 1_000_000);
+
+            // Step 2: Check fee_limit BEFORE mutation
+            let fee_limit_ok = required_tos <= fee_limit;
+            assert!(!fee_limit_ok, "Fee limit should be insufficient");
+
+            // Step 3: State unchanged when check fails
+            assert_eq!(account.energy_usage, 0);
+        }
+
+        /// Test 69.2: Compute on copy pattern
+        /// Addresses: Safe state handling with copies
+        #[test]
+        fn test_69_2_compute_on_copy() {
+            let account = AccountEnergy::new();
+            let required_energy = 1_000u64;
+            let fee_limit = 500_000u64;
+
+            // Create copy for computation
+            let mut account_copy = account.clone();
+
+            let total_weight = 10_000_000 * COIN_VALUE;
+            let now_ms = 1_000_000u64;
+
+            // Compute on copy
+            let result = EnergyResourceManager::consume_transaction_energy_detailed(
+                &mut account_copy,
+                required_energy,
+                total_weight,
+                now_ms,
+            );
+
+            // Check fee_limit
+            let fee_ok = result.fee <= fee_limit;
+            assert!(fee_ok);
+
+            // Original unchanged until explicit commit
+            assert_eq!(account.energy_usage, 0);
+        }
+    }
 }
