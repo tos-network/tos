@@ -1109,6 +1109,142 @@ impl EnergyResource {
         Ok((energy_per_delegatee, whole_tos_amount))
     }
 
+    /// Unfreeze a specific delegatee's entry from a batch delegation record
+    ///
+    /// This function supports selective unfreeze of a single delegatee from a batch
+    /// delegation that may contain multiple delegatees. It is required when the
+    /// delegation record has more than one entry.
+    ///
+    /// # Parameters
+    /// - `tos_amount`: Amount to unfreeze (must be whole TOS, minimum 1 TOS)
+    /// - `current_topoheight`: Current block height for lock checking
+    /// - `record_index`: Which delegation record (required if multiple records exist)
+    /// - `delegatee_address`: The delegatee whose entry to unfreeze
+    ///
+    /// # Returns
+    /// - `Ok((delegatee, energy_removed, pending_amount))` on success
+    /// - `Err(String)` on failure
+    ///
+    /// # Errors
+    /// - "Cannot unfreeze 0 TOS" if amount rounds to 0
+    /// - "Amount below minimum unfreeze amount" if < 1 TOS
+    /// - "Maximum pending unfreezes reached" if at 32 pending limit
+    /// - "No delegated records found" if no delegation records exist
+    /// - "Multiple delegation records exist, record_index required" if > 1 records
+    /// - "Record index out of bounds" if record_index >= records.len()
+    /// - "Record is still locked" if unlock_topoheight not reached
+    /// - "Delegatee not found in record" if delegatee_address not in entries
+    /// - "Amount exceeds entry amount" if trying to unfreeze more than entry has
+    pub fn unfreeze_delegated_entry(
+        &mut self,
+        tos_amount: u64,
+        current_topoheight: TopoHeight,
+        record_index: Option<u32>,
+        delegatee_address: &PublicKey,
+    ) -> Result<(PublicKey, u64, u64), String> {
+        // Validate amount is whole TOS
+        let whole_tos_amount = (tos_amount / crate::config::COIN_VALUE) * crate::config::COIN_VALUE;
+
+        if whole_tos_amount == 0 {
+            return Err("Cannot unfreeze 0 TOS".to_string());
+        }
+
+        if whole_tos_amount < crate::config::MIN_UNFREEZE_TOS_AMOUNT {
+            return Err("Amount below minimum unfreeze amount".to_string());
+        }
+
+        if !self.can_add_pending_unfreeze() {
+            return Err("Maximum pending unfreezes reached".to_string());
+        }
+
+        // Determine which record to use
+        if self.delegated_records.is_empty() {
+            return Err("No delegated records found".to_string());
+        }
+
+        let record_idx = match record_index {
+            Some(idx) => {
+                if idx as usize >= self.delegated_records.len() {
+                    return Err("Record index out of bounds".to_string());
+                }
+                idx as usize
+            }
+            None => {
+                if self.delegated_records.len() > 1 {
+                    return Err(
+                        "Multiple delegation records exist, record_index required".to_string()
+                    );
+                }
+                0
+            }
+        };
+
+        // Check if record is unlocked
+        if !self.delegated_records[record_idx].can_unlock(current_topoheight) {
+            return Err("Record is still locked".to_string());
+        }
+
+        // Find the entry for the specified delegatee
+        let entry_idx = self.delegated_records[record_idx]
+            .find_entry_index(delegatee_address)
+            .ok_or_else(|| "Delegatee not found in record".to_string())?;
+
+        let record = &self.delegated_records[record_idx];
+        let entry = &record.entries[entry_idx];
+
+        // Validate amount doesn't exceed entry amount
+        if whole_tos_amount > entry.amount {
+            return Err("Amount exceeds entry amount".to_string());
+        }
+
+        // Calculate energy to remove (proportional using high-precision math)
+        let energy_to_remove = if whole_tos_amount == entry.amount {
+            // Full unfreeze of entry - remove all energy
+            entry.energy
+        } else {
+            // Partial unfreeze - proportional energy removal with FLOOR rounding
+            const PRECISION: u128 = 1_000_000_000_000;
+            let energy_ratio = whole_tos_amount as u128 * PRECISION / entry.amount as u128;
+            ((entry.energy as u128 * energy_ratio) / PRECISION) as u64
+        };
+
+        let delegatee = entry.delegatee.clone();
+        let is_full_entry_unfreeze = whole_tos_amount >= entry.amount;
+
+        // Now mutably modify the record
+        let record = &mut self.delegated_records[record_idx];
+
+        if is_full_entry_unfreeze {
+            // Remove entry entirely
+            record.entries.remove(entry_idx);
+        } else {
+            // Partial unfreeze - update entry
+            let entry = &mut record.entries[entry_idx];
+            entry.amount = entry.amount.saturating_sub(whole_tos_amount);
+            entry.energy = entry.energy.saturating_sub(energy_to_remove);
+        }
+
+        // Update record totals
+        record.total_amount = record.total_amount.saturating_sub(whole_tos_amount);
+        record.total_energy = record.total_energy.saturating_sub(energy_to_remove);
+
+        // If no entries remain, remove the entire record
+        let record_empty = record.entries.is_empty();
+        if record_empty {
+            self.delegated_records.remove(record_idx);
+        }
+
+        // Update frozen TOS
+        self.frozen_tos = self.frozen_tos.saturating_sub(whole_tos_amount);
+        self.last_update = current_topoheight;
+
+        // Create pending unfreeze
+        let pending = PendingUnfreeze::new(whole_tos_amount, current_topoheight);
+        self.pending_unfreezes.push(pending);
+
+        Ok((delegatee, energy_to_remove, whole_tos_amount))
+    }
+
     /// Get all freeze records that can be unlocked at the current topoheight
     pub fn get_unlockable_records(&self, current_topoheight: TopoHeight) -> Vec<&FreezeRecord> {
         self.freeze_records
@@ -2390,5 +2526,433 @@ mod tests {
         // Third withdraw later - still 0
         let third = resource.withdraw_unfrozen(after_expire + 1000);
         assert_eq!(third, 0);
+    }
+
+    // ==================== Batch Delegation Unfreeze Tests ====================
+
+    #[test]
+    fn test_batch_delegation_unfreeze_single_entry() {
+        use crate::crypto::KeyPair;
+
+        let mut delegator_resource = EnergyResource::new();
+        let freeze_topoheight = 1000;
+        let duration = FreezeDuration::new(30).unwrap(); // 30 days
+        let network = crate::network::Network::Mainnet;
+
+        // Create 3 delegatees (B: 50 TOS, C: 30 TOS, D: 20 TOS)
+        let delegatee_b = KeyPair::new().get_public_key().compress();
+        let delegatee_c = KeyPair::new().get_public_key().compress();
+        let delegatee_d = KeyPair::new().get_public_key().compress();
+
+        let entry_b = DelegateRecordEntry {
+            delegatee: delegatee_b.clone(),
+            amount: 50 * crate::config::COIN_VALUE,
+            energy: 50 * 60, // 50 TOS * 2 * 30 days = 3000 energy
+        };
+        let entry_c = DelegateRecordEntry {
+            delegatee: delegatee_c.clone(),
+            amount: 30 * crate::config::COIN_VALUE,
+            energy: 30 * 60, // 30 TOS * 2 * 30 days = 1800 energy
+        };
+        let entry_d = DelegateRecordEntry {
+            delegatee: delegatee_d.clone(),
+            amount: 20 * crate::config::COIN_VALUE,
+            energy: 20 * 60, // 20 TOS * 2 * 30 days = 1200 energy
+        };
+
+        // Create batch delegation with all 3 entries
+        let total_amount = 100 * crate::config::COIN_VALUE;
+        delegator_resource
+            .create_delegated_freeze(
+                vec![entry_b, entry_c, entry_d],
+                duration,
+                total_amount,
+                freeze_topoheight,
+                &network,
+            )
+            .unwrap();
+
+        assert_eq!(delegator_resource.frozen_tos, total_amount);
+        assert_eq!(delegator_resource.delegated_records.len(), 1);
+        assert_eq!(delegator_resource.delegated_records[0].entries.len(), 3);
+
+        // Calculate unlock time
+        let unlock_topoheight =
+            freeze_topoheight + duration.duration_in_blocks_for_network(&network);
+
+        // Unfreeze B's entry (50 TOS) using selective batch delegation unfreeze
+        let (affected_delegatee, energy_removed, pending_amount) = delegator_resource
+            .unfreeze_delegated_entry(
+                50 * crate::config::COIN_VALUE,
+                unlock_topoheight,
+                Some(0), // First (and only) delegation record
+                &delegatee_b,
+            )
+            .unwrap();
+
+        // Verify results
+        assert_eq!(affected_delegatee, delegatee_b);
+        assert_eq!(energy_removed, 50 * 60); // 3000 energy removed
+        assert_eq!(pending_amount, 50 * crate::config::COIN_VALUE);
+        assert_eq!(
+            delegator_resource.frozen_tos,
+            50 * crate::config::COIN_VALUE
+        ); // 50 TOS remaining
+        assert_eq!(delegator_resource.pending_unfreezes.len(), 1);
+
+        // Verify record now has 2 entries (C and D)
+        assert_eq!(delegator_resource.delegated_records.len(), 1);
+        assert_eq!(delegator_resource.delegated_records[0].entries.len(), 2);
+        assert_eq!(
+            delegator_resource.delegated_records[0].total_amount,
+            50 * crate::config::COIN_VALUE
+        );
+
+        // Verify B's entry is removed
+        assert!(delegator_resource.delegated_records[0]
+            .find_entry(&delegatee_b)
+            .is_none());
+
+        // Verify C and D still exist
+        assert!(delegator_resource.delegated_records[0]
+            .find_entry(&delegatee_c)
+            .is_some());
+        assert!(delegator_resource.delegated_records[0]
+            .find_entry(&delegatee_d)
+            .is_some());
+    }
+
+    #[test]
+    fn test_batch_delegation_partial_entry_unfreeze() {
+        use crate::crypto::KeyPair;
+
+        let mut delegator_resource = EnergyResource::new();
+        let freeze_topoheight = 1000;
+        let duration = FreezeDuration::new(30).unwrap();
+        let network = crate::network::Network::Mainnet;
+
+        // Create 2 delegatees (B: 50 TOS, C: 50 TOS)
+        let delegatee_b = KeyPair::new().get_public_key().compress();
+        let delegatee_c = KeyPair::new().get_public_key().compress();
+
+        let entry_b = DelegateRecordEntry {
+            delegatee: delegatee_b.clone(),
+            amount: 50 * crate::config::COIN_VALUE,
+            energy: 50 * 60, // 3000 energy
+        };
+        let entry_c = DelegateRecordEntry {
+            delegatee: delegatee_c.clone(),
+            amount: 50 * crate::config::COIN_VALUE,
+            energy: 50 * 60, // 3000 energy
+        };
+
+        let total_amount = 100 * crate::config::COIN_VALUE;
+        delegator_resource
+            .create_delegated_freeze(
+                vec![entry_b, entry_c],
+                duration,
+                total_amount,
+                freeze_topoheight,
+                &network,
+            )
+            .unwrap();
+
+        let unlock_topoheight =
+            freeze_topoheight + duration.duration_in_blocks_for_network(&network);
+
+        // Partial unfreeze from B (30 TOS out of 50 TOS)
+        let (affected_delegatee, energy_removed, pending_amount) = delegator_resource
+            .unfreeze_delegated_entry(
+                30 * crate::config::COIN_VALUE,
+                unlock_topoheight,
+                Some(0),
+                &delegatee_b,
+            )
+            .unwrap();
+
+        // Verify results
+        assert_eq!(affected_delegatee, delegatee_b);
+        // Energy removed proportionally: 3000 * 30/50 = 1800
+        assert_eq!(energy_removed, 30 * 60);
+        assert_eq!(pending_amount, 30 * crate::config::COIN_VALUE);
+        assert_eq!(
+            delegator_resource.frozen_tos,
+            70 * crate::config::COIN_VALUE
+        ); // 70 TOS remaining
+
+        // Verify record still has 2 entries
+        assert_eq!(delegator_resource.delegated_records[0].entries.len(), 2);
+
+        // Verify B's entry is updated (20 TOS remaining)
+        let b_entry = delegator_resource.delegated_records[0]
+            .find_entry(&delegatee_b)
+            .unwrap();
+        assert_eq!(b_entry.amount, 20 * crate::config::COIN_VALUE);
+        assert_eq!(b_entry.energy, 20 * 60); // 1200 energy remaining
+
+        // Verify C's entry is unchanged
+        let c_entry = delegator_resource.delegated_records[0]
+            .find_entry(&delegatee_c)
+            .unwrap();
+        assert_eq!(c_entry.amount, 50 * crate::config::COIN_VALUE);
+        assert_eq!(c_entry.energy, 50 * 60);
+    }
+
+    #[test]
+    fn test_batch_delegation_unfreeze_last_entry_removes_record() {
+        use crate::crypto::KeyPair;
+
+        let mut delegator_resource = EnergyResource::new();
+        let freeze_topoheight = 1000;
+        let duration = FreezeDuration::new(7).unwrap();
+        let network = crate::network::Network::Mainnet;
+
+        // Create single delegatee
+        let delegatee = KeyPair::new().get_public_key().compress();
+
+        let entry = DelegateRecordEntry {
+            delegatee: delegatee.clone(),
+            amount: 10 * crate::config::COIN_VALUE,
+            energy: 10 * 14, // 140 energy
+        };
+
+        delegator_resource
+            .create_delegated_freeze(
+                vec![entry],
+                duration,
+                10 * crate::config::COIN_VALUE,
+                freeze_topoheight,
+                &network,
+            )
+            .unwrap();
+
+        let unlock_topoheight =
+            freeze_topoheight + duration.duration_in_blocks_for_network(&network);
+
+        // Unfreeze entire entry
+        let result = delegator_resource.unfreeze_delegated_entry(
+            10 * crate::config::COIN_VALUE,
+            unlock_topoheight,
+            None, // Single record, no index needed
+            &delegatee,
+        );
+
+        assert!(result.is_ok());
+        let (_, energy_removed, _) = result.unwrap();
+        assert_eq!(energy_removed, 140);
+
+        // Verify record is completely removed
+        assert!(delegator_resource.delegated_records.is_empty());
+        assert_eq!(delegator_resource.frozen_tos, 0);
+    }
+
+    #[test]
+    fn test_batch_delegation_unfreeze_requires_address() {
+        use crate::crypto::KeyPair;
+
+        let mut delegator_resource = EnergyResource::new();
+        let freeze_topoheight = 1000;
+        let duration = FreezeDuration::new(7).unwrap();
+        let network = crate::network::Network::Mainnet;
+
+        // Create 2 delegatees
+        let delegatee_a = KeyPair::new().get_public_key().compress();
+        let delegatee_b = KeyPair::new().get_public_key().compress();
+
+        let entries = vec![
+            DelegateRecordEntry {
+                delegatee: delegatee_a,
+                amount: crate::config::COIN_VALUE,
+                energy: 14,
+            },
+            DelegateRecordEntry {
+                delegatee: delegatee_b,
+                amount: crate::config::COIN_VALUE,
+                energy: 14,
+            },
+        ];
+
+        delegator_resource
+            .create_delegated_freeze(
+                entries,
+                duration,
+                2 * crate::config::COIN_VALUE,
+                freeze_topoheight,
+                &network,
+            )
+            .unwrap();
+
+        let unlock_topoheight =
+            freeze_topoheight + duration.duration_in_blocks_for_network(&network);
+
+        // Try to use FIFO unfreeze (unfreeze_delegated) - should work but uses FIFO order
+        // The unfreeze_delegated_entry requires explicit delegatee_address
+        // If we pass a wrong address, it should fail
+        let wrong_delegatee = KeyPair::new().get_public_key().compress();
+        let result = delegator_resource.unfreeze_delegated_entry(
+            crate::config::COIN_VALUE,
+            unlock_topoheight,
+            Some(0),
+            &wrong_delegatee,
+        );
+
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .contains("Delegatee not found in record"));
+    }
+
+    #[test]
+    fn test_batch_delegation_unfreeze_amount_exceeds_entry() {
+        use crate::crypto::KeyPair;
+
+        let mut delegator_resource = EnergyResource::new();
+        let freeze_topoheight = 1000;
+        let duration = FreezeDuration::new(7).unwrap();
+        let network = crate::network::Network::Mainnet;
+
+        let delegatee = KeyPair::new().get_public_key().compress();
+
+        let entry = DelegateRecordEntry {
+            delegatee: delegatee.clone(),
+            amount: 5 * crate::config::COIN_VALUE, // 5 TOS
+            energy: 5 * 14,
+        };
+
+        delegator_resource
+            .create_delegated_freeze(
+                vec![entry],
+                duration,
+                5 * crate::config::COIN_VALUE,
+                freeze_topoheight,
+                &network,
+            )
+            .unwrap();
+
+        let unlock_topoheight =
+            freeze_topoheight + duration.duration_in_blocks_for_network(&network);
+
+        // Try to unfreeze 10 TOS from 5 TOS entry
+        let result = delegator_resource.unfreeze_delegated_entry(
+            10 * crate::config::COIN_VALUE,
+            unlock_topoheight,
+            None,
+            &delegatee,
+        );
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Amount exceeds entry amount"));
+    }
+
+    #[test]
+    fn test_batch_delegation_unfreeze_locked() {
+        use crate::crypto::KeyPair;
+
+        let mut delegator_resource = EnergyResource::new();
+        let freeze_topoheight = 1000;
+        let duration = FreezeDuration::new(30).unwrap();
+        let network = crate::network::Network::Mainnet;
+
+        let delegatee = KeyPair::new().get_public_key().compress();
+
+        let entry = DelegateRecordEntry {
+            delegatee: delegatee.clone(),
+            amount: crate::config::COIN_VALUE,
+            energy: 60,
+        };
+
+        delegator_resource
+            .create_delegated_freeze(
+                vec![entry],
+                duration,
+                crate::config::COIN_VALUE,
+                freeze_topoheight,
+                &network,
+            )
+            .unwrap();
+
+        // Try to unfreeze before unlock (should fail)
+        let result = delegator_resource.unfreeze_delegated_entry(
+            crate::config::COIN_VALUE,
+            freeze_topoheight + 100, // Still locked
+            None,
+            &delegatee,
+        );
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Record is still locked"));
+    }
+
+    #[test]
+    fn test_batch_delegation_multiple_records_requires_index() {
+        use crate::crypto::KeyPair;
+
+        let mut delegator_resource = EnergyResource::new();
+        let freeze_topoheight = 1000;
+        let duration = FreezeDuration::new(7).unwrap();
+        let network = crate::network::Network::Mainnet;
+
+        let delegatee1 = KeyPair::new().get_public_key().compress();
+        let delegatee2 = KeyPair::new().get_public_key().compress();
+
+        // Create first delegation record
+        let entry1 = DelegateRecordEntry {
+            delegatee: delegatee1.clone(),
+            amount: crate::config::COIN_VALUE,
+            energy: 14,
+        };
+        delegator_resource
+            .create_delegated_freeze(
+                vec![entry1],
+                duration,
+                crate::config::COIN_VALUE,
+                freeze_topoheight,
+                &network,
+            )
+            .unwrap();
+
+        // Create second delegation record
+        let entry2 = DelegateRecordEntry {
+            delegatee: delegatee2.clone(),
+            amount: crate::config::COIN_VALUE,
+            energy: 14,
+        };
+        delegator_resource
+            .create_delegated_freeze(
+                vec![entry2],
+                duration,
+                crate::config::COIN_VALUE,
+                freeze_topoheight + 1000,
+                &network,
+            )
+            .unwrap();
+
+        assert_eq!(delegator_resource.delegated_records.len(), 2);
+
+        let unlock_topoheight =
+            freeze_topoheight + 1000 + duration.duration_in_blocks_for_network(&network);
+
+        // Try to unfreeze without specifying record_index (should fail)
+        let result = delegator_resource.unfreeze_delegated_entry(
+            crate::config::COIN_VALUE,
+            unlock_topoheight,
+            None, // No index when multiple records exist
+            &delegatee2,
+        );
+
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .contains("Multiple delegation records exist"));
+
+        // With correct index, should succeed
+        let result = delegator_resource.unfreeze_delegated_entry(
+            crate::config::COIN_VALUE,
+            unlock_topoheight,
+            Some(1), // Second record
+            &delegatee2,
+        );
+
+        assert!(result.is_ok());
     }
 }
