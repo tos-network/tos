@@ -483,6 +483,13 @@ impl Transaction {
                                 "Duplicate delegatee in list"
                             )));
                         }
+
+                        // Reject self-delegation (sender cannot delegate to themselves)
+                        if entry.delegatee == self.source {
+                            return Err(VerificationError::AnyError(anyhow!(
+                                "Cannot delegate energy to yourself"
+                            )));
+                        }
                     }
 
                     if !duration.is_valid() {

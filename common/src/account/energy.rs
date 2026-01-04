@@ -2955,4 +2955,64 @@ mod tests {
 
         assert!(result.is_ok());
     }
+
+    #[test]
+    fn test_batch_delegation_max_delegatees() {
+        use crate::crypto::KeyPair;
+
+        let mut delegator_resource = EnergyResource::new();
+        let freeze_topoheight = 1000;
+        let duration = FreezeDuration::new(7).unwrap();
+        let network = crate::network::Network::Mainnet;
+
+        // Create exactly MAX_DELEGATEES entries (should succeed)
+        let max_entries: Vec<DelegateRecordEntry> = (0..crate::config::MAX_DELEGATEES)
+            .map(|_| DelegateRecordEntry {
+                delegatee: KeyPair::new().get_public_key().compress(),
+                amount: crate::config::COIN_VALUE,
+                energy: 14,
+            })
+            .collect();
+
+        let total_amount = crate::config::MAX_DELEGATEES as u64 * crate::config::COIN_VALUE;
+
+        let result = delegator_resource.create_delegated_freeze(
+            max_entries,
+            duration,
+            total_amount,
+            freeze_topoheight,
+            &network,
+        );
+        assert!(result.is_ok());
+
+        // Reset for next test
+        let mut delegator_resource2 = EnergyResource::new();
+
+        // Create MAX_DELEGATEES + 1 entries (should fail)
+        let too_many_entries: Vec<DelegateRecordEntry> = (0..crate::config::MAX_DELEGATEES + 1)
+            .map(|_| DelegateRecordEntry {
+                delegatee: KeyPair::new().get_public_key().compress(),
+                amount: crate::config::COIN_VALUE,
+                energy: 14,
+            })
+            .collect();
+
+        let total_amount2 = (crate::config::MAX_DELEGATEES + 1) as u64 * crate::config::COIN_VALUE;
+
+        let result2 = delegator_resource2.create_delegated_freeze(
+            too_many_entries,
+            duration,
+            total_amount2,
+            freeze_topoheight,
+            &network,
+        );
+        assert!(result2.is_err());
+        assert!(result2.unwrap_err().contains("Too many delegatees"));
+    }
+
+    // Note: Self-delegation rejection is tested at the transaction verification layer
+    // in common/src/transaction/verify/mod.rs. The check compares entry.delegatee == self.source
+    // and rejects with "Cannot delegate energy to yourself" error.
+    // This cannot be easily unit tested here as it requires transaction context.
+    // See integration tests for full verification testing.
 }
