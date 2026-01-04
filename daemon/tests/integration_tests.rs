@@ -163,7 +163,7 @@ impl MockChainState {
                         && destination_total_energy == 0
                         && destination_nonce == 0
                     {
-                        account_creation_fee += 100000; // FEE_PER_ACCOUNT_CREATION
+                        account_creation_fee += 0; // FEE_PER_ACCOUNT_CREATION (now free)
                     }
 
                     // Deduct from sender
@@ -821,9 +821,9 @@ fn test_block_execution_with_new_account() {
     println!("Bob nonce: {}", chain.get_nonce(&bob_pubkey));
 
     // Verify final balances
-    // Alice should have: 1000 - 200 - 0.00005 - 0.001 = 799.99895 TOS
-    // (200 TOS transfer + 0.00005 TOS fee + 0.001 TOS account creation fee)
-    let expected_alice_balance = 1000 * COIN_VALUE - 200 * COIN_VALUE - 5000 - 100000;
+    // Alice should have: 1000 - 200 - 0.00005 = 799.99995 TOS
+    // (200 TOS transfer + 0.00005 TOS fee, account creation is FREE)
+    let expected_alice_balance = 1000 * COIN_VALUE - 200 * COIN_VALUE - 5000;
     assert_eq!(chain.get_balance(&alice_pubkey), expected_alice_balance);
 
     // Bob should have: 0 + 200 = 200 TOS (account created with initial balance)
@@ -904,9 +904,7 @@ fn test_block_execution_with_new_account_energy_fee() {
     println!("\nBlock transaction:");
     println!("TX1: Alice -> Bob, 200 TOS, Energy fee (50 units)");
     println!("Note: Bob's account will be created by this transaction");
-    println!(
-        "Note: Account creation fee (0.001 TOS) will still be paid in TOS even with energy fee"
-    );
+    println!("Note: Account creation is FREE (no TOS fee required)");
 
     // Execute the block with only one transaction
     let txs = vec![(tx1, 200 * COIN_VALUE)];
@@ -935,9 +933,9 @@ fn test_block_execution_with_new_account_energy_fee() {
     println!("Bob nonce: {}", chain.get_nonce(&bob_pubkey));
 
     // Verify final balances
-    // Alice should have: 1000 - 200 - 0.001 = 799.999 TOS
-    // (200 TOS transfer + 0.001 TOS account creation fee, no TOS fee since using energy)
-    let expected_alice_balance = 1000 * COIN_VALUE - 200 * COIN_VALUE - 100000;
+    // Alice should have: 1000 - 200 = 800 TOS
+    // (200 TOS transfer, no TOS fee since using energy, account creation is FREE)
+    let expected_alice_balance = 1000 * COIN_VALUE - 200 * COIN_VALUE;
     assert_eq!(chain.get_balance(&alice_pubkey), expected_alice_balance);
 
     // Bob should have: 0 + 200 = 200 TOS (account created with initial balance)
@@ -2201,7 +2199,7 @@ fn test_energy_fee_transfer_to_uninitialized_address() {
 
     println!("Transaction 1: Alice -> Bob, 200 TOS, Energy fee (50 units)");
     println!("Note: Bob's account will be created by this transaction");
-    println!("Note: Account creation fee (0.001 TOS) will be paid in TOS even with energy fee");
+    println!("Note: Account creation is FREE (no TOS fee required)");
 
     // Execute the transaction
     let txs1 = vec![(tx1, 200 * COIN_VALUE)];
@@ -2235,9 +2233,9 @@ fn test_energy_fee_transfer_to_uninitialized_address() {
     );
 
     // Verify results for Transaction 1
-    // Alice should have: 1000 - 200 - 0.001 = 799.999 TOS
-    // (200 TOS transfer + 0.001 TOS account creation fee, no TOS fee since using energy)
-    let expected_alice_balance_1 = 1000 * COIN_VALUE - 200 * COIN_VALUE - 100000;
+    // Alice should have: 1000 - 200 = 800 TOS
+    // (200 TOS transfer, no TOS fee since using energy, account creation is FREE)
+    let expected_alice_balance_1 = 1000 * COIN_VALUE - 200 * COIN_VALUE;
     assert_eq!(chain.get_balance(&alice_pubkey), expected_alice_balance_1);
 
     // Bob should have: 0 + 200 = 200 TOS (account created with initial balance)
@@ -2271,7 +2269,7 @@ fn test_energy_fee_transfer_to_uninitialized_address() {
 
     println!("Transaction 2: Alice -> Charlie, 150 TOS, Energy fee (30 units)");
     println!("Note: Charlie's account will be created by this transaction");
-    println!("Note: Account creation fee (0.001 TOS) will be paid in TOS even with energy fee");
+    println!("Note: Account creation is FREE (no TOS fee required)");
 
     // Execute the transaction
     let txs2 = vec![(tx2, 150 * COIN_VALUE)];
@@ -2309,9 +2307,9 @@ fn test_energy_fee_transfer_to_uninitialized_address() {
     );
 
     // Verify results for Transaction 2
-    // Alice should have: 799.999 - 150 - 0.001 = 649.998 TOS
-    // (150 TOS transfer + 0.001 TOS account creation fee, no TOS fee since using energy)
-    let expected_alice_balance_2 = expected_alice_balance_1 - 150 * COIN_VALUE - 100000;
+    // Alice should have: 800 - 150 = 650 TOS
+    // (150 TOS transfer, no TOS fee since using energy, account creation is FREE)
+    let expected_alice_balance_2 = expected_alice_balance_1 - 150 * COIN_VALUE;
     assert_eq!(chain.get_balance(&alice_pubkey), expected_alice_balance_2);
 
     // Charlie should have: 0 + 150 = 150 TOS (account created with initial balance)
@@ -2439,7 +2437,7 @@ fn test_energy_fee_transfer_to_uninitialized_address() {
 
     // Verify total TOS spent by Alice
     let total_tos_spent = 1000 * COIN_VALUE - chain.get_balance(&alice_pubkey);
-    let expected_tos_spent = 200 * COIN_VALUE + 150 * COIN_VALUE + 100 * COIN_VALUE + 2 * 100000; // transfers + 2 account creation fees
+    let expected_tos_spent = 200 * COIN_VALUE + 150 * COIN_VALUE + 100 * COIN_VALUE; // transfers only (account creation is FREE)
     assert_eq!(total_tos_spent, expected_tos_spent);
 
     // Verify total energy consumed by Alice
@@ -2451,19 +2449,14 @@ fn test_energy_fee_transfer_to_uninitialized_address() {
     println!("✓ Energy fee transfer to uninitialized addresses test completed successfully!");
     println!("\nKey findings:");
     println!("1. Energy fees can be used for transfers to uninitialized addresses");
-    println!(
-        "2. Account creation fee (0.001 TOS) is still paid in TOS even when using energy fees"
-    );
-    println!("3. Energy is consumed for the transfer fee, TOS is consumed for account creation");
-    println!("4. Subsequent transfers to the same address don't incur account creation fees");
-    println!(
-        "5. Total cost = Transfer amount + Energy fee (in energy) + Account creation fee (in TOS)"
-    );
+    println!("2. Account creation is FREE - no additional TOS required");
+    println!("3. Energy is consumed for the transfer fee only");
+    println!("4. Total cost = Transfer amount + Energy fee (in energy units)");
 }
 
 #[test]
-fn test_energy_fee_transfer_insufficient_tos_for_account_creation() {
-    println!("=== Testing Energy Fee Transfer with Insufficient TOS for Account Creation ===");
+fn test_energy_fee_transfer_free_account_creation() {
+    println!("=== Testing Energy Fee Transfer with FREE Account Creation ===");
 
     let mut chain = MockChainState::new();
     let alice = KeyPair::new();
@@ -2472,8 +2465,8 @@ fn test_energy_fee_transfer_insufficient_tos_for_account_creation() {
     let alice_pubkey = alice.get_public_key().compress();
     let bob_pubkey = bob.get_public_key().compress();
 
-    // Initialize Alice with very limited TOS balance but sufficient energy
-    chain.set_balance(alice_pubkey.clone(), 50000); // Only 0.0005 TOS (less than account creation fee)
+    // Initialize Alice with minimal TOS balance but sufficient energy
+    chain.set_balance(alice_pubkey.clone(), 50000); // Only 0.0005 TOS
     chain.set_energy(alice_pubkey.clone(), 0, 1000); // 1000 total energy, 0 used
     chain.set_nonce(alice_pubkey.clone(), 0);
 
@@ -2493,13 +2486,10 @@ fn test_energy_fee_transfer_insufficient_tos_for_account_creation() {
         "Bob balance: {} TOS",
         chain.get_balance(&bob_pubkey) as f64 / COIN_VALUE as f64
     );
-    println!(
-        "Account creation fee: {} TOS",
-        100000_f64 / COIN_VALUE as f64
-    );
+    println!("Account creation fee: FREE (0 TOS)");
 
-    // Test Case 1: Try to transfer to uninitialized address with insufficient TOS for account creation
-    println!("\n--- Test Case 1: Insufficient TOS for Account Creation Fee ---");
+    // Test Case 1: Transfer to uninitialized address with minimal TOS (account creation is FREE)
+    println!("\n--- Test Case 1: Transfer to New Account (Account Creation is FREE) ---");
 
     let tx1 = create_transfer_transaction(
         &alice,
@@ -2513,9 +2503,8 @@ fn test_energy_fee_transfer_insufficient_tos_for_account_creation() {
 
     println!("Transaction: Alice -> Bob, 0.0001 TOS, Energy fee (50 units)");
     println!("Note: Bob's account will be created by this transaction");
-    println!("Note: Account creation fee (0.001 TOS) must be paid in TOS");
-    println!("Note: Alice has 0.0005 TOS, after transfer (0.0001 TOS) will have 0.0004 TOS");
-    println!("Note: 0.0004 TOS is insufficient for 0.001 TOS account creation fee");
+    println!("Note: Account creation is FREE - no additional TOS required");
+    println!("Note: Alice only needs enough TOS for the transfer amount");
 
     // Execute the transaction
     let txs1 = vec![(tx1, 10000)];
@@ -2523,165 +2512,92 @@ fn test_energy_fee_transfer_insufficient_tos_for_account_creation() {
 
     let result1 = chain.apply_block(&txs1, &signers1);
     assert!(
-        result1.is_err(),
-        "Should fail due to insufficient TOS for account creation fee"
+        result1.is_ok(),
+        "Should succeed - account creation is FREE: {:?}",
+        result1.err()
     );
 
-    println!("✓ Transaction correctly failed: {:?}", result1.unwrap_err());
+    println!("✓ Transaction succeeded with minimal TOS!");
 
-    // Verify that Alice's state changes as expected in our mock implementation
-    // Note: In our mock, transfer amount is deducted before account creation fee check
-    // So Alice's balance is reduced by the transfer amount even though the transaction fails
-    assert_eq!(chain.get_balance(&alice_pubkey), 40000); // 50000 - 10000 (transfer amount)
+    // Verify Alice's state
+    // Alice should have: 0.0005 - 0.0001 = 0.0004 TOS (only transfer amount deducted)
+    let expected_alice_balance = 50000 - 10000;
+    assert_eq!(chain.get_balance(&alice_pubkey), expected_alice_balance);
+
     let (used_energy, total_energy) = chain.get_energy(&alice_pubkey);
-    assert_eq!(used_energy, 0); // Energy unchanged
+    assert_eq!(used_energy, 50); // Energy consumed for transfer
     assert_eq!(total_energy, 1000);
-    // Note: In our mock implementation, nonce is updated early, so it changes even on failure
-    // In a real implementation, this would be atomic and all changes would be rolled back on failure
 
-    // Bob's account received the transfer amount before the transaction failed
-    // Note: In our mock implementation, transfer amount is processed before account creation fee check
-    assert_eq!(chain.get_balance(&bob_pubkey), 10000); // Bob received the transfer amount
+    // Bob's account should be created with the transfer amount
+    assert_eq!(chain.get_balance(&bob_pubkey), 10000);
     let (bob_used_energy, bob_total_energy) = chain.get_energy(&bob_pubkey);
     assert_eq!(bob_used_energy, 0);
     assert_eq!(bob_total_energy, 0);
-    assert_eq!(chain.get_nonce(&bob_pubkey), 0);
 
-    println!("✓ Alice's balance reduced by transfer amount (mock behavior)");
-    println!("✓ Bob received transfer amount before transaction failed (mock behavior)");
-    println!("✓ In a real implementation, all changes would be rolled back on failure");
-
-    // Test Case 2: Try with sufficient TOS for account creation but insufficient for transfer
     println!(
-        "\n--- Test Case 2: Sufficient TOS for Account Creation but Insufficient for Transfer ---"
+        "✓ Alice balance: {} TOS (only transfer deducted)",
+        chain.get_balance(&alice_pubkey) as f64 / COIN_VALUE as f64
     );
+    println!(
+        "✓ Bob balance: {} TOS (received transfer)",
+        chain.get_balance(&bob_pubkey) as f64 / COIN_VALUE as f64
+    );
+    println!("✓ Alice energy consumed: {} units", used_energy);
 
-    // Create a fresh Bob account for this test case to ensure it's uninitialized
-    let bob2 = KeyPair::new();
-    let bob2_pubkey = bob2.get_public_key().compress();
+    // Test Case 2: Another transfer to a new account
+    println!("\n--- Test Case 2: Another Transfer to New Account ---");
 
-    // Give Alice enough TOS for account creation but not enough for the transfer
-    chain.set_balance(alice_pubkey.clone(), 150000); // 0.0015 TOS (enough for account creation + small transfer)
+    let charlie = KeyPair::new();
+    let charlie_pubkey = charlie.get_public_key().compress();
 
     let tx2 = create_transfer_transaction(
         &alice,
-        &bob2_pubkey,
-        100000, // 0.001 TOS transfer (would leave 0.0005 TOS, but need 0.001 for account creation)
-        30,     // 30 energy units
+        &charlie_pubkey,
+        20000, // 0.0002 TOS transfer
+        30,    // 30 energy units
         FeeType::Energy,
-        1, // nonce (incremented from previous transaction)
+        1, // nonce
     )
     .unwrap();
 
-    println!("Transaction: Alice -> Bob2, 0.001 TOS, Energy fee (30 units)");
-    println!(
-        "Note: Alice has 0.0015 TOS, needs 0.001 TOS for transfer + 0.001 TOS for account creation"
-    );
-    println!("Note: Total required: 0.002 TOS, but Alice only has 0.0015 TOS");
+    println!("Transaction: Alice -> Charlie, 0.0002 TOS, Energy fee (30 units)");
 
-    // Execute the transaction
-    let txs2 = vec![(tx2, 100000)];
+    let txs2 = vec![(tx2, 20000)];
     let signers2 = vec![alice.clone()];
 
     let result2 = chain.apply_block(&txs2, &signers2);
     assert!(
-        result2.is_err(),
-        "Should fail due to insufficient TOS for transfer + account creation"
+        result2.is_ok(),
+        "Should succeed - account creation is FREE: {:?}",
+        result2.err()
     );
-
-    println!("✓ Transaction correctly failed: {:?}", result2.unwrap_err());
-
-    // Test Case 3: Try with sufficient TOS for both transfer and account creation
-    println!("\n--- Test Case 3: Sufficient TOS for Both Transfer and Account Creation ---");
-
-    // Create a fresh Bob account for this test case to ensure it's uninitialized
-    let bob3 = KeyPair::new();
-    let bob3_pubkey = bob3.get_public_key().compress();
-
-    // Give Alice enough TOS for both transfer and account creation
-    chain.set_balance(alice_pubkey.clone(), 300000); // 0.003 TOS (enough for 0.001 transfer + 0.001 account creation + buffer)
-
-    let tx3 = create_transfer_transaction(
-        &alice,
-        &bob3_pubkey,
-        100000, // 0.001 TOS transfer
-        20,     // 20 energy units
-        FeeType::Energy,
-        2, // nonce (incremented from previous transaction)
-    )
-    .unwrap();
-
-    println!("Transaction: Alice -> Bob3, 0.001 TOS, Energy fee (20 units)");
-    println!(
-        "Note: Alice has 0.003 TOS, needs 0.001 TOS for transfer + 0.001 TOS for account creation"
-    );
-    println!("Note: Total required: 0.002 TOS, Alice has 0.003 TOS (sufficient)");
-
-    // Execute the transaction
-    let txs3 = vec![(tx3, 100000)];
-    let signers3 = vec![alice.clone()];
-
-    let result3 = chain.apply_block(&txs3, &signers3);
-    assert!(
-        result3.is_ok(),
-        "Should succeed with sufficient TOS: {:?}",
-        result3.err()
-    );
-
-    println!("✓ Transaction succeeded with sufficient TOS!");
 
     // Verify final state
-    println!("\nFinal state after successful transaction:");
+    // Alice should have: 0.0004 - 0.0002 = 0.0002 TOS
+    let expected_alice_balance_2 = expected_alice_balance - 20000;
+    assert_eq!(chain.get_balance(&alice_pubkey), expected_alice_balance_2);
+
+    // Alice should have consumed: 50 + 30 = 80 energy units total
+    let (used_energy_2, total_energy_2) = chain.get_energy(&alice_pubkey);
+    assert_eq!(used_energy_2, 80);
+    assert_eq!(total_energy_2, 1000);
+
+    // Charlie should have received the transfer
+    assert_eq!(chain.get_balance(&charlie_pubkey), 20000);
+
+    println!("✓ Transaction 2 succeeded!");
     println!(
-        "Alice balance: {} TOS",
+        "✓ Final Alice balance: {} TOS",
         chain.get_balance(&alice_pubkey) as f64 / COIN_VALUE as f64
     );
-    println!(
-        "Alice energy: used_energy: {}, total_energy: {}",
-        chain.get_energy(&alice_pubkey).0,
-        chain.get_energy(&alice_pubkey).1
-    );
-    println!(
-        "Bob3 balance: {} TOS",
-        chain.get_balance(&bob3_pubkey) as f64 / COIN_VALUE as f64
-    );
-    println!(
-        "Bob3 energy: used_energy: {}, total_energy: {}",
-        chain.get_energy(&bob3_pubkey).0,
-        chain.get_energy(&bob3_pubkey).1
-    );
+    println!("✓ Total energy consumed: {} units", used_energy_2);
 
-    // Verify results
-    // Alice should have: 0.003 - 0.001 - 0.001 = 0.001 TOS (transfer amount + account creation fee)
-    let expected_alice_balance = 300000 - 100000 - 100000;
-    assert_eq!(chain.get_balance(&alice_pubkey), expected_alice_balance);
-
-    // Bob3 should have: 0.001 TOS (from this transaction)
-    let expected_bob3_balance = 100000;
-    assert_eq!(chain.get_balance(&bob3_pubkey), expected_bob3_balance);
-
-    // Alice should have consumed: 20 energy units
-    let (used_energy, total_energy) = chain.get_energy(&alice_pubkey);
-    assert_eq!(used_energy, 20);
-    assert_eq!(total_energy, 1000);
-
-    // Bob3 should have: 0 energy (new account)
-    let (bob3_used_energy, bob3_total_energy) = chain.get_energy(&bob3_pubkey);
-    assert_eq!(bob3_used_energy, 0);
-    assert_eq!(bob3_total_energy, 0);
-
-    println!("✓ Final state verification passed!");
-    println!("✓ Energy fee transfer with insufficient TOS for account creation test completed successfully!");
+    println!("\n✓ Free account creation test completed successfully!");
     println!("\nKey findings:");
-    println!(
-        "1. Energy fees can be used for transfers, but account creation fee must be paid in TOS"
-    );
-    println!("2. If insufficient TOS for account creation fee, transaction fails even with sufficient energy");
-    println!(
-        "3. Account creation fee (0.001 TOS) is mandatory for new addresses regardless of fee type"
-    );
-    println!("4. Total TOS requirement = Transfer amount + Account creation fee (if new address)");
-    println!("5. Energy is only consumed for the transfer fee, not for account creation");
+    println!("1. Account creation is FREE - no additional TOS required");
+    println!("2. Only the transfer amount needs to be available in TOS");
+    println!("3. Energy is consumed for the transfer fee as usual");
+    println!("4. New accounts can be created with any transfer amount");
 }
 
 // ============================================================================

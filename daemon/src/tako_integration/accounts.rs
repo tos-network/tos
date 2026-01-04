@@ -290,23 +290,9 @@ impl<'a> AccountProvider for TosAccountAdapter<'a> {
             ))));
         }
 
-        // Check if recipient account exists
-        let recipient_exists = self
-            .provider
-            .account_exists(&to_pubkey, self.topoheight)
-            .map_err(|e| {
-                EbpfError::SyscallError(Box::new(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    format!("Failed to check recipient account: {}", e),
-                )))
-            })?;
-
-        if !recipient_exists {
-            return Err(EbpfError::SyscallError(Box::new(std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                "Recipient account does not exist",
-            ))));
-        }
+        // Note: We no longer check if recipient account exists.
+        // Account creation is FREE, so transfers to new addresses will auto-create the account.
+        // This matches the behavior of regular TOS transfers.
 
         // Update balance deltas to track virtual balances
         // Sender loses amount (negative delta)
@@ -522,18 +508,29 @@ mod tests {
     }
 
     #[test]
-    fn test_transfer_nonexistent_recipient() {
+    fn test_transfer_to_new_account_auto_creates() {
+        // Account creation is FREE, so transfers to non-existent accounts should succeed
         let mut provider = MockProvider::new();
         let from = PublicKey::from_bytes(&[1u8; 32]).unwrap();
         let to = PublicKey::from_bytes(&[2u8; 32]).unwrap();
 
         provider.set_balance(from.clone(), Hash::zero(), 10000);
-        // Don't add 'to' account
+        // Don't add 'to' account - it will be auto-created by the transfer
 
         let mut adapter = TosAccountAdapter::new(&provider, 100);
         let result = adapter.transfer(from.as_bytes(), to.as_bytes(), 1000);
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("does not exist"));
+
+        // Transfer should succeed - account will be auto-created
+        assert!(
+            result.is_ok(),
+            "Transfer to new account should succeed (auto-create)"
+        );
+
+        // Verify the transfer was staged
+        let transfers = adapter.take_pending_transfers();
+        assert_eq!(transfers.len(), 1);
+        assert_eq!(transfers[0].amount, 1000);
+        assert_eq!(transfers[0].destination, to);
     }
 
     #[test]
