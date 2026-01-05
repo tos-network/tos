@@ -937,9 +937,9 @@ async fn setup_wallet_command_manager(
         )],
         CommandHandler::Async(async_handler!(unfreeze_tos)),
     ))?;
-    command_manager.add_command(Command::with_optional_arguments(
+    command_manager.add_command(Command::with_arguments(
         "unfreeze_tos_delegate",
-        "Unfreeze delegated TOS (requires delegatee address)",
+        "Unfreeze delegated TOS (delegatee optional for single-entry records)",
         vec![
             Arg::new("amount", ArgType::String, "Amount of TOS to unfreeze"),
             Arg::new("delegatee", ArgType::String, "Delegatee address"),
@@ -5159,13 +5159,13 @@ async fn freeze_tos(
     // Parse amount
     let amount = from_coin(&amount_str, 8).context("Invalid amount")?;
 
-    // Parse duration (3-90 days)
-    let duration = if (3..=90).contains(&duration_num) {
+    // Parse duration (3-365 days)
+    let duration = if (3..=365).contains(&duration_num) {
         tos_common::account::FreezeDuration::new(duration_num as u32)
             .map_err(|e| CommandError::InvalidArgument(e.to_string()))?
     } else {
         return Err(CommandError::InvalidArgument(
-            "Duration must be between 3 and 90 days".to_string(),
+            "Duration must be between 3 and 365 days".to_string(),
         ));
     };
 
@@ -5394,22 +5394,22 @@ async fn unfreeze_tos_delegate(
         return Err(CommandError::MissingArgument("amount".to_string()));
     };
 
-    let delegatee_str = if args.has_argument("delegatee") {
-        args.get_value("delegatee")?.to_string_value()?
-    } else {
-        return Err(CommandError::MissingArgument("delegatee".to_string()));
-    };
-
     let amount = from_coin(&amount_str, 8).context("Invalid amount")?;
 
-    let delegatee_addr: tos_common::crypto::Address = delegatee_str
-        .parse()
-        .map_err(|e| CommandError::InvalidArgument(format!("Invalid delegatee address: {e}")))?;
-    if delegatee_addr.is_mainnet() != wallet.get_network().is_mainnet() {
-        return Err(CommandError::InvalidArgument(
-            "Delegatee address network does not match wallet network".to_string(),
-        ));
-    }
+    let delegatee = if args.has_argument("delegatee") {
+        let delegatee_str = args.get_value("delegatee")?.to_string_value()?;
+        let delegatee_addr: tos_common::crypto::Address = delegatee_str.parse().map_err(|e| {
+            CommandError::InvalidArgument(format!("Invalid delegatee address: {e}"))
+        })?;
+        if delegatee_addr.is_mainnet() != wallet.get_network().is_mainnet() {
+            return Err(CommandError::InvalidArgument(
+                "Delegatee address network does not match wallet network".to_string(),
+            ));
+        }
+        Some(delegatee_addr.get_public_key().clone())
+    } else {
+        None
+    };
 
     let record_index = if args.has_argument("record_index") {
         Some(args.get_value("record_index")?.to_number()? as u32)
@@ -5417,16 +5417,15 @@ async fn unfreeze_tos_delegate(
         None
     };
 
-    let energy_builder = EnergyBuilder::unfreeze_tos_delegated(
-        amount,
-        record_index,
-        Some(delegatee_addr.get_public_key().clone()),
-    );
+    let energy_builder = EnergyBuilder::unfreeze_tos_delegated(amount, record_index, delegatee);
 
     if let Err(e) = energy_builder.validate() {
         manager.error(format!("Invalid energy builder configuration: {}", e));
         return Ok(());
     }
+
+    // Save delegatee address before moving energy_builder
+    let delegatee_for_display = energy_builder.delegatee_address.clone();
 
     let tx_type = TransactionTypeBuilder::Energy(energy_builder);
     let fee = FeeBuilder::default();
@@ -5442,7 +5441,12 @@ async fn unfreeze_tos_delegate(
     let hash = tx.hash();
     manager.message(format!("Delegation unfreeze transaction created: {}", hash));
     manager.message(format!("Amount: {} TOS", format_coin(amount, 8)));
-    manager.message(format!("Delegatee: {}", delegatee_addr));
+    if let Some(delegatee_pub) = delegatee_for_display {
+        manager.message(format!(
+            "Delegatee: {}",
+            delegatee_pub.to_address(wallet.get_network().is_mainnet())
+        ));
+    }
 
     broadcast_tx(wallet, manager, tx).await;
 
