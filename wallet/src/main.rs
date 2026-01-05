@@ -925,11 +925,6 @@ async fn setup_wallet_command_manager(
                 ArgType::Number,
                 "Freeze duration in days (3/7/14/30, longer = higher rewards)",
             ),
-            Arg::new(
-                "confirm",
-                ArgType::Bool,
-                "Confirm the freeze operation (required for batch mode)",
-            ),
         ],
         CommandHandler::Async(async_handler!(freeze_tos)),
     ))?;
@@ -953,14 +948,11 @@ async fn setup_wallet_command_manager(
     command_manager.add_command(Command::with_required_arguments(
         "unfreeze_tos",
         "Unfreeze TOS (release frozen TOS after lock period)",
-        vec![
-            Arg::new("amount", ArgType::String, "Amount of TOS to unfreeze"),
-            Arg::new(
-                "confirm",
-                ArgType::Bool,
-                "Confirm the unfreeze operation (required for batch mode)",
-            ),
-        ],
+        vec![Arg::new(
+            "amount",
+            ArgType::String,
+            "Amount of TOS to unfreeze",
+        )],
         CommandHandler::Async(async_handler!(unfreeze_tos)),
     ))?;
     let (required_args, optional_args) = unfreeze_tos_delegate_args();
@@ -5176,9 +5168,6 @@ async fn freeze_tos(
         return Err(CommandError::MissingArgument("duration".to_string()));
     };
 
-    // Consume confirm argument (required for batch mode validation)
-    let _confirm = args.get_value("confirm")?;
-
     // Parse amount
     let amount = from_coin(&amount_str, 8).context("Invalid amount")?;
 
@@ -5353,9 +5342,6 @@ async fn unfreeze_tos(
     } else {
         return Err(CommandError::MissingArgument("amount".to_string()));
     };
-
-    // Consume confirm argument (required for batch mode validation)
-    let _confirm = args.get_value("confirm")?;
 
     let amount = from_coin(&amount_str, 8).context("Invalid amount")?;
 
