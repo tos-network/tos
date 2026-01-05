@@ -35,6 +35,7 @@ fn test_energy_resource_management() {
     
     // Test freezing TOS for energy with different durations
     let topoheight = 1000;
+    let network = crate::network::Network::Mainnet;
 
     // Freeze 1 TOS for 3 days (6.0x multiplier)
     let duration3 = FreezeDuration::new(3).unwrap();
@@ -43,7 +44,8 @@ fn test_energy_resource_management() {
         100000000, // 1 TOS
         duration3,
         topoheight
-    );
+    )
+    .unwrap();
     assert_eq!(energy_gained_3d, 6); // 6 transfers
     assert_eq!(resource.frozen_tos, 100000000);
     assert_eq!(resource.total_energy, 6);
@@ -56,7 +58,8 @@ fn test_energy_resource_management() {
         100000000, // 1 TOS
         duration7,
         topoheight
-    );
+    )
+    .unwrap();
     assert_eq!(energy_gained_7d, 14); // 14 transfers
     assert_eq!(resource.frozen_tos, 200000000);
     assert_eq!(resource.total_energy, 20);
@@ -68,7 +71,8 @@ fn test_energy_resource_management() {
         150000000, // 1.5 TOS (invalid)
         duration3,
         topoheight
-    );
+    )
+    .unwrap();
     assert_eq!(energy_gained_partial, 0); // Invalid amount yields no energy
     assert_eq!(resource.frozen_tos, 200000000); // No additional TOS frozen
 
@@ -76,7 +80,8 @@ fn test_energy_resource_management() {
     let result = EnergyResourceManager::consume_energy_for_transaction(
         &mut resource,
         5, // 5 transfers
-        topoheight,
+        topoheight + 1,
+        &network,
     );
     assert!(result.is_ok());
     assert_eq!(resource.available_energy(), 15); // 20 - 5 = 15 transfers remaining
@@ -87,6 +92,7 @@ fn test_energy_resource_management() {
         100000000, // 1 TOS
         topoheight + 10000, // After unlock time
         None, // FIFO mode
+        &network,
     );
     assert!(unfreeze_result.is_ok());
     let (energy_removed, _pending_amount) = unfreeze_result.unwrap();
@@ -98,6 +104,7 @@ fn test_energy_unfreeze_mechanism() {
     let mut resource = EnergyResourceManager::create_energy_resource();
     let freeze_topoheight = 1000;
     let unlock_topoheight_7d = freeze_topoheight + 7 * 24 * 60 * 60;
+    let network = crate::network::Network::Mainnet;
     
     // Freeze 1 TOS for 7 days
     let duration = FreezeDuration::new(7).unwrap();
@@ -106,7 +113,8 @@ fn test_energy_unfreeze_mechanism() {
         100000000, // 1 TOS
         duration,
         freeze_topoheight
-    );
+    )
+    .unwrap();
     
     // Try to unfreeze before unlock time (should fail)
     let result = EnergyResourceManager::unfreeze_tos(
@@ -114,6 +122,7 @@ fn test_energy_unfreeze_mechanism() {
         100000000, // 1 TOS (minimum unit)
         unlock_topoheight_7d - 1,
         None, // FIFO mode
+        &network,
     );
     assert!(result.is_err());
 
@@ -123,7 +132,9 @@ fn test_energy_unfreeze_mechanism() {
         100000000, // 1 TOS
         unlock_topoheight_7d,
         None, // FIFO mode
-    ).unwrap();
+        &network,
+    )
+    .unwrap();
     assert_eq!(energy_removed, 14); // 1 TOS * 14 energy units removed
     assert_eq!(resource.frozen_tos, 0);
     assert_eq!(resource.total_energy, 0);
@@ -133,6 +144,7 @@ fn test_energy_unfreeze_mechanism() {
 fn test_energy_status() {
     let mut resource = EnergyResourceManager::create_energy_resource();
     let topoheight = 1000;
+    let network = crate::network::Network::Mainnet;
     
     // Add some energy
     let duration = FreezeDuration::new(7).unwrap();
@@ -141,13 +153,15 @@ fn test_energy_status() {
         100000000, // 1 TOS
         duration,
         topoheight
-    );
+    )
+    .unwrap();
     
     // Consume some energy
     EnergyResourceManager::consume_energy_for_transaction(
         &mut resource,
         2, // 2 energy units
-        topoheight,
+        topoheight + 1,
+        &network,
     ).unwrap();
     
     let status = EnergyResourceManager::get_energy_status(&resource);
@@ -167,7 +181,8 @@ fn test_energy_status() {
     EnergyResourceManager::consume_energy_for_transaction(
         &mut resource,
         10, // Consume more energy
-        topoheight,
+        topoheight + 1,
+        &network,
     ).unwrap();
     
     let status = EnergyResourceManager::get_energy_status(&resource);
@@ -189,7 +204,8 @@ fn test_freeze_duration_rewards() {
                 amount,
                 duration.clone(),
                 1000
-            );
+            )
+            .unwrap();
             
             let expected_energy = (amount / crate::config::COIN_VALUE) * multiplier;
             assert_eq!(energy_gained, expected_energy);
@@ -244,7 +260,8 @@ fn test_energy_fee_calculator_total_cost() {
         100000000, // 1 TOS
         duration,
         1000
-    );
+    )
+    .unwrap();
     
     let new_addresses = 2;
     
@@ -299,7 +316,8 @@ fn test_freeze_record_management() {
         100000000, // 1 TOS
         duration3,
         topoheight
-    );
+    )
+    .unwrap();
     
     let duration7 = FreezeDuration::new(7).unwrap();
     EnergyResourceManager::freeze_tos_for_energy(
@@ -307,7 +325,8 @@ fn test_freeze_record_management() {
         200000000, // 2 TOS
         duration7,
         topoheight
-    );
+    )
+    .unwrap();
     
     let duration14 = FreezeDuration::new(14).unwrap();
     EnergyResourceManager::freeze_tos_for_energy(
@@ -315,7 +334,8 @@ fn test_freeze_record_management() {
         300000000, // 3 TOS
         duration14,
         topoheight
-    );
+    )
+    .unwrap();
     
     assert_eq!(resource.freeze_records.len(), 3);
     assert_eq!(resource.frozen_tos, 600000000);
@@ -345,6 +365,7 @@ fn test_freeze_record_management() {
 fn test_energy_reset_mechanism() {
     let mut resource = EnergyResourceManager::create_energy_resource();
     let topoheight = 1000;
+    let network = crate::network::Network::Mainnet;
     
     // Add energy and consume some
     let duration = FreezeDuration::new(7).unwrap();
@@ -353,12 +374,14 @@ fn test_energy_reset_mechanism() {
         100000000, // 1 TOS
         duration,
         topoheight
-    );
+    )
+    .unwrap();
     
     EnergyResourceManager::consume_energy_for_transaction(
         &mut resource,
         5, // 5 energy units
-        topoheight,
+        topoheight + 1,
+        &network,
     ).unwrap();
 
     assert_eq!(resource.used_energy, 5);
@@ -376,6 +399,7 @@ fn test_whole_number_tos_requirement() {
     let mut resource = EnergyResource::new();
     let topoheight = 1000;
     let duration = FreezeDuration::new(7).unwrap();
+    let network = crate::network::Network::Mainnet;
 
     // Test that partial TOS amounts are rejected
     let energy_gained = EnergyResourceManager::freeze_tos_for_energy(
@@ -383,7 +407,8 @@ fn test_whole_number_tos_requirement() {
         150000000, // 1.5 TOS
         duration,
         topoheight
-    );
+    )
+    .unwrap();
     assert_eq!(energy_gained, 0); // Invalid amount yields no energy
     assert_eq!(resource.frozen_tos, 0); // Nothing frozen
 
@@ -393,7 +418,8 @@ fn test_whole_number_tos_requirement() {
         50000000, // 0.5 TOS
         duration,
         topoheight
-    );
+    )
+    .unwrap();
     assert_eq!(energy_gained_small, 0); // Invalid amount yields no energy
     assert_eq!(resource.frozen_tos, 0); // Still nothing frozen
 
@@ -403,7 +429,8 @@ fn test_whole_number_tos_requirement() {
         100000000, // 1 TOS
         duration,
         topoheight
-    );
+    )
+    .unwrap();
     assert_eq!(energy_gained_valid, 14);
     assert_eq!(resource.total_energy, 14);
     assert_eq!(resource.available_energy(), 14);
@@ -412,7 +439,8 @@ fn test_whole_number_tos_requirement() {
     let result = EnergyResourceManager::consume_energy_for_transaction(
         &mut resource,
         1, // 1 transfer
-        topoheight,
+        topoheight + 1,
+        &network,
     );
     assert!(result.is_ok());
     assert_eq!(resource.available_energy(), 13); // 13 transfers remaining

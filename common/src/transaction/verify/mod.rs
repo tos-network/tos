@@ -2725,8 +2725,9 @@ impl Transaction {
 
                 if let Some(mut energy_resource) = energy_resource {
                     let topoheight = state.get_block().get_height();
+                    let network = state.get_network();
                     energy_resource.clear_pending_energy_if_ready(topoheight);
-                    energy_resource.maybe_reset_energy(topoheight);
+                    energy_resource.maybe_reset_energy(topoheight, &network);
 
                     // Check if user has enough energy
                     if !energy_resource.has_enough_energy(topoheight, energy_cost) {
@@ -2868,17 +2869,6 @@ impl Transaction {
                         let mut energy_resource =
                             energy_resource.unwrap_or_else(EnergyResource::new);
 
-                        // Check record limit only if a new record would be created
-                        let can_merge = energy_resource
-                            .freeze_records
-                            .iter()
-                            .any(|record| record.duration == *duration);
-                        if !can_merge && !energy_resource.can_add_freeze_record() {
-                            return Err(VerificationError::AnyError(anyhow::anyhow!(
-                                "Maximum freeze records reached"
-                            )));
-                        }
-
                         // Freeze TOS for energy with expired freeze recycling
                         // - Prioritizes recycling TOS from expired freeze records
                         // - Recycled TOS preserves existing energy (no new energy)
@@ -2886,7 +2876,8 @@ impl Transaction {
                         let topoheight = state.get_block().get_height();
                         let network = state.get_network();
                         let result = energy_resource
-                            .freeze_tos_with_recycling(*amount, *duration, topoheight, &network);
+                            .freeze_tos_with_recycling(*amount, *duration, topoheight, &network)
+                            .map_err(|e| VerificationError::AnyError(anyhow::anyhow!("{e}")))?;
 
                         // Update energy resource in state
                         state
@@ -2965,14 +2956,8 @@ impl Transaction {
                             )
                             .map_err(|e| VerificationError::AnyError(anyhow::anyhow!("{e}")))?;
 
-                        // Update delegator's energy resource
-                        state
-                            .set_energy_resource(Cow::Borrowed(&self.source), energy_resource)
-                            .await
-                            .map_err(VerificationError::State)?;
-
-                        // Add delegated energy to each delegatee
-                        // Reference delegatees from payload directly (has correct lifetime 'a)
+                        // Prepare delegatee updates first to avoid partial writes on overflow
+                        let mut updated_delegatees = Vec::with_capacity(delegatees.len());
                         for entry in delegatees.iter() {
                             let energy = (entry.amount / crate::config::COIN_VALUE)
                                 * duration.reward_multiplier();
@@ -2989,11 +2974,19 @@ impl Transaction {
                                 .add_delegated_energy(energy, topoheight)
                                 .map_err(|_| VerificationError::Overflow)?;
 
+                            updated_delegatees.push((entry.delegatee.clone(), delegatee_resource));
+                        }
+
+                        // Update delegator's energy resource
+                        state
+                            .set_energy_resource(Cow::Borrowed(&self.source), energy_resource)
+                            .await
+                            .map_err(VerificationError::State)?;
+
+                        // Apply delegatee updates
+                        for (delegatee, delegatee_resource) in updated_delegatees {
                             state
-                                .set_energy_resource(
-                                    Cow::Borrowed(&entry.delegatee),
-                                    delegatee_resource,
-                                )
+                                .set_energy_resource(Cow::Owned(delegatee), delegatee_resource)
                                 .await
                                 .map_err(VerificationError::State)?;
                         }
@@ -3027,6 +3020,7 @@ impl Transaction {
                             }
 
                             let topoheight = state.get_block().get_height();
+                            let network = state.get_network();
 
                             if *from_delegation {
                                 // Unfreeze from delegated records
@@ -3042,6 +3036,7 @@ impl Transaction {
                                             topoheight,
                                             *record_index,
                                             delegatee_address,
+                                            &network,
                                         )
                                         .map_err(|e| {
                                             VerificationError::AnyError(anyhow::anyhow!("{e}"))
@@ -3099,6 +3094,7 @@ impl Transaction {
                                             topoheight,
                                             Some(record_idx as u32),
                                             &delegatee,
+                                            &network,
                                         )
                                         .map_err(|e| {
                                             VerificationError::AnyError(anyhow::anyhow!("{e}"))
@@ -3143,7 +3139,7 @@ impl Transaction {
                             } else {
                                 // Unfreeze from self-freeze records (two-phase: creates pending)
                                 energy_resource
-                                    .unfreeze_tos(*amount, topoheight, *record_index)
+                                    .unfreeze_tos(*amount, topoheight, *record_index, &network)
                                     .map_err(|e| {
                                         VerificationError::AnyError(anyhow::anyhow!("{e}"))
                                     })?;

@@ -5,7 +5,7 @@ use std::{
     collections::{hash_map::Entry, HashMap},
 };
 use tos_common::{
-    account::Nonce,
+    account::{EnergyResource, Nonce},
     block::{BlockVersion, TopoHeight},
     crypto::{
         elgamal::{Ciphertext, CompressedPublicKey},
@@ -44,6 +44,8 @@ pub struct MempoolState<'a, S: Storage> {
     // Sender accounts
     // This is used to verify ZK Proofs and store/update nonces
     accounts: HashMap<&'a PublicKey, Account<'a>>,
+    // Sender energy resources (used for energy fee validation)
+    energy_resources: HashMap<&'a PublicKey, EnergyResource>,
     // Contract modules
     contracts: HashMap<Hash, Cow<'a, Module>>,
     // The current stable topoheight of the chain
@@ -72,6 +74,7 @@ impl<'a, S: Storage> MempoolState<'a, S> {
             receiver_balances: HashMap::new(),
             receiver_uno_balances: HashMap::new(),
             accounts: HashMap::new(),
+            energy_resources: HashMap::new(),
             contracts: HashMap::new(),
             stable_topoheight,
             topoheight,
@@ -83,9 +86,14 @@ impl<'a, S: Storage> MempoolState<'a, S> {
     pub fn get_sender_cache(
         &mut self,
         key: &PublicKey,
-    ) -> Option<(HashMap<&Hash, u64>, Option<MultiSigPayload>)> {
+    ) -> Option<(
+        HashMap<&Hash, u64>,
+        Option<MultiSigPayload>,
+        Option<EnergyResource>,
+    )> {
         let account = self.accounts.remove(key)?;
-        Some((account.assets, account.multisig))
+        let energy_resource = self.energy_resources.remove(key);
+        Some((account.assets, account.multisig, energy_resource))
     }
 
     // Retrieve the receiver balance
@@ -278,6 +286,68 @@ impl<'a, S: Storage> MempoolState<'a, S> {
             BlockchainError::AccountNotFound(account.as_address(self.storage.is_mainnet()))
         })?;
         account.nonce = new_nonce;
+
+        Ok(())
+    }
+
+    async fn internal_get_sender_energy_resource<'b>(
+        &'b mut self,
+        key: &'a PublicKey,
+    ) -> Result<&'b mut EnergyResource, BlockchainError> {
+        match self.energy_resources.entry(key) {
+            Entry::Occupied(o) => Ok(o.into_mut()),
+            Entry::Vacant(v) => {
+                let energy_resource = if let Some(cache) = self.mempool.get_cache_for(key) {
+                    cache
+                        .get_energy_resource()
+                        .cloned()
+                        .unwrap_or_else(EnergyResource::new)
+                } else {
+                    self.storage
+                        .get_energy_resource(key)
+                        .await?
+                        .unwrap_or_else(EnergyResource::new)
+                };
+                Ok(v.insert(energy_resource))
+            }
+        }
+    }
+
+    pub async fn consume_energy_for_transaction(
+        &mut self,
+        tx: &'a Transaction,
+    ) -> Result<(), BlockchainError> {
+        if !tx.get_fee_type().is_energy() {
+            return Ok(());
+        }
+
+        if matches!(
+            tx.get_data(),
+            tos_common::transaction::TransactionType::Transfers(_)
+        ) {
+            let energy_cost = tx.calculate_energy_cost();
+            if energy_cost == 0 {
+                return Ok(());
+            }
+
+            let network = self.get_network();
+            let topoheight = self.topoheight;
+
+            let energy_resource = self
+                .internal_get_sender_energy_resource(tx.get_source())
+                .await?;
+
+            energy_resource.clear_pending_energy_if_ready(topoheight);
+            energy_resource.maybe_reset_energy(topoheight, &network);
+
+            if !energy_resource.has_enough_energy(topoheight, energy_cost) {
+                return Err(BlockchainError::Any(anyhow::anyhow!("Insufficient energy")));
+            }
+
+            energy_resource
+                .consume_energy(energy_cost, topoheight)
+                .map_err(|_| BlockchainError::Any(anyhow::anyhow!("Insufficient energy")))?;
+        }
 
         Ok(())
     }

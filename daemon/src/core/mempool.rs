@@ -43,6 +43,8 @@ pub struct AccountCache {
     balances: HashMap<Hash, u64>,
     // Expected multisig after all txs in this cache
     multisig: Option<MultiSigPayload>,
+    // Expected energy resource after all txs in this cache
+    energy_resource: Option<tos_common::account::EnergyResource>,
 }
 
 // Mempool is used to store all TXs waiting to be included in a block
@@ -150,9 +152,12 @@ impl Mempool {
         let tx_cache = TxCache::new(storage, self, self.disable_zkp_cache);
         tx.verify(&hash, &mut state, &tx_cache).await?;
 
-        let (balances, multisig) = state.get_sender_cache(tx.get_source()).ok_or_else(|| {
-            BlockchainError::AccountNotFound(tx.get_source().as_address(self.mainnet))
-        })?;
+        state.consume_energy_for_transaction(&tx).await?;
+
+        let (balances, multisig, energy_resource) =
+            state.get_sender_cache(tx.get_source()).ok_or_else(|| {
+                BlockchainError::AccountNotFound(tx.get_source().as_address(self.mainnet))
+            })?;
 
         let balances = balances
             .into_iter()
@@ -177,6 +182,7 @@ impl Mempool {
             // Update re-computed balances
             cache.set_balances(balances);
             cache.set_multisig(multisig);
+            cache.set_energy_resource(energy_resource);
         } else {
             let mut txs = IndexSet::new();
             txs.insert(hash.clone());
@@ -188,6 +194,7 @@ impl Mempool {
                 txs,
                 balances,
                 multisig,
+                energy_resource,
             };
             self.caches.insert(tx.get_source().clone(), cache);
         }
@@ -696,6 +703,19 @@ impl AccountCache {
     // Returns the expected multisig cache after the execution of all TXs
     pub fn get_multisig(&self) -> &Option<MultiSigPayload> {
         &self.multisig
+    }
+
+    // Set the expected energy resource
+    pub fn set_energy_resource(
+        &mut self,
+        energy_resource: Option<tos_common::account::EnergyResource>,
+    ) {
+        self.energy_resource = energy_resource;
+    }
+
+    // Get the expected energy resource
+    pub fn get_energy_resource(&self) -> Option<&tos_common::account::EnergyResource> {
+        self.energy_resource.as_ref()
     }
 
     // Update the cache with a new TX

@@ -1908,6 +1908,7 @@ fn test_energy_system_demo() {
     // Alice freezes TOS to get energy
     println!("=== Freezing TOS for Energy ===");
     let topoheight = 1000;
+    let network = tos_common::network::Network::Mainnet;
 
     // Freeze 1 TOS for 7 days (14 transfers)
     let duration7 = tos_common::account::FreezeDuration::new(7).unwrap();
@@ -1917,7 +1918,8 @@ fn test_energy_system_demo() {
             100000000, // 1 TOS
             duration7,
             topoheight,
-        );
+        )
+        .unwrap();
     println!("Alice froze 1 TOS for 7 days");
     println!("Energy gained: {energy_gained_7d} transfers (1 TOS × 7 days × 2 = 14 transfers)");
     println!(
@@ -1934,7 +1936,8 @@ fn test_energy_system_demo() {
             200000000, // 2 TOS
             duration14,
             topoheight,
-        );
+        )
+        .unwrap();
     println!("Alice froze 2 TOS for 14 days");
     println!("Energy gained: {energy_gained_14d} transfers (2 TOS × 14 days × 2 = 56 transfers)");
     println!(
@@ -1983,7 +1986,8 @@ fn test_energy_system_demo() {
         tos_common::utils::energy_fee::EnergyResourceManager::consume_energy_for_transaction(
             &mut alice_energy,
             energy_cost,
-            topoheight,
+            topoheight + 1,
+            &network,
         );
 
     match result {
@@ -2032,6 +2036,7 @@ fn test_energy_system_demo() {
         50000000, // 0.5 TOS
         unlock_topoheight_7d - 1,
         None, // FIFO mode
+        &network,
     );
 
     match result {
@@ -2053,6 +2058,7 @@ fn test_energy_system_demo() {
         100000000, // 1 TOS (integer)
         unlock_topoheight_7d,
         None, // FIFO mode
+        &network,
     );
 
     match result {

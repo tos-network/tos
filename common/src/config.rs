@@ -98,12 +98,10 @@ pub const MAX_FREEZE_RECORDS: usize = 32;
 pub const MAX_PENDING_UNFREEZES: usize = 32;
 // Maximum delegatees in a single batch delegation
 pub const MAX_DELEGATEES: usize = 500;
-// Unfreeze cooldown period in blocks (14 days)
-// Using 1 block per 2 seconds: 14 days * 24 hours * 60 minutes * 30 blocks/minute
-pub const UNFREEZE_COOLDOWN_BLOCKS: u64 = 14 * 24 * 60 * 30; // 604,800 blocks
-                                                             // Blocks per day (for Energy reset cycle)
-                                                             // Using 1 block per 2 seconds: 24 hours * 60 minutes * 30 blocks/minute
-pub const BLOCKS_PER_DAY: u64 = 24 * 60 * 30; // 43,200 blocks
+// Unfreeze cooldown period in days (converted to blocks per network)
+pub const UNFREEZE_COOLDOWN_DAYS: u64 = 14;
+// Energy reset period in days (converted to blocks per network)
+pub const ENERGY_RESET_DAYS: u64 = 1;
 
 // Addresses format
 // mainnet prefix address

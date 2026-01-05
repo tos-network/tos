@@ -3184,7 +3184,7 @@ async fn get_energy<S: Storage>(context: &Context, body: Value) -> Result<Value,
             frozen_tos: energy_resource.frozen_tos,
             total_energy: energy_resource.total_energy,
             used_energy: energy_resource.used_energy,
-            available_energy: energy_resource.available_energy(),
+            available_energy: energy_resource.available_energy_at(current_topoheight),
             last_update: energy_resource.last_update,
             freeze_records,
         })
