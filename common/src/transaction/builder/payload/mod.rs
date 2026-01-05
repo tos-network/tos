@@ -357,7 +357,7 @@ impl EnergyBuilder {
             // Validate freeze duration (3-180 days)
             if let Some(duration) = &self.freeze_duration {
                 if !duration.is_valid() {
-                    return Err("Freeze duration must be between 3 and 180 days");
+                    return Err("Freeze duration must be between 3 and 365 days");
                 }
             }
         } else {

@@ -486,6 +486,24 @@ async fn register_default_commands(manager: &CommandManager) -> Result<(), Comma
     Ok(())
 }
 
+fn unfreeze_tos_delegate_args() -> (Vec<Arg>, Vec<Arg>) {
+    (
+        vec![Arg::new(
+            "amount",
+            ArgType::String,
+            "Amount of TOS to unfreeze",
+        )],
+        vec![
+            Arg::new("delegatee", ArgType::String, "Delegatee address"),
+            Arg::new(
+                "record_index",
+                ArgType::Number,
+                "Delegation record index (required if multiple records exist)",
+            ),
+        ],
+    )
+}
+
 #[cfg(feature = "xswd")]
 // This must be run in a separate task
 async fn xswd_handler(mut receiver: UnboundedReceiver<XSWDEvent>, prompt: ShareablePrompt) {
@@ -937,18 +955,12 @@ async fn setup_wallet_command_manager(
         )],
         CommandHandler::Async(async_handler!(unfreeze_tos)),
     ))?;
+    let (required_args, optional_args) = unfreeze_tos_delegate_args();
     command_manager.add_command(Command::with_arguments(
         "unfreeze_tos_delegate",
         "Unfreeze delegated TOS (delegatee optional for single-entry records)",
-        vec![
-            Arg::new("amount", ArgType::String, "Amount of TOS to unfreeze"),
-            Arg::new("delegatee", ArgType::String, "Delegatee address"),
-        ],
-        vec![Arg::new(
-            "record_index",
-            ArgType::Number,
-            "Delegation record index (required if multiple records exist)",
-        )],
+        required_args,
+        optional_args,
         CommandHandler::Async(async_handler!(unfreeze_tos_delegate)),
     ))?;
     command_manager.add_command(Command::new(
@@ -6473,4 +6485,72 @@ async fn count_contracts(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tos_common::prompt::{default_logs_datetime_format, LogLevel, ShareablePrompt};
+
+    fn build_test_prompt() -> Result<ShareablePrompt, CommandError> {
+        let temp_dir = std::env::temp_dir().join("tos_wallet_cli_tests");
+        fs::create_dir_all(&temp_dir).map_err(CommandError::Any)?;
+        let dir_path = format!("{}/", temp_dir.display());
+        let config = PromptConfig {
+            level: LogLevel::Off,
+            dir_path: &dir_path,
+            filename_log: "test.log",
+            disable_file_logging: true,
+            disable_file_log_date_based: true,
+            disable_colors: true,
+            enable_auto_compress_logs: false,
+            interactive: false,
+            module_logs: Vec::new(),
+            file_level: LogLevel::Off,
+            show_ascii: false,
+            logs_datetime_format: default_logs_datetime_format(),
+        };
+
+        Prompt::new(config).map_err(CommandError::Any)
+    }
+
+    fn noop_handler(_: &CommandManager, _: ArgumentManager) -> Result<(), CommandError> {
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn unfreeze_tos_delegate_parses_optional_args() {
+        let prompt = build_test_prompt().expect("prompt init");
+        let manager = CommandManager::new_with_batch_mode(prompt, true);
+        let (required_args, optional_args) = unfreeze_tos_delegate_args();
+        manager
+            .add_command(Command::with_arguments(
+                "unfreeze_tos_delegate",
+                "test",
+                required_args,
+                optional_args,
+                CommandHandler::Sync(noop_handler),
+            ))
+            .expect("register command");
+
+        manager
+            .handle_command("unfreeze_tos_delegate amount=1".to_string())
+            .await
+            .expect("amount only");
+        manager
+            .handle_command("unfreeze_tos_delegate amount=1 record_index=0".to_string())
+            .await
+            .expect("record_index only");
+        manager
+            .handle_command("unfreeze_tos_delegate amount=1 delegatee=addr".to_string())
+            .await
+            .expect("delegatee only");
+        manager
+            .handle_command(
+                "unfreeze_tos_delegate amount=1 delegatee=addr record_index=0".to_string(),
+            )
+            .await
+            .expect("delegatee and record_index");
+    }
 }

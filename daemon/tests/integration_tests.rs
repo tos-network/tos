@@ -1181,10 +1181,10 @@ fn test_freeze_tos_integration() {
     );
 
     // Assert state changes after freeze transaction
-    // Balance simplification: Default fee is FEE_PER_KB (10000) with Boost(0)
+    // Energy transactions (freeze_tos) are FREE - no fee deducted
     assert_eq!(
         chain.get_balance(&alice_pubkey),
-        1000 * COIN_VALUE - freeze_amount - 10000
+        1000 * COIN_VALUE - freeze_amount
     );
     let (used, total) = chain.get_energy(&alice_pubkey);
     assert_eq!(used, 0);
@@ -1291,7 +1291,8 @@ fn test_freeze_tos_sigma_proofs_verification() {
             tos_common::transaction::builder::EnergyBuilder::freeze_tos(freeze_amount, duration);
         let tx_type =
             tos_common::transaction::builder::TransactionTypeBuilder::Energy(energy_builder);
-        let fee_builder = tos_common::transaction::builder::FeeBuilder::Value(20000); // 20000 TOS fee
+        // Energy transactions are FREE - FeeBuilder is ignored
+        let fee_builder = tos_common::transaction::builder::FeeBuilder::default();
 
         let builder = tos_common::transaction::builder::TransactionBuilder::new(
             tos_common::transaction::TxVersion::T0,
@@ -1315,7 +1316,7 @@ fn test_freeze_tos_sigma_proofs_verification() {
 
         println!("Transaction details:");
         println!("  Hash: {}", freeze_tx.hash());
-        println!("  Fee: {} TOS", freeze_tx.get_fee());
+        println!("  Fee: {} (Energy is FREE)", freeze_tx.get_fee());
         println!("  Nonce: {}", freeze_tx.get_nonce());
 
         // Test 1: Verify transaction format and structure
@@ -1324,7 +1325,7 @@ fn test_freeze_tos_sigma_proofs_verification() {
             "Invalid transaction format"
         );
         assert_eq!(freeze_tx.get_nonce(), 0, "Invalid nonce");
-        assert_eq!(freeze_tx.get_fee(), 20000, "Invalid fee");
+        assert_eq!(freeze_tx.get_fee(), 0, "Energy transactions are FREE");
         println!("✓ Transaction format validation passed");
 
         // Test 3: Verify that the transaction can be serialized and deserialized
@@ -1445,7 +1446,8 @@ fn test_unfreeze_tos_sigma_proofs_verification() {
             tos_common::transaction::builder::EnergyBuilder::unfreeze_tos(unfreeze_amount);
         let tx_type =
             tos_common::transaction::builder::TransactionTypeBuilder::Energy(energy_builder);
-        let fee_builder = tos_common::transaction::builder::FeeBuilder::Value(20000); // 20000 TOS fee
+        // Energy transactions are FREE - FeeBuilder is ignored
+        let fee_builder = tos_common::transaction::builder::FeeBuilder::default();
 
         let builder = tos_common::transaction::builder::TransactionBuilder::new(
             tos_common::transaction::TxVersion::T0,
@@ -1469,7 +1471,7 @@ fn test_unfreeze_tos_sigma_proofs_verification() {
 
         println!("Transaction details:");
         println!("  Hash: {}", unfreeze_tx.hash());
-        println!("  Fee: {} TOS", unfreeze_tx.get_fee());
+        println!("  Fee: {} (Energy is FREE)", unfreeze_tx.get_fee());
         println!("  Nonce: {}", unfreeze_tx.get_nonce());
 
         // Test 1: Verify transaction format and structure
@@ -1478,7 +1480,7 @@ fn test_unfreeze_tos_sigma_proofs_verification() {
             "Invalid transaction format"
         );
         assert_eq!(unfreeze_tx.get_nonce(), 0, "Invalid nonce");
-        assert_eq!(unfreeze_tx.get_fee(), 20000, "Invalid fee");
+        assert_eq!(unfreeze_tx.get_fee(), 0, "Energy transactions are FREE");
         println!("✓ Transaction format validation passed");
 
         // Test 3: Verify that the transaction can be serialized and deserialized
@@ -1615,7 +1617,8 @@ fn test_unfreeze_tos_integration() {
     let energy_builder =
         tos_common::transaction::builder::EnergyBuilder::freeze_tos(freeze_amount, freeze_duration);
     let tx_type = tos_common::transaction::builder::TransactionTypeBuilder::Energy(energy_builder);
-    let fee_builder = tos_common::transaction::builder::FeeBuilder::Value(20000); // 20000 TOS fee
+    // Energy transactions are FREE - FeeBuilder is ignored
+    let fee_builder = tos_common::transaction::builder::FeeBuilder::default();
 
     let builder = tos_common::transaction::builder::TransactionBuilder::new(
         tos_common::transaction::TxVersion::T0,
@@ -1664,10 +1667,10 @@ fn test_unfreeze_tos_integration() {
     println!("Alice nonce: {}", chain.get_nonce(&alice_pubkey));
 
     // Assert state changes after freeze transaction
-    // This test explicitly uses FeeBuilder::Value(20000) (see line 1309)
+    // Energy transactions (freeze_tos) are FREE - no fee deducted
     assert_eq!(
         chain.get_balance(&alice_pubkey),
-        1000 * COIN_VALUE - freeze_amount - 20000
+        1000 * COIN_VALUE - freeze_amount
     );
     let (used, total) = chain.get_energy(&alice_pubkey);
     assert_eq!(used, 0);
@@ -1681,7 +1684,8 @@ fn test_unfreeze_tos_integration() {
     let energy_builder =
         tos_common::transaction::builder::EnergyBuilder::unfreeze_tos(unfreeze_amount);
     let tx_type = tos_common::transaction::builder::TransactionTypeBuilder::Energy(energy_builder);
-    let fee_builder = tos_common::transaction::builder::FeeBuilder::Value(20000); // 20000 TOS fee
+    // Energy transactions are FREE - FeeBuilder is ignored
+    let fee_builder = tos_common::transaction::builder::FeeBuilder::default();
 
     let builder = tos_common::transaction::builder::TransactionBuilder::new(
         tos_common::transaction::TxVersion::T0,
@@ -1694,7 +1698,7 @@ fn test_unfreeze_tos_integration() {
 
     // Create a simple mock state for transaction building
     let mut state = MockAccountState::new();
-    state.set_balance(tos_common::config::TOS_ASSET, 780 * COIN_VALUE); // Updated balance after freeze
+    state.set_balance(tos_common::config::TOS_ASSET, 800 * COIN_VALUE); // Balance after freeze (no fee)
     state.nonce = 1; // Updated nonce after freeze
 
     // Build the unfreeze transaction
@@ -1728,8 +1732,8 @@ fn test_unfreeze_tos_integration() {
     println!("Alice nonce: {}", chain.get_nonce(&alice_pubkey));
 
     // Assert state changes after unfreeze transaction
-    // Balance should be: initial - freeze_amount - freeze_fee + unfreeze_amount - unfreeze_fee
-    let expected_balance = 1000 * COIN_VALUE - freeze_amount - 20000 + unfreeze_amount - 20000;
+    // Balance should be: initial - freeze_amount + unfreeze_amount (Energy transactions are FREE)
+    let expected_balance = 1000 * COIN_VALUE - freeze_amount + unfreeze_amount;
     assert_eq!(chain.get_balance(&alice_pubkey), expected_balance);
 
     // Energy should be reduced proportionally
@@ -1766,7 +1770,8 @@ fn test_unfreeze_tos_edge_cases() {
         );
         let tx_type =
             tos_common::transaction::builder::TransactionTypeBuilder::Energy(energy_builder);
-        let fee_builder = tos_common::transaction::builder::FeeBuilder::Value(20000);
+        // Energy transactions are FREE
+        let fee_builder = tos_common::transaction::builder::FeeBuilder::default();
 
         let builder = tos_common::transaction::builder::TransactionBuilder::new(
             tos_common::transaction::TxVersion::T0,
@@ -1795,7 +1800,8 @@ fn test_unfreeze_tos_edge_cases() {
             tos_common::transaction::builder::EnergyBuilder::unfreeze_tos(unfreeze_amount);
         let tx_type =
             tos_common::transaction::builder::TransactionTypeBuilder::Energy(energy_builder);
-        let fee_builder = tos_common::transaction::builder::FeeBuilder::Value(20000);
+        // Energy transactions are FREE
+        let fee_builder = tos_common::transaction::builder::FeeBuilder::default();
 
         let builder = tos_common::transaction::builder::TransactionBuilder::new(
             tos_common::transaction::TxVersion::T0,
@@ -1807,7 +1813,7 @@ fn test_unfreeze_tos_edge_cases() {
         );
 
         let mut state = MockAccountState::new();
-        state.set_balance(tos_common::config::TOS_ASSET, 880 * COIN_VALUE); // After freeze
+        state.set_balance(tos_common::config::TOS_ASSET, 900 * COIN_VALUE); // After freeze (1000 - 100 = 900, no fee)
         state.nonce = 1;
 
         let unfreeze_tx = builder.build(&mut state, &alice).unwrap();
@@ -1823,9 +1829,9 @@ fn test_unfreeze_tos_edge_cases() {
         println!("✓ Correctly failed when trying to unfreeze more than frozen");
     }
 
-    // Test case 2: Try to unfreeze with insufficient balance for fee
+    // Test case 2: Unfreeze works with minimal balance (Energy transactions are FREE)
     {
-        println!("\n--- Test case 2: Unfreeze with insufficient balance for fee ---");
+        println!("\n--- Test case 2: Unfreeze works with minimal balance (no fee) ---");
         let alice = KeyPair::new();
         let alice_pubkey = alice.get_public_key().compress();
 
@@ -1843,7 +1849,7 @@ fn test_unfreeze_tos_edge_cases() {
         );
         let tx_type =
             tos_common::transaction::builder::TransactionTypeBuilder::Energy(energy_builder);
-        let fee_builder = tos_common::transaction::builder::FeeBuilder::Value(20000);
+        let fee_builder = tos_common::transaction::builder::FeeBuilder::default();
 
         let builder = tos_common::transaction::builder::TransactionBuilder::new(
             tos_common::transaction::TxVersion::T0,
@@ -1865,17 +1871,17 @@ fn test_unfreeze_tos_edge_cases() {
         let result = chain.apply_block(&freeze_txs, &signers);
         assert!(result.is_ok(), "Freeze block execution failed");
 
-        // Set balance to less than fee
-        chain.set_balance(alice_pubkey.clone(), 1000); // Less than fee (20000)
+        // Set balance to very small amount (Energy transactions are FREE, so this should work)
+        chain.set_balance(alice_pubkey.clone(), 1000); // Very small balance
 
-        // Try to unfreeze 50 TOS
+        // Try to unfreeze 50 TOS (should succeed since Energy transactions are free)
         let unfreeze_amount = 50 * COIN_VALUE;
 
         let energy_builder =
             tos_common::transaction::builder::EnergyBuilder::unfreeze_tos(unfreeze_amount);
         let tx_type =
             tos_common::transaction::builder::TransactionTypeBuilder::Energy(energy_builder);
-        let fee_builder = tos_common::transaction::builder::FeeBuilder::Value(20000);
+        let fee_builder = tos_common::transaction::builder::FeeBuilder::default();
 
         let builder = tos_common::transaction::builder::TransactionBuilder::new(
             tos_common::transaction::TxVersion::T0,
@@ -1887,21 +1893,21 @@ fn test_unfreeze_tos_edge_cases() {
         );
 
         let mut state = MockAccountState::new();
-        state.set_balance(tos_common::config::TOS_ASSET, 880 * COIN_VALUE); // Keep original balance for building
+        state.set_balance(tos_common::config::TOS_ASSET, 900 * COIN_VALUE); // Balance for building
         state.nonce = 1;
 
         let unfreeze_tx = builder.build(&mut state, &alice).unwrap();
         let unfreeze_txs = vec![(unfreeze_tx, unfreeze_amount)];
         let signers = vec![alice.clone()];
 
-        // This should fail because insufficient balance for fee
+        // Energy transactions are FREE, so this should succeed even with minimal balance
         let result = chain.apply_block(&unfreeze_txs, &signers);
         println!("Result: {result:?}");
         assert!(
-            result.is_err(),
-            "Should fail when insufficient balance for fee"
+            result.is_ok(),
+            "Unfreeze should succeed with minimal balance (Energy is FREE)"
         );
-        println!("✓ Correctly failed when insufficient balance for fee");
+        println!("✓ Unfreeze succeeded with minimal balance (Energy transactions are FREE)");
     }
 
     println!("✓ All unfreeze_tos edge case tests passed!");
