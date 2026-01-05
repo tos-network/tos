@@ -91,7 +91,10 @@ impl EnergyResourceManager {
     }
 
     /// Withdraw unfrozen TOS after cooldown period
-    pub fn withdraw_unfrozen(energy_resource: &mut EnergyResource, topoheight: TopoHeight) -> u64 {
+    pub fn withdraw_unfrozen(
+        energy_resource: &mut EnergyResource,
+        topoheight: TopoHeight,
+    ) -> Result<u64, &'static str> {
         energy_resource.withdraw_unfrozen(topoheight)
     }
 
@@ -99,8 +102,11 @@ impl EnergyResourceManager {
     pub fn consume_energy_for_transaction(
         energy_resource: &mut EnergyResource,
         energy_cost: u64,
+        topoheight: TopoHeight,
     ) -> Result<(), &'static str> {
-        energy_resource.consume_energy(energy_cost)
+        energy_resource.clear_pending_energy_if_ready(topoheight);
+        energy_resource.maybe_reset_energy(topoheight);
+        energy_resource.consume_energy(energy_cost, topoheight)
     }
 
     /// Reset energy usage (called periodically)
@@ -222,10 +228,11 @@ mod tests {
         assert_eq!(energy_gained, 14); // 1 TOS * 14 = 14 transfers
         assert_eq!(resource.available_energy(), 14);
 
-        // Consume energy
+        // Consume energy (must be in next block due to pending energy gating)
         let result = EnergyResourceManager::consume_energy_for_transaction(
             &mut resource,
-            5, // 5 transfers
+            5,    // 5 transfers
+            1001, // Next block - energy is now available
         );
         assert!(result.is_ok());
         assert_eq!(resource.available_energy(), 9); // 14 - 5 = 9 transfers remaining

@@ -1983,6 +1983,7 @@ fn test_energy_system_demo() {
         tos_common::utils::energy_fee::EnergyResourceManager::consume_energy_for_transaction(
             &mut alice_energy,
             energy_cost,
+            topoheight,
         );
 
     match result {

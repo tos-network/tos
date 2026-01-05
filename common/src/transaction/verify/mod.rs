@@ -490,6 +490,15 @@ impl Transaction {
                                 "Cannot delegate energy to yourself"
                             )));
                         }
+
+                        // Delegatee account must already exist
+                        let delegatee_exists = state.get_account_nonce(&entry.delegatee).await;
+                        if delegatee_exists.is_err() {
+                            return Err(VerificationError::AnyError(anyhow!(
+                                "Delegatee account does not exist: {:?}",
+                                entry.delegatee
+                            )));
+                        }
                     }
 
                     if !duration.is_valid() {
@@ -773,7 +782,10 @@ impl Transaction {
                     EnergyPayload::FreezeTosDelegate { delegatees, .. } => {
                         // Calculate total delegation amount
                         // Delegation does NOT support recycling - must use full balance
-                        let total: u64 = delegatees.iter().map(|d| d.amount).sum();
+                        let total: u64 = delegatees
+                            .iter()
+                            .try_fold(0u64, |acc, entry| acc.checked_add(entry.amount))
+                            .ok_or(VerificationError::Overflow)?;
                         let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
                         *current = current
                             .checked_add(total)
@@ -2147,7 +2159,10 @@ impl Transaction {
                     EnergyPayload::FreezeTosDelegate { delegatees, .. } => {
                         // Calculate total delegation amount
                         // Delegation does NOT support recycling - must use full balance
-                        let total: u64 = delegatees.iter().map(|d| d.amount).sum();
+                        let total: u64 = delegatees
+                            .iter()
+                            .try_fold(0u64, |acc, entry| acc.checked_add(entry.amount))
+                            .ok_or(VerificationError::Overflow)?;
                         let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
                         *current = current
                             .checked_add(total)
@@ -2531,7 +2546,10 @@ impl Transaction {
                     EnergyPayload::FreezeTosDelegate { delegatees, .. } => {
                         // Calculate total delegation amount
                         // Delegation does NOT support recycling - must use full balance
-                        let total: u64 = delegatees.iter().map(|d| d.amount).sum();
+                        let total: u64 = delegatees
+                            .iter()
+                            .try_fold(0u64, |acc, entry| acc.checked_add(entry.amount))
+                            .ok_or(VerificationError::Overflow)?;
                         let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
                         *current = current
                             .checked_add(total)
@@ -2706,14 +2724,18 @@ impl Transaction {
                     .map_err(VerificationError::State)?;
 
                 if let Some(mut energy_resource) = energy_resource {
+                    let topoheight = state.get_block().get_height();
+                    energy_resource.clear_pending_energy_if_ready(topoheight);
+                    energy_resource.maybe_reset_energy(topoheight);
+
                     // Check if user has enough energy
-                    if !energy_resource.has_enough_energy(energy_cost) {
+                    if !energy_resource.has_enough_energy(topoheight, energy_cost) {
                         return Err(VerificationError::InsufficientEnergy(energy_cost));
                     }
 
                     // Consume energy
                     energy_resource
-                        .consume_energy(energy_cost)
+                        .consume_energy(energy_cost, topoheight)
                         .map_err(|_| VerificationError::InsufficientEnergy(energy_cost))?;
 
                     // Update energy resource in state
@@ -2846,8 +2868,12 @@ impl Transaction {
                         let mut energy_resource =
                             energy_resource.unwrap_or_else(EnergyResource::new);
 
-                        // Check record limit
-                        if !energy_resource.can_add_freeze_record() {
+                        // Check record limit only if a new record would be created
+                        let can_merge = energy_resource
+                            .freeze_records
+                            .iter()
+                            .any(|record| record.duration == *duration);
+                        if !can_merge && !energy_resource.can_add_freeze_record() {
                             return Err(VerificationError::AnyError(anyhow::anyhow!(
                                 "Maximum freeze records reached"
                             )));
@@ -2923,7 +2949,10 @@ impl Transaction {
                             })
                             .collect();
 
-                        let total_amount: u64 = delegatees.iter().map(|d| d.amount).sum();
+                        let total_amount: u64 = delegatees
+                            .iter()
+                            .try_fold(0u64, |acc, entry| acc.checked_add(entry.amount))
+                            .ok_or(VerificationError::Overflow)?;
 
                         // Create delegated freeze record
                         energy_resource
@@ -2956,7 +2985,9 @@ impl Transaction {
                             let mut delegatee_resource =
                                 delegatee_resource.unwrap_or_else(EnergyResource::new);
 
-                            delegatee_resource.add_delegated_energy(energy, topoheight);
+                            delegatee_resource
+                                .add_delegated_energy(energy, topoheight)
+                                .map_err(|_| VerificationError::Overflow)?;
 
                             state
                                 .set_energy_resource(
@@ -2979,7 +3010,7 @@ impl Transaction {
                         amount,
                         from_delegation,
                         record_index,
-                        delegatee_address: _, // TODO: Use for batch delegation unfreeze
+                        delegatee_address,
                     } => {
                         // Get current energy resource for the account
                         let energy_resource = state
@@ -3000,11 +3031,79 @@ impl Transaction {
                             if *from_delegation {
                                 // Unfreeze from delegated records
                                 // This removes energy from delegatees and creates pending unfreeze for delegator
-                                let (energy_per_delegatee, _pending_amount) = energy_resource
-                                    .unfreeze_delegated(*amount, topoheight)
-                                    .map_err(|e| {
-                                        VerificationError::AnyError(anyhow::anyhow!("{e}"))
-                                    })?;
+                                let (delegatee_key, energy_removed, _pending_amount) = if let Some(
+                                    delegatee_address,
+                                ) =
+                                    delegatee_address.as_ref()
+                                {
+                                    energy_resource
+                                        .unfreeze_delegated_entry(
+                                            *amount,
+                                            topoheight,
+                                            *record_index,
+                                            delegatee_address,
+                                        )
+                                        .map_err(|e| {
+                                            VerificationError::AnyError(anyhow::anyhow!("{e}"))
+                                        })?
+                                } else {
+                                    if energy_resource.delegated_records.is_empty() {
+                                        return Err(VerificationError::AnyError(anyhow::anyhow!(
+                                            "No delegated records found"
+                                        )));
+                                    }
+
+                                    let record_idx = match *record_index {
+                                        Some(idx) => {
+                                            let idx = idx as usize;
+                                            if idx >= energy_resource.delegated_records.len() {
+                                                return Err(VerificationError::AnyError(
+                                                    anyhow::anyhow!("Record index out of bounds"),
+                                                ));
+                                            }
+                                            idx
+                                        }
+                                        None => {
+                                            if energy_resource.delegated_records.len() > 1 {
+                                                return Err(VerificationError::AnyError(
+                                                        anyhow::anyhow!(
+                                                            "Multiple delegation records exist, record_index required"
+                                                        ),
+                                                    ));
+                                            }
+                                            0
+                                        }
+                                    };
+
+                                    let record = &energy_resource.delegated_records[record_idx];
+                                    if record.entries.len() > 1 {
+                                        return Err(VerificationError::AnyError(anyhow::anyhow!(
+                                            "Delegatee address required for batch delegations"
+                                        )));
+                                    }
+
+                                    let delegatee = record
+                                        .entries
+                                        .first()
+                                        .ok_or_else(|| {
+                                            VerificationError::AnyError(anyhow::anyhow!(
+                                                "Delegatee not found in record"
+                                            ))
+                                        })?
+                                        .delegatee
+                                        .clone();
+
+                                    energy_resource
+                                        .unfreeze_delegated_entry(
+                                            *amount,
+                                            topoheight,
+                                            Some(record_idx as u32),
+                                            &delegatee,
+                                        )
+                                        .map_err(|e| {
+                                            VerificationError::AnyError(anyhow::anyhow!("{e}"))
+                                        })?
+                                };
 
                                 // Update sender's energy resource first
                                 state
@@ -3015,27 +3114,28 @@ impl Transaction {
                                     .await
                                     .map_err(VerificationError::State)?;
 
-                                // Remove delegated energy from each delegatee
-                                for (delegatee_key, energy_removed) in energy_per_delegatee {
-                                    let delegatee_resource = state
-                                        .get_energy_resource(Cow::Owned(delegatee_key.clone()))
+                                // Remove delegated energy from delegatee
+                                let delegatee_resource = state
+                                    .get_energy_resource(Cow::Owned(delegatee_key.clone()))
+                                    .await
+                                    .map_err(VerificationError::State)?;
+
+                                if let Some(mut delegatee_resource) = delegatee_resource {
+                                    delegatee_resource
+                                        .remove_delegated_energy(energy_removed, topoheight)
+                                        .map_err(|e| {
+                                            VerificationError::AnyError(anyhow::anyhow!("{e}"))
+                                        })?;
+
+                                    state
+                                        .set_energy_resource(
+                                            Cow::Owned(delegatee_key),
+                                            delegatee_resource,
+                                        )
                                         .await
                                         .map_err(VerificationError::State)?;
-
-                                    if let Some(mut delegatee_resource) = delegatee_resource {
-                                        delegatee_resource
-                                            .remove_delegated_energy(energy_removed, topoheight);
-
-                                        state
-                                            .set_energy_resource(
-                                                Cow::Owned(delegatee_key),
-                                                delegatee_resource,
-                                            )
-                                            .await
-                                            .map_err(VerificationError::State)?;
-                                    }
-                                    // If delegatee has no energy resource, nothing to remove
                                 }
+                                // If delegatee has no energy resource, nothing to remove
 
                                 if log::log_enabled!(log::Level::Debug) {
                                     debug!("UnfreezeTos (delegation) applied: {amount} TOS moved to pending (14-day cooldown)");
@@ -3081,7 +3181,9 @@ impl Transaction {
                             let topoheight = state.get_block().get_height();
 
                             // Check if there are withdrawable funds
-                            let withdrawable = energy_resource.withdrawable_unfreeze(topoheight);
+                            let withdrawable = energy_resource
+                                .withdrawable_unfreeze(topoheight)
+                                .map_err(|_| VerificationError::Overflow)?;
                             if withdrawable == 0 {
                                 return Err(VerificationError::AnyError(anyhow::anyhow!(
                                     "No withdrawable TOS (cooldown not expired)"
@@ -3089,7 +3191,9 @@ impl Transaction {
                             }
 
                             // Withdraw unfrozen TOS
-                            let withdrawn = energy_resource.withdraw_unfrozen(topoheight);
+                            let withdrawn = energy_resource
+                                .withdraw_unfrozen(topoheight)
+                                .map_err(|_| VerificationError::Overflow)?;
 
                             // Update energy resource in state
                             state
@@ -4175,7 +4279,10 @@ impl Transaction {
                     EnergyPayload::FreezeTosDelegate { delegatees, .. } => {
                         // Calculate total delegation amount
                         // Delegation does NOT support recycling - must use full balance
-                        let total: u64 = delegatees.iter().map(|d| d.amount).sum();
+                        let total: u64 = delegatees
+                            .iter()
+                            .try_fold(0u64, |acc, entry| acc.checked_add(entry.amount))
+                            .ok_or(VerificationError::Overflow)?;
                         let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
                         *current = current
                             .checked_add(total)

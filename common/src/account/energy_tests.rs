@@ -75,7 +75,8 @@ fn test_energy_resource_management() {
     // Consume energy for transfers
     let result = EnergyResourceManager::consume_energy_for_transaction(
         &mut resource,
-        5 // 5 transfers
+        5, // 5 transfers
+        topoheight,
     );
     assert!(result.is_ok());
     assert_eq!(resource.available_energy(), 15); // 20 - 5 = 15 transfers remaining
@@ -131,6 +132,7 @@ fn test_energy_unfreeze_mechanism() {
 #[test]
 fn test_energy_status() {
     let mut resource = EnergyResourceManager::create_energy_resource();
+    let topoheight = 1000;
     
     // Add some energy
     let duration = FreezeDuration::new(7).unwrap();
@@ -138,13 +140,14 @@ fn test_energy_status() {
         &mut resource, 
         100000000, // 1 TOS
         duration,
-        1000
+        topoheight
     );
     
     // Consume some energy
     EnergyResourceManager::consume_energy_for_transaction(
         &mut resource,
-        2 // 2 energy units
+        2, // 2 energy units
+        topoheight,
     ).unwrap();
     
     let status = EnergyResourceManager::get_energy_status(&resource);
@@ -163,7 +166,8 @@ fn test_energy_status() {
     // Consume more energy to make it low
     EnergyResourceManager::consume_energy_for_transaction(
         &mut resource,
-        10 // Consume more energy
+        10, // Consume more energy
+        topoheight,
     ).unwrap();
     
     let status = EnergyResourceManager::get_energy_status(&resource);
@@ -340,6 +344,7 @@ fn test_freeze_record_management() {
 #[test]
 fn test_energy_reset_mechanism() {
     let mut resource = EnergyResourceManager::create_energy_resource();
+    let topoheight = 1000;
     
     // Add energy and consume some
     let duration = FreezeDuration::new(7).unwrap();
@@ -347,12 +352,13 @@ fn test_energy_reset_mechanism() {
         &mut resource, 
         100000000, // 1 TOS
         duration,
-        1000
+        topoheight
     );
     
     EnergyResourceManager::consume_energy_for_transaction(
         &mut resource,
-        5 // 5 energy units
+        5, // 5 energy units
+        topoheight,
     ).unwrap();
 
     assert_eq!(resource.used_energy, 5);
@@ -405,7 +411,8 @@ fn test_whole_number_tos_requirement() {
     // Consume 1 energy = 1 transfer
     let result = EnergyResourceManager::consume_energy_for_transaction(
         &mut resource,
-        1 // 1 transfer
+        1, // 1 transfer
+        topoheight,
     );
     assert!(result.is_ok());
     assert_eq!(resource.available_energy(), 13); // 13 transfers remaining

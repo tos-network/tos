@@ -6,11 +6,11 @@ use crate::{
 use serde::{Deserialize, Serialize};
 
 /// Flexible freeze duration for TOS staking
-/// Users can set custom days from 3 to 180 days
+/// Users can set custom days from 3 to 365 days
 ///
 /// # Edge Cases
 /// - Duration below 3 days will be rejected
-/// - Duration above 180 days will be rejected
+/// - Duration above 365 days will be rejected
 /// - Default duration is 3 days (minimum)
 ///
 /// # Energy Calculation
@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 /// - 30 days: 1 TOS → 60 energy (60 free transfers)
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct FreezeDuration {
-    /// Number of days to freeze (3-180 days)
+    /// Number of days to freeze (3-365 days)
     pub days: u32,
 }
 
@@ -72,7 +72,7 @@ impl FreezeDuration {
         self.days
     }
 
-    /// Check if duration is valid (3-180 days)
+    /// Check if duration is valid (3-365 days)
     pub fn is_valid(&self) -> bool {
         self.days >= crate::config::MIN_FREEZE_DURATION_DAYS
             && self.days <= crate::config::MAX_FREEZE_DURATION_DAYS
@@ -285,20 +285,26 @@ impl DelegatedFreezeRecord {
         duration: FreezeDuration,
         freeze_topoheight: TopoHeight,
         network: &crate::network::Network,
-    ) -> Self {
+    ) -> Result<Self, String> {
         let unlock_topoheight =
             freeze_topoheight + duration.duration_in_blocks_for_network(network);
-        let total_amount = entries.iter().map(|e| e.amount).sum();
-        let total_energy = entries.iter().map(|e| e.energy).sum();
+        let total_amount = entries
+            .iter()
+            .try_fold(0u64, |acc, entry| acc.checked_add(entry.amount))
+            .ok_or_else(|| "Delegated record amount overflow".to_string())?;
+        let total_energy = entries
+            .iter()
+            .try_fold(0u64, |acc, entry| acc.checked_add(entry.energy))
+            .ok_or_else(|| "Delegated record energy overflow".to_string())?;
 
-        Self {
+        Ok(Self {
             entries,
             duration,
             freeze_topoheight,
             unlock_topoheight,
             total_amount,
             total_energy,
-        }
+        })
     }
 
     /// Check if this delegation record can be unlocked
@@ -461,6 +467,10 @@ pub struct EnergyResource {
     pub delegated_energy: u64,
     /// Used energy (reset every 24 hours)
     pub used_energy: u64,
+    /// Energy pending activation (available from next block)
+    pub pending_energy: u64,
+    /// Topoheight when pending energy was added
+    pub pending_energy_topoheight: TopoHeight,
     /// Total frozen TOS across all freeze records (self + delegated)
     pub frozen_tos: u64,
     /// Last update topoheight
@@ -487,14 +497,37 @@ impl EnergyResource {
         sum.saturating_sub(self.used_energy)
     }
 
-    /// Check if has enough energy
-    pub fn has_enough_energy(&self, required: u64) -> bool {
-        self.available_energy() >= required
+    /// Get available energy at the current topoheight (excludes same-block pending energy)
+    pub fn available_energy_at(&self, current_topoheight: TopoHeight) -> u64 {
+        let active_total =
+            if self.pending_energy > 0 && current_topoheight <= self.pending_energy_topoheight {
+                self.total_energy.saturating_sub(self.pending_energy)
+            } else {
+                self.total_energy
+            };
+        let sum = active_total.saturating_add(self.delegated_energy);
+        sum.saturating_sub(self.used_energy)
+    }
+
+    /// Check if has enough energy at the current topoheight
+    pub fn has_enough_energy(&self, current_topoheight: TopoHeight, required: u64) -> bool {
+        self.available_energy_at(current_topoheight) >= required
+    }
+
+    /// Clear pending energy marker if we've moved to a new block
+    pub fn clear_pending_energy_if_ready(&mut self, current_topoheight: TopoHeight) {
+        if self.pending_energy > 0 && current_topoheight > self.pending_energy_topoheight {
+            self.pending_energy = 0;
+        }
     }
 
     /// Consume energy
-    pub fn consume_energy(&mut self, amount: u64) -> Result<(), &'static str> {
-        if self.available_energy() < amount {
+    pub fn consume_energy(
+        &mut self,
+        amount: u64,
+        current_topoheight: TopoHeight,
+    ) -> Result<(), &'static str> {
+        if self.available_energy_at(current_topoheight) < amount {
             return Err("Insufficient energy");
         }
         self.used_energy = self.used_energy.saturating_add(amount);
@@ -691,9 +724,9 @@ impl EnergyResource {
                 records_to_remove.push(idx);
             } else {
                 // Partial recycle - calculate proportional energy
-                // Use FLOOR rounding: energy_for_recycled = (unfreeze_from_record / COIN_VALUE) * multiplier
-                let energy_for_recycled = (unfreeze_from_record / crate::config::COIN_VALUE)
-                    * record.duration.reward_multiplier();
+                let energy_for_recycled = ((record.energy_gained as u128)
+                    * unfreeze_from_record as u128
+                    / record.amount as u128) as u64;
                 energy_recycled = energy_recycled.saturating_add(energy_for_recycled);
 
                 // Remaining record
@@ -749,6 +782,11 @@ impl EnergyResource {
         // But balance_amount should come from user's balance
         self.frozen_tos = self.frozen_tos.saturating_add(tos_amount);
         self.total_energy = self.total_energy.saturating_add(record_energy);
+        self.clear_pending_energy_if_ready(topoheight);
+        if new_energy > 0 {
+            self.pending_energy = self.pending_energy.saturating_add(new_energy);
+            self.pending_energy_topoheight = topoheight;
+        }
         self.last_update = topoheight;
 
         FreezeWithRecyclingResult {
@@ -802,7 +840,7 @@ impl EnergyResource {
         let mut remaining_to_unfreeze = whole_tos_amount;
         let mut total_energy_removed: u64 = 0;
         let mut records_to_remove = Vec::new();
-        let mut records_to_modify = Vec::new();
+        let mut records_to_modify: Vec<(usize, u64, u64)> = Vec::new();
 
         match record_index {
             // Selective unfreeze: specific record by index
@@ -824,9 +862,12 @@ impl EnergyResource {
                     return Err("Insufficient amount in specified record".to_string());
                 }
 
-                // Calculate energy to remove using FLOOR rounding
-                let energy_to_remove = (whole_tos_amount / crate::config::COIN_VALUE)
-                    * record.duration.reward_multiplier();
+                let energy_to_remove = if whole_tos_amount >= record.amount {
+                    record.energy_gained
+                } else {
+                    ((record.energy_gained as u128 * whole_tos_amount as u128)
+                        / record.amount as u128) as u64
+                };
 
                 total_energy_removed = energy_to_remove;
                 remaining_to_unfreeze = 0;
@@ -835,7 +876,7 @@ impl EnergyResource {
                 if whole_tos_amount == record.amount {
                     records_to_remove.push(idx);
                 } else {
-                    records_to_modify.push((idx, whole_tos_amount));
+                    records_to_modify.push((idx, whole_tos_amount, energy_to_remove));
                 }
             }
 
@@ -852,9 +893,12 @@ impl EnergyResource {
 
                     let unfreeze_amount = std::cmp::min(remaining_to_unfreeze, record.amount);
 
-                    // Calculate energy to remove using FLOOR rounding (integer division)
-                    let energy_to_remove = (unfreeze_amount / crate::config::COIN_VALUE)
-                        * record.duration.reward_multiplier();
+                    let energy_to_remove = if unfreeze_amount >= record.amount {
+                        record.energy_gained
+                    } else {
+                        ((record.energy_gained as u128 * unfreeze_amount as u128)
+                            / record.amount as u128) as u64
+                    };
 
                     total_energy_removed = total_energy_removed.saturating_add(energy_to_remove);
                     remaining_to_unfreeze = remaining_to_unfreeze.saturating_sub(unfreeze_amount);
@@ -864,7 +908,7 @@ impl EnergyResource {
                         records_to_remove.push(index);
                     } else {
                         // Partially unfreeze the record
-                        records_to_modify.push((index, unfreeze_amount));
+                        records_to_modify.push((index, unfreeze_amount, energy_to_remove));
                     }
                 }
             }
@@ -880,14 +924,10 @@ impl EnergyResource {
         }
 
         // Modify partially unfrozen records
-        for (index, unfreeze_amount) in records_to_modify.iter().rev() {
+        for (index, unfreeze_amount, energy_removed) in records_to_modify.iter().rev() {
             let record = &mut self.freeze_records[*index];
             record.amount = record.amount.saturating_sub(*unfreeze_amount);
-
-            // Recalculate energy for the remaining amount (FLOOR rounding)
-            let remaining_energy =
-                (record.amount / crate::config::COIN_VALUE) * record.duration.reward_multiplier();
-            record.energy_gained = remaining_energy;
+            record.energy_gained = record.energy_gained.saturating_sub(*energy_removed);
         }
 
         // Update totals - energy removed immediately
@@ -907,48 +947,72 @@ impl EnergyResource {
     ///
     /// # Returns
     /// - Total TOS amount ready for withdrawal (sum of all expired pending unfreezes)
-    pub fn withdraw_unfrozen(&mut self, current_topoheight: TopoHeight) -> u64 {
+    pub fn withdraw_unfrozen(
+        &mut self,
+        current_topoheight: TopoHeight,
+    ) -> Result<u64, &'static str> {
         let mut total_withdrawn = 0u64;
-        let mut remaining_unfreezes = Vec::new();
-
-        for pending in self.pending_unfreezes.drain(..) {
+        for pending in &self.pending_unfreezes {
             if pending.is_expired(current_topoheight) {
-                total_withdrawn = total_withdrawn.saturating_add(pending.amount);
-            } else {
-                remaining_unfreezes.push(pending);
+                total_withdrawn = total_withdrawn
+                    .checked_add(pending.amount)
+                    .ok_or("Overflow in withdraw calculation")?;
             }
         }
 
-        self.pending_unfreezes = remaining_unfreezes;
+        self.pending_unfreezes
+            .retain(|pending| !pending.is_expired(current_topoheight));
         self.last_update = current_topoheight;
 
-        total_withdrawn
+        Ok(total_withdrawn)
     }
 
     /// Get total pending unfreeze amount (not yet withdrawn)
-    pub fn total_pending_unfreeze(&self) -> u64 {
-        self.pending_unfreezes.iter().map(|p| p.amount).sum()
+    pub fn total_pending_unfreeze(&self) -> Result<u64, &'static str> {
+        self.pending_unfreezes
+            .iter()
+            .try_fold(0u64, |acc, pending| acc.checked_add(pending.amount))
+            .ok_or("Overflow in pending unfreeze total")
     }
 
     /// Get withdrawable unfreeze amount (expired pending unfreezes)
-    pub fn withdrawable_unfreeze(&self, current_topoheight: TopoHeight) -> u64 {
+    pub fn withdrawable_unfreeze(
+        &self,
+        current_topoheight: TopoHeight,
+    ) -> Result<u64, &'static str> {
         self.pending_unfreezes
             .iter()
             .filter(|p| p.is_expired(current_topoheight))
-            .map(|p| p.amount)
-            .sum()
+            .try_fold(0u64, |acc, pending| acc.checked_add(pending.amount))
+            .ok_or("Overflow in withdrawable unfreeze total")
     }
 
     /// Add delegated energy (called on delegatee's account when receiving delegation)
-    pub fn add_delegated_energy(&mut self, energy_amount: u64, topoheight: TopoHeight) {
-        self.delegated_energy = self.delegated_energy.saturating_add(energy_amount);
+    pub fn add_delegated_energy(
+        &mut self,
+        energy_amount: u64,
+        topoheight: TopoHeight,
+    ) -> Result<(), &'static str> {
+        self.delegated_energy = self
+            .delegated_energy
+            .checked_add(energy_amount)
+            .ok_or("Delegated energy overflow")?;
         self.last_update = topoheight;
+        Ok(())
     }
 
     /// Remove delegated energy (called on delegatee's account when delegator unfreezes)
-    pub fn remove_delegated_energy(&mut self, energy_amount: u64, topoheight: TopoHeight) {
+    pub fn remove_delegated_energy(
+        &mut self,
+        energy_amount: u64,
+        topoheight: TopoHeight,
+    ) -> Result<(), &'static str> {
+        if energy_amount > self.delegated_energy {
+            return Err("Cannot remove more delegated energy than available");
+        }
         self.delegated_energy = self.delegated_energy.saturating_sub(energy_amount);
         self.last_update = topoheight;
+        Ok(())
     }
 
     /// Create a delegated freeze record (as delegator)
@@ -973,7 +1037,7 @@ impl EnergyResource {
             return Err("Too many delegatees".to_string());
         }
 
-        let record = DelegatedFreezeRecord::new(entries, duration, topoheight, network);
+        let record = DelegatedFreezeRecord::new(entries, duration, topoheight, network)?;
         let total_energy = record.total_energy;
 
         // Update frozen TOS (delegator's TOS is locked)
@@ -1013,8 +1077,8 @@ impl EnergyResource {
             .delegated_records
             .iter()
             .filter(|r| r.can_unlock(current_topoheight))
-            .map(|r| r.total_amount)
-            .sum();
+            .try_fold(0u64, |acc, record| acc.checked_add(record.total_amount))
+            .ok_or_else(|| "Delegated record total overflow".to_string())?;
 
         if total_delegated < whole_tos_amount {
             return Err("Insufficient unlocked delegated TOS".to_string());
@@ -1089,8 +1153,16 @@ impl EnergyResource {
             }
 
             // Recalculate totals
-            record.total_amount = record.entries.iter().map(|e| e.amount).sum();
-            record.total_energy = record.entries.iter().map(|e| e.energy).sum();
+            record.total_amount = record
+                .entries
+                .iter()
+                .try_fold(0u64, |acc, entry| acc.checked_add(entry.amount))
+                .ok_or_else(|| "Delegated record amount overflow".to_string())?;
+            record.total_energy = record
+                .entries
+                .iter()
+                .try_fold(0u64, |acc, entry| acc.checked_add(entry.energy))
+                .ok_or_else(|| "Delegated record energy overflow".to_string())?;
         }
 
         // Remove empty records
@@ -1365,6 +1437,10 @@ impl Serializer for EnergyResource {
         for pending in &self.pending_unfreezes {
             pending.write(writer);
         }
+
+        // Write pending energy markers (optional in older data)
+        writer.write_u64(&self.pending_energy);
+        writer.write_u64(&self.pending_energy_topoheight);
     }
 
     fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
@@ -1396,10 +1472,18 @@ impl Serializer for EnergyResource {
             pending_unfreezes.push(PendingUnfreeze::read(reader)?);
         }
 
+        let (pending_energy, pending_energy_topoheight) = if reader.size() >= 16 {
+            (reader.read_u64()?, reader.read_u64()?)
+        } else {
+            (0, 0)
+        };
+
         Ok(Self {
             total_energy,
             delegated_energy,
             used_energy,
+            pending_energy,
+            pending_energy_topoheight,
             frozen_tos,
             last_update,
             last_reset_topoheight,
@@ -1427,7 +1511,12 @@ impl Serializer for EnergyResource {
             .iter()
             .map(|p| p.size())
             .sum::<usize>();
-        base_size + freeze_records_size + delegated_records_size + pending_unfreezes_size
+        base_size
+            + freeze_records_size
+            + delegated_records_size
+            + pending_unfreezes_size
+            + self.pending_energy.size()
+            + self.pending_energy_topoheight.size()
     }
 }
 
@@ -1589,13 +1678,13 @@ mod tests {
         assert_eq!(resource.pending_unfreezes.len(), 1);
 
         // Try to withdraw before cooldown (should return 0)
-        let withdrawn_early = resource.withdraw_unfrozen(unlock_topoheight + 1);
+        let withdrawn_early = resource.withdraw_unfrozen(unlock_topoheight + 1).unwrap();
         assert_eq!(withdrawn_early, 0);
         assert_eq!(resource.pending_unfreezes.len(), 1);
 
         // Phase 2: Withdraw after cooldown
         let withdraw_time = unlock_topoheight + cooldown;
-        let withdrawn = resource.withdraw_unfrozen(withdraw_time);
+        let withdrawn = resource.withdraw_unfrozen(withdraw_time).unwrap();
         assert_eq!(withdrawn, 100000000);
         assert_eq!(resource.pending_unfreezes.len(), 0);
     }
@@ -1671,6 +1760,11 @@ mod tests {
 
         assert_eq!(resource.total_energy, deserialized.total_energy);
         assert_eq!(resource.frozen_tos, deserialized.frozen_tos);
+        assert_eq!(resource.pending_energy, deserialized.pending_energy);
+        assert_eq!(
+            resource.pending_energy_topoheight,
+            deserialized.pending_energy_topoheight
+        );
         assert_eq!(
             resource.freeze_records.len(),
             deserialized.freeze_records.len()
@@ -2340,7 +2434,7 @@ mod tests {
         let mut resource = EnergyResource::new();
 
         // No pending unfreezes - withdraw should return 0
-        let withdrawn = resource.withdraw_unfrozen(1000);
+        let withdrawn = resource.withdraw_unfrozen(1000).unwrap();
         assert_eq!(withdrawn, 0);
         assert_eq!(resource.pending_unfreezes.len(), 0);
     }
@@ -2366,7 +2460,7 @@ mod tests {
 
         // Try to withdraw before any have expired
         let before_expire = unlock_topoheight + cooldown - 1;
-        let withdrawn = resource.withdraw_unfrozen(before_expire);
+        let withdrawn = resource.withdraw_unfrozen(before_expire).unwrap();
 
         assert_eq!(withdrawn, 0);
         assert_eq!(resource.pending_unfreezes.len(), 2); // All still pending
@@ -2390,7 +2484,7 @@ mod tests {
 
         // Withdraw after cooldown
         let after_expire = unlock_topoheight + cooldown;
-        let withdrawn = resource.withdraw_unfrozen(after_expire);
+        let withdrawn = resource.withdraw_unfrozen(after_expire).unwrap();
 
         assert_eq!(withdrawn, 100000000); // 1 TOS
         assert_eq!(resource.pending_unfreezes.len(), 0);
@@ -2427,7 +2521,7 @@ mod tests {
 
         // Withdraw when only first has expired (after first cooldown, before second)
         let partial_expire = unlock_topoheight + cooldown + 50;
-        let withdrawn = resource.withdraw_unfrozen(partial_expire);
+        let withdrawn = resource.withdraw_unfrozen(partial_expire).unwrap();
 
         assert_eq!(withdrawn, 100000000); // Only first 1 TOS expired
         assert_eq!(resource.pending_unfreezes.len(), 2); // 2 still pending
@@ -2459,7 +2553,7 @@ mod tests {
 
         // Withdraw when all have expired
         let all_expired = unlock_topoheight + 200 + cooldown + 1;
-        let withdrawn = resource.withdraw_unfrozen(all_expired);
+        let withdrawn = resource.withdraw_unfrozen(all_expired).unwrap();
 
         assert_eq!(withdrawn, 300000000); // All 3 TOS
         assert_eq!(resource.pending_unfreezes.len(), 0);
@@ -2488,13 +2582,13 @@ mod tests {
 
         // First withdraw - only first expired
         let first_withdraw_time = unlock_topoheight + cooldown;
-        let first_withdrawn = resource.withdraw_unfrozen(first_withdraw_time);
+        let first_withdrawn = resource.withdraw_unfrozen(first_withdraw_time).unwrap();
         assert_eq!(first_withdrawn, 100000000);
         assert_eq!(resource.pending_unfreezes.len(), 1);
 
         // Second withdraw - second now expired
         let second_withdraw_time = unlock_topoheight + 1000 + cooldown;
-        let second_withdrawn = resource.withdraw_unfrozen(second_withdraw_time);
+        let second_withdrawn = resource.withdraw_unfrozen(second_withdraw_time).unwrap();
         assert_eq!(second_withdrawn, 100000000);
         assert_eq!(resource.pending_unfreezes.len(), 0);
     }
@@ -2516,15 +2610,15 @@ mod tests {
         let after_expire = unlock_topoheight + cooldown;
 
         // First withdraw
-        let first = resource.withdraw_unfrozen(after_expire);
+        let first = resource.withdraw_unfrozen(after_expire).unwrap();
         assert_eq!(first, 100000000);
 
         // Second withdraw at same time - should return 0
-        let second = resource.withdraw_unfrozen(after_expire);
+        let second = resource.withdraw_unfrozen(after_expire).unwrap();
         assert_eq!(second, 0);
 
         // Third withdraw later - still 0
-        let third = resource.withdraw_unfrozen(after_expire + 1000);
+        let third = resource.withdraw_unfrozen(after_expire + 1000).unwrap();
         assert_eq!(third, 0);
     }
 
