@@ -6495,7 +6495,7 @@ mod tests {
 
     fn build_test_prompt() -> Result<ShareablePrompt, CommandError> {
         let temp_dir = std::env::temp_dir().join("tos_wallet_cli_tests");
-        fs::create_dir_all(&temp_dir).map_err(CommandError::Any)?;
+        fs::create_dir_all(&temp_dir).map_err(|e| CommandError::Any(e.into()))?;
         let dir_path = format!("{}/", temp_dir.display());
         let config = PromptConfig {
             level: LogLevel::Off,
@@ -6512,7 +6512,7 @@ mod tests {
             logs_datetime_format: default_logs_datetime_format(),
         };
 
-        Prompt::new(config).map_err(CommandError::Any)
+        Prompt::new(config).map_err(|e| CommandError::Any(e.into()))
     }
 
     fn noop_handler(_: &CommandManager, _: ArgumentManager) -> Result<(), CommandError> {
