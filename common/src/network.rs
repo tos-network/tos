@@ -87,6 +87,16 @@ impl Network {
             Self::Devnet => 10, // 10 blocks per "day" for quick testing
         }
     }
+
+    /// Get blocks per day for this network
+    pub fn blocks_per_day(&self) -> u64 {
+        self.freeze_duration_multiplier()
+    }
+
+    /// Get unfreeze cooldown blocks for this network
+    pub fn unfreeze_cooldown_blocks(&self) -> u64 {
+        crate::config::UNFREEZE_COOLDOWN_DAYS * self.blocks_per_day()
+    }
 }
 
 impl Serialize for Network {

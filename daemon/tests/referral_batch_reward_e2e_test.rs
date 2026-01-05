@@ -335,6 +335,10 @@ impl<'a> BlockchainVerificationState<'a, TestError> for TestChainState {
         Ok(*self.nonces.get(account).unwrap_or(&0))
     }
 
+    async fn account_exists(&mut self, account: &'a PublicKey) -> Result<bool, TestError> {
+        Ok(self.nonces.contains_key(account))
+    }
+
     async fn update_account_nonce(
         &mut self,
         account: &'a PublicKey,
@@ -369,6 +373,14 @@ impl<'a> BlockchainVerificationState<'a, TestError> for TestChainState {
             .duration_since(std::time::SystemTime::UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0)
+    }
+
+    fn get_verification_topoheight(&self) -> u64 {
+        1000 // Default topoheight for tests
+    }
+
+    async fn get_recyclable_tos(&mut self, _account: &'a PublicKey) -> Result<u64, TestError> {
+        Ok(0) // No recyclable TOS in referral tests
     }
 
     async fn set_multisig_state(
@@ -503,14 +515,14 @@ impl<'a> BlockchainApplyState<'a, DummyContractProvider, TestError> for TestChai
 
     async fn get_energy_resource(
         &mut self,
-        _account: &'a PublicKey,
+        _account: Cow<'a, CompressedPublicKey>,
     ) -> Result<Option<EnergyResource>, TestError> {
         Ok(None)
     }
 
     async fn set_energy_resource(
         &mut self,
-        _account: &'a PublicKey,
+        _account: Cow<'a, CompressedPublicKey>,
         _energy_resource: EnergyResource,
     ) -> Result<(), TestError> {
         Ok(())

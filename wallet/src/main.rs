@@ -32,7 +32,7 @@ use tos_common::{
             UnoTransferBuilder,
         },
         multisig::{MultiSig, SignatureId},
-        BurnPayload, MultiSigPayload, Transaction, TxVersion,
+        BurnPayload, DelegationEntry, MultiSigPayload, Transaction, TxVersion,
     },
     utils::{format_coin, format_tos, from_coin},
 };
@@ -486,6 +486,24 @@ async fn register_default_commands(manager: &CommandManager) -> Result<(), Comma
     Ok(())
 }
 
+fn unfreeze_tos_delegate_args() -> (Vec<Arg>, Vec<Arg>) {
+    (
+        vec![Arg::new(
+            "amount",
+            ArgType::String,
+            "Amount of TOS to unfreeze",
+        )],
+        vec![
+            Arg::new("delegatee", ArgType::String, "Delegatee address"),
+            Arg::new(
+                "record_index",
+                ArgType::Number,
+                "Delegation record index (required if multiple records exist)",
+            ),
+        ],
+    )
+}
+
 #[cfg(feature = "xswd")]
 // This must be run in a separate task
 async fn xswd_handler(mut receiver: UnboundedReceiver<XSWDEvent>, prompt: ShareablePrompt) {
@@ -911,6 +929,23 @@ async fn setup_wallet_command_manager(
         CommandHandler::Async(async_handler!(freeze_tos)),
     ))?;
     command_manager.add_command(Command::with_required_arguments(
+        "freeze_tos_delegate",
+        "Freeze TOS and delegate energy to other accounts",
+        vec![
+            Arg::new(
+                "duration",
+                ArgType::Number,
+                "Freeze duration in days (3/7/14/30, longer = higher rewards)",
+            ),
+            Arg::new(
+                "delegatees",
+                ArgType::String,
+                "Comma-separated list of delegatees as address:amount",
+            ),
+        ],
+        CommandHandler::Async(async_handler!(freeze_tos_delegate)),
+    ))?;
+    command_manager.add_command(Command::with_required_arguments(
         "unfreeze_tos",
         "Unfreeze TOS (release frozen TOS after lock period)",
         vec![Arg::new(
@@ -919,6 +954,19 @@ async fn setup_wallet_command_manager(
             "Amount of TOS to unfreeze",
         )],
         CommandHandler::Async(async_handler!(unfreeze_tos)),
+    ))?;
+    let (required_args, optional_args) = unfreeze_tos_delegate_args();
+    command_manager.add_command(Command::with_arguments(
+        "unfreeze_tos_delegate",
+        "Unfreeze delegated TOS (delegatee optional for single-entry records)",
+        required_args,
+        optional_args,
+        CommandHandler::Async(async_handler!(unfreeze_tos_delegate)),
+    ))?;
+    command_manager.add_command(Command::new(
+        "withdraw_unfrozen",
+        "Withdraw all expired pending unfreezes",
+        CommandHandler::Async(async_handler!(withdraw_unfrozen)),
     ))?;
     command_manager.add_command(Command::new(
         "energy_info",
@@ -3203,9 +3251,32 @@ async fn transaction(
                         manager.message(format!("  Amount: {} TOS", format_tos(*amount)));
                         manager.message(format!("  Duration: {:?}", duration));
                     }
-                    EnergyPayload::UnfreezeTos { amount } => {
+                    EnergyPayload::FreezeTosDelegate {
+                        delegatees,
+                        duration,
+                    } => {
+                        manager.message("Type: FreezeTosDelegate".to_string());
+                        manager.message(format!("  Delegatees: {} accounts", delegatees.len()));
+                        manager.message(format!("  Duration: {:?}", duration));
+                    }
+                    EnergyPayload::UnfreezeTos {
+                        amount,
+                        from_delegation,
+                        record_index,
+                        delegatee_address,
+                    } => {
                         manager.message("Type: UnfreezeTos".to_string());
                         manager.message(format!("  Amount: {} TOS", format_tos(*amount)));
+                        manager.message(format!("  From Delegation: {}", from_delegation));
+                        if let Some(idx) = record_index {
+                            manager.message(format!("  Record Index: {}", idx));
+                        }
+                        if let Some(addr) = delegatee_address {
+                            manager.message(format!("  Delegatee: {:?}", addr));
+                        }
+                    }
+                    EnergyPayload::WithdrawUnfrozen => {
+                        manager.message("Type: WithdrawUnfrozen".to_string());
                     }
                 }
             }
@@ -5100,13 +5171,13 @@ async fn freeze_tos(
     // Parse amount
     let amount = from_coin(&amount_str, 8).context("Invalid amount")?;
 
-    // Parse duration (3-90 days)
-    let duration = if (3..=90).contains(&duration_num) {
+    // Parse duration (3-365 days)
+    let duration = if (3..=365).contains(&duration_num) {
         tos_common::account::FreezeDuration::new(duration_num as u32)
             .map_err(|e| CommandError::InvalidArgument(e.to_string()))?
     } else {
         return Err(CommandError::InvalidArgument(
-            "Duration must be between 3 and 90 days".to_string(),
+            "Duration must be between 3 and 365 days".to_string(),
         ));
     };
 
@@ -5154,6 +5225,107 @@ async fn freeze_tos(
     Ok(())
 }
 
+/// Freeze TOS and delegate energy to other accounts
+async fn freeze_tos_delegate(
+    manager: &CommandManager,
+    mut args: ArgumentManager,
+) -> Result<(), CommandError> {
+    manager.validate_batch_params("freeze_tos_delegate", &args)?;
+
+    let context = manager.get_context().lock()?;
+    let wallet: &Arc<Wallet> = context.get()?;
+
+    let duration_num = if args.has_argument("duration") {
+        args.get_value("duration")?.to_number()?
+    } else {
+        return Err(CommandError::MissingArgument("duration".to_string()));
+    };
+
+    let delegatees_str = if args.has_argument("delegatees") {
+        args.get_value("delegatees")?.to_string_value()?
+    } else {
+        return Err(CommandError::MissingArgument("delegatees".to_string()));
+    };
+
+    let duration = tos_common::account::FreezeDuration::new(duration_num as u32)
+        .map_err(|e| CommandError::InvalidArgument(e.to_string()))?;
+
+    let mut delegatees = Vec::new();
+    for entry in delegatees_str.split(',') {
+        let entry = entry.trim();
+        if entry.is_empty() {
+            continue;
+        }
+        let mut parts = entry.split(':');
+        let addr_str = parts.next().ok_or_else(|| {
+            CommandError::InvalidArgument("Invalid delegatees format".to_string())
+        })?;
+        let amount_str = parts.next().ok_or_else(|| {
+            CommandError::InvalidArgument("Invalid delegatees format".to_string())
+        })?;
+        if parts.next().is_some() {
+            return Err(CommandError::InvalidArgument(
+                "Invalid delegatees format".to_string(),
+            ));
+        }
+
+        let address: tos_common::crypto::Address = addr_str.parse().map_err(|e| {
+            CommandError::InvalidArgument(format!("Invalid delegatee address: {e}"))
+        })?;
+        if address.is_mainnet() != wallet.get_network().is_mainnet() {
+            return Err(CommandError::InvalidArgument(
+                "Delegatee address network does not match wallet network".to_string(),
+            ));
+        }
+        let amount = from_coin(amount_str, 8).context("Invalid delegatee amount")?;
+
+        delegatees.push(DelegationEntry {
+            delegatee: address.get_public_key().clone(),
+            amount,
+        });
+    }
+
+    if delegatees.is_empty() {
+        return Err(CommandError::InvalidArgument(
+            "Delegatees list cannot be empty".to_string(),
+        ));
+    }
+
+    let energy_builder = EnergyBuilder::freeze_tos_delegate(delegatees, duration)
+        .map_err(|e| CommandError::InvalidArgument(e.to_string()))?;
+
+    if let Err(e) = energy_builder.validate() {
+        manager.error(format!("Invalid energy builder configuration: {}", e));
+        return Ok(());
+    }
+
+    let tx_type = TransactionTypeBuilder::Energy(energy_builder);
+    let fee = FeeBuilder::default();
+
+    let tx = match wallet.create_transaction(tx_type, fee).await {
+        Ok(tx) => tx,
+        Err(e) => {
+            manager.error(format!("Error while creating transaction: {}", e));
+            return Ok(());
+        }
+    };
+
+    let hash = tx.hash();
+    manager.message(format!("Delegation freeze transaction created: {}", hash));
+    manager.message(format!("Duration: {:?}", duration));
+    manager.message(format!(
+        "Delegatees: {} accounts",
+        delegatees_str
+            .split(',')
+            .filter(|s| !s.trim().is_empty())
+            .count()
+    ));
+
+    broadcast_tx(wallet, manager, tx).await;
+
+    Ok(())
+}
+
 /// Unfreeze TOS (release frozen TOS after lock period)
 async fn unfreeze_tos(
     manager: &CommandManager,
@@ -5174,7 +5346,12 @@ async fn unfreeze_tos(
     let amount = from_coin(&amount_str, 8).context("Invalid amount")?;
 
     // Create unfreeze transaction
-    let _payload = tos_common::transaction::EnergyPayload::UnfreezeTos { amount };
+    let _payload = tos_common::transaction::EnergyPayload::UnfreezeTos {
+        amount,
+        from_delegation: false,
+        record_index: None,      // Use FIFO mode by default
+        delegatee_address: None, // No specific delegatee
+    };
 
     manager.message("Building transaction...");
 
@@ -5213,6 +5390,115 @@ async fn unfreeze_tos(
     Ok(())
 }
 
+/// Unfreeze delegated TOS (delegation revoke)
+async fn unfreeze_tos_delegate(
+    manager: &CommandManager,
+    mut args: ArgumentManager,
+) -> Result<(), CommandError> {
+    manager.validate_batch_params("unfreeze_tos_delegate", &args)?;
+
+    let context = manager.get_context().lock()?;
+    let wallet: &Arc<Wallet> = context.get()?;
+
+    let amount_str = if args.has_argument("amount") {
+        args.get_value("amount")?.to_string_value()?
+    } else {
+        return Err(CommandError::MissingArgument("amount".to_string()));
+    };
+
+    let amount = from_coin(&amount_str, 8).context("Invalid amount")?;
+
+    let delegatee = if args.has_argument("delegatee") {
+        let delegatee_str = args.get_value("delegatee")?.to_string_value()?;
+        let delegatee_addr: tos_common::crypto::Address = delegatee_str.parse().map_err(|e| {
+            CommandError::InvalidArgument(format!("Invalid delegatee address: {e}"))
+        })?;
+        if delegatee_addr.is_mainnet() != wallet.get_network().is_mainnet() {
+            return Err(CommandError::InvalidArgument(
+                "Delegatee address network does not match wallet network".to_string(),
+            ));
+        }
+        Some(delegatee_addr.get_public_key().clone())
+    } else {
+        None
+    };
+
+    let record_index = if args.has_argument("record_index") {
+        Some(args.get_value("record_index")?.to_number()? as u32)
+    } else {
+        None
+    };
+
+    let energy_builder = EnergyBuilder::unfreeze_tos_delegated(amount, record_index, delegatee);
+
+    if let Err(e) = energy_builder.validate() {
+        manager.error(format!("Invalid energy builder configuration: {}", e));
+        return Ok(());
+    }
+
+    // Save delegatee address before moving energy_builder
+    let delegatee_for_display = energy_builder.delegatee_address.clone();
+
+    let tx_type = TransactionTypeBuilder::Energy(energy_builder);
+    let fee = FeeBuilder::default();
+
+    let tx = match wallet.create_transaction(tx_type, fee).await {
+        Ok(tx) => tx,
+        Err(e) => {
+            manager.error(format!("Error while creating transaction: {}", e));
+            return Ok(());
+        }
+    };
+
+    let hash = tx.hash();
+    manager.message(format!("Delegation unfreeze transaction created: {}", hash));
+    manager.message(format!("Amount: {} TOS", format_coin(amount, 8)));
+    if let Some(delegatee_pub) = delegatee_for_display {
+        manager.message(format!(
+            "Delegatee: {}",
+            delegatee_pub.to_address(wallet.get_network().is_mainnet())
+        ));
+    }
+
+    broadcast_tx(wallet, manager, tx).await;
+
+    Ok(())
+}
+
+/// Withdraw all expired pending unfreezes
+async fn withdraw_unfrozen(
+    manager: &CommandManager,
+    _args: ArgumentManager,
+) -> Result<(), CommandError> {
+    let context = manager.get_context().lock()?;
+    let wallet: &Arc<Wallet> = context.get()?;
+
+    let energy_builder = EnergyBuilder::withdraw_unfrozen();
+
+    if let Err(e) = energy_builder.validate() {
+        manager.error(format!("Invalid energy builder configuration: {}", e));
+        return Ok(());
+    }
+
+    let tx_type = TransactionTypeBuilder::Energy(energy_builder);
+    let fee = FeeBuilder::default();
+
+    let tx = match wallet.create_transaction(tx_type, fee).await {
+        Ok(tx) => tx,
+        Err(e) => {
+            manager.error(format!("Error while creating transaction: {}", e));
+            return Ok(());
+        }
+    };
+
+    let hash = tx.hash();
+    manager.message(format!("Withdraw transaction created: {}", hash));
+
+    broadcast_tx(wallet, manager, tx).await;
+
+    Ok(())
+}
+
 /// Show energy information and freeze records
 async fn energy_info(manager: &CommandManager, _args: ArgumentManager) -> Result<(), CommandError> {
     let context = manager.get_context().lock()?;
@@ -5246,14 +5532,7 @@ async fn energy_info(manager: &CommandManager, _args: ArgumentManager) -> Result
                     "  Frozen TOS: {} TOS",
                     format_tos(energy_result.frozen_tos)
                 ));
-                manager.message(format!(
-                    "  Total Energy: {} units",
-                    energy_result.total_energy
-                ));
-                manager.message(format!(
-                    "  Used Energy: {} units",
-                    energy_result.used_energy
-                ));
+                manager.message(format!("  Energy: {} units", energy_result.energy));
                 manager.message(format!(
                     "  Available Energy: {} units",
                     energy_result.available_energy
@@ -5305,6 +5584,82 @@ async fn energy_info(manager: &CommandManager, _args: ArgumentManager) -> Result
                                     remaining_days
                                 ));
                             }
+                        }
+                    }
+                }
+
+                if !energy_result.delegated_records.is_empty() {
+                    manager.message("  Delegated Freeze Records:");
+                    for (i, record) in energy_result.delegated_records.iter().enumerate() {
+                        manager.message(format!(
+                            "    Record {}: {} TOS for {} days",
+                            i + 1,
+                            format_tos(record.total_amount),
+                            record.duration
+                        ));
+                        manager
+                            .message(format!("      Total Energy: {} units", record.total_energy));
+                        manager.message(format!(
+                            "      Freeze Time: topoheight {}",
+                            record.freeze_topoheight
+                        ));
+                        manager.message(format!(
+                            "      Unlock Time: topoheight {}",
+                            record.unlock_topoheight
+                        ));
+
+                        if record.can_unlock {
+                            manager.message("      Status: ✅ Unlockable".to_string());
+                        } else {
+                            let blocks_per_day =
+                                wallet.get_network().freeze_duration_multiplier() as f64;
+                            let remaining_days = record.remaining_blocks as f64 / blocks_per_day;
+                            if wallet.get_network().is_devnet() {
+                                manager.message(format!(
+                                    "      Status: 🔒 Locked ({} blocks remaining, ~{:.1} devnet-days)",
+                                    record.remaining_blocks, remaining_days
+                                ));
+                            } else {
+                                manager.message(format!(
+                                    "      Status: 🔒 Locked ({:.2} days remaining)",
+                                    remaining_days
+                                ));
+                            }
+                        }
+
+                        if !record.entries.is_empty() {
+                            manager.message("      Delegatees:");
+                            for entry in &record.entries {
+                                manager.message(format!(
+                                    "        {}: {} TOS, {} energy",
+                                    entry.delegatee,
+                                    format_tos(entry.amount),
+                                    entry.energy
+                                ));
+                            }
+                        }
+                    }
+                }
+
+                if !energy_result.pending_unfreezes.is_empty() {
+                    manager.message("  Pending Unfreezes:");
+                    for (i, pending) in energy_result.pending_unfreezes.iter().enumerate() {
+                        manager.message(format!(
+                            "    Pending {}: {} TOS",
+                            i + 1,
+                            format_tos(pending.amount)
+                        ));
+                        manager.message(format!(
+                            "      Expire Time: topoheight {}",
+                            pending.expire_topoheight
+                        ));
+                        if pending.can_withdraw {
+                            manager.message("      Status: ✅ Withdrawable".to_string());
+                        } else {
+                            manager.message(format!(
+                                "      Status: 🕒 Cooling ({} blocks remaining)",
+                                pending.remaining_blocks
+                            ));
                         }
                     }
                 }
@@ -6130,4 +6485,72 @@ async fn count_contracts(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tos_common::prompt::{default_logs_datetime_format, LogLevel, ShareablePrompt};
+
+    fn build_test_prompt() -> Result<ShareablePrompt, CommandError> {
+        let temp_dir = std::env::temp_dir().join("tos_wallet_cli_tests");
+        fs::create_dir_all(&temp_dir).map_err(|e| CommandError::Any(e.into()))?;
+        let dir_path = format!("{}/", temp_dir.display());
+        let config = PromptConfig {
+            level: LogLevel::Off,
+            dir_path: &dir_path,
+            filename_log: "test.log",
+            disable_file_logging: true,
+            disable_file_log_date_based: true,
+            disable_colors: true,
+            enable_auto_compress_logs: false,
+            interactive: false,
+            module_logs: Vec::new(),
+            file_level: LogLevel::Off,
+            show_ascii: false,
+            logs_datetime_format: default_logs_datetime_format(),
+        };
+
+        Prompt::new(config).map_err(|e| CommandError::Any(e.into()))
+    }
+
+    fn noop_handler(_: &CommandManager, _: ArgumentManager) -> Result<(), CommandError> {
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn unfreeze_tos_delegate_parses_optional_args() {
+        let prompt = build_test_prompt().expect("prompt init");
+        let manager = CommandManager::new_with_batch_mode(prompt, true);
+        let (required_args, optional_args) = unfreeze_tos_delegate_args();
+        manager
+            .add_command(Command::with_arguments(
+                "unfreeze_tos_delegate",
+                "test",
+                required_args,
+                optional_args,
+                CommandHandler::Sync(noop_handler),
+            ))
+            .expect("register command");
+
+        manager
+            .handle_command("unfreeze_tos_delegate amount=1".to_string())
+            .await
+            .expect("amount only");
+        manager
+            .handle_command("unfreeze_tos_delegate amount=1 record_index=0".to_string())
+            .await
+            .expect("record_index only");
+        manager
+            .handle_command("unfreeze_tos_delegate amount=1 delegatee=addr".to_string())
+            .await
+            .expect("delegatee only");
+        manager
+            .handle_command(
+                "unfreeze_tos_delegate amount=1 delegatee=addr record_index=0".to_string(),
+            )
+            .await
+            .expect("delegatee and record_index");
+    }
 }

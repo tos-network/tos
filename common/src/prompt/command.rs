@@ -557,11 +557,9 @@ impl CommandManager {
             "freeze_tos" => {
                 self.require_param(args, "amount")?;
                 self.require_param(args, "duration")?;
-                self.require_param(args, "confirm")?;
             }
             "unfreeze_tos" => {
                 self.require_param(args, "amount")?;
-                self.require_param(args, "confirm")?;
             }
             "set_asset_name" => {
                 self.require_param(args, "asset")?;

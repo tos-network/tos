@@ -27,13 +27,13 @@ pub const ENERGY_PER_TRANSFER: u64 = 1; // Basic transfer (1 energy per transfer
 
 // TOS-based fee model constants
 pub const FEE_PER_KB: u64 = 10000;
-pub const FEE_PER_ACCOUNT_CREATION: u64 = 100000;
+pub const FEE_PER_ACCOUNT_CREATION: u64 = 0; // Free account creation (no fee)
 pub const FEE_PER_TRANSFER: u64 = 5000;
 pub const FEE_PER_MULTISIG_SIGNATURE: u64 = 500;
 
 // UNO-based fee model constants (privacy transfers)
 pub const UNO_FEE_PER_KB: u64 = 10000;
-pub const UNO_FEE_PER_ACCOUNT_CREATION: u64 = 100000;
+pub const UNO_FEE_PER_ACCOUNT_CREATION: u64 = 0; // Free account creation (no fee)
 pub const UNO_FEE_PER_TRANSFER: u64 = 5000;
 pub const UNO_FEE_PER_MULTISIG_SIGNATURE: u64 = 500;
 
@@ -82,14 +82,24 @@ pub const MAXIMUM_SUPPLY: u64 = 184_000_000 * COIN_VALUE;
 // ===== FREEZE DURATION LIMITS =====
 // Minimum freeze duration in days
 pub const MIN_FREEZE_DURATION_DAYS: u32 = 3;
-// Maximum freeze duration in days
-pub const MAX_FREEZE_DURATION_DAYS: u32 = 180;
+// Maximum freeze duration in days (extended to 365 for long-term staking)
+pub const MAX_FREEZE_DURATION_DAYS: u32 = 365;
 
 // ===== TOS AMOUNT LIMITS =====
 // Minimum TOS amount for freeze operations (1 TOS)
 pub const MIN_FREEZE_TOS_AMOUNT: u64 = COIN_VALUE;
 // Minimum TOS amount for unfreeze operations (1 TOS)
 pub const MIN_UNFREEZE_TOS_AMOUNT: u64 = COIN_VALUE;
+
+// ===== ENERGY SYSTEM LIMITS =====
+// Maximum freeze records per account (self-freeze + delegation combined)
+pub const MAX_FREEZE_RECORDS: usize = 32;
+// Maximum pending unfreeze operations per account
+pub const MAX_PENDING_UNFREEZES: usize = 32;
+// Maximum delegatees in a single batch delegation
+pub const MAX_DELEGATEES: usize = 500;
+// Unfreeze cooldown period in days (converted to blocks per network)
+pub const UNFREEZE_COOLDOWN_DAYS: u64 = 14;
 
 // Addresses format
 // mainnet prefix address

@@ -585,6 +585,13 @@ impl<'a> BlockchainVerificationState<'a, TestError> for EdgeCaseTestState {
         Ok(*self.nonces.get(account).unwrap_or(&0))
     }
 
+    async fn account_exists(
+        &mut self,
+        account: &'a CompressedPublicKey,
+    ) -> Result<bool, TestError> {
+        Ok(self.nonces.contains_key(account))
+    }
+
     async fn update_account_nonce(
         &mut self,
         account: &'a CompressedPublicKey,
@@ -615,6 +622,17 @@ impl<'a> BlockchainVerificationState<'a, TestError> for EdgeCaseTestState {
 
     fn get_verification_timestamp(&self) -> u64 {
         self.current_time
+    }
+
+    fn get_verification_topoheight(&self) -> u64 {
+        1000 // Default topoheight for tests
+    }
+
+    async fn get_recyclable_tos(
+        &mut self,
+        _account: &'a CompressedPublicKey,
+    ) -> Result<u64, TestError> {
+        Ok(0) // No recyclable TOS in KYC edge case tests
     }
 
     async fn set_multisig_state(
@@ -753,14 +771,14 @@ impl<'a> BlockchainApplyState<'a, DummyContractProvider, TestError> for EdgeCase
 
     async fn get_energy_resource(
         &mut self,
-        _account: &'a CompressedPublicKey,
+        _account: Cow<'a, CompressedPublicKey>,
     ) -> Result<Option<EnergyResource>, TestError> {
         Ok(None)
     }
 
     async fn set_energy_resource(
         &mut self,
-        _account: &'a CompressedPublicKey,
+        _account: Cow<'a, CompressedPublicKey>,
         _energy_resource: EnergyResource,
     ) -> Result<(), TestError> {
         Ok(())

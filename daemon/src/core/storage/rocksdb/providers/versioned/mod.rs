@@ -14,6 +14,7 @@ mod balance;
 mod cache;
 mod contract;
 mod dag_order;
+mod energy;
 mod multisig;
 mod nonce;
 mod registrations;

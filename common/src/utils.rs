@@ -264,7 +264,7 @@ mod tests {
 
     #[test]
     fn test_tos_format() {
-        assert_eq!(format_tos(FEE_PER_ACCOUNT_CREATION), "0.00100000");
+        assert_eq!(format_tos(FEE_PER_ACCOUNT_CREATION), "0.00000000"); // Free account creation
         assert_eq!(format_tos(FEE_PER_KB), "0.00010000");
         assert_eq!(format_tos(FEE_PER_TRANSFER), "0.00005000");
         assert_eq!(format_tos(COIN_VALUE), "1.00000000");

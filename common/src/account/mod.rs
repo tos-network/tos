@@ -3,13 +3,19 @@ mod energy;
 mod nonce;
 mod uno_balance;
 
+#[cfg(test)]
+mod energy_tests;
+
 use std::{
     borrow::Cow,
     fmt::{self, Display, Formatter},
 };
 
 pub use balance::{AccountSummary, Balance, BalanceType, VersionedBalance};
-pub use energy::{EnergyLease, EnergyResource, FreezeDuration, FreezeRecord};
+pub use energy::{
+    DelegateRecordEntry, DelegatedFreezeRecord, EnergyLease, EnergyResource, FreezeDuration,
+    FreezeRecord, PendingUnfreeze,
+};
 pub use nonce::{Nonce, VersionedNonce};
 pub use uno_balance::{UnoAccountSummary, UnoBalance, VersionedUnoBalance};
 

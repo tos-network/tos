@@ -14,13 +14,13 @@ use crate::{
         builder::{
             AccountState, ContractDepositBuilder, DeployContractBuilder, EnergyBuilder, FeeBuilder,
             FeeHelper, GenerationError, InvokeContractBuilder, MultiSigBuilder, TransactionBuilder,
-            TransactionTypeBuilder, TransferBuilder,
+            TransactionTypeBuilder, TransferBuilder, UnsignedTransaction,
         },
         extra_data::Role,
         extra_data::{derive_shared_key_from_opening, PlaintextData},
         verify::{BlockchainVerificationState, NoZKPCache, ZKPCache},
-        BurnPayload, MultiSigPayload, Reference, Transaction, TransactionType, TxVersion,
-        MAX_TRANSFER_COUNT,
+        BurnPayload, DelegationEntry, EnergyPayload, FeeType, MultiSigPayload, Reference,
+        Transaction, TransactionType, TxVersion, MAX_TRANSFER_COUNT,
     },
 };
 use async_trait::async_trait;
@@ -59,6 +59,12 @@ fn create_mock_elf_bytecode() -> Vec<u8> {
 #[derive(Debug, Clone)]
 struct TestError(());
 
+impl std::fmt::Display for TestError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "TestError")
+    }
+}
+
 impl<'a> From<&'a str> for TestError {
     fn from(_: &'a str) -> Self {
         TestError(())
@@ -76,7 +82,9 @@ struct ChainState {
     accounts: HashMap<PublicKey, AccountChainState>,
     multisig: HashMap<PublicKey, MultiSigPayload>,
     contracts: HashMap<Hash, Module>,
+    energy_resources: HashMap<PublicKey, crate::account::EnergyResource>,
     env: Environment,
+    topoheight: u64,
 }
 
 impl ChainState {
@@ -85,7 +93,9 @@ impl ChainState {
             accounts: HashMap::new(),
             multisig: HashMap::new(),
             contracts: HashMap::new(),
+            energy_resources: HashMap::new(),
             env: Environment::new(),
+            topoheight: 1000,
         }
     }
 }
@@ -1193,13 +1203,15 @@ async fn test_transfer_extra_data_limits() {
     }
 }
 
-// Test UnfreezeTos balance refund in verify phase
-// This test verifies that unfrozen TOS is returned to balance during verification
+// Test UnfreezeTos two-phase behavior
+// With the new design, UnfreezeTos creates a pending unfreeze (no immediate refund)
+// TOS is returned via WithdrawUnfrozen after 14-day cooldown
+// Also, Energy operations are now FREE (no TOS fee)
 #[tokio::test]
 async fn test_unfreeze_tos_balance_refund() {
     let mut alice = Account::new();
     let initial_balance = 1000 * COIN_VALUE;
-    let unfreeze_amount = 100 * COIN_VALUE;
+    let _unfreeze_amount = 100 * COIN_VALUE; // Not used for balance check - TOS goes to pending
 
     // Set initial balance (simulating post-freeze state)
     alice.set_balance(TOS_ASSET, initial_balance);
@@ -1216,9 +1228,14 @@ async fn test_unfreeze_tos_balance_refund() {
         };
 
         let data = TransactionTypeBuilder::Energy(EnergyBuilder {
-            amount: unfreeze_amount,
+            amount: _unfreeze_amount,
             is_freeze: false,
+            is_withdraw: false,
             freeze_duration: None,
+            delegatees: None,
+            from_delegation: false,
+            record_index: None,
+            delegatee_address: None,
         });
 
         let builder = TransactionBuilder::new(
@@ -1227,7 +1244,7 @@ async fn test_unfreeze_tos_balance_refund() {
             alice.keypair.get_public_key().compress(),
             None,
             data,
-            FeeBuilder::Multiplier(1.0),
+            FeeBuilder::Value(0), // Energy operations are FREE
         );
         builder.build(&mut state, &alice.keypair).unwrap()
     };
@@ -1249,7 +1266,7 @@ async fn test_unfreeze_tos_balance_refund() {
     }
 
     // Check balance before verify
-    let balance_before_verify = state
+    let balance_before_verify = *state
         .accounts
         .get(&alice.keypair.get_public_key().compress())
         .unwrap()
@@ -1260,7 +1277,7 @@ async fn test_unfreeze_tos_balance_refund() {
 
     // Verify UnfreezeTos transaction
     let unfreeze_tx_hash = unfreeze_tx.hash();
-    let tx_fee = unfreeze_tx.fee; // Save actual fee from transaction
+    let tx_fee = unfreeze_tx.fee; // Energy operations are FREE, so fee should be 0
     println!("Transaction fee: {tx_fee}");
     let unfreeze_result = Arc::new(unfreeze_tx)
         .verify(&unfreeze_tx_hash, &mut state, &NoZKPCache)
@@ -1270,9 +1287,11 @@ async fn test_unfreeze_tos_balance_refund() {
         "UnfreezeTos transaction should succeed"
     );
 
-    // After UnfreezeTos verify: balance should be increased by unfreeze_amount but decreased by fee
-    // Expected: initial + unfreeze_amount - tx_fee (use actual tx fee, not hardcoded)
-    let alice_balance_after_unfreeze = state
+    // After UnfreezeTos verify with two-phase unfreeze:
+    // - Balance is NOT increased (TOS goes to pending unfreeze)
+    // - Energy operations are FREE (no fee deducted)
+    // - Expected: initial_balance (no change in verify phase)
+    let alice_balance_after_unfreeze = *state
         .accounts
         .get(&alice.keypair.get_public_key().compress())
         .unwrap()
@@ -1281,31 +1300,212 @@ async fn test_unfreeze_tos_balance_refund() {
         .unwrap();
     println!("Balance after verify: {alice_balance_after_unfreeze}");
 
-    let expected_balance = initial_balance + unfreeze_amount - tx_fee;
+    // Energy operations are FREE, so fee should be 0
+    assert_eq!(tx_fee, 0, "Energy operations should be FREE");
+
+    // With two-phase unfreeze, balance should remain unchanged
+    // (TOS goes to pending state, not returned to balance)
+    let expected_balance = initial_balance; // No change
     println!(
-        "Expected balance: {expected_balance} (initial {initial_balance} + unfreeze {unfreeze_amount} - fee {tx_fee})"
+        "Expected balance: {expected_balance} (initial {initial_balance} - no change in verify phase)"
     );
     assert_eq!(
-        *alice_balance_after_unfreeze, expected_balance,
-        "Balance should be initial + unfreeze_amount - fee (refund happens in verify phase)"
+        alice_balance_after_unfreeze, expected_balance,
+        "Balance should remain unchanged (TOS goes to pending, not refunded yet)"
     );
 
-    // CRITICAL CHECK: Verify balance was refunded (not just fee deducted)
-    // If refund didn't happen, balance would be: initial - tx_fee
-    let no_refund_balance = initial_balance - tx_fee;
-    assert_ne!(
-        *alice_balance_after_unfreeze, no_refund_balance,
-        "Balance should show refund (if equal to this, refund logic is missing)"
-    );
-
-    println!("UnfreezeTos test passed: Balance refund works correctly");
+    println!("UnfreezeTos test passed: Two-phase unfreeze works correctly");
     println!("   Initial balance:     {initial_balance}");
-    println!("   Unfreeze amount:     {unfreeze_amount}");
-    println!("   Transaction fee:     {tx_fee}");
-    println!("   Final balance:       {expected_balance}");
-    println!(
-        "   Formula verified:    {initial_balance} + {unfreeze_amount} - {tx_fee} = {expected_balance}"
+    println!("   Balance after:       {alice_balance_after_unfreeze}");
+    println!("   Note: TOS is in pending state, use WithdrawUnfrozen after 14 days");
+}
+
+#[tokio::test]
+async fn test_unfreeze_rejects_delegatee_address_without_delegation() {
+    let mut alice = Account::new();
+    alice.set_balance(TOS_ASSET, 10 * COIN_VALUE);
+    let delegatee = KeyPair::new().get_public_key().compress();
+
+    let payload = EnergyPayload::UnfreezeTos {
+        amount: COIN_VALUE,
+        from_delegation: false,
+        record_index: None,
+        delegatee_address: Some(delegatee),
+    };
+
+    let unsigned = UnsignedTransaction::new_with_fee_type(
+        TxVersion::T0,
+        0,
+        alice.keypair.get_public_key().compress(),
+        TransactionType::Energy(payload),
+        0,
+        FeeType::TOS,
+        alice.nonce,
+        Reference {
+            topoheight: 0,
+            hash: Hash::zero(),
+        },
     );
+    let tx = unsigned.finalize(&alice.keypair);
+    let tx_hash = tx.hash();
+
+    let mut state = ChainState::new();
+    let mut balances = HashMap::new();
+    balances.insert(TOS_ASSET, 10 * COIN_VALUE);
+    state.accounts.insert(
+        alice.keypair.get_public_key().compress(),
+        AccountChainState {
+            balances,
+            nonce: alice.nonce,
+        },
+    );
+
+    let result = Arc::new(tx).verify(&tx_hash, &mut state, &NoZKPCache).await;
+    assert!(result.is_err(), "expected error, got: {result:?}");
+}
+
+#[tokio::test]
+async fn test_energy_tx_rejects_non_zero_fee() {
+    let alice = Account::new();
+    let payload = EnergyPayload::WithdrawUnfrozen;
+
+    let unsigned = UnsignedTransaction::new_with_fee_type(
+        TxVersion::T0,
+        0,
+        alice.keypair.get_public_key().compress(),
+        TransactionType::Energy(payload),
+        1,
+        FeeType::TOS,
+        alice.nonce,
+        Reference {
+            topoheight: 0,
+            hash: Hash::zero(),
+        },
+    );
+    let tx = unsigned.finalize(&alice.keypair);
+    let tx_hash = tx.hash();
+
+    let mut state = ChainState::new();
+    let result = Arc::new(tx).verify(&tx_hash, &mut state, &NoZKPCache).await;
+    assert!(result.is_err(), "expected error, got: {result:?}");
+}
+
+// NOTE: test_withdraw_unfrozen_requires_pending and test_withdraw_unfrozen_requires_expired
+// have been removed because they test apply-phase logic (pending/expired unfreeze checks)
+// but call the verify() method which only uses BlockchainVerificationState.
+// The pending/expired unfreeze checks happen in the apply() phase which requires
+// BlockchainApplyState (including get_energy_resource and set_energy_resource).
+// These tests should be re-added when integration tests for apply() are implemented.
+
+#[tokio::test]
+async fn test_freeze_delegation_requires_existing_delegatee() {
+    let mut alice = Account::new();
+    alice.set_balance(TOS_ASSET, 10 * COIN_VALUE);
+
+    let delegatee = KeyPair::new().get_public_key().compress();
+    assert_ne!(
+        delegatee,
+        alice.keypair.get_public_key().compress(),
+        "delegatee should differ from sender"
+    );
+    let duration = crate::account::FreezeDuration::new(7).unwrap();
+    let payload = EnergyPayload::FreezeTosDelegate {
+        delegatees: vec![DelegationEntry {
+            delegatee: delegatee.clone(),
+            amount: COIN_VALUE,
+        }],
+        duration,
+    };
+
+    let unsigned = UnsignedTransaction::new_with_fee_type(
+        TxVersion::T0,
+        0,
+        alice.keypair.get_public_key().compress(),
+        TransactionType::Energy(payload),
+        0,
+        FeeType::TOS,
+        alice.nonce,
+        Reference {
+            topoheight: 0,
+            hash: Hash::zero(),
+        },
+    );
+    let tx = unsigned.finalize(&alice.keypair);
+    let tx_hash = tx.hash();
+
+    match tx.get_data() {
+        TransactionType::Energy(EnergyPayload::FreezeTosDelegate { delegatees, .. }) => {
+            assert_eq!(delegatees.len(), 1);
+        }
+        _ => panic!("Expected FreezeTosDelegate payload"),
+    }
+
+    let mut state = ChainState::new();
+    let mut balances = HashMap::new();
+    balances.insert(TOS_ASSET, 10 * COIN_VALUE);
+    state.accounts.insert(
+        alice.keypair.get_public_key().compress(),
+        AccountChainState {
+            balances,
+            nonce: alice.nonce,
+        },
+    );
+
+    assert!(!state.accounts.contains_key(&delegatee));
+    assert!(!state.account_exists(&delegatee).await.unwrap());
+
+    let result = Arc::new(tx).verify(&tx_hash, &mut state, &NoZKPCache).await;
+    assert!(result.is_err(), "expected error, got: {result:?}");
+}
+
+#[tokio::test]
+async fn test_energy_fee_transfer_rejects_new_address() {
+    let mut alice = Account::new();
+    alice.set_balance(TOS_ASSET, 10 * COIN_VALUE);
+    let bob = Account::new();
+
+    let mut state = AccountStateImpl {
+        balances: alice.balances.clone(),
+        nonce: alice.nonce,
+        reference: Reference {
+            topoheight: 0,
+            hash: Hash::zero(),
+        },
+    };
+
+    let transfer = TransferBuilder {
+        amount: COIN_VALUE,
+        destination: bob.address(),
+        asset: TOS_ASSET,
+        extra_data: None,
+    };
+    let builder = TransactionBuilder::new(
+        TxVersion::T0,
+        0,
+        alice.keypair.get_public_key().compress(),
+        None,
+        TransactionTypeBuilder::Transfers(vec![transfer]),
+        FeeBuilder::Value(0),
+    )
+    .with_fee_type(FeeType::Energy);
+    let tx = builder.build(&mut state, &alice.keypair).unwrap();
+
+    let mut verify_state = ChainState::new();
+    let mut balances = HashMap::new();
+    balances.insert(TOS_ASSET, 10 * COIN_VALUE);
+    verify_state.accounts.insert(
+        alice.keypair.get_public_key().compress(),
+        AccountChainState {
+            balances,
+            nonce: alice.nonce,
+        },
+    );
+
+    let tx_hash = tx.hash();
+    let result = Arc::new(tx)
+        .verify(&tx_hash, &mut verify_state, &NoZKPCache)
+        .await;
+    assert!(result.is_err());
 }
 
 #[async_trait]
@@ -1391,6 +1591,10 @@ impl<'a> BlockchainVerificationState<'a, TestError> for ChainState {
             .ok_or(TestError(()))
     }
 
+    async fn account_exists(&mut self, account: &'a PublicKey) -> Result<bool, TestError> {
+        Ok(self.accounts.contains_key(account))
+    }
+
     /// Apply a new nonce to an account
     async fn update_account_nonce(
         &mut self,
@@ -1431,6 +1635,23 @@ impl<'a> BlockchainVerificationState<'a, TestError> for ChainState {
             .duration_since(std::time::SystemTime::UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0)
+    }
+
+    fn get_verification_topoheight(&self) -> u64 {
+        // Use current topoheight for tests
+        self.topoheight
+    }
+
+    async fn get_recyclable_tos(&mut self, account: &'a PublicKey) -> Result<u64, TestError> {
+        // Get energy resource and calculate recyclable TOS
+        let energy = self.energy_resources.get(account);
+        let recyclable = match energy {
+            Some(resource) => resource
+                .get_recyclable_tos(self.topoheight)
+                .map_err(|_| TestError(()))?,
+            None => 0,
+        };
+        Ok(recyclable)
     }
 
     async fn set_multisig_state(

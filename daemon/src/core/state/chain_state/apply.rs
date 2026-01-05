@@ -145,6 +145,10 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError>
         self.inner.get_account_nonce(account).await
     }
 
+    async fn account_exists(&mut self, account: &'a PublicKey) -> Result<bool, BlockchainError> {
+        self.inner.account_exists(account).await
+    }
+
     async fn update_account_nonce(
         &mut self,
         account: &'a PublicKey,
@@ -173,6 +177,16 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError>
     /// Get the timestamp to use for verification (delegates to inner)
     fn get_verification_timestamp(&self) -> u64 {
         self.inner.get_verification_timestamp()
+    }
+
+    /// Get the topoheight to use for verification (delegates to inner)
+    fn get_verification_topoheight(&self) -> u64 {
+        self.inner.get_verification_topoheight()
+    }
+
+    /// Get the recyclable TOS amount from expired freeze records (delegates to inner)
+    async fn get_recyclable_tos(&mut self, account: &'a PublicKey) -> Result<u64, BlockchainError> {
+        self.inner.get_recyclable_tos(account).await
     }
 
     async fn set_multisig_state(
@@ -386,19 +400,21 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for Applicable
 
     async fn get_energy_resource(
         &mut self,
-        account: &'a CompressedPublicKey,
+        account: Cow<'a, CompressedPublicKey>,
     ) -> Result<Option<EnergyResource>, BlockchainError> {
-        self.inner.storage.get_energy_resource(account).await
+        self.inner.internal_get_energy_resource(account).await
     }
 
     async fn set_energy_resource(
         &mut self,
-        account: &'a CompressedPublicKey,
+        account: Cow<'a, CompressedPublicKey>,
         energy_resource: EnergyResource,
     ) -> Result<(), BlockchainError> {
         self.inner
+            .cache_energy_resource(account.clone(), energy_resource.clone());
+        self.inner
             .storage
-            .set_energy_resource(account, self.inner.topoheight, &energy_resource)
+            .set_energy_resource(&account, self.inner.topoheight, &energy_resource)
             .await
     }
 
