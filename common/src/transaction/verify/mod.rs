@@ -150,10 +150,13 @@ impl Transaction {
     ) -> Ciphertext {
         let mut output = Ciphertext::zero();
 
-        // Fees are applied to the UNO asset for privacy-preserving transfers
-        if *asset == UNO_ASSET {
-            output += tos_crypto::curve25519_dalek::Scalar::from(self.fee);
-        }
+        // Fees are paid via TOS (Energy consumption), not UNO
+        // In Energy model, fees are paid via TOS (Energy consumption), not UNO
+        // Fee handling is done in plaintext TOS balance, not encrypted UNO balance
+        // OLD CODE (REMOVED):
+        // if *asset == UNO_ASSET {
+        //     output += tos_crypto::curve25519_dalek::Scalar::from(self.get_fee_limit());
+        // }
 
         // Sum up all UNO transfers for this asset
         if let TransactionType::UnoTransfers(transfers) = &self.data {
@@ -665,6 +668,14 @@ impl Transaction {
                         return Err(VerificationError::InvalidTransferAmount);
                     }
 
+                    // Shield transfers only support TOS asset
+                    // UNO is a single-asset privacy layer for TOS only
+                    if *transfer.get_asset() != TOS_ASSET {
+                        return Err(VerificationError::AnyError(anyhow!(
+                            "Shield transfers only support TOS asset"
+                        )));
+                    }
+
                     // SECURITY: Verify Shield commitment proof
                     // This ensures the commitment is correctly formed for the claimed amount
                     // and prevents inflation attacks via forged commitments
@@ -920,6 +931,47 @@ impl Transaction {
 
         // Two-phase unfreeze: UnfreezeTos creates pending, WithdrawUnfrozen credits balance
         // UnfreezeTos does NOT credit balance immediately - TOS stays in pending state
+
+        // Deduct sender UNO balance for UnoTransfers
+        // This ensures cached UNO transactions also update balance during verification
+        // Previously, only pre_verify_uno updated balance, but cached TXs use verify_dynamic_parts
+        if let TransactionType::UnoTransfers(transfers) = &self.data {
+            if log::log_enabled!(log::Level::Trace) {
+                trace!(
+                    "verify_dynamic_parts: Processing UnoTransfers for source {:?}",
+                    self.source
+                );
+            }
+
+            // Decompress transfer ciphertexts to compute total spending
+            let mut output = Ciphertext::zero();
+            for transfer in transfers.iter() {
+                let decompressed = DecompressedUnoTransferCt::decompress(transfer)
+                    .map_err(ProofVerificationError::from)?;
+                output += decompressed.get_ciphertext(Role::Sender);
+            }
+
+            // Get sender's UNO balance and deduct spending
+            let sender_uno_balance = state
+                .get_sender_uno_balance(&self.source, &UNO_ASSET, &self.reference)
+                .await
+                .map_err(VerificationError::State)?;
+
+            if log::log_enabled!(log::Level::Trace) {
+                trace!(
+                    "verify_dynamic_parts: UnoTransfer deducting from UNO balance for source {:?}",
+                    self.source
+                );
+            }
+
+            *sender_uno_balance -= &output;
+
+            // Track sender output for final balance calculation
+            state
+                .add_sender_uno_output(&self.source, &UNO_ASSET, output)
+                .await
+                .map_err(VerificationError::State)?;
+        }
 
         // Deduct sender UNO balance for UnshieldTransfers
         // Similar to pre_verify_uno but without CommitmentEqProof (amount is plaintext)
@@ -1845,6 +1897,14 @@ impl Transaction {
                 for transfer in transfers.iter() {
                     if transfer.get_amount() == 0 {
                         return Err(VerificationError::InvalidTransferAmount);
+                    }
+
+                    // Shield transfers only support TOS asset
+                    // UNO is a single-asset privacy layer for TOS only
+                    if *transfer.get_asset() != TOS_ASSET {
+                        return Err(VerificationError::AnyError(anyhow!(
+                            "Shield transfers only support TOS asset"
+                        )));
                     }
 
                     // SECURITY: Verify Shield commitment proof

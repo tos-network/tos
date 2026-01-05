@@ -456,8 +456,9 @@ impl TransactionBuilder {
             _ => {
                 // Compute the size and transfers count
                 let size = self.estimate_size();
-                let (transfers, new_addresses) =
-                    if let TransactionTypeBuilder::Transfers(transfers) = &self.data {
+                // Extract transfer count for all transfer types (TOS, UNO, Unshield)
+                let (transfers, new_addresses) = match &self.data {
+                    TransactionTypeBuilder::Transfers(transfers) => {
                         let mut new_addresses = 0;
                         for transfer in transfers {
                             if !state
@@ -467,11 +468,27 @@ impl TransactionBuilder {
                                 new_addresses += 1;
                             }
                         }
-
                         (transfers.len(), new_addresses)
-                    } else {
-                        (0, 0)
-                    };
+                    }
+                    TransactionTypeBuilder::UnoTransfers(transfers) => {
+                        // UNO transfers: count outputs, no new address fee (UNO-only accounts)
+                        (transfers.len(), 0)
+                    }
+                    TransactionTypeBuilder::UnshieldTransfers(transfers) => {
+                        // Unshield transfers: count outputs and check for new TOS addresses
+                        let mut new_addresses = 0;
+                        for transfer in transfers {
+                            if !state
+                                .account_exists(transfer.destination.get_public_key())
+                                .map_err(GenerationError::State)?
+                            {
+                                new_addresses += 1;
+                            }
+                        }
+                        (transfers.len(), new_addresses)
+                    }
+                    _ => (0, 0),
+                };
 
                 let expected_fee = if let Some(ref fee_type) = self.fee_type {
                     if *fee_type == FeeType::Energy
@@ -529,28 +546,16 @@ impl TransactionBuilder {
     }
 
     /// Compute the full cost of the transaction
-    pub fn get_transaction_cost(&self, fee: u64, asset: &Hash) -> u64 {
+    /// In Stake 2.0, fee_limit is the max TOS willing to burn
+    /// Actual fee deduction happens during execution based on energy consumption
+    pub fn get_transaction_cost(&self, fee_limit: u64, asset: &Hash) -> u64 {
         let mut cost = 0;
 
-        // Check if we should apply fees to TOS balance
-        let should_apply_fees = if let Some(ref fee_type) = self.fee_type {
-            // For Energy fees, we don't deduct from TOS balance
-            // Energy is consumed separately from the account's energy resource
-            *fee_type == FeeType::TOS
-        } else {
-            // Default to TOS fees
-            true
-        };
-
-        let fee_asset = if matches!(self.data, TransactionTypeBuilder::UnoTransfers(_)) {
-            &UNO_ASSET
-        } else {
-            &TOS_ASSET
-        };
-
-        if *asset == *fee_asset && should_apply_fees {
-            // Fees are applied to the fee asset (TOS or UNO).
-            cost += fee;
+        // fee_limit is ALWAYS added to TOS cost, not UNO
+        // In Energy model, fees are paid via TOS (Energy consumption)
+        // UNO transfers spend from encrypted balance for amounts, but fees from TOS
+        if *asset == TOS_ASSET {
+            cost += fee_limit;
         }
 
         match &self.data {

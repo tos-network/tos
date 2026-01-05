@@ -23,6 +23,10 @@ const MAX_ARRAY_SIZE: usize = 10000;
 /// Example attack: Map with 10M key-value pairs → gigabytes of memory allocation
 const MAX_MAP_SIZE: usize = 10000;
 
+/// Maximum bytes size for ValueCell::Bytes to prevent memory exhaustion DoS attacks
+/// Example attack: Bytes with 1GB length prefix → gigabytes of memory allocation
+const MAX_BYTES_SIZE: usize = 1_000_000; // 1MB max
+
 /// Contract deposit - plaintext balance system
 ///
 /// Balance simplification: Only public deposits are supported.
@@ -356,6 +360,15 @@ impl Serializer for ValueCell {
                 1 => {
                     // Bytes: Read length and byte array
                     let len = reader.read_u32()? as usize;
+
+                    // Enforce bytes size limit to prevent memory exhaustion DoS
+                    if len > MAX_BYTES_SIZE {
+                        return Err(ReaderError::ExceedsMaxBytesSize {
+                            max: MAX_BYTES_SIZE,
+                            actual: len,
+                        });
+                    }
+
                     current_value = Some(ValueCell::Bytes(reader.read_bytes(len)?));
                     // Loop back to State 2 (have completed value)
                 }
@@ -634,6 +647,30 @@ mod tests {
                 assert_eq!(actual, 10001);
             }
             _ => panic!("Expected ExceedsMaxArraySize error, got {result:?}"),
+        }
+    }
+
+    /// Test that bytes size limit is enforced to prevent memory exhaustion DoS
+    #[test]
+    fn test_value_cell_bytes_size_limit() {
+        // Create Bytes with size exceeding MAX_BYTES_SIZE (1MB)
+        let mut buffer = Vec::new();
+        let mut writer = Writer::new(&mut buffer);
+        writer.write_u8(1); // Bytes tag
+        writer.write_u32(&(MAX_BYTES_SIZE as u32 + 1)); // len exceeds limit
+
+        let bytes = writer.as_bytes();
+        let mut reader = Reader::new(bytes);
+
+        // Should fail with ExceedsMaxBytesSize error
+        let result = ValueCell::read(&mut reader);
+        assert!(result.is_err());
+        match result {
+            Err(ReaderError::ExceedsMaxBytesSize { max, actual }) => {
+                assert_eq!(max, MAX_BYTES_SIZE);
+                assert_eq!(actual, MAX_BYTES_SIZE + 1);
+            }
+            _ => panic!("Expected ExceedsMaxBytesSize error, got {result:?}"),
         }
     }
 }
