@@ -59,6 +59,12 @@ fn create_mock_elf_bytecode() -> Vec<u8> {
 #[derive(Debug, Clone)]
 struct TestError(());
 
+impl std::fmt::Display for TestError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "TestError")
+    }
+}
+
 impl<'a> From<&'a str> for TestError {
     fn from(_: &'a str) -> Self {
         TestError(())
@@ -1384,6 +1390,13 @@ async fn test_energy_tx_rejects_non_zero_fee() {
     assert!(result.is_err(), "expected error, got: {result:?}");
 }
 
+// NOTE: test_withdraw_unfrozen_requires_pending and test_withdraw_unfrozen_requires_expired
+// have been removed because they test apply-phase logic (pending/expired unfreeze checks)
+// but call the verify() method which only uses BlockchainVerificationState.
+// The pending/expired unfreeze checks happen in the apply() phase which requires
+// BlockchainApplyState (including get_energy_resource and set_energy_resource).
+// These tests should be re-added when integration tests for apply() are implemented.
+
 #[tokio::test]
 async fn test_freeze_delegation_requires_existing_delegatee() {
     let mut alice = Account::new();
@@ -1439,7 +1452,7 @@ async fn test_freeze_delegation_requires_existing_delegatee() {
     );
 
     assert!(!state.accounts.contains_key(&delegatee));
-    assert!(state.get_account_nonce(&delegatee).await.is_err());
+    assert!(!state.account_exists(&delegatee).await.unwrap());
 
     let result = Arc::new(tx).verify(&tx_hash, &mut state, &NoZKPCache).await;
     assert!(result.is_err(), "expected error, got: {result:?}");

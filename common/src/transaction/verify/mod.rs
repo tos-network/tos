@@ -418,8 +418,11 @@ impl Transaction {
                     }
 
                     // Delegatee account must already exist
-                    let delegatee_exists = state.get_account_nonce(&entry.delegatee).await;
-                    if delegatee_exists.is_err() {
+                    let delegatee_exists = state
+                        .account_exists(&entry.delegatee)
+                        .await
+                        .map_err(VerificationError::State)?;
+                    if !delegatee_exists {
                         return Err(VerificationError::AnyError(anyhow!(
                             "Delegatee account does not exist: {:?}",
                             entry.delegatee
@@ -3209,12 +3212,17 @@ impl Transaction {
                             let topoheight = state.get_verification_topoheight();
 
                             // Check if there are withdrawable funds
+                            if energy_resource.pending_unfreezes.is_empty() {
+                                return Err(VerificationError::AnyError(anyhow::anyhow!(
+                                    "No pending unfreezes"
+                                )));
+                            }
                             let withdrawable = energy_resource
                                 .withdrawable_unfreeze(topoheight)
                                 .map_err(|_| VerificationError::Overflow)?;
                             if withdrawable == 0 {
                                 return Err(VerificationError::AnyError(anyhow::anyhow!(
-                                    "No withdrawable TOS (cooldown not expired)"
+                                    "No expired unfreezes"
                                 )));
                             }
 

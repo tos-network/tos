@@ -531,13 +531,14 @@ impl<'a, S: Storage> MempoolState<'a, S> {
                     .internal_get_sender_energy_resource(tx.get_source())
                     .await?;
 
+                if energy_resource.pending_unfreezes.is_empty() {
+                    return Err(BlockchainError::Any(anyhow!("No pending unfreezes")));
+                }
                 let withdrawable = energy_resource
                     .withdrawable_unfreeze(topoheight)
                     .map_err(|_| BlockchainError::Overflow)?;
                 if withdrawable == 0 {
-                    return Err(BlockchainError::Any(anyhow!(
-                        "No withdrawable TOS (cooldown not expired)"
-                    )));
+                    return Err(BlockchainError::Any(anyhow!("No expired unfreezes")));
                 }
 
                 let withdrawn = energy_resource
