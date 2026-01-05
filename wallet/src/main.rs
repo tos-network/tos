@@ -5274,14 +5274,7 @@ async fn energy_info(manager: &CommandManager, _args: ArgumentManager) -> Result
                     "  Frozen TOS: {} TOS",
                     format_tos(energy_result.frozen_tos)
                 ));
-                manager.message(format!(
-                    "  Total Energy: {} units",
-                    energy_result.total_energy
-                ));
-                manager.message(format!(
-                    "  Used Energy: {} units",
-                    energy_result.used_energy
-                ));
+                manager.message(format!("  Energy: {} units", energy_result.energy));
                 manager.message(format!(
                     "  Available Energy: {} units",
                     energy_result.available_energy

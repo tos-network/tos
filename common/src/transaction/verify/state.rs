@@ -82,6 +82,9 @@ pub trait BlockchainVerificationState<'a, E> {
     /// Get the nonce of an account
     async fn get_account_nonce(&mut self, account: &'a CompressedPublicKey) -> Result<Nonce, E>;
 
+    /// Check if an account exists (registered on-chain)
+    async fn account_exists(&mut self, account: &'a CompressedPublicKey) -> Result<bool, E>;
+
     /// Apply a new nonce to an account
     async fn update_account_nonce(
         &mut self,

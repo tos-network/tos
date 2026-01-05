@@ -136,14 +136,16 @@ impl EnergyPayload {
     pub fn calculate_energy_gain(&self) -> Option<u64> {
         match self {
             Self::FreezeTos { amount, duration } => {
-                Some((*amount / crate::config::COIN_VALUE) * duration.reward_multiplier())
+                (amount / crate::config::COIN_VALUE).checked_mul(duration.reward_multiplier())
             }
             Self::FreezeTosDelegate {
                 delegatees,
                 duration,
             } => {
-                let total_amount: u64 = delegatees.iter().map(|d| d.amount).sum();
-                Some((total_amount / crate::config::COIN_VALUE) * duration.reward_multiplier())
+                let total_amount: u64 = delegatees
+                    .iter()
+                    .try_fold(0u64, |acc, d| acc.checked_add(d.amount))?;
+                (total_amount / crate::config::COIN_VALUE).checked_mul(duration.reward_multiplier())
             }
             Self::UnfreezeTos { .. } => None,
             Self::WithdrawUnfrozen => None,
@@ -612,7 +614,9 @@ mod tests {
                     duration: *duration,
                 };
 
-                let expected_energy = (amount / COIN_VALUE) * duration.reward_multiplier();
+                let expected_energy = (amount / COIN_VALUE)
+                    .checked_mul(duration.reward_multiplier())
+                    .expect("energy overflow");
                 assert_eq!(payload.calculate_energy_gain(), Some(expected_energy));
             }
         }

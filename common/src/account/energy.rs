@@ -85,6 +85,32 @@ impl Default for FreezeDuration {
     }
 }
 
+fn calculate_energy_saturating(amount_whole: u64, duration: FreezeDuration) -> u64 {
+    amount_whole.saturating_mul(duration.reward_multiplier())
+}
+
+fn calculate_energy_checked(
+    amount_whole: u64,
+    duration: FreezeDuration,
+) -> Result<u64, &'static str> {
+    amount_whole
+        .checked_mul(duration.reward_multiplier())
+        .ok_or("Energy overflow")
+}
+
+fn to_whole_tos(amount: u64) -> Result<u64, &'static str> {
+    if !amount.is_multiple_of(crate::config::COIN_VALUE) {
+        return Err("Amount must be a whole number of TOS");
+    }
+    Ok(amount / crate::config::COIN_VALUE)
+}
+
+fn to_atomic_tos(amount_whole: u64) -> Result<u64, &'static str> {
+    amount_whole
+        .checked_mul(crate::config::COIN_VALUE)
+        .ok_or("TOS amount overflow")
+}
+
 impl Serializer for FreezeDuration {
     fn write(&self, writer: &mut Writer) {
         writer.write_u32(&self.days);
@@ -111,10 +137,10 @@ impl Serializer for FreezeDuration {
 /// # Important Notes
 /// - Each freeze record tracks its own unlock time based on the freeze duration
 /// - Energy gained is immutable once frozen (doesn't change with time)
-/// - Unfreezing removes energy proportionally to the amount unfrozen
+/// - Unfreezing does not reduce energy balance
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FreezeRecord {
-    /// Amount of TOS frozen
+    /// Amount of TOS frozen (whole TOS units)
     pub amount: u64,
     /// Freeze duration
     pub duration: FreezeDuration,
@@ -130,14 +156,12 @@ impl FreezeRecord {
     /// Create a new freeze record (uses default mainnet timing)
     /// Ensures TOS amount is a whole number (multiple of COIN_VALUE)
     pub fn new(amount: u64, duration: FreezeDuration, freeze_topoheight: TopoHeight) -> Self {
-        let unlock_topoheight = freeze_topoheight + duration.duration_in_blocks();
+        let unlock_topoheight = freeze_topoheight.saturating_add(duration.duration_in_blocks());
 
-        // Ensure amount is a whole number of TOS (multiple of COIN_VALUE)
-        let whole_tos_amount = (amount / crate::config::COIN_VALUE) * crate::config::COIN_VALUE;
+        let whole_tos_amount = to_whole_tos(amount).unwrap_or(0);
 
         // Calculate energy gained using integer arithmetic
-        let energy_gained =
-            (whole_tos_amount / crate::config::COIN_VALUE) * duration.reward_multiplier();
+        let energy_gained = calculate_energy_saturating(whole_tos_amount, duration);
 
         Self {
             amount: whole_tos_amount,
@@ -158,14 +182,12 @@ impl FreezeRecord {
         network: &crate::network::Network,
     ) -> Self {
         let unlock_topoheight =
-            freeze_topoheight + duration.duration_in_blocks_for_network(network);
+            freeze_topoheight.saturating_add(duration.duration_in_blocks_for_network(network));
 
-        // Ensure amount is a whole number of TOS (multiple of COIN_VALUE)
-        let whole_tos_amount = (amount / crate::config::COIN_VALUE) * crate::config::COIN_VALUE;
+        let whole_tos_amount = to_whole_tos(amount).unwrap_or(0);
 
         // Calculate energy gained using integer arithmetic
-        let energy_gained =
-            (whole_tos_amount / crate::config::COIN_VALUE) * duration.reward_multiplier();
+        let energy_gained = calculate_energy_saturating(whole_tos_amount, duration);
 
         Self {
             amount: whole_tos_amount,
@@ -219,13 +241,13 @@ impl Serializer for FreezeRecord {
 ///
 /// # Fields
 /// - `delegatee`: The account receiving delegated energy
-/// - `amount`: Amount of TOS delegated to this delegatee
+/// - `amount`: Amount of TOS delegated to this delegatee (whole TOS units)
 /// - `energy`: Energy amount delegated (calculated from amount and duration)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DelegateRecordEntry {
     /// Delegatee account (receives energy)
     pub delegatee: PublicKey,
-    /// Amount of TOS delegated
+    /// Amount of TOS delegated (whole TOS units)
     pub amount: u64,
     /// Energy delegated to this delegatee
     pub energy: u64,
@@ -256,7 +278,7 @@ impl Serializer for DelegateRecordEntry {
 /// # Design Notes
 /// - One batch delegation = one freeze record (counts toward 32-record limit)
 /// - All entries share the same duration and unlock time
-/// - Energy is calculated per-delegatee: amount * 2 * days / COIN_VALUE
+/// - Energy is calculated per-delegatee: amount * 2 * days (amount in whole TOS)
 ///
 /// # Edge Cases
 /// - Minimum 1 TOS per delegatee to prevent dust entries
@@ -272,7 +294,7 @@ pub struct DelegatedFreezeRecord {
     pub freeze_topoheight: TopoHeight,
     /// Topoheight when can be unlocked
     pub unlock_topoheight: TopoHeight,
-    /// Total amount delegated (sum of all entry amounts)
+    /// Total amount delegated (sum of all entry amounts, whole TOS units)
     pub total_amount: u64,
     /// Total energy delegated (sum of all entry energies)
     pub total_energy: u64,
@@ -286,8 +308,9 @@ impl DelegatedFreezeRecord {
         freeze_topoheight: TopoHeight,
         network: &crate::network::Network,
     ) -> Result<Self, String> {
-        let unlock_topoheight =
-            freeze_topoheight + duration.duration_in_blocks_for_network(network);
+        let unlock_topoheight = freeze_topoheight
+            .checked_add(duration.duration_in_blocks_for_network(network))
+            .ok_or_else(|| "Delegated unlock topoheight overflow".to_string())?;
         let total_amount = entries
             .iter()
             .try_fold(0u64, |acc, entry| acc.checked_add(entry.amount))
@@ -337,7 +360,8 @@ impl Serializer for DelegatedFreezeRecord {
     }
 
     fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
-        let entries_count = reader.read_u64()? as usize;
+        let entries_count =
+            usize::try_from(reader.read_u64()?).map_err(|_| ReaderError::InvalidValue)?;
         if entries_count > crate::config::MAX_DELEGATEES {
             return Err(ReaderError::InvalidValue);
         }
@@ -368,17 +392,17 @@ impl Serializer for DelegatedFreezeRecord {
 /// Pending unfreeze record for two-phase unfreeze
 ///
 /// # Two-Phase Unfreeze Process
-/// 1. Phase 1 (UnfreezeTos): Creates PendingUnfreeze, removes energy immediately
+/// 1. Phase 1 (UnfreezeTos): Creates PendingUnfreeze
 /// 2. Phase 2 (WithdrawUnfrozen): After cooldown, TOS returned to balance
 ///
 /// # Design Notes
 /// - 14-day cooldown prevents rapid stake/unstake cycling
-/// - Energy is removed immediately in Phase 1 (not at withdraw time)
+/// - Energy balance is unchanged by unfreeze (withdraw only moves TOS)
 /// - PendingUnfreeze is source-agnostic (same structure for self-freeze and delegation)
 /// - Maximum 32 pending unfreezes per account
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PendingUnfreeze {
-    /// Amount of TOS pending withdrawal
+    /// Amount of TOS pending withdrawal (whole TOS units)
     pub amount: u64,
     /// Topoheight when this unfreeze can be withdrawn
     pub expire_topoheight: TopoHeight,
@@ -393,7 +417,8 @@ impl PendingUnfreeze {
     ) -> Self {
         Self {
             amount,
-            expire_topoheight: current_topoheight + network.unfreeze_cooldown_blocks(),
+            expire_topoheight: current_topoheight
+                .saturating_add(network.unfreeze_cooldown_blocks()),
         }
     }
 
@@ -446,48 +471,32 @@ pub struct FreezeWithRecyclingResult {
 /// # Energy Model Overview
 /// - Energy is consumed for transfer operations (1 energy per transfer)
 /// - Energy is gained by freezing TOS for a specified duration (self-freeze or delegation)
-/// - Energy regenerates when used_energy is reset (24-hour reset cycle)
+/// - Energy does not auto-regenerate; users must freeze more TOS to gain more
 /// - Multiple freeze records with different durations can coexist
 /// - Supports batch delegation (up to 500 delegatees per transaction)
 ///
 /// # Energy Sources
-/// - **total_energy**: From self-frozen TOS (sum of freeze_records.energy_gained)
-/// - **delegated_energy**: From delegators (sum of delegations TO this account)
-/// - **available_energy**: max(0, total_energy + delegated_energy - used_energy)
+/// - **energy**: Balance-style energy, increased on freeze/delegation, decreased on consumption
 ///
 /// # Edge Cases and Limitations
 /// - **Minimum freeze amount**: Only whole TOS amounts (multiples of COIN_VALUE)
 /// - **Energy consumption**: Fails if insufficient energy available (no automatic TOS conversion)
 /// - **Unfreezing constraints**: Only unlocked records can be unfrozen
 /// - **Integer arithmetic**: All calculations use integers to avoid floating-point precision issues
-/// - **Energy reset**: used_energy resets after 24 hours (lazy trigger on first tx)
+/// - **No reset cycle**: energy is a balance (adds on gain, subtracts on use)
 /// - **Record limits**: Max 32 freeze records, max 32 pending unfreezes per account
 ///
 /// # Two-Phase Unfreeze
-/// - Phase 1 (UnfreezeTos): Creates PendingUnfreeze, removes energy immediately
+/// - Phase 1 (UnfreezeTos): Creates PendingUnfreeze
 /// - Phase 2 (WithdrawUnfrozen): After 14-day cooldown, TOS returned to balance
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct EnergyResource {
-    /// Total energy from self-frozen TOS (sum of freeze_records.energy_gained)
-    pub total_energy: u64,
-    /// Energy received from delegators (authoritative source)
-    pub delegated_energy: u64,
-    /// Used energy (reset every 24 hours)
-    pub used_energy: u64,
-    /// Energy pending activation (available from next block)
-    pub pending_energy: u64,
-    /// Topoheight when pending energy was added
-    pub pending_energy_topoheight: TopoHeight,
-    /// Delegated energy pending activation (available from next block)
-    pub pending_delegated_energy: u64,
-    /// Topoheight when delegated pending energy was added
-    pub pending_delegated_energy_topoheight: TopoHeight,
-    /// Total frozen TOS across all freeze records (self + delegated)
+    /// Energy balance from self-freeze + delegations (available to spend)
+    pub energy: u64,
+    /// Total frozen TOS across all freeze records (self + delegated, whole TOS units)
     pub frozen_tos: u64,
     /// Last update topoheight
     pub last_update: TopoHeight,
-    /// Last energy reset topoheight (for 24-hour reset cycle)
-    pub last_reset_topoheight: TopoHeight,
     /// Individual self-freeze records
     pub freeze_records: Vec<FreezeRecord>,
     /// Delegation freeze records (as delegator - what I delegated to others)
@@ -501,48 +510,20 @@ impl EnergyResource {
         Self::default()
     }
 
-    /// Get available energy (includes delegated energy, uses saturating arithmetic)
-    /// Formula: max(0, total_energy + delegated_energy - used_energy)
+    /// Get available energy (balance-style)
     pub fn available_energy(&self) -> u64 {
-        let sum = self.total_energy.saturating_add(self.delegated_energy);
-        sum.saturating_sub(self.used_energy)
+        self.energy
     }
 
-    /// Get available energy at the current topoheight (excludes same-block pending energy)
+    /// Get available energy at the current topoheight (immediate availability)
     pub fn available_energy_at(&self, current_topoheight: TopoHeight) -> u64 {
-        let active_total =
-            if self.pending_energy > 0 && current_topoheight <= self.pending_energy_topoheight {
-                self.total_energy.saturating_sub(self.pending_energy)
-            } else {
-                self.total_energy
-            };
-        let active_delegated = if self.pending_delegated_energy > 0
-            && current_topoheight <= self.pending_delegated_energy_topoheight
-        {
-            self.delegated_energy
-                .saturating_sub(self.pending_delegated_energy)
-        } else {
-            self.delegated_energy
-        };
-        let sum = active_total.saturating_add(active_delegated);
-        sum.saturating_sub(self.used_energy)
+        let _ = current_topoheight;
+        self.available_energy()
     }
 
     /// Check if has enough energy at the current topoheight
     pub fn has_enough_energy(&self, current_topoheight: TopoHeight, required: u64) -> bool {
         self.available_energy_at(current_topoheight) >= required
-    }
-
-    /// Clear pending energy markers if we've moved to a new block
-    pub fn clear_pending_energy_if_ready(&mut self, current_topoheight: TopoHeight) {
-        if self.pending_energy > 0 && current_topoheight > self.pending_energy_topoheight {
-            self.pending_energy = 0;
-        }
-        if self.pending_delegated_energy > 0
-            && current_topoheight > self.pending_delegated_energy_topoheight
-        {
-            self.pending_delegated_energy = 0;
-        }
     }
 
     /// Consume energy
@@ -554,25 +535,9 @@ impl EnergyResource {
         if self.available_energy_at(current_topoheight) < amount {
             return Err("Insufficient energy");
         }
-        self.used_energy = self.used_energy.saturating_add(amount);
+        self.energy = self.energy.checked_sub(amount).ok_or("Energy underflow")?;
+        self.last_update = current_topoheight;
         Ok(())
-    }
-
-    /// Check and perform energy reset if due (24-hour cycle)
-    /// Returns true if reset was performed
-    pub fn maybe_reset_energy(
-        &mut self,
-        current_topoheight: TopoHeight,
-        network: &crate::network::Network,
-    ) -> bool {
-        let reset_period = network.energy_reset_blocks();
-        if current_topoheight >= self.last_reset_topoheight.saturating_add(reset_period) {
-            self.used_energy = 0;
-            self.last_reset_topoheight = current_topoheight;
-            true
-        } else {
-            false
-        }
     }
 
     /// Get total record count (self-freeze + delegation)
@@ -592,12 +557,14 @@ impl EnergyResource {
 
     /// Get total recyclable TOS from expired freeze records
     /// Returns the sum of all expired self-freeze record amounts
-    pub fn get_recyclable_tos(&self, current_topoheight: TopoHeight) -> u64 {
-        self.freeze_records
+    pub fn get_recyclable_tos(&self, current_topoheight: TopoHeight) -> Result<u64, &'static str> {
+        let total_whole = self
+            .freeze_records
             .iter()
             .filter(|r| r.can_unlock(current_topoheight))
-            .map(|r| r.amount)
-            .sum()
+            .try_fold(0u64, |acc, r| acc.checked_add(r.amount))
+            .ok_or("Recyclable TOS overflow")?;
+        to_atomic_tos(total_whole)
     }
 
     /// Merge with existing same-duration record or create new record
@@ -723,6 +690,8 @@ impl EnergyResource {
             });
         }
 
+        let tos_whole = to_whole_tos(tos_amount).map_err(|e| e.to_string())?;
+
         // Step 1: Find expired records and calculate recyclable amount
         let mut expired_indices: Vec<usize> = Vec::new();
         let mut total_recyclable: u64 = 0;
@@ -737,8 +706,8 @@ impl EnergyResource {
         }
 
         // Step 2: Calculate recycle and balance amounts
-        let recycle_amount = std::cmp::min(tos_amount, total_recyclable);
-        let balance_amount = tos_amount
+        let recycle_amount = std::cmp::min(tos_whole, total_recyclable);
+        let balance_amount = tos_whole
             .checked_sub(recycle_amount)
             .ok_or_else(|| "Balance amount underflow".to_string())?;
 
@@ -804,12 +773,6 @@ impl EnergyResource {
             }
         }
 
-        // Step 5: Reduce total_energy by recycled energy (will be added back with new record)
-        self.total_energy = self
-            .total_energy
-            .checked_sub(energy_recycled)
-            .ok_or_else(|| "Total energy underflow".to_string())?;
-
         // Reduce frozen_tos by recycled amount (will be added back)
         self.frozen_tos = self
             .frozen_tos
@@ -818,12 +781,14 @@ impl EnergyResource {
 
         // Step 6: Calculate new energy (only from balance portion)
         let new_energy =
-            (balance_amount / crate::config::COIN_VALUE) * duration.reward_multiplier();
+            calculate_energy_checked(balance_amount, duration).map_err(|e| e.to_string())?;
 
         // Step 7: Create new freeze record OR merge with existing same-duration record
-        let unlock_topoheight = topoheight + duration.duration_in_blocks_for_network(network);
+        let unlock_topoheight = topoheight
+            .checked_add(duration.duration_in_blocks_for_network(network))
+            .ok_or_else(|| "Unlock topoheight overflow".to_string())?;
         let expected_recycled_energy = if recycle_amount > 0 {
-            (recycle_amount / crate::config::COIN_VALUE) * duration.reward_multiplier()
+            calculate_energy_checked(recycle_amount, duration).map_err(|e| e.to_string())?
         } else {
             0
         };
@@ -866,10 +831,6 @@ impl EnergyResource {
                     unlock_topoheight,
                     new_energy,
                 )?;
-                self.total_energy = self
-                    .total_energy
-                    .checked_add(new_energy)
-                    .ok_or_else(|| "Total energy overflow".to_string())?;
             }
 
             let recycled_record = FreezeRecord {
@@ -880,10 +841,6 @@ impl EnergyResource {
                 energy_gained: energy_recycled,
             };
             self.freeze_records.push(recycled_record);
-            self.total_energy = self
-                .total_energy
-                .checked_add(energy_recycled)
-                .ok_or_else(|| "Total energy overflow".to_string())?;
         } else if separate_recycled {
             let recycled_record = FreezeRecord {
                 amount: recycle_amount,
@@ -893,27 +850,18 @@ impl EnergyResource {
                 energy_gained: energy_recycled,
             };
             self.freeze_records.push(recycled_record);
-            self.total_energy = self
-                .total_energy
-                .checked_add(energy_recycled)
-                .ok_or_else(|| "Total energy overflow".to_string())?;
         } else {
             let record_energy = energy_recycled
                 .checked_add(new_energy)
                 .ok_or_else(|| "Record energy overflow".to_string())?;
 
             let _merged = self.merge_or_create_freeze_record(
-                tos_amount,
+                tos_whole,
                 duration,
                 topoheight,
                 unlock_topoheight,
                 record_energy,
             )?;
-
-            self.total_energy = self
-                .total_energy
-                .checked_add(record_energy)
-                .ok_or_else(|| "Total energy overflow".to_string())?;
         }
 
         // Step 8: Update totals
@@ -921,29 +869,25 @@ impl EnergyResource {
         // But balance_amount should come from user's balance
         self.frozen_tos = self
             .frozen_tos
-            .checked_add(tos_amount)
+            .checked_add(tos_whole)
             .ok_or_else(|| "Frozen TOS overflow".to_string())?;
-        self.clear_pending_energy_if_ready(topoheight);
-        if new_energy > 0 {
-            self.pending_energy = self
-                .pending_energy
-                .checked_add(new_energy)
-                .ok_or_else(|| "Pending energy overflow".to_string())?;
-            self.pending_energy_topoheight = topoheight;
-        }
+        self.energy = self
+            .energy
+            .checked_add(new_energy)
+            .ok_or_else(|| "Energy overflow".to_string())?;
         self.last_update = topoheight;
 
         Ok(FreezeWithRecyclingResult {
             new_energy,
-            recycled_tos: recycle_amount,
-            balance_tos: balance_amount,
+            recycled_tos: to_atomic_tos(recycle_amount).map_err(|e| e.to_string())?,
+            balance_tos: to_atomic_tos(balance_amount).map_err(|e| e.to_string())?,
             recycled_energy: energy_recycled,
         })
     }
 
     /// Unfreeze TOS from self-freeze records (Phase 1 of two-phase unfreeze)
     /// Creates a PendingUnfreeze with 14-day cooldown
-    /// Energy is removed immediately, TOS returned after cooldown via WithdrawUnfrozen
+    /// Energy balance is unchanged, TOS returned after cooldown via WithdrawUnfrozen
     ///
     /// # Arguments
     /// - `tos_amount`: Amount of TOS to unfreeze (must be whole TOS multiples)
@@ -962,14 +906,14 @@ impl EnergyResource {
         record_index: Option<u32>,
         network: &crate::network::Network,
     ) -> Result<(u64, u64), String> {
-        // Ensure requested amount is a whole number of TOS
-        let whole_tos_amount = (tos_amount / crate::config::COIN_VALUE) * crate::config::COIN_VALUE;
+        let whole_tos_amount = to_whole_tos(tos_amount).map_err(|e| e.to_string())?;
 
         if whole_tos_amount == 0 {
             return Err("Cannot unfreeze 0 TOS".to_string());
         }
 
-        if whole_tos_amount < crate::config::MIN_UNFREEZE_TOS_AMOUNT {
+        let min_whole = crate::config::MIN_UNFREEZE_TOS_AMOUNT / crate::config::COIN_VALUE;
+        if whole_tos_amount < min_whole {
             return Err("Amount below minimum unfreeze amount".to_string());
         }
 
@@ -1075,16 +1019,18 @@ impl EnergyResource {
             record.energy_gained = record.energy_gained.saturating_sub(*energy_removed);
         }
 
-        // Update totals - energy removed immediately
+        // Update totals (energy balance is not reduced on unfreeze)
         self.frozen_tos = self.frozen_tos.saturating_sub(whole_tos_amount);
-        self.total_energy = self.total_energy.saturating_sub(total_energy_removed);
         self.last_update = current_topoheight;
 
         // Create pending unfreeze (Phase 1 complete, Phase 2 after 14 days)
         let pending = PendingUnfreeze::new(whole_tos_amount, current_topoheight, network);
         self.pending_unfreezes.push(pending);
 
-        Ok((total_energy_removed, whole_tos_amount))
+        Ok((
+            total_energy_removed,
+            to_atomic_tos(whole_tos_amount).map_err(|e| e.to_string())?,
+        ))
     }
 
     /// Withdraw unfrozen TOS after cooldown period (Phase 2 of two-phase unfreeze)
@@ -1096,10 +1042,10 @@ impl EnergyResource {
         &mut self,
         current_topoheight: TopoHeight,
     ) -> Result<u64, &'static str> {
-        let mut total_withdrawn = 0u64;
+        let mut total_withdrawn_whole = 0u64;
         for pending in &self.pending_unfreezes {
             if pending.is_expired(current_topoheight) {
-                total_withdrawn = total_withdrawn
+                total_withdrawn_whole = total_withdrawn_whole
                     .checked_add(pending.amount)
                     .ok_or("Overflow in withdraw calculation")?;
             }
@@ -1109,15 +1055,17 @@ impl EnergyResource {
             .retain(|pending| !pending.is_expired(current_topoheight));
         self.last_update = current_topoheight;
 
-        Ok(total_withdrawn)
+        to_atomic_tos(total_withdrawn_whole)
     }
 
     /// Get total pending unfreeze amount (not yet withdrawn)
     pub fn total_pending_unfreeze(&self) -> Result<u64, &'static str> {
-        self.pending_unfreezes
+        let total_whole = self
+            .pending_unfreezes
             .iter()
             .try_fold(0u64, |acc, pending| acc.checked_add(pending.amount))
-            .ok_or("Overflow in pending unfreeze total")
+            .ok_or("Overflow in pending unfreeze total")?;
+        to_atomic_tos(total_whole)
     }
 
     /// Get withdrawable unfreeze amount (expired pending unfreezes)
@@ -1125,11 +1073,13 @@ impl EnergyResource {
         &self,
         current_topoheight: TopoHeight,
     ) -> Result<u64, &'static str> {
-        self.pending_unfreezes
+        let total_whole = self
+            .pending_unfreezes
             .iter()
             .filter(|p| p.is_expired(current_topoheight))
             .try_fold(0u64, |acc, pending| acc.checked_add(pending.amount))
-            .ok_or("Overflow in withdrawable unfreeze total")
+            .ok_or("Overflow in withdrawable unfreeze total")?;
+        to_atomic_tos(total_whole)
     }
 
     /// Add delegated energy (called on delegatee's account when receiving delegation)
@@ -1138,33 +1088,10 @@ impl EnergyResource {
         energy_amount: u64,
         topoheight: TopoHeight,
     ) -> Result<(), &'static str> {
-        self.delegated_energy = self
-            .delegated_energy
+        self.energy = self
+            .energy
             .checked_add(energy_amount)
-            .ok_or("Delegated energy overflow")?;
-        self.pending_delegated_energy = self
-            .pending_delegated_energy
-            .checked_add(energy_amount)
-            .ok_or("Delegated pending energy overflow")?;
-        self.pending_delegated_energy_topoheight = topoheight;
-        self.last_update = topoheight;
-        Ok(())
-    }
-
-    /// Remove delegated energy (called on delegatee's account when delegator unfreezes)
-    pub fn remove_delegated_energy(
-        &mut self,
-        energy_amount: u64,
-        topoheight: TopoHeight,
-    ) -> Result<(), &'static str> {
-        if energy_amount > self.delegated_energy {
-            return Err("Cannot remove more delegated energy than available");
-        }
-        self.delegated_energy = self.delegated_energy.saturating_sub(energy_amount);
-        if self.pending_delegated_energy_topoheight == topoheight {
-            self.pending_delegated_energy =
-                self.pending_delegated_energy.saturating_sub(energy_amount);
-        }
+            .ok_or("Energy overflow")?;
         self.last_update = topoheight;
         Ok(())
     }
@@ -1213,13 +1140,14 @@ impl EnergyResource {
         current_topoheight: TopoHeight,
         network: &crate::network::Network,
     ) -> Result<(Vec<(PublicKey, u64)>, u64), String> {
-        let whole_tos_amount = (tos_amount / crate::config::COIN_VALUE) * crate::config::COIN_VALUE;
+        let whole_tos_amount = to_whole_tos(tos_amount).map_err(|e| e.to_string())?;
 
         if whole_tos_amount == 0 {
             return Err("Cannot unfreeze 0 TOS".to_string());
         }
 
-        if whole_tos_amount < crate::config::MIN_UNFREEZE_TOS_AMOUNT {
+        let min_whole = crate::config::MIN_UNFREEZE_TOS_AMOUNT / crate::config::COIN_VALUE;
+        if whole_tos_amount < min_whole {
             return Err("Amount below minimum unfreeze amount".to_string());
         }
 
@@ -1263,8 +1191,9 @@ impl EnergyResource {
                 }
 
                 let unfreeze_from_entry = std::cmp::min(remaining_to_unfreeze, entry.amount);
-                let energy_to_remove = (unfreeze_from_entry / crate::config::COIN_VALUE)
-                    * record.duration.reward_multiplier();
+                let energy_to_remove =
+                    calculate_energy_checked(unfreeze_from_entry, record.duration)
+                        .map_err(|e| e.to_string())?;
 
                 remaining_to_unfreeze = remaining_to_unfreeze.saturating_sub(unfreeze_from_entry);
                 record_energy_changes.push((entry.delegatee.clone(), energy_to_remove));
@@ -1296,8 +1225,8 @@ impl EnergyResource {
             // Apply modifications
             for (entry_idx, unfreeze_amount) in modifications.iter().rev() {
                 let entry = &mut record.entries[*entry_idx];
-                let energy_removed = (*unfreeze_amount / crate::config::COIN_VALUE)
-                    * record.duration.reward_multiplier();
+                let energy_removed = calculate_energy_checked(*unfreeze_amount, record.duration)
+                    .map_err(|e| e.to_string())?;
                 entry.amount = entry.amount.saturating_sub(*unfreeze_amount);
                 entry.energy = entry.energy.saturating_sub(energy_removed);
             }
@@ -1333,7 +1262,10 @@ impl EnergyResource {
         let pending = PendingUnfreeze::new(whole_tos_amount, current_topoheight, network);
         self.pending_unfreezes.push(pending);
 
-        Ok((energy_per_delegatee, whole_tos_amount))
+        Ok((
+            energy_per_delegatee,
+            to_atomic_tos(whole_tos_amount).map_err(|e| e.to_string())?,
+        ))
     }
 
     /// Unfreeze a specific delegatee's entry from a batch delegation record
@@ -1371,13 +1303,14 @@ impl EnergyResource {
         network: &crate::network::Network,
     ) -> Result<(PublicKey, u64, u64), String> {
         // Validate amount is whole TOS
-        let whole_tos_amount = (tos_amount / crate::config::COIN_VALUE) * crate::config::COIN_VALUE;
+        let whole_tos_amount = to_whole_tos(tos_amount).map_err(|e| e.to_string())?;
 
         if whole_tos_amount == 0 {
             return Err("Cannot unfreeze 0 TOS".to_string());
         }
 
-        if whole_tos_amount < crate::config::MIN_UNFREEZE_TOS_AMOUNT {
+        let min_whole = crate::config::MIN_UNFREEZE_TOS_AMOUNT / crate::config::COIN_VALUE;
+        if whole_tos_amount < min_whole {
             return Err("Amount below minimum unfreeze amount".to_string());
         }
 
@@ -1429,7 +1362,8 @@ impl EnergyResource {
         let energy_to_remove = if whole_tos_amount == entry.amount {
             entry.energy
         } else {
-            (whole_tos_amount / crate::config::COIN_VALUE) * record.duration.reward_multiplier()
+            calculate_energy_checked(whole_tos_amount, record.duration)
+                .map_err(|e| e.to_string())?
         };
 
         if energy_to_remove > entry.energy {
@@ -1470,7 +1404,11 @@ impl EnergyResource {
         let pending = PendingUnfreeze::new(whole_tos_amount, current_topoheight, network);
         self.pending_unfreezes.push(pending);
 
-        Ok((delegatee, energy_to_remove, whole_tos_amount))
+        Ok((
+            delegatee,
+            energy_to_remove,
+            to_atomic_tos(whole_tos_amount).map_err(|e| e.to_string())?,
+        ))
     }
 
     /// Get all freeze records that can be unlocked at the current topoheight
@@ -1482,11 +1420,13 @@ impl EnergyResource {
     }
 
     /// Get total unlockable TOS amount at the current topoheight
-    pub fn get_unlockable_tos(&self, current_topoheight: TopoHeight) -> u64 {
-        self.get_unlockable_records(current_topoheight)
+    pub fn get_unlockable_tos(&self, current_topoheight: TopoHeight) -> Result<u64, &'static str> {
+        let total_whole = self
+            .get_unlockable_records(current_topoheight)
             .iter()
-            .map(|record| record.amount)
-            .sum()
+            .try_fold(0u64, |acc, record| acc.checked_add(record.amount))
+            .ok_or("Unlockable TOS overflow")?;
+        to_atomic_tos(total_whole)
     }
 
     /// Get freeze records grouped by duration
@@ -1501,22 +1441,6 @@ impl EnergyResource {
         }
 
         grouped
-    }
-
-    /// Reset used energy (called periodically by the network)
-    ///
-    /// # When to call
-    /// This should be called periodically by the network (e.g., daily) to restore
-    /// energy usage. In TRON-like systems, this typically happens every 24 hours.
-    ///
-    /// # Edge Cases
-    /// - Resets used_energy to 0, making all total_energy available again
-    /// - Does not affect frozen TOS or total energy amounts
-    /// - Updates last_update timestamp to current topoheight
-    /// - No validation on timing - caller must implement reset schedule
-    pub fn reset_used_energy(&mut self, topoheight: TopoHeight) {
-        self.used_energy = 0;
-        self.last_update = topoheight;
     }
 }
 
@@ -1558,23 +1482,24 @@ impl EnergyLease {
 
     /// Check if lease is still valid
     pub fn is_valid(&self, current_topoheight: TopoHeight) -> bool {
-        current_topoheight < self.start_topoheight + self.duration
+        self.start_topoheight
+            .checked_add(self.duration)
+            .is_some_and(|end| current_topoheight < end)
     }
 
     /// Calculate total cost
-    pub fn total_cost(&self) -> u64 {
-        self.energy_amount * self.price_per_energy
+    pub fn total_cost(&self) -> Result<u64, &'static str> {
+        self.energy_amount
+            .checked_mul(self.price_per_energy)
+            .ok_or("Energy lease cost overflow")
     }
 }
 
 impl Serializer for EnergyResource {
     fn write(&self, writer: &mut Writer) {
-        writer.write_u64(&self.total_energy);
-        writer.write_u64(&self.delegated_energy);
-        writer.write_u64(&self.used_energy);
+        writer.write_u64(&self.energy);
         writer.write_u64(&self.frozen_tos);
         writer.write_u64(&self.last_update);
-        writer.write_u64(&self.last_reset_topoheight);
 
         // Write self-freeze records
         writer.write_u64(&(self.freeze_records.len() as u64));
@@ -1593,66 +1518,56 @@ impl Serializer for EnergyResource {
         for pending in &self.pending_unfreezes {
             pending.write(writer);
         }
-
-        // Write pending energy markers (optional in older data)
-        writer.write_u64(&self.pending_energy);
-        writer.write_u64(&self.pending_energy_topoheight);
-        writer.write_u64(&self.pending_delegated_energy);
-        writer.write_u64(&self.pending_delegated_energy_topoheight);
     }
 
     fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
-        let total_energy = reader.read_u64()?;
-        let delegated_energy = reader.read_u64()?;
-        let used_energy = reader.read_u64()?;
+        let energy = reader.read_u64()?;
         let frozen_tos = reader.read_u64()?;
         let last_update = reader.read_u64()?;
-        let last_reset_topoheight = reader.read_u64()?;
 
         // Read self-freeze records
-        let records_count = reader.read_u64()? as usize;
+        let records_count =
+            usize::try_from(reader.read_u64()?).map_err(|_| ReaderError::InvalidValue)?;
+        if records_count > crate::config::MAX_FREEZE_RECORDS {
+            return Err(ReaderError::InvalidValue);
+        }
         let mut freeze_records = Vec::with_capacity(records_count);
         for _ in 0..records_count {
             freeze_records.push(FreezeRecord::read(reader)?);
         }
 
         // Read delegated freeze records
-        let delegated_count = reader.read_u64()? as usize;
+        let delegated_count =
+            usize::try_from(reader.read_u64()?).map_err(|_| ReaderError::InvalidValue)?;
+        if delegated_count > crate::config::MAX_FREEZE_RECORDS {
+            return Err(ReaderError::InvalidValue);
+        }
+        let total_records = records_count
+            .checked_add(delegated_count)
+            .ok_or(ReaderError::InvalidValue)?;
+        if total_records > crate::config::MAX_FREEZE_RECORDS {
+            return Err(ReaderError::InvalidValue);
+        }
         let mut delegated_records = Vec::with_capacity(delegated_count);
         for _ in 0..delegated_count {
             delegated_records.push(DelegatedFreezeRecord::read(reader)?);
         }
 
         // Read pending unfreezes
-        let pending_count = reader.read_u64()? as usize;
+        let pending_count =
+            usize::try_from(reader.read_u64()?).map_err(|_| ReaderError::InvalidValue)?;
+        if pending_count > crate::config::MAX_PENDING_UNFREEZES {
+            return Err(ReaderError::InvalidValue);
+        }
         let mut pending_unfreezes = Vec::with_capacity(pending_count);
         for _ in 0..pending_count {
             pending_unfreezes.push(PendingUnfreeze::read(reader)?);
         }
 
-        let (pending_energy, pending_energy_topoheight) = if reader.size() >= 16 {
-            (reader.read_u64()?, reader.read_u64()?)
-        } else {
-            (0, 0)
-        };
-        let (pending_delegated_energy, pending_delegated_energy_topoheight) = if reader.size() >= 16
-        {
-            (reader.read_u64()?, reader.read_u64()?)
-        } else {
-            (0, 0)
-        };
-
         Ok(Self {
-            total_energy,
-            delegated_energy,
-            used_energy,
-            pending_energy,
-            pending_energy_topoheight,
-            pending_delegated_energy,
-            pending_delegated_energy_topoheight,
+            energy,
             frozen_tos,
             last_update,
-            last_reset_topoheight,
             freeze_records,
             delegated_records,
             pending_unfreezes,
@@ -1660,12 +1575,7 @@ impl Serializer for EnergyResource {
     }
 
     fn size(&self) -> usize {
-        let base_size = self.total_energy.size()
-            + self.delegated_energy.size()
-            + self.used_energy.size()
-            + self.frozen_tos.size()
-            + self.last_update.size()
-            + self.last_reset_topoheight.size();
+        let base_size = self.energy.size() + self.frozen_tos.size() + self.last_update.size();
         let freeze_records_size = 8 + self.freeze_records.iter().map(|r| r.size()).sum::<usize>();
         let delegated_records_size = 8 + self
             .delegated_records
@@ -1677,14 +1587,7 @@ impl Serializer for EnergyResource {
             .iter()
             .map(|p| p.size())
             .sum::<usize>();
-        base_size
-            + freeze_records_size
-            + delegated_records_size
-            + pending_unfreezes_size
-            + self.pending_energy.size()
-            + self.pending_energy_topoheight.size()
-            + self.pending_delegated_energy.size()
-            + self.pending_delegated_energy_topoheight.size()
+        base_size + freeze_records_size + delegated_records_size + pending_unfreezes_size
     }
 }
 
@@ -1759,7 +1662,7 @@ mod tests {
     fn test_freeze_record_creation() {
         let duration = FreezeDuration::new(7).unwrap();
         let record = FreezeRecord::new(100000000, duration, 100); // 1 TOS
-        assert_eq!(record.amount, 100000000);
+        assert_eq!(record.amount, 1);
         assert_eq!(record.duration, duration);
         assert_eq!(record.freeze_topoheight, 100);
         assert_eq!(record.unlock_topoheight, 100 + 7 * 24 * 60 * 60);
@@ -1769,7 +1672,7 @@ mod tests {
     #[test]
     fn test_freeze_record_unlock_check() {
         let duration = FreezeDuration::new(3).unwrap();
-        let record = FreezeRecord::new(1000, duration, 100);
+        let record = FreezeRecord::new(crate::config::COIN_VALUE, duration, 100);
         let unlock_time = 100 + 3 * 24 * 60 * 60;
 
         assert!(!record.can_unlock(unlock_time - 1));
@@ -1788,8 +1691,8 @@ mod tests {
             .freeze_tos_for_energy(100000000, duration, topoheight)
             .unwrap();
         assert_eq!(energy_gained, 14); // 1 TOS * 14 = 14 transfers
-        assert_eq!(resource.frozen_tos, 100000000);
-        assert_eq!(resource.total_energy, 14);
+        assert_eq!(resource.frozen_tos, 1);
+        assert_eq!(resource.energy, 14);
         assert_eq!(resource.freeze_records.len(), 1);
 
         // Freeze 1 TOS for 14 days
@@ -1798,8 +1701,8 @@ mod tests {
             .freeze_tos_for_energy(100000000, duration, topoheight)
             .unwrap();
         assert_eq!(energy_gained2, 28); // 1 TOS * 28 = 28 transfers
-        assert_eq!(resource.frozen_tos, 200000000);
-        assert_eq!(resource.total_energy, 42);
+        assert_eq!(resource.frozen_tos, 2);
+        assert_eq!(resource.energy, 42);
         assert_eq!(resource.freeze_records.len(), 2);
     }
 
@@ -1826,8 +1729,8 @@ mod tests {
             .unwrap();
         assert_eq!(energy_removed, 14); // 1 TOS * 14 = 14 transfers
         assert_eq!(pending_amount, 100000000); // 1 TOS pending
-        assert_eq!(resource.frozen_tos, 100000000); // 1 TOS still frozen
-        assert_eq!(resource.total_energy, 14); // Energy reduced
+        assert_eq!(resource.frozen_tos, 1); // 1 TOS still frozen
+        assert_eq!(resource.energy, 28); // Energy unchanged by unfreeze
         assert_eq!(resource.pending_unfreezes.len(), 1); // Pending unfreeze created
     }
 
@@ -1844,7 +1747,7 @@ mod tests {
         resource
             .freeze_tos_for_energy(100000000, duration, freeze_topoheight)
             .unwrap();
-        assert_eq!(resource.total_energy, 14);
+        assert_eq!(resource.energy, 14);
 
         // Phase 1: Unfreeze (creates pending)
         let (energy_removed, pending) = resource
@@ -1852,7 +1755,7 @@ mod tests {
             .unwrap();
         assert_eq!(energy_removed, 14);
         assert_eq!(pending, 100000000);
-        assert_eq!(resource.total_energy, 0);
+        assert_eq!(resource.energy, 14);
         assert_eq!(resource.pending_unfreezes.len(), 1);
 
         // Try to withdraw before cooldown (should return 0)
@@ -1951,21 +1854,8 @@ mod tests {
         let mut reader = crate::serializer::Reader::new(&bytes);
         let deserialized = EnergyResource::read(&mut reader).unwrap();
 
-        assert_eq!(resource.total_energy, deserialized.total_energy);
+        assert_eq!(resource.energy, deserialized.energy);
         assert_eq!(resource.frozen_tos, deserialized.frozen_tos);
-        assert_eq!(resource.pending_energy, deserialized.pending_energy);
-        assert_eq!(
-            resource.pending_energy_topoheight,
-            deserialized.pending_energy_topoheight
-        );
-        assert_eq!(
-            resource.pending_delegated_energy,
-            deserialized.pending_delegated_energy
-        );
-        assert_eq!(
-            resource.pending_delegated_energy_topoheight,
-            deserialized.pending_delegated_energy_topoheight
-        );
         assert_eq!(
             resource.freeze_records.len(),
             deserialized.freeze_records.len()
@@ -2025,26 +1915,26 @@ mod tests {
         // Create delegation entries
         let entry1 = DelegateRecordEntry {
             delegatee: delegatee1.clone(),
-            amount: 100000000, // 1 TOS
-            energy: 14,        // 1 TOS * 2 * 7 days = 14 energy
+            amount: 1,  // 1 TOS
+            energy: 14, // 1 TOS * 2 * 7 days = 14 energy
         };
         let entry2 = DelegateRecordEntry {
             delegatee: delegatee2.clone(),
-            amount: 200000000, // 2 TOS
-            energy: 28,        // 2 TOS * 2 * 7 days = 28 energy
+            amount: 2,  // 2 TOS
+            energy: 28, // 2 TOS * 2 * 7 days = 28 energy
         };
 
         // Create delegated freeze record
         let result = delegator_resource.create_delegated_freeze(
             vec![entry1, entry2],
             duration,
-            300000000, // 3 TOS total
+            3, // 3 TOS total
             freeze_topoheight,
             &network,
         );
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), 42); // Total energy = 14 + 28
-        assert_eq!(delegator_resource.frozen_tos, 300000000);
+        assert_eq!(delegator_resource.frozen_tos, 3);
         assert_eq!(delegator_resource.delegated_records.len(), 1);
 
         // Calculate unlock time
@@ -2066,7 +1956,7 @@ mod tests {
 
         // Verify results
         assert_eq!(pending_amount, 100000000); // 1 TOS pending
-        assert_eq!(delegator_resource.frozen_tos, 200000000); // 2 TOS still frozen
+        assert_eq!(delegator_resource.frozen_tos, 2); // 2 TOS still frozen
         assert_eq!(delegator_resource.pending_unfreezes.len(), 1);
 
         // Verify energy removed from delegatees
@@ -2104,18 +1994,12 @@ mod tests {
         // Create delegation entry for 3 TOS
         let entry = DelegateRecordEntry {
             delegatee: delegatee.clone(),
-            amount: 300000000, // 3 TOS
-            energy: 42,        // 3 TOS * 2 * 7 days = 42 energy
+            amount: 3,  // 3 TOS
+            energy: 42, // 3 TOS * 2 * 7 days = 42 energy
         };
 
         delegator_resource
-            .create_delegated_freeze(
-                vec![entry],
-                duration,
-                300000000,
-                freeze_topoheight,
-                &network,
-            )
+            .create_delegated_freeze(vec![entry], duration, 3, freeze_topoheight, &network)
             .unwrap();
 
         let unlock_topoheight =
@@ -2127,15 +2011,15 @@ mod tests {
             .unwrap();
 
         assert_eq!(pending_amount, 100000000);
-        assert_eq!(delegator_resource.frozen_tos, 200000000); // 2 TOS remaining
+        assert_eq!(delegator_resource.frozen_tos, 2); // 2 TOS remaining
         assert_eq!(energy_per_delegatee[0].1, 14); // 1 TOS * 14 energy
 
         // Verify the delegated record is updated, not removed
         assert_eq!(delegator_resource.delegated_records.len(), 1);
         let record = &delegator_resource.delegated_records[0];
-        assert_eq!(record.total_amount, 200000000); // 2 TOS remaining
+        assert_eq!(record.total_amount, 2); // 2 TOS remaining
         assert_eq!(record.entries.len(), 1);
-        assert_eq!(record.entries[0].amount, 200000000);
+        assert_eq!(record.entries[0].amount, 2);
         assert_eq!(record.entries[0].energy, 28); // 2 TOS * 14 = 28 energy
     }
 
@@ -2149,7 +2033,7 @@ mod tests {
         let duration = FreezeDuration::new(3).unwrap(); // 3-day lock
 
         // Initially no recyclable TOS
-        assert_eq!(resource.get_recyclable_tos(freeze_topoheight), 0);
+        assert_eq!(resource.get_recyclable_tos(freeze_topoheight).unwrap(), 0);
 
         // Freeze 5 TOS
         resource
@@ -2159,11 +2043,14 @@ mod tests {
         // Before expiration: no recyclable TOS
         let before_unlock =
             freeze_topoheight + duration.duration_in_blocks_for_network(&network) - 1;
-        assert_eq!(resource.get_recyclable_tos(before_unlock), 0);
+        assert_eq!(resource.get_recyclable_tos(before_unlock).unwrap(), 0);
 
         // After expiration: 5 TOS recyclable
         let after_unlock = freeze_topoheight + duration.duration_in_blocks_for_network(&network);
-        assert_eq!(resource.get_recyclable_tos(after_unlock), 500000000);
+        assert_eq!(
+            resource.get_recyclable_tos(after_unlock).unwrap(),
+            500000000
+        );
     }
 
     #[test]
@@ -2177,7 +2064,7 @@ mod tests {
         resource
             .freeze_tos_for_energy_with_network(300000000, duration, freeze_topoheight, &network)
             .unwrap();
-        let initial_energy = resource.total_energy;
+        let initial_energy = resource.energy;
         assert_eq!(initial_energy, 42); // 3 TOS * 2 * 7 days = 42
 
         // After lock expires
@@ -2197,8 +2084,8 @@ mod tests {
         assert_eq!(result.recycled_energy, 42); // Preserved from old record
 
         // Total energy preserved (old energy kept)
-        assert_eq!(resource.total_energy, 42);
-        assert_eq!(resource.frozen_tos, 300000000);
+        assert_eq!(resource.energy, 42);
+        assert_eq!(resource.frozen_tos, 3);
         assert_eq!(resource.freeze_records.len(), 1); // Old record removed, new one added
     }
 
@@ -2213,7 +2100,7 @@ mod tests {
         resource
             .freeze_tos_for_energy_with_network(300000000, duration, freeze_topoheight, &network)
             .unwrap();
-        let initial_energy = resource.total_energy;
+        let initial_energy = resource.energy;
         assert_eq!(initial_energy, 42);
 
         // After lock expires
@@ -2234,8 +2121,8 @@ mod tests {
         assert_eq!(result.new_energy, 56);
 
         // Total energy = recycled (42) + new (56) = 98
-        assert_eq!(resource.total_energy, 98);
-        assert_eq!(resource.frozen_tos, 500000000);
+        assert_eq!(resource.energy, 98);
+        assert_eq!(resource.frozen_tos, 5);
     }
 
     #[test]
@@ -2249,7 +2136,7 @@ mod tests {
         resource
             .freeze_tos_for_energy_with_network(500000000, duration, freeze_topoheight, &network)
             .unwrap();
-        let initial_energy = resource.total_energy;
+        let initial_energy = resource.energy;
         assert_eq!(initial_energy, 70); // 5 TOS * 2 * 7 days = 70
 
         // After lock expires
@@ -2274,8 +2161,8 @@ mod tests {
         // We recycle 2 TOS worth 28 energy, leaving 3 TOS with 42 energy in old record
         // New record: 2 TOS with 28 energy
         // Total = 42 + 28 = 70
-        assert_eq!(resource.total_energy, 70);
-        assert_eq!(resource.frozen_tos, 500000000); // Still 5 TOS total (3 old + 2 new)
+        assert_eq!(resource.energy, 70);
+        assert_eq!(resource.frozen_tos, 5); // Still 5 TOS total (3 old + 2 new)
         assert_eq!(resource.freeze_records.len(), 2); // One remaining + one new
     }
 
@@ -2295,7 +2182,7 @@ mod tests {
                 &network,
             )
             .unwrap();
-        let long_energy = resource.total_energy;
+        let long_energy = resource.energy;
         assert_eq!(long_energy, 180); // 3 TOS * 2 * 30 days = 180
 
         // After lock expires
@@ -2316,7 +2203,7 @@ mod tests {
         assert_eq!(result.new_energy, 0);
 
         // Total energy = preserved energy (180), not recalculated (18)
-        assert_eq!(resource.total_energy, 180);
+        assert_eq!(resource.energy, 180);
     }
 
     #[test]
@@ -2347,13 +2234,13 @@ mod tests {
         // Now have 1 record (same-duration records are merged)
         assert_eq!(resource.freeze_records.len(), 1);
         // Total: 3 + 2 = 5 TOS frozen
-        assert_eq!(resource.frozen_tos, 500000000);
+        assert_eq!(resource.frozen_tos, 5);
         // Total energy: 42 + 28 = 70
-        assert_eq!(resource.total_energy, 70);
+        assert_eq!(resource.energy, 70);
 
         // Verify merge used the later unlock_topoheight
         let record = &resource.freeze_records[0];
-        assert_eq!(record.amount, 500000000); // 3 + 2 TOS merged
+        assert_eq!(record.amount, 5); // 3 + 2 TOS merged
         assert_eq!(record.energy_gained, 70); // 42 + 28 merged
                                               // unlock_topoheight should be the later one (from second freeze)
         let expected_unlock = before_unlock + duration.duration_in_blocks_for_network(&network);
@@ -2372,7 +2259,7 @@ mod tests {
             .freeze_tos_for_energy_with_network(500000000, duration, first_topoheight, &network)
             .unwrap();
         assert_eq!(resource.freeze_records.len(), 1);
-        assert_eq!(resource.total_energy, 140); // 5 * 2 * 14 = 140
+        assert_eq!(resource.energy, 140); // 5 * 2 * 14 = 140
 
         let first_unlock = first_topoheight + duration.duration_in_blocks_for_network(&network);
 
@@ -2389,14 +2276,14 @@ mod tests {
 
         // Records merged: still only 1 record
         assert_eq!(resource.freeze_records.len(), 1);
-        assert_eq!(resource.frozen_tos, 800000000); // 5 + 3 = 8 TOS
+        assert_eq!(resource.frozen_tos, 8); // 5 + 3 = 8 TOS
 
         // Energy merged
-        assert_eq!(resource.total_energy, 224); // 140 + 84 = 224
+        assert_eq!(resource.energy, 224); // 140 + 84 = 224
         assert_eq!(resource.freeze_records[0].energy_gained, 224);
 
         // Amount merged
-        assert_eq!(resource.freeze_records[0].amount, 800000000);
+        assert_eq!(resource.freeze_records[0].amount, 8);
 
         // Unlock time uses LATER value (from second freeze)
         let second_unlock = second_topoheight + duration.duration_in_blocks_for_network(&network);
@@ -2415,7 +2302,7 @@ mod tests {
             .freeze_tos_for_energy_with_network(500000000, duration_7, 1000, &network)
             .unwrap();
         assert_eq!(resource.freeze_records.len(), 1);
-        assert_eq!(resource.total_energy, 70); // 5 * 2 * 7 = 70
+        assert_eq!(resource.energy, 70); // 5 * 2 * 7 = 70
 
         // Second freeze: 3 TOS with 14-day duration (different)
         let duration_14 = FreezeDuration::new(14).unwrap();
@@ -2430,8 +2317,8 @@ mod tests {
 
         // NOT merged: 2 separate records (different durations)
         assert_eq!(resource.freeze_records.len(), 2);
-        assert_eq!(resource.frozen_tos, 800000000);
-        assert_eq!(resource.total_energy, 154); // 70 + 84 = 154
+        assert_eq!(resource.frozen_tos, 8);
+        assert_eq!(resource.energy, 154); // 70 + 84 = 154
     }
 
     #[test]
@@ -2478,14 +2365,14 @@ mod tests {
         // - They should merge: 2 + 3 = 5 TOS
 
         // Total frozen should be 5 TOS (2 remaining + 3 new)
-        assert_eq!(resource.frozen_tos, 500000000);
+        assert_eq!(resource.frozen_tos, 5);
         // One merged record
         assert_eq!(resource.freeze_records.len(), 1);
 
         // Energy: recycled (42) + new (0 since all from recycled) = 42
         // Plus remaining energy from old record: 70 - 42 = 28
         // Total: 42 + 28 = 70
-        assert_eq!(resource.total_energy, 70);
+        assert_eq!(resource.energy, 70);
     }
 
     #[test]
@@ -2505,7 +2392,7 @@ mod tests {
             .unwrap(); // 3 TOS, 84 energy
 
         assert_eq!(resource.freeze_records.len(), 2);
-        assert_eq!(resource.total_energy, 112); // 28 + 84
+        assert_eq!(resource.energy, 112); // 28 + 84
 
         // After 14-day unlock (both records are unlocked)
         let unlock_topoheight = freeze_topoheight + duration_14.duration_in_blocks();
@@ -2519,11 +2406,11 @@ mod tests {
         assert_eq!(energy_removed, 28);
         assert_eq!(pending, 100000000);
         assert_eq!(resource.freeze_records.len(), 2); // Both records still exist
-        assert_eq!(resource.frozen_tos, 400000000); // 5 - 1 = 4 TOS
+        assert_eq!(resource.frozen_tos, 4); // 5 - 1 = 4 TOS
 
         // Check that the correct record was modified
-        assert_eq!(resource.freeze_records[0].amount, 200000000); // Unchanged
-        assert_eq!(resource.freeze_records[1].amount, 200000000); // 3 - 1 = 2 TOS
+        assert_eq!(resource.freeze_records[0].amount, 2); // Unchanged
+        assert_eq!(resource.freeze_records[1].amount, 2); // 3 - 1 = 2 TOS
     }
 
     #[test]
@@ -2581,7 +2468,7 @@ mod tests {
             .unwrap(); // 2 TOS, 28 energy
 
         assert_eq!(resource.freeze_records.len(), 2);
-        assert_eq!(resource.total_energy, 34); // 6 + 28
+        assert_eq!(resource.energy, 34); // 6 + 28
 
         // Unlock time after 7 days (both unlocked)
         let unlock_both = freeze_topoheight + duration_7.duration_in_blocks();
@@ -2615,7 +2502,7 @@ mod tests {
             .unwrap(); // Index 1: 1 TOS, 28 energy
 
         assert_eq!(resource.freeze_records.len(), 2);
-        assert_eq!(resource.total_energy, 42);
+        assert_eq!(resource.energy, 42);
 
         // After both unlock
         let unlock_both = freeze_topoheight + duration_14.duration_in_blocks();
@@ -2863,22 +2750,22 @@ mod tests {
 
         let entry_b = DelegateRecordEntry {
             delegatee: delegatee_b.clone(),
-            amount: 50 * crate::config::COIN_VALUE,
+            amount: 50,
             energy: 50 * 60, // 50 TOS * 2 * 30 days = 3000 energy
         };
         let entry_c = DelegateRecordEntry {
             delegatee: delegatee_c.clone(),
-            amount: 30 * crate::config::COIN_VALUE,
+            amount: 30,
             energy: 30 * 60, // 30 TOS * 2 * 30 days = 1800 energy
         };
         let entry_d = DelegateRecordEntry {
             delegatee: delegatee_d.clone(),
-            amount: 20 * crate::config::COIN_VALUE,
+            amount: 20,
             energy: 20 * 60, // 20 TOS * 2 * 30 days = 1200 energy
         };
 
         // Create batch delegation with all 3 entries
-        let total_amount = 100 * crate::config::COIN_VALUE;
+        let total_amount = 100;
         delegator_resource
             .create_delegated_freeze(
                 vec![entry_b, entry_c, entry_d],
@@ -2912,19 +2799,13 @@ mod tests {
         assert_eq!(affected_delegatee, delegatee_b);
         assert_eq!(energy_removed, 50 * 60); // 3000 energy removed
         assert_eq!(pending_amount, 50 * crate::config::COIN_VALUE);
-        assert_eq!(
-            delegator_resource.frozen_tos,
-            50 * crate::config::COIN_VALUE
-        ); // 50 TOS remaining
+        assert_eq!(delegator_resource.frozen_tos, 50); // 50 TOS remaining
         assert_eq!(delegator_resource.pending_unfreezes.len(), 1);
 
         // Verify record now has 2 entries (C and D)
         assert_eq!(delegator_resource.delegated_records.len(), 1);
         assert_eq!(delegator_resource.delegated_records[0].entries.len(), 2);
-        assert_eq!(
-            delegator_resource.delegated_records[0].total_amount,
-            50 * crate::config::COIN_VALUE
-        );
+        assert_eq!(delegator_resource.delegated_records[0].total_amount, 50);
 
         // Verify B's entry is removed
         assert!(delegator_resource.delegated_records[0]
@@ -2955,16 +2836,16 @@ mod tests {
 
         let entry_b = DelegateRecordEntry {
             delegatee: delegatee_b.clone(),
-            amount: 50 * crate::config::COIN_VALUE,
+            amount: 50,
             energy: 50 * 60, // 3000 energy
         };
         let entry_c = DelegateRecordEntry {
             delegatee: delegatee_c.clone(),
-            amount: 50 * crate::config::COIN_VALUE,
+            amount: 50,
             energy: 50 * 60, // 3000 energy
         };
 
-        let total_amount = 100 * crate::config::COIN_VALUE;
+        let total_amount = 100;
         delegator_resource
             .create_delegated_freeze(
                 vec![entry_b, entry_c],
@@ -2994,10 +2875,7 @@ mod tests {
         // Energy removed proportionally: 3000 * 30/50 = 1800
         assert_eq!(energy_removed, 30 * 60);
         assert_eq!(pending_amount, 30 * crate::config::COIN_VALUE);
-        assert_eq!(
-            delegator_resource.frozen_tos,
-            70 * crate::config::COIN_VALUE
-        ); // 70 TOS remaining
+        assert_eq!(delegator_resource.frozen_tos, 70); // 70 TOS remaining
 
         // Verify record still has 2 entries
         assert_eq!(delegator_resource.delegated_records[0].entries.len(), 2);
@@ -3006,14 +2884,14 @@ mod tests {
         let b_entry = delegator_resource.delegated_records[0]
             .find_entry(&delegatee_b)
             .unwrap();
-        assert_eq!(b_entry.amount, 20 * crate::config::COIN_VALUE);
+        assert_eq!(b_entry.amount, 20);
         assert_eq!(b_entry.energy, 20 * 60); // 1200 energy remaining
 
         // Verify C's entry is unchanged
         let c_entry = delegator_resource.delegated_records[0]
             .find_entry(&delegatee_c)
             .unwrap();
-        assert_eq!(c_entry.amount, 50 * crate::config::COIN_VALUE);
+        assert_eq!(c_entry.amount, 50);
         assert_eq!(c_entry.energy, 50 * 60);
     }
 
@@ -3031,18 +2909,12 @@ mod tests {
 
         let entry = DelegateRecordEntry {
             delegatee: delegatee.clone(),
-            amount: 10 * crate::config::COIN_VALUE,
+            amount: 10,
             energy: 10 * 14, // 140 energy
         };
 
         delegator_resource
-            .create_delegated_freeze(
-                vec![entry],
-                duration,
-                10 * crate::config::COIN_VALUE,
-                freeze_topoheight,
-                &network,
-            )
+            .create_delegated_freeze(vec![entry], duration, 10, freeze_topoheight, &network)
             .unwrap();
 
         let unlock_topoheight =
@@ -3082,24 +2954,18 @@ mod tests {
         let entries = vec![
             DelegateRecordEntry {
                 delegatee: delegatee_a,
-                amount: crate::config::COIN_VALUE,
+                amount: 1,
                 energy: 14,
             },
             DelegateRecordEntry {
                 delegatee: delegatee_b,
-                amount: crate::config::COIN_VALUE,
+                amount: 1,
                 energy: 14,
             },
         ];
 
         delegator_resource
-            .create_delegated_freeze(
-                entries,
-                duration,
-                2 * crate::config::COIN_VALUE,
-                freeze_topoheight,
-                &network,
-            )
+            .create_delegated_freeze(entries, duration, 2, freeze_topoheight, &network)
             .unwrap();
 
         let unlock_topoheight =
@@ -3136,18 +3002,12 @@ mod tests {
 
         let entry = DelegateRecordEntry {
             delegatee: delegatee.clone(),
-            amount: 5 * crate::config::COIN_VALUE, // 5 TOS
+            amount: 5, // 5 TOS
             energy: 5 * 14,
         };
 
         delegator_resource
-            .create_delegated_freeze(
-                vec![entry],
-                duration,
-                5 * crate::config::COIN_VALUE,
-                freeze_topoheight,
-                &network,
-            )
+            .create_delegated_freeze(vec![entry], duration, 5, freeze_topoheight, &network)
             .unwrap();
 
         let unlock_topoheight =
@@ -3179,18 +3039,12 @@ mod tests {
 
         let entry = DelegateRecordEntry {
             delegatee: delegatee.clone(),
-            amount: crate::config::COIN_VALUE,
+            amount: 1,
             energy: 60,
         };
 
         delegator_resource
-            .create_delegated_freeze(
-                vec![entry],
-                duration,
-                crate::config::COIN_VALUE,
-                freeze_topoheight,
-                &network,
-            )
+            .create_delegated_freeze(vec![entry], duration, 1, freeze_topoheight, &network)
             .unwrap();
 
         // Try to unfreeze before unlock (should fail)
@@ -3221,30 +3075,24 @@ mod tests {
         // Create first delegation record
         let entry1 = DelegateRecordEntry {
             delegatee: delegatee1.clone(),
-            amount: crate::config::COIN_VALUE,
+            amount: 1,
             energy: 14,
         };
         delegator_resource
-            .create_delegated_freeze(
-                vec![entry1],
-                duration,
-                crate::config::COIN_VALUE,
-                freeze_topoheight,
-                &network,
-            )
+            .create_delegated_freeze(vec![entry1], duration, 1, freeze_topoheight, &network)
             .unwrap();
 
         // Create second delegation record
         let entry2 = DelegateRecordEntry {
             delegatee: delegatee2.clone(),
-            amount: crate::config::COIN_VALUE,
+            amount: 1,
             energy: 14,
         };
         delegator_resource
             .create_delegated_freeze(
                 vec![entry2],
                 duration,
-                crate::config::COIN_VALUE,
+                1,
                 freeze_topoheight + 1000,
                 &network,
             )
@@ -3294,12 +3142,12 @@ mod tests {
         let max_entries: Vec<DelegateRecordEntry> = (0..crate::config::MAX_DELEGATEES)
             .map(|_| DelegateRecordEntry {
                 delegatee: KeyPair::new().get_public_key().compress(),
-                amount: crate::config::COIN_VALUE,
+                amount: 1,
                 energy: 14,
             })
             .collect();
 
-        let total_amount = crate::config::MAX_DELEGATEES as u64 * crate::config::COIN_VALUE;
+        let total_amount = crate::config::MAX_DELEGATEES as u64;
 
         let result = delegator_resource.create_delegated_freeze(
             max_entries,
@@ -3317,12 +3165,12 @@ mod tests {
         let too_many_entries: Vec<DelegateRecordEntry> = (0..crate::config::MAX_DELEGATEES + 1)
             .map(|_| DelegateRecordEntry {
                 delegatee: KeyPair::new().get_public_key().compress(),
-                amount: crate::config::COIN_VALUE,
+                amount: 1,
                 energy: 14,
             })
             .collect();
 
-        let total_amount2 = (crate::config::MAX_DELEGATEES + 1) as u64 * crate::config::COIN_VALUE;
+        let total_amount2 = (crate::config::MAX_DELEGATEES + 1) as u64;
 
         let result2 = delegator_resource2.create_delegated_freeze(
             too_many_entries,
@@ -3340,4 +3188,237 @@ mod tests {
     // and rejects with "Cannot delegate energy to yourself" error.
     // This cannot be easily unit tested here as it requires transaction context.
     // See integration tests for full verification testing.
+
+    #[test]
+    fn test_delegated_freeze_record_amount_overflow() {
+        use crate::crypto::KeyPair;
+
+        let network = crate::network::Network::Mainnet;
+        let duration = FreezeDuration::new(7).unwrap();
+        let entries = vec![
+            DelegateRecordEntry {
+                delegatee: KeyPair::new().get_public_key().compress(),
+                amount: u64::MAX,
+                energy: 0,
+            },
+            DelegateRecordEntry {
+                delegatee: KeyPair::new().get_public_key().compress(),
+                amount: 1,
+                energy: 0,
+            },
+        ];
+
+        let result = DelegatedFreezeRecord::new(entries, duration, 0, &network);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("amount overflow"));
+    }
+
+    #[test]
+    fn test_freeze_record_limit_merge_path() {
+        let mut resource = EnergyResource::new();
+        let network = crate::network::Network::Mainnet;
+        let duration = FreezeDuration::new(7).unwrap();
+
+        for _ in 0..crate::config::MAX_FREEZE_RECORDS {
+            resource.freeze_records.push(FreezeRecord {
+                amount: 1,
+                duration,
+                freeze_topoheight: 0,
+                unlock_topoheight: 1000,
+                energy_gained: 14,
+            });
+        }
+        resource.frozen_tos = crate::config::MAX_FREEZE_RECORDS as u64;
+        resource.energy = crate::config::MAX_FREEZE_RECORDS as u64 * 14;
+
+        let result =
+            resource.freeze_tos_with_recycling(crate::config::COIN_VALUE, duration, 10, &network);
+        assert!(result.is_ok());
+        assert_eq!(
+            resource.freeze_records.len(),
+            crate::config::MAX_FREEZE_RECORDS
+        );
+    }
+
+    #[test]
+    fn test_unfreeze_proportional_energy_from_record() {
+        let mut resource = EnergyResource::new();
+        let network = crate::network::Network::Mainnet;
+        let duration = FreezeDuration::new(7).unwrap();
+
+        resource.freeze_records.push(FreezeRecord {
+            amount: 2,
+            duration,
+            freeze_topoheight: 0,
+            unlock_topoheight: 0,
+            energy_gained: 100,
+        });
+        resource.frozen_tos = 2;
+        resource.energy = 100;
+
+        let (energy_removed, pending) = resource
+            .unfreeze_tos(crate::config::COIN_VALUE, 1, None, &network)
+            .unwrap();
+        assert_eq!(pending, crate::config::COIN_VALUE);
+        assert_eq!(energy_removed, 50);
+        assert_eq!(resource.energy, 100);
+        assert_eq!(resource.freeze_records[0].energy_gained, 50);
+    }
+
+    #[test]
+    fn test_delegated_unfreeze_non_divisible_ratio() {
+        let mut resource = EnergyResource::new();
+        let network = crate::network::Network::Mainnet;
+        let duration = FreezeDuration::new(7).unwrap();
+        let delegatee = crate::crypto::KeyPair::new().get_public_key().compress();
+
+        let entry = DelegateRecordEntry {
+            delegatee: delegatee.clone(),
+            amount: 3,
+            energy: 42,
+        };
+        let record = DelegatedFreezeRecord::new(vec![entry], duration, 0, &network).unwrap();
+        resource.delegated_records.push(record);
+        resource.frozen_tos = 3;
+
+        let (returned_delegatee, energy_removed, pending) = resource
+            .unfreeze_delegated_entry(
+                crate::config::COIN_VALUE,
+                duration.duration_in_blocks_for_network(&network),
+                Some(0),
+                &delegatee,
+                &network,
+            )
+            .unwrap();
+
+        assert_eq!(returned_delegatee, delegatee);
+        assert_eq!(pending, crate::config::COIN_VALUE);
+        assert_eq!(energy_removed, 14);
+        assert_eq!(resource.delegated_records[0].entries[0].amount, 2);
+        assert_eq!(resource.delegated_records[0].entries[0].energy, 28);
+        assert_eq!(resource.delegated_records[0].total_amount, 2);
+        assert_eq!(resource.delegated_records[0].total_energy, 28);
+    }
+
+    #[test]
+    fn test_withdraw_unfrozen_overflow() {
+        let mut resource = EnergyResource::new();
+        resource.pending_unfreezes = vec![
+            PendingUnfreeze {
+                amount: u64::MAX,
+                expire_topoheight: 0,
+            },
+            PendingUnfreeze {
+                amount: 1,
+                expire_topoheight: 0,
+            },
+        ];
+
+        let result = resource.withdraw_unfrozen(0);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "Overflow in withdraw calculation");
+    }
+
+    #[test]
+    fn test_delegated_energy_overflow() {
+        let mut resource = EnergyResource::new();
+        resource.energy = u64::MAX;
+        assert!(resource.add_delegated_energy(1, 0).is_err());
+    }
+
+    #[test]
+    fn test_recyclable_tos_overflow() {
+        let mut resource = EnergyResource::new();
+        let duration = FreezeDuration::new(3).unwrap();
+        resource.freeze_records = vec![
+            FreezeRecord {
+                amount: u64::MAX,
+                duration,
+                freeze_topoheight: 0,
+                unlock_topoheight: 0,
+                energy_gained: 0,
+            },
+            FreezeRecord {
+                amount: 1,
+                duration,
+                freeze_topoheight: 0,
+                unlock_topoheight: 0,
+                energy_gained: 0,
+            },
+        ];
+
+        let result = resource.get_recyclable_tos(0);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "Recyclable TOS overflow");
+    }
+
+    #[test]
+    fn test_unlock_topoheight_overflow() {
+        let mut resource = EnergyResource::new();
+        let duration = FreezeDuration::new(3).unwrap();
+        let network = crate::network::Network::Mainnet;
+
+        let result = resource.freeze_tos_for_energy_with_network(
+            crate::config::COIN_VALUE,
+            duration,
+            u64::MAX - 1,
+            &network,
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Unlock topoheight overflow"));
+    }
+
+    #[test]
+    fn test_delegated_freeze_record_read_rejects_large_count() {
+        use crate::serializer::{Reader, ReaderError, Writer};
+
+        let mut bytes = Vec::new();
+        let mut writer = Writer::new(&mut bytes);
+        writer.write_u64(&((crate::config::MAX_DELEGATEES + 1) as u64));
+
+        let mut reader = Reader::new(&bytes);
+        let result = DelegatedFreezeRecord::read(&mut reader);
+        assert!(matches!(result, Err(ReaderError::InvalidValue)));
+    }
+
+    #[test]
+    fn test_energy_resource_read_rejects_too_many_records() {
+        use crate::serializer::{Reader, ReaderError, Writer};
+
+        let mut bytes = Vec::new();
+        let mut writer = Writer::new(&mut bytes);
+        writer.write_u64(&0); // energy
+        writer.write_u64(&0); // frozen_tos
+        writer.write_u64(&0); // last_update
+        writer.write_u64(&((crate::config::MAX_FREEZE_RECORDS + 1) as u64)); // records_count
+
+        let mut reader = Reader::new(&bytes);
+        let result = EnergyResource::read(&mut reader);
+        assert!(matches!(result, Err(ReaderError::InvalidValue)));
+    }
+
+    #[test]
+    fn test_energy_calculation_avoids_intermediate_overflow() {
+        let mut resource = EnergyResource::new();
+        let duration = FreezeDuration::new(180).unwrap();
+        let amount = (u64::MAX / 2 / crate::config::COIN_VALUE) * crate::config::COIN_VALUE;
+
+        assert!(amount.checked_mul(duration.reward_multiplier()).is_none());
+
+        let result = resource.freeze_tos_for_energy(amount, duration, 0);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_recycling_overflow_reports_error() {
+        let mut resource = EnergyResource::new();
+        let network = crate::network::Network::Mainnet;
+        let duration = FreezeDuration::new(7).unwrap();
+        resource.energy = u64::MAX - 10;
+
+        let result =
+            resource.freeze_tos_with_recycling(crate::config::COIN_VALUE, duration, 0, &network);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Energy overflow"));
+    }
 }

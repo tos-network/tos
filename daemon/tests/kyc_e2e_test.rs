@@ -304,6 +304,13 @@ impl<'a> BlockchainVerificationState<'a, TestError> for KycTestChainState {
         Ok(*self.nonces.get(account).unwrap_or(&0))
     }
 
+    async fn account_exists(
+        &mut self,
+        account: &'a CompressedPublicKey,
+    ) -> Result<bool, TestError> {
+        Ok(self.nonces.contains_key(account))
+    }
+
     async fn update_account_nonce(
         &mut self,
         account: &'a CompressedPublicKey,

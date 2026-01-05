@@ -3,6 +3,9 @@ mod energy;
 mod nonce;
 mod uno_balance;
 
+#[cfg(test)]
+mod energy_tests;
+
 use std::{
     borrow::Cow,
     fmt::{self, Display, Formatter},

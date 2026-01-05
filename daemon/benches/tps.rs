@@ -326,6 +326,10 @@ impl<'a> tos_common::transaction::verify::BlockchainVerificationState<'a, ()>
             .ok_or(())
     }
 
+    async fn account_exists(&mut self, account: &'a CompressedPublicKey) -> Result<bool, ()> {
+        Ok(self.accounts.contains_key(account))
+    }
+
     async fn update_account_nonce(
         &mut self,
         account: &'a CompressedPublicKey,

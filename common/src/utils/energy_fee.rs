@@ -8,40 +8,44 @@ use crate::{
 /// Implements TRON-style energy model without bandwidth
 ///
 /// # Energy Cost Model
-/// - Transfer operations: 1 energy per transfer (regardless of transaction size)
+/// - Transfer operations: 1 energy per transaction (regardless of transaction size or outputs)
 /// - Account creation: 0 energy (no energy cost for new addresses)
 /// - Transaction size: Ignored in energy calculation (unlike TRON's bandwidth)
 ///
 /// # Edge Cases
 /// - Large transactions consume the same energy as small ones (size-independent)
-/// - Multiple outputs scale linearly (N outputs = N energy)
+/// - Multiple outputs do not increase energy cost
 /// - New account creation doesn't consume additional energy
 /// - Zero outputs result in zero energy cost
 pub struct EnergyFeeCalculator;
 
 impl EnergyFeeCalculator {
     /// Calculate energy cost for a transaction (only transfer operations consume energy)
-    /// Each transfer consumes exactly 1 energy, regardless of transaction size
+    /// Each transfer transaction consumes exactly 1 energy, regardless of transaction size or outputs
     ///
     /// # Parameters
     /// - `_tx_size`: Transaction size in bytes (ignored in current implementation)
-    /// - `output_count`: Number of transfer outputs (each costs 1 energy)
+    /// - `output_count`: Number of transfer outputs (used to detect empty tx)
     /// - `new_addresses`: Number of new addresses created (currently costs 0 energy)
     ///
     /// # Edge Cases
     /// - Transaction size is completely ignored (unlike TRON's bandwidth model)
     /// - New address creation is free in terms of energy
     /// - Zero outputs = zero energy cost
-    /// - Large transactions with 1 output = same cost as small transactions with 1 output
+    /// - Large transactions with many outputs = same cost as single-output transfers
     pub fn calculate_energy_cost(
         _tx_size: usize,
         output_count: usize,
         _new_addresses: usize,
     ) -> u64 {
-        // Energy cost for transfers (1 energy per transfer, regardless of size)
+        // Energy cost for transfers (1 energy per transaction, regardless of size or outputs)
         // Note: new_addresses parameter is intentionally unused as new account
         // creation is free in the current energy model
-        output_count as u64 * ENERGY_PER_TRANSFER
+        if output_count == 0 {
+            0
+        } else {
+            ENERGY_PER_TRANSFER
+        }
     }
 }
 
@@ -52,13 +56,13 @@ impl EnergyFeeCalculator {
 /// - Freezing TOS to gain energy
 /// - Unfreezing TOS (with time constraints)
 /// - Consuming energy for transactions
-/// - Resetting energy usage periodically
+/// - No automatic energy reset (users must freeze more TOS)
 ///
 /// # Edge Cases and Error Handling
 /// - All TOS amounts must be whole numbers (fractional parts discarded)
 /// - Energy consumption fails if insufficient energy available
 /// - Unfreezing only works on unlocked freeze records
-/// - Energy reset timing must be managed externally
+/// - No reset timing or auto-regeneration
 pub struct EnergyResourceManager;
 
 impl EnergyResourceManager {
@@ -106,22 +110,18 @@ impl EnergyResourceManager {
         topoheight: TopoHeight,
         network: &crate::network::Network,
     ) -> Result<(), &'static str> {
-        energy_resource.clear_pending_energy_if_ready(topoheight);
-        energy_resource.maybe_reset_energy(topoheight, network);
+        let _ = network;
         energy_resource.consume_energy(energy_cost, topoheight)
     }
 
-    /// Reset energy usage (called periodically)
-    pub fn reset_energy_usage(energy_resource: &mut EnergyResource, topoheight: TopoHeight) {
-        energy_resource.reset_used_energy(topoheight);
-    }
-
     /// Get energy status for an account
-    pub fn get_energy_status(energy_resource: &EnergyResource) -> EnergyStatus {
+    pub fn get_energy_status(
+        energy_resource: &EnergyResource,
+        current_topoheight: TopoHeight,
+    ) -> EnergyStatus {
         EnergyStatus {
-            total_energy: energy_resource.total_energy,
-            used_energy: energy_resource.used_energy,
-            available_energy: energy_resource.available_energy(),
+            energy: energy_resource.energy,
+            available_energy: energy_resource.available_energy_at(current_topoheight),
             frozen_tos: energy_resource.frozen_tos,
         }
     }
@@ -130,7 +130,7 @@ impl EnergyResourceManager {
     pub fn get_unlockable_tos(
         energy_resource: &EnergyResource,
         current_topoheight: TopoHeight,
-    ) -> u64 {
+    ) -> Result<u64, &'static str> {
         energy_resource.get_unlockable_tos(current_topoheight)
     }
 
@@ -145,25 +145,25 @@ impl EnergyResourceManager {
 /// Energy status information
 #[derive(Debug, Clone)]
 pub struct EnergyStatus {
-    pub total_energy: u64,
-    pub used_energy: u64,
+    pub energy: u64,
     pub available_energy: u64,
+    /// Frozen TOS amount (whole TOS units)
     pub frozen_tos: u64,
 }
 
 impl EnergyStatus {
     /// Calculate energy usage percentage
     pub fn usage_percentage(&self) -> f64 {
-        if self.total_energy == 0 {
+        if self.energy == 0 {
             0.0
         } else {
-            (self.used_energy as f64 / self.total_energy as f64) * 100.0
+            ((self.energy - self.available_energy) as f64 / self.energy as f64) * 100.0
         }
     }
 
     /// Check if energy is low (less than 10% available)
     pub fn is_energy_low(&self) -> bool {
-        self.available_energy < self.total_energy / 10
+        self.energy == 0 || self.available_energy < self.energy / 10
     }
 }
 
@@ -179,13 +179,13 @@ mod tests {
 
     #[test]
     fn test_transfer_energy_cost_is_one() {
-        // Test that each transfer consumes exactly 1 energy
+        // Test that each transfer transaction consumes exactly 1 energy
         let single_transfer_cost = EnergyFeeCalculator::calculate_energy_cost(100, 1, 0);
         assert_eq!(single_transfer_cost, ENERGY_PER_TRANSFER); // Should be 1 energy
 
-        // Test multiple transfers
+        // Multiple outputs should not increase energy cost
         let multiple_transfer_cost = EnergyFeeCalculator::calculate_energy_cost(100, 5, 0);
-        assert_eq!(multiple_transfer_cost, 5 * ENERGY_PER_TRANSFER); // Should be 5 energy
+        assert_eq!(multiple_transfer_cost, ENERGY_PER_TRANSFER); // Still 1 energy
 
         // Test with new addresses (new addresses don't consume energy in current implementation)
         let transfer_with_new_address = EnergyFeeCalculator::calculate_energy_cost(100, 1, 2);
@@ -207,12 +207,12 @@ mod tests {
         assert_eq!(large_tx_cost, 1);
         assert_eq!(huge_tx_cost, 1);
 
-        // Multiple transfers should scale linearly
+        // Multiple outputs should not change energy cost
         let multiple_small = EnergyFeeCalculator::calculate_energy_cost(100, 3, 0);
         let multiple_large = EnergyFeeCalculator::calculate_energy_cost(10000, 3, 0);
 
-        assert_eq!(multiple_small, 3);
-        assert_eq!(multiple_large, 3);
+        assert_eq!(multiple_small, 1);
+        assert_eq!(multiple_large, 1);
     }
 
     #[test]

@@ -97,11 +97,6 @@ impl Network {
     pub fn unfreeze_cooldown_blocks(&self) -> u64 {
         crate::config::UNFREEZE_COOLDOWN_DAYS * self.blocks_per_day()
     }
-
-    /// Get energy reset blocks for this network
-    pub fn energy_reset_blocks(&self) -> u64 {
-        crate::config::ENERGY_RESET_DAYS * self.blocks_per_day()
-    }
 }
 
 impl Serialize for Network {

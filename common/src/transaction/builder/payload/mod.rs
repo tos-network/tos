@@ -207,8 +207,8 @@ impl EnergyBuilder {
     /// Calculate the energy that would be gained from this freeze operation
     pub fn calculate_energy_gain(&self) -> Option<u64> {
         if self.is_freeze {
-            self.freeze_duration.as_ref().map(|duration| {
-                (self.amount / crate::config::COIN_VALUE) * duration.reward_multiplier()
+            self.freeze_duration.as_ref().and_then(|duration| {
+                (self.amount / crate::config::COIN_VALUE).checked_mul(duration.reward_multiplier())
             })
         } else {
             None
@@ -366,7 +366,9 @@ mod tests {
         for amount in amounts {
             for duration in &durations {
                 let builder = EnergyBuilder::freeze_tos(amount, *duration);
-                let expected_energy = (amount / COIN_VALUE) * duration.reward_multiplier();
+                let expected_energy = (amount / COIN_VALUE)
+                    .checked_mul(duration.reward_multiplier())
+                    .expect("energy overflow");
                 assert_eq!(builder.calculate_energy_gain(), Some(expected_energy));
             }
         }

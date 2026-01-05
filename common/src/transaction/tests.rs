@@ -14,13 +14,13 @@ use crate::{
         builder::{
             AccountState, ContractDepositBuilder, DeployContractBuilder, EnergyBuilder, FeeBuilder,
             FeeHelper, GenerationError, InvokeContractBuilder, MultiSigBuilder, TransactionBuilder,
-            TransactionTypeBuilder, TransferBuilder,
+            TransactionTypeBuilder, TransferBuilder, UnsignedTransaction,
         },
         extra_data::Role,
         extra_data::{derive_shared_key_from_opening, PlaintextData},
         verify::{BlockchainVerificationState, NoZKPCache, ZKPCache},
-        BurnPayload, MultiSigPayload, Reference, Transaction, TransactionType, TxVersion,
-        MAX_TRANSFER_COUNT,
+        BurnPayload, DelegationEntry, EnergyPayload, FeeType, MultiSigPayload, Reference,
+        Transaction, TransactionType, TxVersion, MAX_TRANSFER_COUNT,
     },
 };
 use async_trait::async_trait;
@@ -1309,6 +1309,117 @@ async fn test_unfreeze_tos_balance_refund() {
     println!("   Note: TOS is in pending state, use WithdrawUnfrozen after 14 days");
 }
 
+#[tokio::test]
+async fn test_freeze_delegation_requires_existing_delegatee() {
+    let mut alice = Account::new();
+    alice.set_balance(TOS_ASSET, 10 * COIN_VALUE);
+
+    let delegatee = KeyPair::new().get_public_key().compress();
+    assert_ne!(
+        delegatee,
+        alice.keypair.get_public_key().compress(),
+        "delegatee should differ from sender"
+    );
+    let duration = crate::account::FreezeDuration::new(7).unwrap();
+    let payload = EnergyPayload::FreezeTosDelegate {
+        delegatees: vec![DelegationEntry {
+            delegatee: delegatee.clone(),
+            amount: COIN_VALUE,
+        }],
+        duration,
+    };
+
+    let unsigned = UnsignedTransaction::new_with_fee_type(
+        TxVersion::T0,
+        0,
+        alice.keypair.get_public_key().compress(),
+        TransactionType::Energy(payload),
+        0,
+        FeeType::TOS,
+        alice.nonce,
+        Reference {
+            topoheight: 0,
+            hash: Hash::zero(),
+        },
+    );
+    let tx = unsigned.finalize(&alice.keypair);
+    let tx_hash = tx.hash();
+
+    match tx.get_data() {
+        TransactionType::Energy(EnergyPayload::FreezeTosDelegate { delegatees, .. }) => {
+            assert_eq!(delegatees.len(), 1);
+        }
+        _ => panic!("Expected FreezeTosDelegate payload"),
+    }
+
+    let mut state = ChainState::new();
+    let mut balances = HashMap::new();
+    balances.insert(TOS_ASSET, 10 * COIN_VALUE);
+    state.accounts.insert(
+        alice.keypair.get_public_key().compress(),
+        AccountChainState {
+            balances,
+            nonce: alice.nonce,
+        },
+    );
+
+    assert!(!state.accounts.contains_key(&delegatee));
+    assert!(state.get_account_nonce(&delegatee).await.is_err());
+
+    let result = Arc::new(tx).verify(&tx_hash, &mut state, &NoZKPCache).await;
+    assert!(result.is_err(), "expected error, got: {result:?}");
+}
+
+#[tokio::test]
+async fn test_energy_fee_transfer_rejects_new_address() {
+    let mut alice = Account::new();
+    alice.set_balance(TOS_ASSET, 10 * COIN_VALUE);
+    let bob = Account::new();
+
+    let mut state = AccountStateImpl {
+        balances: alice.balances.clone(),
+        nonce: alice.nonce,
+        reference: Reference {
+            topoheight: 0,
+            hash: Hash::zero(),
+        },
+    };
+
+    let transfer = TransferBuilder {
+        amount: COIN_VALUE,
+        destination: bob.address(),
+        asset: TOS_ASSET,
+        extra_data: None,
+    };
+    let builder = TransactionBuilder::new(
+        TxVersion::T0,
+        0,
+        alice.keypair.get_public_key().compress(),
+        None,
+        TransactionTypeBuilder::Transfers(vec![transfer]),
+        FeeBuilder::Value(0),
+    )
+    .with_fee_type(FeeType::Energy);
+    let tx = builder.build(&mut state, &alice.keypair).unwrap();
+
+    let mut verify_state = ChainState::new();
+    let mut balances = HashMap::new();
+    balances.insert(TOS_ASSET, 10 * COIN_VALUE);
+    verify_state.accounts.insert(
+        alice.keypair.get_public_key().compress(),
+        AccountChainState {
+            balances,
+            nonce: alice.nonce,
+        },
+    );
+
+    let tx_hash = tx.hash();
+    let result = Arc::new(tx)
+        .verify(&tx_hash, &mut verify_state, &NoZKPCache)
+        .await;
+    assert!(result.is_err());
+}
+
 #[async_trait]
 impl<'a> BlockchainVerificationState<'a, TestError> for ChainState {
     /// Pre-verify the TX
@@ -1392,6 +1503,10 @@ impl<'a> BlockchainVerificationState<'a, TestError> for ChainState {
             .ok_or(TestError(()))
     }
 
+    async fn account_exists(&mut self, account: &'a PublicKey) -> Result<bool, TestError> {
+        Ok(self.accounts.contains_key(account))
+    }
+
     /// Apply a new nonce to an account
     async fn update_account_nonce(
         &mut self,
@@ -1442,9 +1557,12 @@ impl<'a> BlockchainVerificationState<'a, TestError> for ChainState {
     async fn get_recyclable_tos(&mut self, account: &'a PublicKey) -> Result<u64, TestError> {
         // Get energy resource and calculate recyclable TOS
         let energy = self.energy_resources.get(account);
-        let recyclable = energy
-            .map(|e| e.get_recyclable_tos(self.topoheight))
-            .unwrap_or(0);
+        let recyclable = match energy {
+            Some(resource) => resource
+                .get_recyclable_tos(self.topoheight)
+                .map_err(|_| TestError(()))?,
+            None => 0,
+        };
         Ok(recyclable)
     }
 

@@ -3166,7 +3166,10 @@ async fn get_energy<S: Storage>(context: &Context, body: Value) -> Result<Value,
             .freeze_records
             .iter()
             .map(|record| FreezeRecordInfo {
-                amount: record.amount,
+                amount: record
+                    .amount
+                    .checked_mul(tos_common::config::COIN_VALUE)
+                    .unwrap_or(u64::MAX),
                 duration: format!("{}_days", record.duration.get_days()),
                 freeze_topoheight: record.freeze_topoheight,
                 unlock_topoheight: record.unlock_topoheight,
@@ -3181,9 +3184,11 @@ async fn get_energy<S: Storage>(context: &Context, body: Value) -> Result<Value,
             .collect::<Vec<_>>();
 
         json!(GetEnergyResult {
-            frozen_tos: energy_resource.frozen_tos,
-            total_energy: energy_resource.total_energy,
-            used_energy: energy_resource.used_energy,
+            frozen_tos: energy_resource
+                .frozen_tos
+                .checked_mul(tos_common::config::COIN_VALUE)
+                .unwrap_or(u64::MAX),
+            energy: energy_resource.energy,
             available_energy: energy_resource.available_energy_at(current_topoheight),
             last_update: energy_resource.last_update,
             freeze_records,
@@ -3191,8 +3196,7 @@ async fn get_energy<S: Storage>(context: &Context, body: Value) -> Result<Value,
     } else {
         json!(GetEnergyResult {
             frozen_tos: 0,
-            total_energy: 0,
-            used_energy: 0,
+            energy: 0,
             available_energy: 0,
             last_update: current_topoheight,
             freeze_records: Vec::new(),

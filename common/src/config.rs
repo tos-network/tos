@@ -100,8 +100,6 @@ pub const MAX_PENDING_UNFREEZES: usize = 32;
 pub const MAX_DELEGATEES: usize = 500;
 // Unfreeze cooldown period in days (converted to blocks per network)
 pub const UNFREEZE_COOLDOWN_DAYS: u64 = 14;
-// Energy reset period in days (converted to blocks per network)
-pub const ENERGY_RESET_DAYS: u64 = 1;
 
 // Addresses format
 // mainnet prefix address

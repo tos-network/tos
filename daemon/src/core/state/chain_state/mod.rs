@@ -9,7 +9,7 @@ use std::{
     collections::{hash_map::Entry, HashMap},
 };
 use tos_common::{
-    account::{Nonce, VersionedBalance, VersionedNonce, VersionedUnoBalance},
+    account::{EnergyResource, Nonce, VersionedBalance, VersionedNonce, VersionedUnoBalance},
     block::{BlockVersion, TopoHeight},
     config::TOS_ASSET,
     crypto::{
@@ -147,6 +147,8 @@ pub struct ChainState<'a, S: Storage> {
     // Sender accounts
     // This is used to verify ZK Proofs and store/update nonces
     accounts: HashMap<&'a PublicKey, Account<'a>>,
+    // Cached energy resources
+    energy_resources: HashMap<Cow<'a, PublicKey>, EnergyResource>,
     // Current stable topoheight of the snapshot
     stable_topoheight: TopoHeight,
     // Current topoheight of the snapshot
@@ -177,6 +179,7 @@ impl<'a, S: Storage> ChainState<'a, S> {
             receiver_balances: HashMap::new(),
             receiver_uno_balances: HashMap::new(),
             accounts: HashMap::new(),
+            energy_resources: HashMap::new(),
             stable_topoheight,
             topoheight,
             contracts: HashMap::new(),
@@ -517,6 +520,31 @@ impl<'a, S: Storage> ChainState<'a, S> {
                     .get_balance())
             }
         }
+    }
+
+    async fn internal_get_energy_resource(
+        &mut self,
+        account: Cow<'a, PublicKey>,
+    ) -> Result<Option<EnergyResource>, BlockchainError> {
+        if let Some(resource) = self.energy_resources.get(&account) {
+            return Ok(Some(resource.clone()));
+        }
+
+        let resource = self.storage.get_energy_resource(&account).await?;
+        if let Some(ref energy_resource) = resource {
+            self.energy_resources
+                .insert(account.clone(), energy_resource.clone());
+        }
+
+        Ok(resource)
+    }
+
+    fn cache_energy_resource(
+        &mut self,
+        account: Cow<'a, PublicKey>,
+        energy_resource: EnergyResource,
+    ) {
+        self.energy_resources.insert(account, energy_resource);
     }
 
     // Update the output echanges of an account
@@ -989,6 +1017,18 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for ChainS
         self.internal_get_account_nonce(account).await
     }
 
+    async fn account_exists(&mut self, account: &'a PublicKey) -> Result<bool, BlockchainError> {
+        if self.receiver_balances.contains_key(account)
+            || self.receiver_uno_balances.contains_key(account)
+            || self.accounts.contains_key(account)
+        {
+            return Ok(true);
+        }
+        self.storage
+            .is_account_registered_for_topoheight(account, self.topoheight)
+            .await
+    }
+
     /// Apply a new nonce to an account
     async fn update_account_nonce(
         &mut self,
@@ -1043,10 +1083,15 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for ChainS
 
     /// Get the recyclable TOS amount from expired freeze records
     async fn get_recyclable_tos(&mut self, account: &'a PublicKey) -> Result<u64, BlockchainError> {
-        let energy_resource = self.storage.get_energy_resource(account).await?;
-        let recyclable = energy_resource
-            .map(|e| e.get_recyclable_tos(self.topoheight))
-            .unwrap_or(0);
+        let energy_resource = self
+            .internal_get_energy_resource(Cow::Borrowed(account))
+            .await?;
+        let recyclable = match energy_resource {
+            Some(resource) => resource
+                .get_recyclable_tos(self.topoheight)
+                .map_err(|_| BlockchainError::Overflow)?,
+            None => 0,
+        };
         Ok(recyclable)
     }
 

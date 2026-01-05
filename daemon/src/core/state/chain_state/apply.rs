@@ -145,6 +145,10 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError>
         self.inner.get_account_nonce(account).await
     }
 
+    async fn account_exists(&mut self, account: &'a PublicKey) -> Result<bool, BlockchainError> {
+        self.inner.account_exists(account).await
+    }
+
     async fn update_account_nonce(
         &mut self,
         account: &'a PublicKey,
@@ -398,7 +402,7 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for Applicable
         &mut self,
         account: Cow<'a, CompressedPublicKey>,
     ) -> Result<Option<EnergyResource>, BlockchainError> {
-        self.inner.storage.get_energy_resource(&account).await
+        self.inner.internal_get_energy_resource(account).await
     }
 
     async fn set_energy_resource(
@@ -406,6 +410,8 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for Applicable
         account: Cow<'a, CompressedPublicKey>,
         energy_resource: EnergyResource,
     ) -> Result<(), BlockchainError> {
+        self.inner
+            .cache_energy_resource(account.clone(), energy_resource.clone());
         self.inner
             .storage
             .set_energy_resource(&account, self.inner.topoheight, &energy_resource)

@@ -78,20 +78,41 @@ impl MockChainState {
         *self.balances.get(account).unwrap_or(&0)
     }
 
-    fn set_energy(&mut self, account: CompressedPublicKey, used_energy: u64, total_energy: u64) {
-        self.energy.insert(account.clone(), used_energy);
-        self.total_energy.insert(account, total_energy);
+    fn set_energy(&mut self, account: CompressedPublicKey, energy: u64) {
+        self.energy.insert(account.clone(), energy);
+        self.total_energy.insert(account, energy);
     }
 
     fn get_energy(&self, account: &CompressedPublicKey) -> (u64, u64) {
-        let used = *self.energy.get(account).unwrap_or(&0);
-        let total = *self.total_energy.get(account).unwrap_or(&0);
+        let total = self.get_total_energy(account);
+        let available = self.get_available_energy(account);
+        let used = total.saturating_sub(available);
         (used, total)
     }
 
     fn get_available_energy(&self, account: &CompressedPublicKey) -> u64 {
+        *self.energy.get(account).unwrap_or(&0)
+    }
+
+    fn get_total_energy(&self, account: &CompressedPublicKey) -> u64 {
+        *self.total_energy.get(account).unwrap_or(&0)
+    }
+
+    fn set_energy_balance(&mut self, account: CompressedPublicKey, energy: u64) {
+        self.energy.insert(account, energy);
+    }
+
+    fn add_energy(&mut self, account: CompressedPublicKey, energy_gain: u64) {
+        let available = self.get_available_energy(&account);
+        let total = self.get_total_energy(&account);
+        self.energy.insert(account.clone(), available + energy_gain);
+        self.total_energy.insert(account, total + energy_gain);
+    }
+
+    #[allow(dead_code)]
+    fn format_energy(&self, account: &CompressedPublicKey) -> String {
         let (used, total) = self.get_energy(account);
-        total.saturating_sub(used)
+        format!("used_energy: {used}, total_energy: {total}")
     }
 
     fn set_nonce(&mut self, account: CompressedPublicKey, nonce: u64) {
@@ -206,8 +227,7 @@ impl MockChainState {
                         if available_energy < fee {
                             return Err("Insufficient energy".into());
                         }
-                        let (used, total) = self.get_energy(sender);
-                        self.set_energy(sender.clone(), used + fee, total);
+                        self.set_energy_balance(sender.clone(), available_energy - fee);
                     }
                 }
             }
@@ -217,8 +237,7 @@ impl MockChainState {
                 if available_energy < fee {
                     return Err("Insufficient energy for burn transaction".into());
                 }
-                let (used, total) = self.get_energy(sender);
-                self.set_energy(sender.clone(), used + fee, total);
+                self.set_energy_balance(sender.clone(), available_energy - fee);
             }
             TransactionType::Energy(energy_data) => {
                 match energy_data {
@@ -237,9 +256,8 @@ impl MockChainState {
                         }
                         self.set_balance(sender.clone(), sender_balance - fee);
                         // Increase energy
-                        let (used, total) = self.get_energy(sender);
                         let energy_gain = (*amount / COIN_VALUE) * duration.reward_multiplier();
-                        self.set_energy(sender.clone(), used, total + energy_gain);
+                        self.add_energy(sender.clone(), energy_gain);
                     }
                     tos_common::transaction::EnergyPayload::UnfreezeTos { amount, .. } => {
                         // Check if we have enough balance for fee first
@@ -253,8 +271,8 @@ impl MockChainState {
                         // In a real implementation, this would check freeze records and unlock times
                         // For now, we'll use a simple approach: check if the unfreeze amount is reasonable
                         // based on the current energy (assuming 3-day duration with 6x multiplier)
-                        let (used, total) = self.get_energy(sender);
-                        let max_frozen_tos = (total / 6) * COIN_VALUE; // Reverse calculation from energy to TOS
+                        let total_energy = self.get_total_energy(sender);
+                        let max_frozen_tos = (total_energy / 6) * COIN_VALUE; // Approximate bound for mock
 
                         if *amount > max_frozen_tos {
                             return Err("Cannot unfreeze more TOS than was frozen".into());
@@ -267,9 +285,7 @@ impl MockChainState {
                         let sender_balance = self.get_balance(sender);
                         self.set_balance(sender.clone(), sender_balance + *amount);
 
-                        // Reduce energy proportionally
-                        let energy_removed = (*amount / COIN_VALUE) * 6; // Assume 3-day duration (6x multiplier)
-                        self.set_energy(sender.clone(), used, total.saturating_sub(energy_removed));
+                        // Energy balance is not reduced on unfreeze in this model
                     }
                     tos_common::transaction::EnergyPayload::FreezeTosDelegate { .. } => {
                         // Not implemented in mock - just deduct fee
@@ -659,8 +675,8 @@ fn test_block_execution_simulation() {
     // Initialize account states
     chain.set_balance(alice_pubkey.clone(), 1000 * COIN_VALUE); // 1000 TOS
     chain.set_balance(bob_pubkey.clone(), 0); // 0 TOS
-    chain.set_energy(alice_pubkey.clone(), 0, 1000); // 1000 total energy, 0 used
-    chain.set_energy(bob_pubkey.clone(), 0, 0); // No energy for Bob
+    chain.set_energy(alice_pubkey.clone(), 1000); // 1000 total energy, 0 used
+    chain.set_energy(bob_pubkey.clone(), 0); // No energy for Bob
     chain.set_nonce(alice_pubkey.clone(), 0);
     chain.set_nonce(bob_pubkey.clone(), 0);
 
@@ -772,7 +788,7 @@ fn test_block_execution_with_new_account() {
 
     // Initialize only Alice's account state
     chain.set_balance(alice_pubkey.clone(), 1000 * COIN_VALUE); // 1000 TOS
-    chain.set_energy(alice_pubkey.clone(), 0, 1000); // 1000 total energy, 0 used
+    chain.set_energy(alice_pubkey.clone(), 1000); // 1000 total energy, 0 used
     chain.set_nonce(alice_pubkey.clone(), 0);
 
     // Bob's account is NOT initialized (no balance, no energy, no nonce set)
@@ -789,10 +805,10 @@ fn test_block_execution_with_new_account() {
     );
     let (used_energy, total_energy) = chain.get_energy(&alice_pubkey);
     println!("Alice energy: used_energy: {used_energy}, total_energy: {total_energy}");
+    let (bob_used_energy, bob_total_energy) = chain.get_energy(&bob_pubkey);
     println!(
         "Bob energy: used_energy: {}, total_energy: {}",
-        chain.get_energy(&bob_pubkey).0,
-        chain.get_energy(&bob_pubkey).1
+        bob_used_energy, bob_total_energy
     );
     println!("Alice nonce: {}", chain.get_nonce(&alice_pubkey));
     println!("Bob nonce: {}", chain.get_nonce(&bob_pubkey));
@@ -830,10 +846,10 @@ fn test_block_execution_with_new_account() {
     );
     let (used_energy, total_energy) = chain.get_energy(&alice_pubkey);
     println!("Alice energy: used_energy: {used_energy}, total_energy: {total_energy}");
+    let (bob_used_energy, bob_total_energy) = chain.get_energy(&bob_pubkey);
     println!(
         "Bob energy: used_energy: {}, total_energy: {}",
-        chain.get_energy(&bob_pubkey).0,
-        chain.get_energy(&bob_pubkey).1
+        bob_used_energy, bob_total_energy
     );
     println!("Alice nonce: {}", chain.get_nonce(&alice_pubkey));
     println!("Bob nonce: {}", chain.get_nonce(&bob_pubkey));
@@ -883,7 +899,7 @@ fn test_block_execution_with_new_account_energy_fee() {
 
     // Initialize only Alice's account state
     chain.set_balance(alice_pubkey.clone(), 1000 * COIN_VALUE); // 1000 TOS
-    chain.set_energy(alice_pubkey.clone(), 0, 1000); // 1000 total energy, 0 used
+    chain.set_energy(alice_pubkey.clone(), 1000); // 1000 total energy, 0 used
     chain.set_nonce(alice_pubkey.clone(), 0);
 
     // Bob's account is NOT initialized (no balance, no energy, no nonce set)
@@ -900,10 +916,10 @@ fn test_block_execution_with_new_account_energy_fee() {
     );
     let (used_energy, total_energy) = chain.get_energy(&alice_pubkey);
     println!("Alice energy: used_energy: {used_energy}, total_energy: {total_energy}");
+    let (bob_used_energy, bob_total_energy) = chain.get_energy(&bob_pubkey);
     println!(
         "Bob energy: used_energy: {}, total_energy: {}",
-        chain.get_energy(&bob_pubkey).0,
-        chain.get_energy(&bob_pubkey).1
+        bob_used_energy, bob_total_energy
     );
     println!("Alice nonce: {}", chain.get_nonce(&alice_pubkey));
     println!("Bob nonce: {}", chain.get_nonce(&bob_pubkey));
@@ -942,10 +958,10 @@ fn test_block_execution_with_new_account_energy_fee() {
     );
     let (used_energy, total_energy) = chain.get_energy(&alice_pubkey);
     println!("Alice energy: used_energy: {used_energy}, total_energy: {total_energy}");
+    let (bob_used_energy, bob_total_energy) = chain.get_energy(&bob_pubkey);
     println!(
         "Bob energy: used_energy: {}, total_energy: {}",
-        chain.get_energy(&bob_pubkey).0,
-        chain.get_energy(&bob_pubkey).1
+        bob_used_energy, bob_total_energy
     );
     println!("Alice nonce: {}", chain.get_nonce(&alice_pubkey));
     println!("Bob nonce: {}", chain.get_nonce(&bob_pubkey));
@@ -999,7 +1015,7 @@ fn test_energy_insufficient_error() {
     // Initialize with limited energy
     chain.set_balance(alice_pubkey.clone(), 1000 * COIN_VALUE);
     chain.set_balance(bob_pubkey.clone(), 0);
-    chain.set_energy(alice_pubkey.clone(), 0, 50); // Only 50 total energy
+    chain.set_energy(alice_pubkey.clone(), 50); // Only 50 total energy
     chain.set_nonce(alice_pubkey.clone(), 0);
 
     // Try to create a transaction requiring more energy than available
@@ -1038,7 +1054,7 @@ fn test_balance_insufficient_error() {
     // Initialize with limited balance
     chain.set_balance(alice_pubkey.clone(), 100 * COIN_VALUE); // Only 100 TOS
     chain.set_balance(bob_pubkey.clone(), 0);
-    chain.set_energy(alice_pubkey.clone(), 0, 1000);
+    chain.set_energy(alice_pubkey.clone(), 1000);
     chain.set_nonce(alice_pubkey.clone(), 0);
 
     // Try to transfer more than available balance
@@ -1076,7 +1092,7 @@ fn test_freeze_tos_integration() {
 
     // Initialize only Alice's account state
     chain.set_balance(alice_pubkey.clone(), 1000 * COIN_VALUE); // 1000 TOS
-    chain.set_energy(alice_pubkey.clone(), 0, 0); // No energy yet
+    chain.set_energy(alice_pubkey.clone(), 0); // No energy yet
     chain.set_nonce(alice_pubkey.clone(), 0);
 
     // Bob's account is NOT initialized
@@ -1086,20 +1102,20 @@ fn test_freeze_tos_integration() {
         "Alice balance: {} TOS",
         chain.get_balance(&alice_pubkey) as f64 / COIN_VALUE as f64
     );
+    let (alice_used_energy, alice_total_energy) = chain.get_energy(&alice_pubkey);
     println!(
         "Alice energy: used_energy: {}, total_energy: {}",
-        chain.get_energy(&alice_pubkey).0,
-        chain.get_energy(&alice_pubkey).1
+        alice_used_energy, alice_total_energy
     );
     println!("Alice nonce: {}", chain.get_nonce(&alice_pubkey));
     println!(
         "Bob balance: {} TOS",
         chain.get_balance(&bob_pubkey) as f64 / COIN_VALUE as f64
     );
+    let (bob_used_energy, bob_total_energy) = chain.get_energy(&bob_pubkey);
     println!(
         "Bob energy: used_energy: {}, total_energy: {}",
-        chain.get_energy(&bob_pubkey).0,
-        chain.get_energy(&bob_pubkey).1
+        bob_used_energy, bob_total_energy
     );
 
     // Create a real freeze_tos transaction
@@ -1566,8 +1582,8 @@ fn test_unfreeze_tos_integration() {
     let mut chain = MockChainState::new();
     chain.set_balance(alice_pubkey.clone(), 1000 * COIN_VALUE);
     chain.set_balance(bob_pubkey.clone(), 0);
-    chain.set_energy(alice_pubkey.clone(), 0, 0);
-    chain.set_energy(bob_pubkey.clone(), 0, 0);
+    chain.set_energy(alice_pubkey.clone(), 0);
+    chain.set_energy(bob_pubkey.clone(), 0);
 
     println!("Initial state:");
     println!(
@@ -1719,10 +1735,7 @@ fn test_unfreeze_tos_integration() {
     // Energy should be reduced proportionally
     let (used, total) = chain.get_energy(&alice_pubkey);
     assert_eq!(used, 0);
-    // Energy removed should be proportional to the unfreeze amount
-    let energy_removed = (unfreeze_amount / COIN_VALUE) * freeze_duration.reward_multiplier();
-    let expected_energy = energy_gain - energy_removed;
-    assert_eq!(total, expected_energy);
+    assert_eq!(total, energy_gain);
 
     assert_eq!(chain.get_nonce(&alice_pubkey), 2);
 
@@ -1741,7 +1754,7 @@ fn test_unfreeze_tos_edge_cases() {
 
         let mut chain = MockChainState::new();
         chain.set_balance(alice_pubkey.clone(), 1000 * COIN_VALUE);
-        chain.set_energy(alice_pubkey.clone(), 0, 0);
+        chain.set_energy(alice_pubkey.clone(), 0);
 
         // Freeze 100 TOS
         let freeze_amount = 100 * COIN_VALUE;
@@ -1818,7 +1831,7 @@ fn test_unfreeze_tos_edge_cases() {
 
         let mut chain = MockChainState::new();
         chain.set_balance(alice_pubkey.clone(), 1000 * COIN_VALUE);
-        chain.set_energy(alice_pubkey.clone(), 0, 0);
+        chain.set_energy(alice_pubkey.clone(), 0);
 
         // Freeze 100 TOS
         let freeze_amount = 100 * COIN_VALUE;
@@ -1948,15 +1961,13 @@ fn test_energy_system_demo() {
 
     // Show energy status
     println!("=== Energy Status ===");
-    let status =
-        tos_common::utils::energy_fee::EnergyResourceManager::get_energy_status(&alice_energy);
-    println!("Total energy: {} transfers", status.total_energy);
-    println!("Used energy: {} transfers", status.used_energy);
-    println!("Available energy: {} transfers", status.available_energy);
-    println!(
-        "Frozen TOS: {} TOS",
-        status.frozen_tos as f64 / COIN_VALUE as f64
+    let status = tos_common::utils::energy_fee::EnergyResourceManager::get_energy_status(
+        &alice_energy,
+        topoheight + 1,
     );
+    println!("Energy: {} transfers", status.energy);
+    println!("Available energy: {} transfers", status.available_energy);
+    println!("Frozen TOS: {} TOS", status.frozen_tos);
     println!("Usage percentage: {:.2}%", status.usage_percentage());
     println!();
 
@@ -2006,10 +2017,11 @@ fn test_energy_system_demo() {
 
     // Show updated status
     println!("=== Updated Energy Status ===");
-    let updated_status =
-        tos_common::utils::energy_fee::EnergyResourceManager::get_energy_status(&alice_energy);
-    println!("Total energy: {} transfers", updated_status.total_energy);
-    println!("Used energy: {} transfers", updated_status.used_energy);
+    let updated_status = tos_common::utils::energy_fee::EnergyResourceManager::get_energy_status(
+        &alice_energy,
+        topoheight + 1,
+    );
+    println!("Energy: {} transfers", updated_status.energy);
     println!(
         "Available energy: {} transfers",
         updated_status.available_energy
@@ -2063,9 +2075,9 @@ fn test_energy_system_demo() {
 
     match result {
         Ok((energy_removed, pending_amount)) => {
-            println!("Success! Energy removed: {energy_removed}, pending: {pending_amount}");
+            println!("Success! Energy accounted: {energy_removed}, pending: {pending_amount}");
             println!("Remaining frozen TOS: {}", alice_energy.frozen_tos);
-            println!("Remaining total energy: {}", alice_energy.total_energy);
+            println!("Remaining energy: {}", alice_energy.energy);
         }
         Err(e) => {
             println!("Failed: {e}");
@@ -2075,8 +2087,12 @@ fn test_energy_system_demo() {
 
     // Show unlockable amounts
     println!("=== Unlockable Amounts ===");
-    let unlockable_7d = alice_energy.get_unlockable_tos(unlock_topoheight_7d);
-    let unlockable_14d = alice_energy.get_unlockable_tos(unlock_topoheight_14d);
+    let unlockable_7d = alice_energy
+        .get_unlockable_tos(unlock_topoheight_7d)
+        .unwrap();
+    let unlockable_14d = alice_energy
+        .get_unlockable_tos(unlock_topoheight_14d)
+        .unwrap();
 
     println!("Unlockable at 7 days: {unlockable_7d} TOS");
     println!("Unlockable at 14 days: {unlockable_14d} TOS");
@@ -2132,13 +2148,10 @@ fn test_energy_system_demo() {
     println!("=== Verification Assertions ===");
 
     // Verify transaction execution
-    assert!(
-        alice_energy.used_energy > 0,
-        "Energy should be consumed after transaction"
-    );
-    assert!(
-        alice_energy.available_energy() < alice_energy.total_energy,
-        "Available energy should be less than total after consumption"
+    let expected_energy = energy_gained_7d + energy_gained_14d - energy_cost;
+    assert_eq!(
+        alice_energy.energy, expected_energy,
+        "Energy balance should reflect consumption"
     );
 
     // Verify final state after unfreeze
@@ -2147,22 +2160,18 @@ fn test_energy_system_demo() {
         "Should still have frozen TOS after partial unfreeze"
     );
     assert!(
-        alice_energy.total_energy > 0,
-        "Should still have total energy after partial unfreeze"
-    );
-
-    // Verify that energy was properly reduced after unfreeze
-    assert!(
-        alice_energy.total_energy < 70,
-        "Total energy should be reduced after unfreeze"
+        alice_energy.energy > 0,
+        "Should still have energy after partial unfreeze"
     );
     assert!(
-        alice_energy.frozen_tos < 300000000,
+        alice_energy.frozen_tos < 3,
         "Frozen TOS should be reduced after unfreeze"
     );
 
     // Verify that 14-day freeze still has unlockable TOS
-    let unlockable_14d = alice_energy.get_unlockable_tos(unlock_topoheight_14d);
+    let unlockable_14d = alice_energy
+        .get_unlockable_tos(unlock_topoheight_14d)
+        .unwrap();
     assert!(
         unlockable_14d > 0,
         "Should have unlockable TOS after 14 days"
@@ -2188,7 +2197,7 @@ fn test_energy_fee_transfer_to_uninitialized_address() {
 
     // Initialize only Alice's account state
     chain.set_balance(alice_pubkey.clone(), 1000 * COIN_VALUE); // 1000 TOS
-    chain.set_energy(alice_pubkey.clone(), 0, 1000); // 1000 total energy, 0 used
+    chain.set_energy(alice_pubkey.clone(), 1000); // 1000 total energy, 0 used
     chain.set_nonce(alice_pubkey.clone(), 0);
 
     // Bob's account is NOT initialized (will be created by first transaction)
@@ -2496,7 +2505,7 @@ fn test_energy_fee_transfer_free_account_creation() {
 
     // Initialize Alice with minimal TOS balance but sufficient energy
     chain.set_balance(alice_pubkey.clone(), 50000); // Only 0.0005 TOS
-    chain.set_energy(alice_pubkey.clone(), 0, 1000); // 1000 total energy, 0 used
+    chain.set_energy(alice_pubkey.clone(), 1000); // 1000 total energy, 0 used
     chain.set_nonce(alice_pubkey.clone(), 0);
 
     // Bob's account is NOT initialized
@@ -2506,10 +2515,10 @@ fn test_energy_fee_transfer_free_account_creation() {
         "Alice balance: {} TOS",
         chain.get_balance(&alice_pubkey) as f64 / COIN_VALUE as f64
     );
+    let alice_energy = chain.get_energy(&alice_pubkey);
     println!(
         "Alice energy: used_energy: {}, total_energy: {}",
-        chain.get_energy(&alice_pubkey).0,
-        chain.get_energy(&alice_pubkey).1
+        alice_energy.0, alice_energy.1
     );
     println!(
         "Bob balance: {} TOS",

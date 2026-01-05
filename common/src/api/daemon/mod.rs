@@ -1350,8 +1350,7 @@ pub struct GetEnergyParams<'a> {
 #[derive(Serialize, Deserialize)]
 pub struct GetEnergyResult {
     pub frozen_tos: u64,
-    pub total_energy: u64,
-    pub used_energy: u64,
+    pub energy: u64,
     pub available_energy: u64,
     pub last_update: u64,
     pub freeze_records: Vec<FreezeRecordInfo>,

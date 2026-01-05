@@ -5,7 +5,7 @@ use log::{debug, info, trace, warn};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, mem, sync::Arc};
 use tos_common::{
-    account::Nonce,
+    account::{EnergyResource, Nonce},
     api::daemon::FeeRatesEstimated,
     block::{BlockVersion, TopoHeight},
     config::{BYTES_PER_KB, FEE_PER_KB},
@@ -153,6 +153,7 @@ impl Mempool {
         tx.verify(&hash, &mut state, &tx_cache).await?;
 
         state.consume_energy_for_transaction(&tx).await?;
+        state.apply_energy_payload(&tx).await?;
 
         let (balances, multisig, energy_resource) =
             state.get_sender_cache(tx.get_source()).ok_or_else(|| {
@@ -165,39 +166,14 @@ impl Mempool {
             .collect();
 
         let nonce = tx.get_nonce();
-        // update the cache for this owner
-        if let Some(cache) = self.caches.get_mut(tx.get_source()) {
-            // delete the TX if its in the range of already tracked nonces
-            if log::log_enabled!(log::Level::Debug) {
-                debug!(
-                    "Cache found for owner {} with nonce range {}-{}, nonce = {}",
-                    tx.get_source().as_address(self.mainnet),
-                    cache.get_min(),
-                    cache.get_max(),
-                    nonce
-                );
-            }
-            cache.update(nonce, hash.clone());
-
-            // Update re-computed balances
-            cache.set_balances(balances);
-            cache.set_multisig(multisig);
-            cache.set_energy_resource(energy_resource);
-        } else {
-            let mut txs = IndexSet::new();
-            txs.insert(hash.clone());
-
-            // init the cache
-            let cache = AccountCache {
-                max: nonce,
-                min: nonce,
-                txs,
-                balances,
-                multisig,
-                energy_resource,
-            };
-            self.caches.insert(tx.get_source().clone(), cache);
-        }
+        self.update_cache_for_sender(
+            tx.get_source(),
+            nonce,
+            hash.clone(),
+            balances,
+            multisig,
+            energy_resource,
+        );
 
         let sorted_tx = SortedTx {
             size,
@@ -209,6 +185,48 @@ impl Mempool {
         self.txs.insert(hash, sorted_tx);
 
         Ok(())
+    }
+
+    fn update_cache_for_sender(
+        &mut self,
+        sender: &PublicKey,
+        nonce: Nonce,
+        hash: Arc<Hash>,
+        balances: HashMap<Hash, u64>,
+        multisig: Option<MultiSigPayload>,
+        energy_resource: Option<EnergyResource>,
+    ) {
+        if let Some(cache) = self.caches.get_mut(sender) {
+            if log::log_enabled!(log::Level::Debug) {
+                debug!(
+                    "Cache found for owner {} with nonce range {}-{}, nonce = {}",
+                    sender.as_address(self.mainnet),
+                    cache.get_min(),
+                    cache.get_max(),
+                    nonce
+                );
+            }
+            cache.update(nonce, hash);
+
+            cache.set_balances(balances);
+            cache.set_multisig(multisig);
+            if energy_resource.is_some() {
+                cache.set_energy_resource(energy_resource);
+            }
+        } else {
+            let mut txs = IndexSet::new();
+            txs.insert(hash);
+
+            let cache = AccountCache {
+                max: nonce,
+                min: nonce,
+                txs,
+                balances,
+                multisig,
+                energy_resource,
+            };
+            self.caches.insert(sender.clone(), cache);
+        }
     }
 
     // Remove a TX using its hash from mempool
@@ -760,6 +778,9 @@ impl AccountCache {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use indexmap::IndexSet;
+    use std::collections::HashMap;
+    use tos_common::{config::TOS_ASSET, crypto::KeyPair};
 
     #[test]
     fn test_estimated_fee_rates() {
@@ -803,5 +824,36 @@ mod tests {
         assert_eq!(estimated.medium, (FEE_PER_KB as f64 * 2.5) as u64);
         assert_eq!(estimated.low, FEE_PER_KB * 2);
         assert_eq!(estimated.default, FEE_PER_KB);
+    }
+
+    #[test]
+    fn test_mempool_energy_cache_preserved_on_non_energy_tx() {
+        let mut mempool = Mempool::new(Network::Devnet, true);
+        let sender = KeyPair::new().get_public_key().compress();
+
+        let mut energy_resource = EnergyResource::new();
+        energy_resource.energy = 42;
+
+        let mut balances = HashMap::new();
+        balances.insert(TOS_ASSET, 1000);
+
+        let mut txs = IndexSet::new();
+        txs.insert(Arc::new(Hash::zero()));
+
+        let cache = AccountCache {
+            min: 0,
+            max: 0,
+            txs,
+            balances: balances.clone(),
+            multisig: None,
+            energy_resource: Some(energy_resource),
+        };
+        mempool.caches.insert(sender.clone(), cache);
+
+        let hash = Arc::new(Hash::new([1u8; 32]));
+        mempool.update_cache_for_sender(&sender, 1, hash, balances, None, None);
+
+        let cache = mempool.get_cache_for(&sender).unwrap();
+        assert_eq!(cache.get_energy_resource().unwrap().energy, 42);
     }
 }

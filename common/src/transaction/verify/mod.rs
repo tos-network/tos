@@ -323,6 +323,123 @@ impl Transaction {
         Ok(())
     }
 
+    async fn verify_energy_payload<'a, E, B: BlockchainVerificationState<'a, E>>(
+        &self,
+        payload: &'a EnergyPayload,
+        state: &mut B,
+    ) -> Result<(), VerificationError<E>> {
+        match payload {
+            EnergyPayload::FreezeTos { amount, duration } => {
+                if *amount == 0 {
+                    return Err(VerificationError::AnyError(anyhow!(
+                        "Freeze amount must be greater than zero"
+                    )));
+                }
+
+                if *amount % crate::config::COIN_VALUE != 0 {
+                    return Err(VerificationError::AnyError(anyhow!(
+                        "Freeze amount must be a whole number of TOS"
+                    )));
+                }
+
+                if *amount < crate::config::MIN_FREEZE_TOS_AMOUNT {
+                    return Err(VerificationError::AnyError(anyhow!(
+                        "Freeze amount must be at least 1 TOS"
+                    )));
+                }
+
+                if !duration.is_valid() {
+                    return Err(VerificationError::AnyError(anyhow!(
+                        "Freeze duration must be between 3 and 365 days"
+                    )));
+                }
+            }
+            EnergyPayload::FreezeTosDelegate {
+                delegatees,
+                duration,
+            } => {
+                if delegatees.is_empty() {
+                    return Err(VerificationError::AnyError(anyhow!(
+                        "Delegatees list cannot be empty"
+                    )));
+                }
+
+                if delegatees.len() > crate::config::MAX_DELEGATEES {
+                    return Err(VerificationError::AnyError(anyhow!(
+                        "Too many delegatees (max {})",
+                        crate::config::MAX_DELEGATEES
+                    )));
+                }
+
+                // Check for duplicates and self-delegation
+                let mut seen = std::collections::HashSet::new();
+                for entry in delegatees {
+                    if entry.amount == 0 {
+                        return Err(VerificationError::AnyError(anyhow!(
+                            "Delegation amount must be greater than zero"
+                        )));
+                    }
+
+                    if entry.amount % crate::config::COIN_VALUE != 0 {
+                        return Err(VerificationError::AnyError(anyhow!(
+                            "Delegation amount must be a whole number of TOS"
+                        )));
+                    }
+
+                    if entry.amount < crate::config::MIN_FREEZE_TOS_AMOUNT {
+                        return Err(VerificationError::AnyError(anyhow!(
+                            "Delegation amount must be at least 1 TOS"
+                        )));
+                    }
+
+                    if !seen.insert(&entry.delegatee) {
+                        return Err(VerificationError::AnyError(anyhow!(
+                            "Duplicate delegatee in list"
+                        )));
+                    }
+
+                    // Reject self-delegation (sender cannot delegate to themselves)
+                    if entry.delegatee == self.source {
+                        return Err(VerificationError::AnyError(anyhow!(
+                            "Cannot delegate energy to yourself"
+                        )));
+                    }
+
+                    // Delegatee account must already exist
+                    let delegatee_exists = state.get_account_nonce(&entry.delegatee).await;
+                    if delegatee_exists.is_err() {
+                        return Err(VerificationError::AnyError(anyhow!(
+                            "Delegatee account does not exist: {:?}",
+                            entry.delegatee
+                        )));
+                    }
+                }
+
+                if !duration.is_valid() {
+                    return Err(VerificationError::AnyError(anyhow!(
+                        "Freeze duration must be between 3 and 365 days"
+                    )));
+                }
+            }
+            EnergyPayload::UnfreezeTos { amount, .. } => {
+                if *amount == 0 {
+                    return Err(VerificationError::AnyError(anyhow!(
+                        "Unfreeze amount must be greater than zero"
+                    )));
+                }
+
+                if *amount % crate::config::COIN_VALUE != 0 {
+                    return Err(VerificationError::AnyError(anyhow!(
+                        "Unfreeze amount must be a whole number of TOS"
+                    )));
+                }
+            }
+            EnergyPayload::WithdrawUnfrozen => {}
+        }
+
+        Ok(())
+    }
+
     async fn verify_dynamic_parts<'a, E, B: BlockchainVerificationState<'a, E>>(
         &'a self,
         tx_hash: &'a Hash,
@@ -414,122 +531,9 @@ impl Transaction {
                     .verify()
                     .map_err(|err| VerificationError::ModuleError(format!("{err:#}")))?;
             }
-            TransactionType::Energy(payload) => match payload {
-                EnergyPayload::FreezeTos { amount, duration } => {
-                    if *amount == 0 {
-                        return Err(VerificationError::AnyError(anyhow!(
-                            "Freeze amount must be greater than zero"
-                        )));
-                    }
-
-                    if *amount % crate::config::COIN_VALUE != 0 {
-                        return Err(VerificationError::AnyError(anyhow!(
-                            "Freeze amount must be a whole number of TOS"
-                        )));
-                    }
-
-                    if *amount < crate::config::MIN_FREEZE_TOS_AMOUNT {
-                        return Err(VerificationError::AnyError(anyhow!(
-                            "Freeze amount must be at least 1 TOS"
-                        )));
-                    }
-
-                    if !duration.is_valid() {
-                        return Err(VerificationError::AnyError(anyhow!(
-                            "Freeze duration must be between 3 and 365 days"
-                        )));
-                    }
-                }
-                EnergyPayload::FreezeTosDelegate {
-                    delegatees,
-                    duration,
-                } => {
-                    if delegatees.is_empty() {
-                        return Err(VerificationError::AnyError(anyhow!(
-                            "Delegatees list cannot be empty"
-                        )));
-                    }
-
-                    if delegatees.len() > crate::config::MAX_DELEGATEES {
-                        return Err(VerificationError::AnyError(anyhow!(
-                            "Too many delegatees (max {})",
-                            crate::config::MAX_DELEGATEES
-                        )));
-                    }
-
-                    // Check for duplicates and self-delegation
-                    let mut seen = std::collections::HashSet::new();
-                    for entry in delegatees {
-                        if entry.amount == 0 {
-                            return Err(VerificationError::AnyError(anyhow!(
-                                "Delegation amount must be greater than zero"
-                            )));
-                        }
-
-                        if entry.amount % crate::config::COIN_VALUE != 0 {
-                            return Err(VerificationError::AnyError(anyhow!(
-                                "Delegation amount must be a whole number of TOS"
-                            )));
-                        }
-
-                        if entry.amount < crate::config::MIN_FREEZE_TOS_AMOUNT {
-                            return Err(VerificationError::AnyError(anyhow!(
-                                "Delegation amount must be at least 1 TOS"
-                            )));
-                        }
-
-                        if !seen.insert(&entry.delegatee) {
-                            return Err(VerificationError::AnyError(anyhow!(
-                                "Duplicate delegatee in list"
-                            )));
-                        }
-
-                        // Reject self-delegation (sender cannot delegate to themselves)
-                        if entry.delegatee == self.source {
-                            return Err(VerificationError::AnyError(anyhow!(
-                                "Cannot delegate energy to yourself"
-                            )));
-                        }
-
-                        // Delegatee account must already exist
-                        let delegatee_exists = state.get_account_nonce(&entry.delegatee).await;
-                        if delegatee_exists.is_err() {
-                            return Err(VerificationError::AnyError(anyhow!(
-                                "Delegatee account does not exist: {:?}",
-                                entry.delegatee
-                            )));
-                        }
-                    }
-
-                    if !duration.is_valid() {
-                        return Err(VerificationError::AnyError(anyhow!(
-                            "Freeze duration must be between 3 and 365 days"
-                        )));
-                    }
-                }
-                EnergyPayload::UnfreezeTos { amount, .. } => {
-                    if *amount == 0 {
-                        return Err(VerificationError::AnyError(anyhow!(
-                            "Unfreeze amount must be greater than zero"
-                        )));
-                    }
-
-                    if *amount % crate::config::COIN_VALUE != 0 {
-                        return Err(VerificationError::AnyError(anyhow!(
-                            "Unfreeze amount must be a whole number of TOS"
-                        )));
-                    }
-
-                    if *amount < crate::config::MIN_UNFREEZE_TOS_AMOUNT {
-                        return Err(VerificationError::AnyError(anyhow!(
-                            "Unfreeze amount must be at least 1 TOS"
-                        )));
-                    }
-                }
-                EnergyPayload::WithdrawUnfrozen => {
-                    // No additional validation needed - amount is determined at apply time
-                }
-            },
+            TransactionType::Energy(payload) => {
+                self.verify_energy_payload(payload, state).await?;
+            }
             TransactionType::AIMining(_) => {
                 // AI Mining transactions don't require special verification beyond basic checks for now
             }
@@ -1508,12 +1512,15 @@ impl Transaction {
             // Validate that Energy fee type cannot be used for transfers to new addresses
             if let TransactionType::Transfers(transfers) = &self.data {
                 for transfer in transfers {
-                    // Try to get the account nonce to check if account exists
-                    // If account doesn't exist, this will fail with AccountNotFound error
-                    let _nonce = state
-                        .get_account_nonce(transfer.get_destination())
+                    let exists = state
+                        .account_exists(transfer.get_destination())
                         .await
                         .map_err(|_| VerificationError::InvalidFormat)?;
+                    if !exists {
+                        return Err(VerificationError::AnyError(anyhow::anyhow!(
+                            "Energy fee cannot be used for transfers to new addresses"
+                        )));
+                    }
                 }
             }
         }
@@ -1698,8 +1705,8 @@ impl Transaction {
                     .verify()
                     .map_err(|err| VerificationError::ModuleError(format!("{err:#}")))?;
             }
-            TransactionType::Energy(_) => {
-                // Energy transactions don't require special verification beyond basic checks
+            TransactionType::Energy(payload) => {
+                self.verify_energy_payload(payload, state).await?;
             }
             TransactionType::AIMining(_) => {
                 // AI Mining transactions don't require special verification beyond basic checks for now
@@ -2724,10 +2731,7 @@ impl Transaction {
                     .map_err(VerificationError::State)?;
 
                 if let Some(mut energy_resource) = energy_resource {
-                    let topoheight = state.get_block().get_height();
-                    let network = state.get_network();
-                    energy_resource.clear_pending_energy_if_ready(topoheight);
-                    energy_resource.maybe_reset_energy(topoheight, &network);
+                    let topoheight = state.get_verification_topoheight();
 
                     // Check if user has enough energy
                     if !energy_resource.has_enough_energy(topoheight, energy_cost) {
@@ -2873,7 +2877,7 @@ impl Transaction {
                         // - Prioritizes recycling TOS from expired freeze records
                         // - Recycled TOS preserves existing energy (no new energy)
                         // - Only TOS from balance generates new energy
-                        let topoheight = state.get_block().get_height();
+                        let topoheight = state.get_verification_topoheight();
                         let network = state.get_network();
                         let result = energy_resource
                             .freeze_tos_with_recycling(*amount, *duration, topoheight, &network)
@@ -2925,24 +2929,31 @@ impl Transaction {
                             )));
                         }
 
-                        let topoheight = state.get_block().get_height();
+                        let topoheight = state.get_verification_topoheight();
                         let network = state.get_network();
 
                         // Build delegation entries
                         use crate::account::DelegateRecordEntry;
                         let entries: Vec<DelegateRecordEntry> = delegatees
                             .iter()
-                            .map(|d| DelegateRecordEntry {
-                                delegatee: d.delegatee.clone(),
-                                amount: d.amount,
-                                energy: (d.amount / crate::config::COIN_VALUE)
-                                    * duration.reward_multiplier(),
+                            .map(|d| {
+                                let amount_whole = d.amount / crate::config::COIN_VALUE;
+                                let energy = amount_whole
+                                    .checked_mul(duration.reward_multiplier())
+                                    .ok_or(VerificationError::Overflow)?;
+                                Ok(DelegateRecordEntry {
+                                    delegatee: d.delegatee.clone(),
+                                    amount: amount_whole,
+                                    energy,
+                                })
                             })
-                            .collect();
+                            .collect::<Result<_, VerificationError<E>>>()?;
 
                         let total_amount: u64 = delegatees
                             .iter()
-                            .try_fold(0u64, |acc, entry| acc.checked_add(entry.amount))
+                            .try_fold(0u64, |acc, entry| {
+                                acc.checked_add(entry.amount / crate::config::COIN_VALUE)
+                            })
                             .ok_or(VerificationError::Overflow)?;
 
                         // Create delegated freeze record
@@ -2959,8 +2970,10 @@ impl Transaction {
                         // Prepare delegatee updates first to avoid partial writes on overflow
                         let mut updated_delegatees = Vec::with_capacity(delegatees.len());
                         for entry in delegatees.iter() {
-                            let energy = (entry.amount / crate::config::COIN_VALUE)
-                                * duration.reward_multiplier();
+                            let amount_whole = entry.amount / crate::config::COIN_VALUE;
+                            let energy = amount_whole
+                                .checked_mul(duration.reward_multiplier())
+                                .ok_or(VerificationError::Overflow)?;
 
                             let delegatee_resource = state
                                 .get_energy_resource(Cow::Borrowed(&entry.delegatee))
@@ -3019,87 +3032,88 @@ impl Transaction {
                                 )));
                             }
 
-                            let topoheight = state.get_block().get_height();
+                            let topoheight = state.get_verification_topoheight();
                             let network = state.get_network();
 
                             if *from_delegation {
                                 // Unfreeze from delegated records
                                 // This removes energy from delegatees and creates pending unfreeze for delegator
-                                let (delegatee_key, energy_removed, _pending_amount) = if let Some(
-                                    delegatee_address,
-                                ) =
-                                    delegatee_address.as_ref()
-                                {
-                                    energy_resource
-                                        .unfreeze_delegated_entry(
-                                            *amount,
-                                            topoheight,
-                                            *record_index,
-                                            delegatee_address,
-                                            &network,
-                                        )
-                                        .map_err(|e| {
-                                            VerificationError::AnyError(anyhow::anyhow!("{e}"))
-                                        })?
-                                } else {
-                                    if energy_resource.delegated_records.is_empty() {
-                                        return Err(VerificationError::AnyError(anyhow::anyhow!(
-                                            "No delegated records found"
-                                        )));
-                                    }
-
-                                    let record_idx = match *record_index {
-                                        Some(idx) => {
-                                            let idx = idx as usize;
-                                            if idx >= energy_resource.delegated_records.len() {
-                                                return Err(VerificationError::AnyError(
-                                                    anyhow::anyhow!("Record index out of bounds"),
-                                                ));
-                                            }
-                                            idx
+                                let (_delegatee_key, _energy_removed, _pending_amount) =
+                                    if let Some(delegatee_address) = delegatee_address.as_ref() {
+                                        energy_resource
+                                            .unfreeze_delegated_entry(
+                                                *amount,
+                                                topoheight,
+                                                *record_index,
+                                                delegatee_address,
+                                                &network,
+                                            )
+                                            .map_err(|e| {
+                                                VerificationError::AnyError(anyhow::anyhow!("{e}"))
+                                            })?
+                                    } else {
+                                        if energy_resource.delegated_records.is_empty() {
+                                            return Err(VerificationError::AnyError(
+                                                anyhow::anyhow!("No delegated records found"),
+                                            ));
                                         }
-                                        None => {
-                                            if energy_resource.delegated_records.len() > 1 {
-                                                return Err(VerificationError::AnyError(
+
+                                        let record_idx = match *record_index {
+                                            Some(idx) => {
+                                                let idx = idx as usize;
+                                                if idx >= energy_resource.delegated_records.len() {
+                                                    return Err(VerificationError::AnyError(
+                                                        anyhow::anyhow!(
+                                                            "Record index out of bounds"
+                                                        ),
+                                                    ));
+                                                }
+                                                idx
+                                            }
+                                            None => {
+                                                if energy_resource.delegated_records.len() > 1 {
+                                                    return Err(VerificationError::AnyError(
                                                         anyhow::anyhow!(
                                                             "Multiple delegation records exist, record_index required"
                                                         ),
                                                     ));
+                                                }
+                                                0
                                             }
-                                            0
-                                        }
-                                    };
+                                        };
 
-                                    let record = &energy_resource.delegated_records[record_idx];
-                                    if record.entries.len() > 1 {
-                                        return Err(VerificationError::AnyError(anyhow::anyhow!(
+                                        let record = &energy_resource.delegated_records[record_idx];
+                                        if record.entries.len() > 1 {
+                                            return Err(VerificationError::AnyError(
+                                                anyhow::anyhow!(
                                             "Delegatee address required for batch delegations"
-                                        )));
-                                    }
+                                        ),
+                                            ));
+                                        }
 
-                                    let delegatee = record
-                                        .entries
-                                        .first()
-                                        .ok_or_else(|| {
-                                            VerificationError::AnyError(anyhow::anyhow!(
-                                                "Delegatee not found in record"
-                                            ))
-                                        })?
-                                        .delegatee
-                                        .clone();
+                                        let delegatee = record
+                                            .entries
+                                            .first()
+                                            .ok_or_else(|| {
+                                                VerificationError::AnyError(anyhow::anyhow!(
+                                                    "Delegatee not found in record"
+                                                ))
+                                            })?
+                                            .delegatee
+                                            .clone();
 
-                                    energy_resource
-                                        .unfreeze_delegated_entry(
-                                            *amount,
-                                            topoheight,
-                                            Some(record_idx as u32),
-                                            &delegatee,
-                                            &network,
-                                        )
-                                        .map_err(|e| {
-                                            VerificationError::AnyError(anyhow::anyhow!("{e}"))
-                                        })?
-                                };
+                                        energy_resource
+                                            .unfreeze_delegated_entry(
+                                                *amount,
+                                                topoheight,
+                                                Some(record_idx as u32),
+                                                &delegatee,
+                                                &network,
+                                            )
+                                            .map_err(|e| {
+                                                VerificationError::AnyError(anyhow::anyhow!("{e}"))
+                                            })?
+                                    };
 
                                 // Update sender's energy resource first
                                 state
@@ -3109,29 +3123,6 @@ impl Transaction {
                                     )
                                     .await
                                     .map_err(VerificationError::State)?;
-
-                                // Remove delegated energy from delegatee
-                                let delegatee_resource = state
-                                    .get_energy_resource(Cow::Owned(delegatee_key.clone()))
-                                    .await
-                                    .map_err(VerificationError::State)?;
-
-                                if let Some(mut delegatee_resource) = delegatee_resource {
-                                    delegatee_resource
-                                        .remove_delegated_energy(energy_removed, topoheight)
-                                        .map_err(|e| {
-                                            VerificationError::AnyError(anyhow::anyhow!("{e}"))
-                                        })?;
-
-                                    state
-                                        .set_energy_resource(
-                                            Cow::Owned(delegatee_key),
-                                            delegatee_resource,
-                                        )
-                                        .await
-                                        .map_err(VerificationError::State)?;
-                                }
-                                // If delegatee has no energy resource, nothing to remove
 
                                 if log::log_enabled!(log::Level::Debug) {
                                     debug!("UnfreezeTos (delegation) applied: {amount} TOS moved to pending (14-day cooldown)");
@@ -3174,7 +3165,7 @@ impl Transaction {
                             .map_err(VerificationError::State)?;
 
                         if let Some(mut energy_resource) = energy_resource {
-                            let topoheight = state.get_block().get_height();
+                            let topoheight = state.get_verification_topoheight();
 
                             // Check if there are withdrawable funds
                             let withdrawable = energy_resource
