@@ -1354,6 +1354,8 @@ pub struct GetEnergyResult {
     pub available_energy: u64,
     pub last_update: u64,
     pub freeze_records: Vec<FreezeRecordInfo>,
+    pub delegated_records: Vec<DelegatedFreezeRecordInfo>,
+    pub pending_unfreezes: Vec<PendingUnfreezeInfo>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -1364,6 +1366,33 @@ pub struct FreezeRecordInfo {
     pub unlock_topoheight: u64,
     pub energy_gained: u64,
     pub can_unlock: bool,
+    pub remaining_blocks: u64,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct DelegatedFreezeEntryInfo {
+    pub delegatee: Address,
+    pub amount: u64,
+    pub energy: u64,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct DelegatedFreezeRecordInfo {
+    pub duration: String,
+    pub freeze_topoheight: u64,
+    pub unlock_topoheight: u64,
+    pub total_amount: u64,
+    pub total_energy: u64,
+    pub can_unlock: bool,
+    pub remaining_blocks: u64,
+    pub entries: Vec<DelegatedFreezeEntryInfo>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct PendingUnfreezeInfo {
+    pub amount: u64,
+    pub expire_topoheight: u64,
+    pub can_withdraw: bool,
     pub remaining_blocks: u64,
 }
 

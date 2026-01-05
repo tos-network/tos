@@ -2,6 +2,7 @@ use crate::{
     account::FreezeDuration,
     api::DataElement,
     crypto::{elgamal::CompressedPublicKey, Address, Hash},
+    transaction::DelegationEntry,
 };
 use indexmap::{IndexMap, IndexSet};
 use serde::{Deserialize, Serialize};
@@ -173,11 +174,26 @@ pub struct EnergyBuilder {
     pub amount: u64,
     /// Whether this is a freeze operation (true) or unfreeze operation (false)
     pub is_freeze: bool,
+    /// Whether this is a withdraw operation
+    #[serde(default)]
+    pub is_withdraw: bool,
     /// Freeze duration for freeze operations (3, 7, or 14 days)
     /// This affects the reward multiplier: 1.0x, 1.1x, or 1.2x respectively
     /// Only used when is_freeze is true
     #[serde(default)]
     pub freeze_duration: Option<FreezeDuration>,
+    /// Optional delegatees for delegation freeze
+    #[serde(default)]
+    pub delegatees: Option<Vec<DelegationEntry>>,
+    /// Whether this unfreeze is from delegation
+    #[serde(default)]
+    pub from_delegation: bool,
+    /// Optional delegation record index for unfreeze
+    #[serde(default)]
+    pub record_index: Option<u32>,
+    /// Optional delegatee address for batch delegation unfreeze
+    #[serde(default)]
+    pub delegatee_address: Option<CompressedPublicKey>,
 }
 
 impl EnergyBuilder {
@@ -186,8 +202,35 @@ impl EnergyBuilder {
         Self {
             amount,
             is_freeze: true,
+            is_withdraw: false,
             freeze_duration: Some(duration),
+            delegatees: None,
+            from_delegation: false,
+            record_index: None,
+            delegatee_address: None,
         }
+    }
+
+    /// Create a new delegation freeze builder
+    pub fn freeze_tos_delegate(
+        delegatees: Vec<DelegationEntry>,
+        duration: FreezeDuration,
+    ) -> Result<Self, &'static str> {
+        let total_amount = delegatees
+            .iter()
+            .try_fold(0u64, |acc, entry| acc.checked_add(entry.amount))
+            .ok_or("Delegated amount overflow")?;
+
+        Ok(Self {
+            amount: total_amount,
+            is_freeze: true,
+            is_withdraw: false,
+            freeze_duration: Some(duration),
+            delegatees: Some(delegatees),
+            from_delegation: false,
+            record_index: None,
+            delegatee_address: None,
+        })
     }
 
     /// Create a new unfreeze TOS builder
@@ -195,7 +238,44 @@ impl EnergyBuilder {
         Self {
             amount,
             is_freeze: false,
+            is_withdraw: false,
             freeze_duration: None,
+            delegatees: None,
+            from_delegation: false,
+            record_index: None,
+            delegatee_address: None,
+        }
+    }
+
+    /// Create a new delegation unfreeze builder
+    pub fn unfreeze_tos_delegated(
+        amount: u64,
+        record_index: Option<u32>,
+        delegatee_address: Option<CompressedPublicKey>,
+    ) -> Self {
+        Self {
+            amount,
+            is_freeze: false,
+            is_withdraw: false,
+            freeze_duration: None,
+            delegatees: None,
+            from_delegation: true,
+            record_index,
+            delegatee_address,
+        }
+    }
+
+    /// Create a new withdraw builder
+    pub fn withdraw_unfrozen() -> Self {
+        Self {
+            amount: 0,
+            is_freeze: false,
+            is_withdraw: true,
+            freeze_duration: None,
+            delegatees: None,
+            from_delegation: false,
+            record_index: None,
+            delegatee_address: None,
         }
     }
 
@@ -217,12 +297,50 @@ impl EnergyBuilder {
 
     /// Validate the builder configuration
     pub fn validate(&self) -> Result<(), &'static str> {
+        if self.is_withdraw {
+            if self.amount != 0 {
+                return Err("Withdraw should not specify amount");
+            }
+            if self.is_freeze || self.freeze_duration.is_some() {
+                return Err("Withdraw should not specify freeze fields");
+            }
+            return Ok(());
+        }
+
         if self.amount == 0 {
             return Err("Amount must be greater than 0");
         }
 
         // Check minimum freeze amount (1 TOS) and ensure whole TOS amounts
         if self.is_freeze {
+            if let Some(delegatees) = self.delegatees.as_ref() {
+                if delegatees.is_empty() {
+                    return Err("Delegatees list cannot be empty");
+                }
+                let total_amount = delegatees
+                    .iter()
+                    .try_fold(0u64, |acc, entry| acc.checked_add(entry.amount))
+                    .ok_or("Delegated amount overflow")?;
+                if total_amount != self.amount {
+                    return Err("Delegated amounts must sum to total amount");
+                }
+                if delegatees.len() > crate::config::MAX_DELEGATEES {
+                    return Err("Too many delegatees");
+                }
+                let mut seen = std::collections::HashSet::new();
+                for entry in delegatees {
+                    if !seen.insert(entry.delegatee.clone()) {
+                        return Err("Duplicate delegatee");
+                    }
+                    if entry.amount < crate::config::MIN_FREEZE_TOS_AMOUNT {
+                        return Err("Delegation amount must be at least 1 TOS");
+                    }
+                    if !entry.amount.is_multiple_of(crate::config::COIN_VALUE) {
+                        return Err("Delegation amount must be a whole number of TOS");
+                    }
+                }
+            }
+
             if self.amount < crate::config::MIN_FREEZE_TOS_AMOUNT {
                 return Err("Minimum freeze amount is 1 TOS");
             }
@@ -256,6 +374,10 @@ impl EnergyBuilder {
             if self.freeze_duration.is_some() {
                 return Err("Freeze duration should not be specified for unfreeze operations");
             }
+
+            if !self.from_delegation && self.delegatee_address.is_some() {
+                return Err("delegatee_address requires from_delegation=true");
+            }
         }
 
         Ok(())
@@ -266,6 +388,7 @@ impl EnergyBuilder {
 mod tests {
     use super::*;
     use crate::config::COIN_VALUE;
+    use crate::crypto::KeyPair;
 
     #[test]
     fn test_energy_builder_freeze() {
@@ -316,7 +439,12 @@ mod tests {
         let builder = EnergyBuilder {
             amount: 1000,
             is_freeze: true,
+            is_withdraw: false,
             freeze_duration: None,
+            delegatees: None,
+            from_delegation: false,
+            record_index: None,
+            delegatee_address: None,
         };
         assert!(builder.validate().is_err());
 
@@ -324,7 +452,12 @@ mod tests {
         let builder = EnergyBuilder {
             amount: 100000000,
             is_freeze: true,
+            is_withdraw: false,
             freeze_duration: Some(FreezeDuration { days: 2 }),
+            delegatees: None,
+            from_delegation: false,
+            record_index: None,
+            delegatee_address: None,
         };
         assert!(builder.validate().is_err());
 
@@ -332,7 +465,12 @@ mod tests {
         let builder = EnergyBuilder {
             amount: 100000000,
             is_freeze: true,
+            is_withdraw: false,
             freeze_duration: Some(FreezeDuration { days: 366 }),
+            delegatees: None,
+            from_delegation: false,
+            record_index: None,
+            delegatee_address: None,
         };
         assert!(builder.validate().is_err());
 
@@ -341,7 +479,12 @@ mod tests {
         let builder = EnergyBuilder {
             amount: 1000,
             is_freeze: false,
+            is_withdraw: false,
             freeze_duration: Some(duration),
+            delegatees: None,
+            from_delegation: false,
+            record_index: None,
+            delegatee_address: None,
         };
         assert!(builder.validate().is_err());
 
@@ -351,6 +494,72 @@ mod tests {
 
         // Test unfreeze with decimal amount (1.1 TOS)
         let builder = EnergyBuilder::unfreeze_tos(110000000); // 1.1 TOS
+        assert!(builder.validate().is_err());
+    }
+
+    #[test]
+    fn test_energy_builder_delegatee_validation() {
+        let duration = FreezeDuration::new(7).unwrap();
+        let delegatee_a = KeyPair::new().get_public_key().compress();
+        let delegatee_b = KeyPair::new().get_public_key().compress();
+
+        let entries = vec![
+            DelegationEntry {
+                delegatee: delegatee_a.clone(),
+                amount: crate::config::COIN_VALUE,
+            },
+            DelegationEntry {
+                delegatee: delegatee_b.clone(),
+                amount: crate::config::COIN_VALUE,
+            },
+        ];
+
+        let builder = EnergyBuilder::freeze_tos_delegate(entries.clone(), duration).unwrap();
+        assert!(builder.validate().is_ok());
+
+        let builder = EnergyBuilder {
+            amount: crate::config::COIN_VALUE,
+            is_freeze: true,
+            is_withdraw: false,
+            freeze_duration: Some(duration),
+            delegatees: Some(entries.clone()),
+            from_delegation: false,
+            record_index: None,
+            delegatee_address: None,
+        };
+        assert!(builder.validate().is_err());
+
+        let builder = EnergyBuilder {
+            amount: 2 * crate::config::COIN_VALUE,
+            is_freeze: true,
+            is_withdraw: false,
+            freeze_duration: Some(duration),
+            delegatees: Some(vec![]),
+            from_delegation: false,
+            record_index: None,
+            delegatee_address: None,
+        };
+        assert!(builder.validate().is_err());
+
+        let builder = EnergyBuilder {
+            amount: 2 * crate::config::COIN_VALUE,
+            is_freeze: true,
+            is_withdraw: false,
+            freeze_duration: Some(duration),
+            delegatees: Some(vec![
+                DelegationEntry {
+                    delegatee: delegatee_a.clone(),
+                    amount: crate::config::COIN_VALUE,
+                },
+                DelegationEntry {
+                    delegatee: delegatee_a,
+                    amount: crate::config::COIN_VALUE,
+                },
+            ]),
+            from_delegation: false,
+            record_index: None,
+            delegatee_address: None,
+        };
         assert!(builder.validate().is_err());
     }
 
@@ -482,7 +691,7 @@ mod tests {
 
     // UnoTransferBuilder tests
 
-    use crate::crypto::{elgamal::KeyPair, Address, AddressType};
+    use crate::crypto::{Address, AddressType};
 
     fn create_test_address() -> Address {
         let keypair = KeyPair::new();

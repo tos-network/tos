@@ -2350,7 +2350,10 @@ async fn get_account_history<S: Storage>(
                                 delegatees,
                                 duration,
                             } => {
-                                let total_amount: u64 = delegatees.iter().map(|d| d.amount).sum();
+                                let total_amount = delegatees
+                                    .iter()
+                                    .try_fold(0u64, |acc, d| acc.checked_add(d.amount))
+                                    .unwrap_or(u64::MAX);
                                 history.push(AccountHistoryEntry {
                                     topoheight: topo,
                                     hash: tx_hash.clone(),
@@ -3154,11 +3157,12 @@ async fn get_energy<S: Storage>(context: &Context, body: Value) -> Result<Value,
     let storage = blockchain.get_storage().read().await;
 
     // Get current topoheight
-    let current_topoheight = storage.get_top_height().await?;
+    let current_topoheight = storage.get_top_topoheight().await?;
 
     // Get energy resource for the account
     let pubkey = params.address.into_owned().to_public_key();
     let energy_resource = storage.get_energy_resource(&pubkey).await?;
+    let mainnet = blockchain.get_network().is_mainnet();
 
     let result = if let Some(energy_resource) = energy_resource {
         // Convert freeze records to FreezeRecordInfo format
@@ -3183,6 +3187,63 @@ async fn get_energy<S: Storage>(context: &Context, body: Value) -> Result<Value,
             })
             .collect::<Vec<_>>();
 
+        let delegated_records = energy_resource
+            .delegated_records
+            .iter()
+            .map(|record| {
+                let can_unlock = record.can_unlock(current_topoheight);
+                DelegatedFreezeRecordInfo {
+                    duration: format!("{}_days", record.duration.get_days()),
+                    freeze_topoheight: record.freeze_topoheight,
+                    unlock_topoheight: record.unlock_topoheight,
+                    total_amount: record
+                        .total_amount
+                        .checked_mul(tos_common::config::COIN_VALUE)
+                        .unwrap_or(u64::MAX),
+                    total_energy: record.total_energy,
+                    can_unlock,
+                    remaining_blocks: if can_unlock {
+                        0
+                    } else {
+                        record.unlock_topoheight.saturating_sub(current_topoheight)
+                    },
+                    entries: record
+                        .entries
+                        .iter()
+                        .map(|entry| DelegatedFreezeEntryInfo {
+                            delegatee: entry.delegatee.clone().to_address(mainnet),
+                            amount: entry
+                                .amount
+                                .checked_mul(tos_common::config::COIN_VALUE)
+                                .unwrap_or(u64::MAX),
+                            energy: entry.energy,
+                        })
+                        .collect(),
+                }
+            })
+            .collect::<Vec<_>>();
+
+        let pending_unfreezes = energy_resource
+            .pending_unfreezes
+            .iter()
+            .map(|pending| {
+                let can_withdraw = pending.is_expired(current_topoheight);
+                PendingUnfreezeInfo {
+                    amount: pending
+                        .amount
+                        .checked_mul(tos_common::config::COIN_VALUE)
+                        .unwrap_or(u64::MAX),
+                    expire_topoheight: pending.expire_topoheight,
+                    can_withdraw,
+                    remaining_blocks: if can_withdraw {
+                        0
+                    } else {
+                        pending.expire_topoheight.saturating_sub(current_topoheight)
+                    },
+                }
+            })
+            .collect::<Vec<_>>();
+
         json!(GetEnergyResult {
             frozen_tos: energy_resource
                 .frozen_tos
@@ -3192,6 +3253,8 @@ async fn get_energy<S: Storage>(context: &Context, body: Value) -> Result<Value,
             available_energy: energy_resource.available_energy_at(current_topoheight),
             last_update: energy_resource.last_update,
             freeze_records,
+            delegated_records,
+            pending_unfreezes,
         })
     } else {
         json!(GetEnergyResult {
@@ -3200,6 +3263,8 @@ async fn get_energy<S: Storage>(context: &Context, body: Value) -> Result<Value,
             available_energy: 0,
             last_update: current_topoheight,
             freeze_records: Vec::new(),
+            delegated_records: Vec::new(),
+            pending_unfreezes: Vec::new(),
         })
     };
 

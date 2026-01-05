@@ -23,6 +23,7 @@ use super::{
     TxVersion, EXTRA_DATA_LIMIT_SIZE, EXTRA_DATA_LIMIT_SUM_SIZE, MAX_MULTISIG_PARTICIPANTS,
     MAX_TRANSFER_COUNT,
 };
+use crate::account::FreezeDuration;
 use crate::ai_mining::AIMiningPayload;
 use crate::{
     config::{BURN_PER_CONTRACT, MAX_GAS_USAGE_PER_TX, TOS_ASSET, UNO_ASSET},
@@ -312,33 +313,32 @@ impl TransactionBuilder {
             }
             TransactionTypeBuilder::Energy(payload) => {
                 // Convert EnergyBuilder to EnergyPayload for size calculation
-                let energy_payload = match payload {
-                    EnergyBuilder {
-                        amount,
-                        is_freeze: true,
-                        freeze_duration: Some(duration),
-                    } => EnergyPayload::FreezeTos {
-                        amount: *amount,
-                        duration: *duration,
-                    },
-                    EnergyBuilder {
-                        amount,
-                        is_freeze: false,
-                        freeze_duration: None,
-                    } => EnergyPayload::UnfreezeTos {
-                        amount: *amount,
-                        from_delegation: false,
-                        record_index: None,
-                        delegatee_address: None,
-                    },
-                    _ => {
-                        // This should not happen due to validation, but handle gracefully
-                        EnergyPayload::UnfreezeTos {
-                            amount: 0,
-                            from_delegation: false,
-                            record_index: None,
-                            delegatee_address: None,
+                let energy_payload = if payload.is_withdraw {
+                    EnergyPayload::WithdrawUnfrozen
+                } else if payload.is_freeze {
+                    if let Some(delegatees) = payload.delegatees.clone() {
+                        let duration = payload
+                            .freeze_duration
+                            .unwrap_or_else(FreezeDuration::default);
+                        EnergyPayload::FreezeTosDelegate {
+                            delegatees,
+                            duration,
                         }
+                    } else {
+                        let duration = payload
+                            .freeze_duration
+                            .unwrap_or_else(FreezeDuration::default);
+                        EnergyPayload::FreezeTos {
+                            amount: payload.amount,
+                            duration,
+                        }
+                    }
+                } else {
+                    EnergyPayload::UnfreezeTos {
+                        amount: payload.amount,
+                        from_delegation: payload.from_delegation,
+                        record_index: payload.record_index,
+                        delegatee_address: payload.delegatee_address.clone(),
                     }
                 };
 
@@ -446,6 +446,10 @@ impl TransactionBuilder {
         &self,
         state: &mut B,
     ) -> Result<u64, GenerationError<B::Error>> {
+        if matches!(self.data, TransactionTypeBuilder::Energy(_)) {
+            return Ok(0);
+        }
+
         let calculated_fee = match self.fee_builder {
             // If the value is set, use it
             FeeBuilder::Value(value) => value,
@@ -469,7 +473,6 @@ impl TransactionBuilder {
                         (0, 0)
                     };
 
-                // Check if we should use energy fees for transfer transactions
                 let expected_fee = if let Some(ref fee_type) = self.fee_type {
                     if *fee_type == FeeType::Energy
                         && matches!(self.data, TransactionTypeBuilder::Transfers(_))
@@ -896,29 +899,32 @@ impl TransactionBuilder {
                 })
             }
             TransactionTypeBuilder::Energy(ref payload) => {
-                let energy_payload = match payload {
-                    EnergyBuilder {
-                        amount,
-                        is_freeze: true,
-                        freeze_duration: Some(duration),
-                    } => EnergyPayload::FreezeTos {
-                        amount: *amount,
-                        duration: *duration,
-                    },
-                    EnergyBuilder {
-                        amount,
-                        is_freeze: false,
-                        freeze_duration: None,
-                    } => EnergyPayload::UnfreezeTos {
-                        amount: *amount,
-                        from_delegation: false,
-                        record_index: None,
-                        delegatee_address: None,
-                    },
-                    _ => {
-                        return Err(GenerationError::State(
-                            "Invalid EnergyBuilder configuration".into(),
-                        ));
+                let energy_payload = if payload.is_withdraw {
+                    EnergyPayload::WithdrawUnfrozen
+                } else if payload.is_freeze {
+                    if let Some(delegatees) = payload.delegatees.clone() {
+                        let duration = payload.freeze_duration.ok_or_else(|| {
+                            GenerationError::State("Freeze duration is required".into())
+                        })?;
+                        EnergyPayload::FreezeTosDelegate {
+                            delegatees,
+                            duration,
+                        }
+                    } else {
+                        let duration = payload.freeze_duration.ok_or_else(|| {
+                            GenerationError::State("Freeze duration is required".into())
+                        })?;
+                        EnergyPayload::FreezeTos {
+                            amount: payload.amount,
+                            duration,
+                        }
+                    }
+                } else {
+                    EnergyPayload::UnfreezeTos {
+                        amount: payload.amount,
+                        from_delegation: payload.from_delegation,
+                        record_index: payload.record_index,
+                        delegatee_address: payload.delegatee_address.clone(),
                     }
                 };
                 TransactionType::Energy(energy_payload)
@@ -1779,6 +1785,38 @@ pub fn compute_contract_address(deployer: &CompressedPublicKey, bytecode: &[u8])
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[derive(Default)]
+    struct DummyFeeState;
+
+    impl FeeHelper for DummyFeeState {
+        type Error = ();
+
+        fn account_exists(&self, _account: &CompressedPublicKey) -> Result<bool, Self::Error> {
+            Ok(true)
+        }
+    }
+
+    #[test]
+    fn test_energy_tx_default_fee_is_zero() {
+        let duration = FreezeDuration::new(3).unwrap();
+        let energy_builder = EnergyBuilder::freeze_tos(1 * crate::config::COIN_VALUE, duration);
+
+        let builder = TransactionBuilder::new(
+            TxVersion::T0,
+            0,
+            CompressedPublicKey::new(
+                tos_crypto::curve25519_dalek::ristretto::CompressedRistretto::default(),
+            ),
+            None,
+            TransactionTypeBuilder::Energy(energy_builder),
+            FeeBuilder::default(),
+        );
+
+        let mut state = DummyFeeState::default();
+        let fee = builder.estimate_fees(&mut state).unwrap();
+        assert_eq!(fee, 0);
+    }
 
     #[test]
     fn test_energy_fee_type_validation() {

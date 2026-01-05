@@ -330,6 +330,12 @@ impl Transaction {
     ) -> Result<(), VerificationError<E>> {
         match payload {
             EnergyPayload::FreezeTos { amount, duration } => {
+                if self.fee != 0 {
+                    return Err(VerificationError::AnyError(anyhow!(
+                        "Energy transactions must have zero fee"
+                    )));
+                }
+
                 if *amount == 0 {
                     return Err(VerificationError::AnyError(anyhow!(
                         "Freeze amount must be greater than zero"
@@ -358,6 +364,12 @@ impl Transaction {
                 delegatees,
                 duration,
             } => {
+                if self.fee != 0 {
+                    return Err(VerificationError::AnyError(anyhow!(
+                        "Energy transactions must have zero fee"
+                    )));
+                }
+
                 if delegatees.is_empty() {
                     return Err(VerificationError::AnyError(anyhow!(
                         "Delegatees list cannot be empty"
@@ -421,7 +433,18 @@ impl Transaction {
                     )));
                 }
             }
-            EnergyPayload::UnfreezeTos { amount, .. } => {
+            EnergyPayload::UnfreezeTos {
+                amount,
+                from_delegation,
+                delegatee_address,
+                ..
+            } => {
+                if self.fee != 0 {
+                    return Err(VerificationError::AnyError(anyhow!(
+                        "Energy transactions must have zero fee"
+                    )));
+                }
+
                 if *amount == 0 {
                     return Err(VerificationError::AnyError(anyhow!(
                         "Unfreeze amount must be greater than zero"
@@ -433,8 +456,20 @@ impl Transaction {
                         "Unfreeze amount must be a whole number of TOS"
                     )));
                 }
+
+                if !from_delegation && delegatee_address.is_some() {
+                    return Err(VerificationError::AnyError(anyhow!(
+                        "Invalid delegatee_address usage"
+                    )));
+                }
             }
-            EnergyPayload::WithdrawUnfrozen => {}
+            EnergyPayload::WithdrawUnfrozen => {
+                if self.fee != 0 {
+                    return Err(VerificationError::AnyError(anyhow!(
+                        "Energy transactions must have zero fee"
+                    )));
+                }
+            }
         }
 
         Ok(())
@@ -3018,6 +3053,12 @@ impl Transaction {
                         record_index,
                         delegatee_address,
                     } => {
+                        if !*from_delegation && delegatee_address.is_some() {
+                            return Err(VerificationError::AnyError(anyhow::anyhow!(
+                                "Invalid delegatee_address usage"
+                            )));
+                        }
+
                         // Get current energy resource for the account
                         let energy_resource = state
                             .get_energy_resource(Cow::Borrowed(&self.source))

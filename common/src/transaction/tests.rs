@@ -1224,7 +1224,12 @@ async fn test_unfreeze_tos_balance_refund() {
         let data = TransactionTypeBuilder::Energy(EnergyBuilder {
             amount: _unfreeze_amount,
             is_freeze: false,
+            is_withdraw: false,
             freeze_duration: None,
+            delegatees: None,
+            from_delegation: false,
+            record_index: None,
+            delegatee_address: None,
         });
 
         let builder = TransactionBuilder::new(
@@ -1307,6 +1312,76 @@ async fn test_unfreeze_tos_balance_refund() {
     println!("   Initial balance:     {initial_balance}");
     println!("   Balance after:       {alice_balance_after_unfreeze}");
     println!("   Note: TOS is in pending state, use WithdrawUnfrozen after 14 days");
+}
+
+#[tokio::test]
+async fn test_unfreeze_rejects_delegatee_address_without_delegation() {
+    let mut alice = Account::new();
+    alice.set_balance(TOS_ASSET, 10 * COIN_VALUE);
+    let delegatee = KeyPair::new().get_public_key().compress();
+
+    let payload = EnergyPayload::UnfreezeTos {
+        amount: COIN_VALUE,
+        from_delegation: false,
+        record_index: None,
+        delegatee_address: Some(delegatee),
+    };
+
+    let unsigned = UnsignedTransaction::new_with_fee_type(
+        TxVersion::T0,
+        0,
+        alice.keypair.get_public_key().compress(),
+        TransactionType::Energy(payload),
+        0,
+        FeeType::TOS,
+        alice.nonce,
+        Reference {
+            topoheight: 0,
+            hash: Hash::zero(),
+        },
+    );
+    let tx = unsigned.finalize(&alice.keypair);
+    let tx_hash = tx.hash();
+
+    let mut state = ChainState::new();
+    let mut balances = HashMap::new();
+    balances.insert(TOS_ASSET, 10 * COIN_VALUE);
+    state.accounts.insert(
+        alice.keypair.get_public_key().compress(),
+        AccountChainState {
+            balances,
+            nonce: alice.nonce,
+        },
+    );
+
+    let result = Arc::new(tx).verify(&tx_hash, &mut state, &NoZKPCache).await;
+    assert!(result.is_err(), "expected error, got: {result:?}");
+}
+
+#[tokio::test]
+async fn test_energy_tx_rejects_non_zero_fee() {
+    let alice = Account::new();
+    let payload = EnergyPayload::WithdrawUnfrozen;
+
+    let unsigned = UnsignedTransaction::new_with_fee_type(
+        TxVersion::T0,
+        0,
+        alice.keypair.get_public_key().compress(),
+        TransactionType::Energy(payload),
+        1,
+        FeeType::TOS,
+        alice.nonce,
+        Reference {
+            topoheight: 0,
+            hash: Hash::zero(),
+        },
+    );
+    let tx = unsigned.finalize(&alice.keypair);
+    let tx_hash = tx.hash();
+
+    let mut state = ChainState::new();
+    let result = Arc::new(tx).verify(&tx_hash, &mut state, &NoZKPCache).await;
+    assert!(result.is_err(), "expected error, got: {result:?}");
 }
 
 #[tokio::test]

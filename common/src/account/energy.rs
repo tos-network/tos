@@ -1122,7 +1122,10 @@ impl EnergyResource {
         let total_energy = record.total_energy;
 
         // Update frozen TOS (delegator's TOS is locked)
-        self.frozen_tos = self.frozen_tos.saturating_add(total_amount);
+        self.frozen_tos = self
+            .frozen_tos
+            .checked_add(total_amount)
+            .ok_or_else(|| "Frozen TOS overflow".to_string())?;
         self.last_update = topoheight;
 
         // Add delegated freeze record
@@ -1153,6 +1156,9 @@ impl EnergyResource {
 
         if !self.can_add_pending_unfreeze() {
             return Err("Maximum pending unfreezes reached".to_string());
+        }
+        if self.frozen_tos < whole_tos_amount {
+            return Err("Insufficient frozen TOS".to_string());
         }
 
         // Calculate total delegated TOS
@@ -1255,7 +1261,10 @@ impl EnergyResource {
         }
 
         // Update frozen TOS
-        self.frozen_tos = self.frozen_tos.saturating_sub(whole_tos_amount);
+        self.frozen_tos = self
+            .frozen_tos
+            .checked_sub(whole_tos_amount)
+            .ok_or_else(|| "Frozen TOS underflow".to_string())?;
         self.last_update = current_topoheight;
 
         // Create pending unfreeze
@@ -1316,6 +1325,9 @@ impl EnergyResource {
 
         if !self.can_add_pending_unfreeze() {
             return Err("Maximum pending unfreezes reached".to_string());
+        }
+        if self.frozen_tos < whole_tos_amount {
+            return Err("Insufficient frozen TOS".to_string());
         }
 
         // Determine which record to use
@@ -1397,7 +1409,10 @@ impl EnergyResource {
         }
 
         // Update frozen TOS
-        self.frozen_tos = self.frozen_tos.saturating_sub(whole_tos_amount);
+        self.frozen_tos = self
+            .frozen_tos
+            .checked_sub(whole_tos_amount)
+            .ok_or_else(|| "Frozen TOS underflow".to_string())?;
         self.last_update = current_topoheight;
 
         // Create pending unfreeze
@@ -3023,7 +3038,8 @@ mod tests {
         );
 
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Amount exceeds entry amount"));
+        // frozen_tos check fails first (5 < 10)
+        assert!(result.unwrap_err().contains("Insufficient frozen TOS"));
     }
 
     #[test]
@@ -3324,6 +3340,62 @@ mod tests {
         let mut resource = EnergyResource::new();
         resource.energy = u64::MAX;
         assert!(resource.add_delegated_energy(1, 0).is_err());
+    }
+
+    #[test]
+    fn test_delegated_freeze_frozen_tos_overflow() {
+        use crate::crypto::KeyPair;
+
+        let mut resource = EnergyResource::new();
+        resource.frozen_tos = u64::MAX;
+
+        let duration = FreezeDuration::new(3).unwrap();
+        let delegatee = KeyPair::new().get_public_key().compress();
+        let entry = DelegateRecordEntry {
+            delegatee,
+            amount: 1,
+            energy: 6,
+        };
+
+        let result = resource.create_delegated_freeze(
+            vec![entry],
+            duration,
+            1,
+            0,
+            &crate::network::Network::Mainnet,
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Frozen TOS overflow"));
+    }
+
+    #[test]
+    fn test_delegated_unfreeze_insufficient_frozen_tos() {
+        use crate::crypto::KeyPair;
+
+        let mut resource = EnergyResource::new();
+        let duration = FreezeDuration::new(3).unwrap();
+        let network = crate::network::Network::Mainnet;
+        let delegatee = KeyPair::new().get_public_key().compress();
+
+        let entry = DelegateRecordEntry {
+            delegatee: delegatee.clone(),
+            amount: 2,
+            energy: 12,
+        };
+        resource
+            .create_delegated_freeze(vec![entry], duration, 2, 0, &network)
+            .unwrap();
+
+        resource.frozen_tos = 0;
+        let result = resource.unfreeze_delegated_entry(
+            crate::config::COIN_VALUE,
+            duration.duration_in_blocks_for_network(&network),
+            Some(0),
+            &delegatee,
+            &network,
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Insufficient frozen TOS"));
     }
 
     #[test]

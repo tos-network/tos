@@ -413,6 +413,8 @@ impl<'a, S: Storage> MempoolState<'a, S> {
                     .create_delegated_freeze(entries, *duration, total_amount, topoheight, &network)
                     .map_err(|e| BlockchainError::Any(anyhow!(e)))?;
 
+                let mut staged_updates: Vec<(&PublicKey, EnergyResource)> =
+                    Vec::with_capacity(delegatees.len());
                 for entry in delegatees.iter() {
                     let amount_whole = entry.amount / COIN_VALUE;
                     let energy = amount_whole
@@ -420,10 +422,19 @@ impl<'a, S: Storage> MempoolState<'a, S> {
                         .ok_or(BlockchainError::Overflow)?;
                     let delegatee_resource = self
                         .internal_get_sender_energy_resource(&entry.delegatee)
-                        .await?;
-                    delegatee_resource
+                        .await?
+                        .clone();
+                    let mut updated_resource = delegatee_resource;
+                    updated_resource
                         .add_delegated_energy(energy, topoheight)
                         .map_err(|e| BlockchainError::Any(anyhow!(e)))?;
+                    staged_updates.push((&entry.delegatee, updated_resource));
+                }
+
+                for (delegatee, updated_resource) in staged_updates {
+                    let delegatee_resource =
+                        self.internal_get_sender_energy_resource(delegatee).await?;
+                    *delegatee_resource = updated_resource;
                 }
             }
             EnergyPayload::UnfreezeTos {
@@ -435,6 +446,12 @@ impl<'a, S: Storage> MempoolState<'a, S> {
                 let energy_resource = self
                     .internal_get_sender_energy_resource(tx.get_source())
                     .await?;
+
+                if !*from_delegation && delegatee_address.is_some() {
+                    return Err(BlockchainError::Any(anyhow!(
+                        "Invalid delegatee_address usage"
+                    )));
+                }
 
                 if *from_delegation {
                     let (_delegatee_key, _energy_removed, _pending_amount) =

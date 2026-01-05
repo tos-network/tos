@@ -813,7 +813,8 @@ fn test_batch_delegate_unfreeze_amount_exceeds_entry() {
     );
 
     assert!(result.is_err());
-    assert!(result.unwrap_err().contains("Amount exceeds entry amount"));
+    // frozen_tos check fails first (1 < 2)
+    assert!(result.unwrap_err().contains("Insufficient frozen TOS"));
 }
 
 #[test]
