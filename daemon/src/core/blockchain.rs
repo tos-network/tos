@@ -4922,6 +4922,11 @@ pub async fn estimate_required_tx_fees<P: AccountProvider>(
         }
     }
 
+    // Energy transactions (freeze/unfreeze/withdraw) are always free
+    if matches!(tx.get_data(), TransactionType::Energy(_)) {
+        return Ok(0);
+    }
+
     // Check if this transaction uses energy fees
     if tx.get_fee_type().is_energy() {
         // For energy fees, we return 0 TOS fee requirement
