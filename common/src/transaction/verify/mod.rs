@@ -1539,25 +1539,8 @@ impl Transaction {
         }
 
         // Validate that Energy fee type can only be used with Transfer transactions
-        if self.get_fee_type().is_energy() {
-            if !matches!(self.data, TransactionType::Transfers(_)) {
-                return Err(VerificationError::InvalidFormat);
-            }
-
-            // Validate that Energy fee type cannot be used for transfers to new addresses
-            if let TransactionType::Transfers(transfers) = &self.data {
-                for transfer in transfers {
-                    let exists = state
-                        .account_exists(transfer.get_destination())
-                        .await
-                        .map_err(|_| VerificationError::InvalidFormat)?;
-                    if !exists {
-                        return Err(VerificationError::AnyError(anyhow::anyhow!(
-                            "Energy fee cannot be used for transfers to new addresses"
-                        )));
-                    }
-                }
-            }
+        if self.get_fee_type().is_energy() && !matches!(self.data, TransactionType::Transfers(_)) {
+            return Err(VerificationError::InvalidFormat);
         }
 
         trace!("Pre-verifying transaction on state");
@@ -1607,6 +1590,23 @@ impl Transaction {
                     if *transfer.get_destination() == self.source {
                         debug!("sender cannot be the receiver in the same TX");
                         return Err(VerificationError::SenderIsReceiver);
+                    }
+
+                    // Energy fee transfers cannot send to new (non-existent) accounts
+                    // This prevents using energy to create new accounts for free
+                    if self.get_fee_type().is_energy() {
+                        let dest_exists = state
+                            .account_exists(transfer.get_destination())
+                            .await
+                            .map_err(VerificationError::State)?;
+                        if !dest_exists {
+                            if log::log_enabled!(log::Level::Debug) {
+                                debug!(
+                                    "Energy fee transfer rejected: destination account does not exist"
+                                );
+                            }
+                            return Err(VerificationError::InvalidFormat);
+                        }
                     }
 
                     if let Some(extra_data) = transfer.get_extra_data() {
