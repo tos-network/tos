@@ -115,8 +115,9 @@ impl ContractStorage for MockProvider {
 /// Test that counter contract execution returns cache with storage writes
 #[test]
 fn test_success_cache_contains_storage_writes() {
-    let contract_path = "tests/fixtures/counter.so";
-    let bytecode = std::fs::read(contract_path).expect("Failed to read counter.so");
+    let contract_path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/counter.so");
+    let bytecode = std::fs::read(&contract_path).expect("Failed to read counter.so");
 
     let mut provider = MockProvider;
     let contract_hash = Hash::zero();
@@ -403,8 +404,9 @@ fn test_execution_error_cache_is_none() {
 /// Test that TakoExecutor.execute returns cache correctly
 #[test]
 fn test_tako_executor_returns_cache() {
-    let contract_path = "tests/fixtures/counter.so";
-    let bytecode = std::fs::read(contract_path).expect("Failed to read counter.so");
+    let contract_path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/counter.so");
+    let bytecode = std::fs::read(&contract_path).expect("Failed to read counter.so");
 
     let mut provider = MockProvider;
     let contract_hash = Hash::zero();
