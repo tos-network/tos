@@ -1408,7 +1408,8 @@ impl TransactionBuilder {
             .collect::<Result<Vec<_>, GenerationError<B::Error>>>()?;
 
         let data = TransactionType::ShieldTransfers(transfer_payloads);
-        let fee_type = FeeType::TOS;
+        // Use builder's fee_type if set, otherwise default to TOS
+        let fee_type = self.fee_type.unwrap_or(FeeType::TOS);
 
         let unsigned_tx = UnsignedTransaction::new_with_fee_type(
             self.version,
@@ -1464,9 +1465,10 @@ impl TransactionBuilder {
         // Calculate total unshield amount
         let total_amount: u64 = unshield_transfers.iter().map(|t| t.amount).sum();
 
-        // Fees are paid from TOS balance (plaintext)
+        // Fees are paid from TOS balance (plaintext) or Energy
         let fee = self.estimate_fees(state)?;
-        let fee_type = FeeType::TOS;
+        // Use builder's fee_type if set, otherwise default to TOS
+        let fee_type = self.fee_type.unwrap_or(FeeType::TOS);
 
         // Check TOS balance for fees
         let current_tos_balance = state
