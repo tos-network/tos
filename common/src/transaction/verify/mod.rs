@@ -852,8 +852,34 @@ impl Transaction {
                     }
                 }
             }
+            TransactionType::AIMining(payload) => {
+                // Enforce AIMining fee/stake/reward spending on-chain
+                use crate::ai_mining::AIMiningPayload;
+                match payload {
+                    AIMiningPayload::RegisterMiner { registration_fee, .. } => {
+                        let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                        *current = current
+                            .checked_add(*registration_fee)
+                            .ok_or(VerificationError::Overflow)?;
+                    }
+                    AIMiningPayload::SubmitAnswer { stake_amount, .. } => {
+                        let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                        *current = current
+                            .checked_add(*stake_amount)
+                            .ok_or(VerificationError::Overflow)?;
+                    }
+                    AIMiningPayload::PublishTask { reward_amount, .. } => {
+                        let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                        *current = current
+                            .checked_add(*reward_amount)
+                            .ok_or(VerificationError::Overflow)?;
+                    }
+                    AIMiningPayload::ValidateAnswer { .. } => {
+                        // ValidateAnswer does not spend TOS directly
+                    }
+                }
+            }
             TransactionType::MultiSig(_)
-            | TransactionType::AIMining(_)
             | TransactionType::BindReferrer(_)
             // KYC transactions don't spend assets directly (only fee)
             | TransactionType::SetKyc(_)
@@ -2281,8 +2307,34 @@ impl Transaction {
                     }
                 }
             }
+            TransactionType::AIMining(payload) => {
+                // Enforce AIMining fee/stake/reward spending on-chain
+                use crate::ai_mining::AIMiningPayload;
+                match payload {
+                    AIMiningPayload::RegisterMiner { registration_fee, .. } => {
+                        let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                        *current = current
+                            .checked_add(*registration_fee)
+                            .ok_or(VerificationError::Overflow)?;
+                    }
+                    AIMiningPayload::SubmitAnswer { stake_amount, .. } => {
+                        let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                        *current = current
+                            .checked_add(*stake_amount)
+                            .ok_or(VerificationError::Overflow)?;
+                    }
+                    AIMiningPayload::PublishTask { reward_amount, .. } => {
+                        let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                        *current = current
+                            .checked_add(*reward_amount)
+                            .ok_or(VerificationError::Overflow)?;
+                    }
+                    AIMiningPayload::ValidateAnswer { .. } => {
+                        // ValidateAnswer does not spend TOS directly
+                    }
+                }
+            }
             TransactionType::MultiSig(_)
-            | TransactionType::AIMining(_)
             | TransactionType::BindReferrer(_)
             // KYC transactions don't spend assets directly (only fee)
             | TransactionType::SetKyc(_)
@@ -2668,8 +2720,34 @@ impl Transaction {
                     }
                 }
             }
+            TransactionType::AIMining(payload) => {
+                // Enforce AIMining fee/stake/reward spending on-chain
+                use crate::ai_mining::AIMiningPayload;
+                match payload {
+                    AIMiningPayload::RegisterMiner { registration_fee, .. } => {
+                        let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                        *current = current
+                            .checked_add(*registration_fee)
+                            .ok_or(VerificationError::Overflow)?;
+                    }
+                    AIMiningPayload::SubmitAnswer { stake_amount, .. } => {
+                        let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                        *current = current
+                            .checked_add(*stake_amount)
+                            .ok_or(VerificationError::Overflow)?;
+                    }
+                    AIMiningPayload::PublishTask { reward_amount, .. } => {
+                        let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                        *current = current
+                            .checked_add(*reward_amount)
+                            .ok_or(VerificationError::Overflow)?;
+                    }
+                    AIMiningPayload::ValidateAnswer { .. } => {
+                        // ValidateAnswer does not spend TOS directly
+                    }
+                }
+            }
             TransactionType::MultiSig(_)
-            | TransactionType::AIMining(_)
             | TransactionType::BindReferrer(_)
             // KYC transactions don't spend assets directly (only fee)
             | TransactionType::SetKyc(_)
@@ -4392,8 +4470,34 @@ impl Transaction {
                     }
                 }
             }
+            TransactionType::AIMining(payload) => {
+                // Enforce AIMining fee/stake/reward spending on-chain
+                use crate::ai_mining::AIMiningPayload;
+                match payload {
+                    AIMiningPayload::RegisterMiner { registration_fee, .. } => {
+                        let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                        *current = current
+                            .checked_add(*registration_fee)
+                            .ok_or(VerificationError::Overflow)?;
+                    }
+                    AIMiningPayload::SubmitAnswer { stake_amount, .. } => {
+                        let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                        *current = current
+                            .checked_add(*stake_amount)
+                            .ok_or(VerificationError::Overflow)?;
+                    }
+                    AIMiningPayload::PublishTask { reward_amount, .. } => {
+                        let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                        *current = current
+                            .checked_add(*reward_amount)
+                            .ok_or(VerificationError::Overflow)?;
+                    }
+                    AIMiningPayload::ValidateAnswer { .. } => {
+                        // ValidateAnswer does not spend TOS directly
+                    }
+                }
+            }
             TransactionType::MultiSig(_)
-            | TransactionType::AIMining(_)
             | TransactionType::BindReferrer(_)
             // KYC transactions don't spend assets directly (only fee)
             | TransactionType::SetKyc(_)
