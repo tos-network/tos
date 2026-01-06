@@ -3799,14 +3799,16 @@ impl Transaction {
                         ))
                     })?;
 
-                // SECURITY FIX (Issue #34): Pass transferred_at to bind approval signatures to timestamp
-                // SECURITY FIX (Issue #44): Pass network for cross-network replay protection
+                // Pass transferred_at to bind approval signatures to timestamp
+                // Pass network for cross-network replay protection
+                // Pass current_level to bind approval to user's KYC level
                 crate::kyc::verify_transfer_kyc_dest_approvals(
                     &network,
                     &dest_committee,
                     payload.get_dest_approvals(),
                     payload.get_source_committee_id(),
                     payload.get_account(),
+                    current_level,
                     payload.get_new_data_hash(),
                     payload.get_transferred_at(),
                     current_time,

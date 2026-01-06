@@ -324,14 +324,16 @@ pub fn verify_transfer_kyc_source_approvals(
 
 /// Verify approvals for TransferKyc - destination committee side
 ///
-/// SECURITY FIX (Issue #34): Now requires transferred_at parameter to bind approvals to timestamp
-/// SECURITY FIX (Issue #44): Now requires network parameter for cross-network replay protection
+/// Now requires transferred_at parameter to bind approvals to timestamp
+/// Now requires network parameter for cross-network replay protection
+/// Now requires current_level to bind approvals to KYC level
 pub fn verify_transfer_kyc_dest_approvals(
     network: &Network,
     dest_committee: &SecurityCommittee,
     approvals: &[CommitteeApproval],
     source_committee_id: &Hash,
     account: &PublicKey,
+    current_level: u16,
     new_data_hash: &Hash,
     transferred_at: u64,
     current_time: u64,
@@ -345,14 +347,15 @@ pub fn verify_transfer_kyc_dest_approvals(
     let account = account.clone();
     let new_data_hash = new_data_hash.clone();
 
-    // SECURITY FIX (Issue #34): Include transferred_at in message to bind approval to timestamp
-    // SECURITY FIX (Issue #44): Include network chain_id for cross-network replay protection
+    // Include transferred_at in message to bind approval to timestamp
+    // Include network chain_id for cross-network replay protection
     let build_message = move |approval: &CommitteeApproval| {
         CommitteeApproval::build_transfer_kyc_dest_message(
             network,
             &source_id,
             &dest_id,
             &account,
+            current_level,
             &new_data_hash,
             transferred_at,
             approval.timestamp,
