@@ -650,16 +650,22 @@ impl RocksStorage {
 
         while let Some(current) = stack.pop() {
             // Safety limit to prevent excessive CPU usage
+            // Return error instead of truncating to prevent incorrect reward calculations
             iterations = iterations.saturating_add(1);
             if iterations > MAX_TEAM_SIZE_ITERATIONS {
-                if log::log_enabled!(log::Level::Warn) {
-                    log::warn!(
-                        "calculate_team_size exceeded max iterations ({}) for user {:?}",
+                if log::log_enabled!(log::Level::Error) {
+                    log::error!(
+                        "calculate_team_size exceeded max iterations ({}) for user {:?}, \
+                         possible data corruption or attack",
                         MAX_TEAM_SIZE_ITERATIONS,
                         user
                     );
                 }
-                break;
+                return Err(BlockchainError::Any(anyhow::anyhow!(
+                    "Team size calculation exceeded maximum iterations ({}), \
+                     possible cyclic referral graph or data corruption",
+                    MAX_TEAM_SIZE_ITERATIONS
+                )));
             }
 
             // Get direct referrals for current user

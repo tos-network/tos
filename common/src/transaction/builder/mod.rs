@@ -1640,8 +1640,11 @@ impl TransactionTypeBuilder {
                 }
             }
             TransactionTypeBuilder::UnoTransfers(transfers) => {
-                // UNO transfers use UNO_ASSET for fees (paid from encrypted balance)
+                // UNO transfers use UNO_ASSET for encrypted amounts
+                // BUT fees are paid from TOS_ASSET (plaintext balance)
+                // Must include TOS_ASSET so fee_limit is balance-checked
                 consumed.insert(&UNO_ASSET);
+                consumed.insert(&TOS_ASSET);
                 for transfer in transfers {
                     consumed.insert(&transfer.asset);
                 }
@@ -1655,8 +1658,10 @@ impl TransactionTypeBuilder {
             }
             TransactionTypeBuilder::UnshieldTransfers(transfers) => {
                 // Unshield transfers deduct from UNO balance (encrypted)
-                // Fees are paid from TOS_ASSET (destination receives plaintext TOS)
+                // Fees are paid from TOS_ASSET (plaintext balance)
+                // Must include TOS_ASSET so fee_limit is balance-checked
                 consumed.insert(&UNO_ASSET);
+                consumed.insert(&TOS_ASSET);
                 for transfer in transfers {
                     consumed.insert(&transfer.asset);
                 }
