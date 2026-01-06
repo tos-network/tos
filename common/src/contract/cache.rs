@@ -45,6 +45,29 @@ impl ContractCache {
         }
     }
 
+    /// Merge only the storage field from another ContractCache (overlay semantics).
+    ///
+    /// # Why storage-only?
+    ///
+    /// TosStorageAdapter ONLY writes to `cache.storage`. Other fields are handled separately:
+    /// - `balances`: Managed by chain_state.cache (deposits)
+    /// - `events`: Persisted via `add_contract_events()` after execution
+    /// - `memory`: Not persisted (transient storage, EIP-1153)
+    ///
+    /// Using a narrow merge function prevents future bugs where VM might write to
+    /// events/balances, causing conflicts with existing persistence paths.
+    ///
+    /// # Safety
+    ///
+    /// Callers MUST only call this when execution succeeded (exit_code == Some(0)).
+    pub fn merge_overlay_storage_only(&mut self, other: Self) {
+        self.storage.extend(other.storage);
+        // NOTE: Do NOT merge balances/events/memory here.
+        // - balances: already in chain_state.cache from deposits
+        // - events: saved via add_contract_events() separately
+        // - memory: transient, not persisted
+    }
+
     // Merge the cache with another one
     // pub fn merge(&mut self, other: Self) {
     //     for (key, assets) in other.transfers {

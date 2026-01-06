@@ -33,8 +33,55 @@ impl Transaction {
             .map_err(VerificationError::State)
     }
 
-    // Invoke a contract from a transaction using the ContractExecutor trait
-    // This method supports both TOS Kernel(TAKO) (eBPF) and legacy contracts
+    /// Invoke a contract from a transaction using the ContractExecutor trait.
+    ///
+    /// # Security Invariants
+    ///
+    /// ## Staged Changeset Pattern (Atomic Rollback)
+    ///
+    /// All contract state changes are staged in a `ContractCache` during execution:
+    /// - Storage writes go to `cache.storage`
+    /// - Balance changes go to `cache.balances`
+    /// - Events go through separate `add_contract_events()` call
+    ///
+    /// **Critical invariant**: Only when `is_success == true` (exit_code == Some(0))
+    /// does the cache get merged via `merge_contract_changes()`. On failure, the
+    /// cache is simply dropped, providing automatic atomic rollback.
+    ///
+    /// ## Gas Consumption on Failure
+    ///
+    /// There are two failure modes with different gas semantics:
+    ///
+    /// **Executor Error (Err)**: VM crash, invalid bytecode, etc.
+    /// - Forced `gas_used = max_gas` to prevent "free invoke" attacks
+    /// - 30% burned, 70% to miners, 0% refunded
+    ///
+    /// **Non-zero Exit Code**: Contract logic failure (revert, assert, etc.)
+    /// - `gas_used` = actual VM consumption before failure
+    /// - Remaining gas (`max_gas - gas_used`) is refunded to caller
+    /// - This is standard EVM/SVM semantics for reverts
+    ///
+    /// ## Deposit Handling
+    ///
+    /// Deposits are held in `chain_state.cache.balances` during execution.
+    /// On success: merged to persistent storage.
+    /// On failure: `refund_deposits()` returns all deposits to sender.
+    ///
+    /// # Arguments
+    ///
+    /// * `tx_hash` - Transaction hash for tracking
+    /// * `state` - Blockchain state accessor
+    /// * `contract` - Contract address to invoke
+    /// * `deposits` - Asset deposits made with this call
+    /// * `user_parameters` - Call data from transaction
+    /// * `max_gas` - Maximum gas units for execution
+    /// * `invoke` - Entry point or hook to invoke
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(true)` - Contract executed successfully (exit_code == 0)
+    /// * `Ok(false)` - Contract execution failed (exit_code != 0 or execution error)
+    /// * `Err(_)` - System error (state access failure)
     pub(super) async fn invoke_contract<
         'a,
         P: ContractProvider + Send,
@@ -159,13 +206,20 @@ impl Transaction {
                             contract
                         );
                     }
+                    // Truncate error message to prevent chain bloat (DoS protection)
+                    const MAX_ERROR_RETURN_DATA: usize = 4096;
+                    let mut error_msg = format!("Execution error: {e}").into_bytes();
+                    if error_msg.len() > MAX_ERROR_RETURN_DATA {
+                        error_msg.truncate(MAX_ERROR_RETURN_DATA);
+                    }
                     // Return a failure result with max_gas consumed
                     crate::contract::ContractExecutionResult {
                         exit_code: None,
                         gas_used: max_gas,
-                        return_data: Some(format!("Execution error: {e}").into_bytes()),
+                        return_data: Some(error_msg),
                         transfers: vec![],
                         events: vec![],
+                        cache: None, // No cache to merge on error
                     }
                 }
             }
@@ -176,6 +230,7 @@ impl Transaction {
         let return_data = execution_result.return_data;
         let transfers = execution_result.transfers;
         let events = execution_result.events;
+        let vm_cache = execution_result.cache;
 
         if log::log_enabled!(log::Level::Debug) {
             debug!(
@@ -206,7 +261,22 @@ impl Transaction {
 
         // If the contract execution was successful, merge the changes
         if is_success {
-            let cache = chain_state.cache;
+            let mut cache = chain_state.cache;
+            // Merge VM storage writes into chain_state cache
+            // Only storage is merged - balances/events/memory are handled separately
+            if let Some(vm_cache) = vm_cache {
+                // Safety check: VM cache should only contain storage writes.
+                // Balances are managed by chain_state.cache, events via add_contract_events(),
+                // and memory is transient. If TAKO starts writing to these fields, we need
+                // to update the merge strategy to avoid conflicts.
+                debug_assert!(
+                    vm_cache.balances.is_empty(),
+                    "VM cache must not write balances"
+                );
+                debug_assert!(vm_cache.events.is_empty(), "VM cache must not write events");
+                debug_assert!(vm_cache.memory.is_empty(), "VM cache must not write memory");
+                cache.merge_overlay_storage_only(vm_cache);
+            }
             let tracker = chain_state.tracker;
             let assets = chain_state.assets;
             state
@@ -316,7 +386,26 @@ impl Transaction {
         Ok(refund_gas)
     }
 
-    // Refund the deposits made by the user to the contract
+    /// Refund the deposits made by the user to the contract on execution failure.
+    ///
+    /// # Overflow Safety
+    ///
+    /// The `checked_add` below is kept as defensive programming, but overflow is
+    /// mathematically impossible in the current design:
+    ///
+    /// 1. Each deposit amount was deducted from sender's balance in `apply_without_verify`
+    /// 2. The receiver IS the sender (refund goes back to original account)
+    /// 3. Refunding cannot exceed the balance that existed before deduction
+    ///
+    /// Proof: Let B_before = sender's balance before TX, D_total = sum of deposits
+    /// - After deduction: B_after = B_before - D_total
+    /// - After refund: B_refund = B_after + D_total = B_before
+    /// - Since B_before <= u64::MAX (valid balance), B_refund <= u64::MAX
+    ///
+    /// The checked_add is retained because:
+    /// - It documents the overflow concern for future maintainers
+    /// - It provides defense-in-depth if the invariants are ever broken
+    /// - The runtime cost is negligible (single branch prediction)
     pub(super) async fn refund_deposits<
         'a,
         P: ContractProvider,

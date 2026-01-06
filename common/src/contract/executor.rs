@@ -1,4 +1,4 @@
-use super::TransferOutput;
+use super::{ContractCache, TransferOutput};
 use anyhow::Result;
 /// Contract execution trait for dependency injection
 ///
@@ -62,6 +62,13 @@ pub struct ContractExecutionResult {
     /// Events emitted by the contract during execution (Ethereum-style)
     /// Contains indexed topics and data for off-chain indexing and monitoring
     pub events: Vec<ContractEvent>,
+
+    /// Optional contract cache overlay produced by the VM during execution.
+    ///
+    /// Contains storage writes made via `tos_storage_write` syscall.
+    /// Only merged to persistent storage when execution succeeds (exit_code == Some(0)).
+    /// On failure, this cache is discarded to ensure atomic rollback.
+    pub cache: Option<ContractCache>,
 }
 
 /// Contract executor trait
@@ -103,6 +110,7 @@ pub struct ContractExecutionResult {
 ///             return_data: None,
 ///             transfers: vec![],
 ///             events: vec![],
+///             cache: None,
 ///         })
 ///     }
 ///
