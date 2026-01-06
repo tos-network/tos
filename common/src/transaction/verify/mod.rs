@@ -578,8 +578,15 @@ impl Transaction {
             TransactionType::AIMining(_) => {
                 // AI Mining transactions don't require special verification beyond basic checks for now
             }
-            TransactionType::BindReferrer(_) => {
-                // BindReferrer validation is handled by the referral provider
+            TransactionType::BindReferrer(payload) => {
+                // Validate extra_data size to prevent mempool/storage bloat
+                // BindReferrer has extra_data field but was missing size validation
+                if let Some(extra_data) = payload.get_extra_data() {
+                    let size = extra_data.size();
+                    if size > EXTRA_DATA_LIMIT_SIZE {
+                        return Err(VerificationError::TransferExtraDataSize);
+                    }
+                }
             }
             TransactionType::BatchReferralReward(payload) => {
                 // BatchReferralReward validation
@@ -1827,8 +1834,14 @@ impl Transaction {
             TransactionType::AIMining(_) => {
                 // AI Mining transactions don't require special verification beyond basic checks for now
             }
-            TransactionType::BindReferrer(_) => {
-                // BindReferrer transactions are validated by the referral provider at execution time
+            TransactionType::BindReferrer(payload) => {
+                // Validate extra_data size to prevent mempool/storage bloat
+                if let Some(extra_data) = payload.get_extra_data() {
+                    let size = extra_data.size();
+                    if size > EXTRA_DATA_LIMIT_SIZE {
+                        return Err(VerificationError::TransferExtraDataSize);
+                    }
+                }
             }
             TransactionType::BatchReferralReward(payload) => {
                 // BatchReferralReward validation - check payload is valid
@@ -4107,12 +4120,20 @@ impl Transaction {
                     | crate::transaction::CommitteeUpdateData::UpdateMemberStatus {
                         public_key,
                         ..
-                    } => committee.get_member(public_key).map(|member| {
-                        (
+                    } => {
+                        // Member MUST exist for these operations
+                        let member = committee.get_member(public_key).ok_or_else(|| {
+                            VerificationError::AnyError(anyhow::anyhow!(
+                                "Member {:?} not found in committee {}",
+                                public_key,
+                                payload.get_committee_id()
+                            ))
+                        })?;
+                        Some((
                             member.status == crate::kyc::MemberStatus::Active,
                             member.role.can_approve(),
-                        )
-                    }),
+                        ))
+                    }
                     _ => None,
                 }
                 .unwrap_or((true, true));
