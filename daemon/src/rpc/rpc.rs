@@ -162,7 +162,8 @@ async fn maybe_send_callback(
             );
             update_payment_callback_status(payment_id, PaymentStatus::Expired).await;
         }
-        PaymentStatus::Mempool | PaymentStatus::Confirming | PaymentStatus::Underpaid => {
+        PaymentStatus::Mempool | PaymentStatus::Confirming => {
+            // Only send initial detection callback once
             if stored.last_callback_status.is_some() {
                 return;
             }
@@ -178,6 +179,27 @@ async fn maybe_send_callback(
                     confirmations,
                 );
                 update_payment_callback_status(payment_id, status).await;
+            }
+        }
+        PaymentStatus::Underpaid => {
+            // Underpaid is a final state - merchant MUST be notified even if
+            // a previous Mempool/Confirming callback was sent
+            // Only skip if we already sent an Underpaid callback
+            if stored.last_callback_status == Some(PaymentStatus::Underpaid) {
+                return;
+            }
+            if let (Some(tx_hash), Some(amount)) = (tx_hash, amount) {
+                send_payment_callback(
+                    Arc::clone(&CALLBACK_SERVICE),
+                    callback_url,
+                    secret,
+                    payment_id.to_string(),
+                    tx_hash,
+                    amount,
+                    expected_amount,
+                    confirmations,
+                );
+                update_payment_callback_status(payment_id, PaymentStatus::Underpaid).await;
             }
         }
         PaymentStatus::Pending => {}
