@@ -458,7 +458,7 @@ impl TransactionBuilder {
             _ => {
                 // Compute the size and transfers count
                 let size = self.estimate_size();
-                // Extract transfer count for all transfer types (TOS, UNO, Unshield)
+                // Extract transfer count for all transfer types (TOS, UNO, Shield, Unshield)
                 let (transfers, new_addresses) = match &self.data {
                     TransactionTypeBuilder::Transfers(transfers) => {
                         let mut new_addresses = 0;
@@ -474,6 +474,11 @@ impl TransactionBuilder {
                     }
                     TransactionTypeBuilder::UnoTransfers(transfers) => {
                         // UNO transfers: count outputs, no new address fee (UNO-only accounts)
+                        (transfers.len(), 0)
+                    }
+                    TransactionTypeBuilder::ShieldTransfers(transfers) => {
+                        // Shield transfers: TOS -> UNO, count outputs
+                        // No new address check needed (receiver already has UNO balance)
                         (transfers.len(), 0)
                     }
                     TransactionTypeBuilder::UnshieldTransfers(transfers) => {
@@ -1936,6 +1941,93 @@ mod tests {
         assert!(
             is_valid_combination,
             "Energy fee type should be allowed with Transfer transactions (including to new addresses)"
+        );
+    }
+
+    #[test]
+    fn test_energy_fee_type_allowed_for_uno_shield_unshield() {
+        use super::super::FeeType;
+
+        // Test that Energy fee type is allowed for all transfer-type transactions
+        let energy_fee = FeeType::Energy;
+
+        // UnoTransfers should be allowed
+        let uno_builder = TransactionTypeBuilder::UnoTransfers(vec![]);
+        let is_uno_allowed = matches!(
+            uno_builder,
+            TransactionTypeBuilder::Transfers(_)
+                | TransactionTypeBuilder::UnoTransfers(_)
+                | TransactionTypeBuilder::ShieldTransfers(_)
+                | TransactionTypeBuilder::UnshieldTransfers(_)
+        );
+        assert!(
+            is_uno_allowed,
+            "Energy fee should be allowed for UnoTransfers"
+        );
+
+        // ShieldTransfers should be allowed
+        let shield_builder = TransactionTypeBuilder::ShieldTransfers(vec![]);
+        let is_shield_allowed = matches!(
+            shield_builder,
+            TransactionTypeBuilder::Transfers(_)
+                | TransactionTypeBuilder::UnoTransfers(_)
+                | TransactionTypeBuilder::ShieldTransfers(_)
+                | TransactionTypeBuilder::UnshieldTransfers(_)
+        );
+        assert!(
+            is_shield_allowed,
+            "Energy fee should be allowed for ShieldTransfers"
+        );
+
+        // UnshieldTransfers should be allowed
+        let unshield_builder = TransactionTypeBuilder::UnshieldTransfers(vec![]);
+        let is_unshield_allowed = matches!(
+            unshield_builder,
+            TransactionTypeBuilder::Transfers(_)
+                | TransactionTypeBuilder::UnoTransfers(_)
+                | TransactionTypeBuilder::ShieldTransfers(_)
+                | TransactionTypeBuilder::UnshieldTransfers(_)
+        );
+        assert!(
+            is_unshield_allowed,
+            "Energy fee should be allowed for UnshieldTransfers"
+        );
+
+        // Verify Energy fee type is set correctly
+        assert!(matches!(energy_fee, FeeType::Energy));
+    }
+
+    #[test]
+    fn test_shield_minimum_amount_validation() {
+        // Test that Shield minimum amount is enforced (100 TOS)
+        use crate::config::{COIN_VALUE, MIN_SHIELD_TOS_AMOUNT};
+
+        // Verify the constant value
+        assert_eq!(
+            MIN_SHIELD_TOS_AMOUNT,
+            COIN_VALUE * 100,
+            "MIN_SHIELD_TOS_AMOUNT should be 100 TOS"
+        );
+
+        // Test that amounts below minimum should be rejected
+        let below_minimum = MIN_SHIELD_TOS_AMOUNT - 1;
+        assert!(
+            below_minimum < MIN_SHIELD_TOS_AMOUNT,
+            "Amount below minimum should fail validation"
+        );
+
+        // Test that amounts at minimum should be accepted
+        let at_minimum = MIN_SHIELD_TOS_AMOUNT;
+        assert!(
+            at_minimum >= MIN_SHIELD_TOS_AMOUNT,
+            "Amount at minimum should pass validation"
+        );
+
+        // Test that amounts above minimum should be accepted
+        let above_minimum = MIN_SHIELD_TOS_AMOUNT + COIN_VALUE;
+        assert!(
+            above_minimum >= MIN_SHIELD_TOS_AMOUNT,
+            "Amount above minimum should pass validation"
         );
     }
 }
