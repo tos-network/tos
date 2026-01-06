@@ -482,17 +482,47 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for Applicable
         contract: &Hash,
         tx_hash: &'a Hash,
     ) -> Result<(), BlockchainError> {
-        // Contract events are logged but not persisted in this simplified version
-        // In the full version, these would be stored for event filtering
+        // Persist contract events to storage
+        // This enables event filtering and querying
+        use crate::core::storage::StoredContractEvent;
+        use tos_common::crypto::Hashable;
+
         let event_count = events.len();
-        if event_count > 0 {
-            if log::log_enabled!(log::Level::Debug) {
-                debug!(
-                    "Contract {} emitted {} events in TX {} (not persisted)",
-                    contract, event_count, tx_hash
-                );
-            }
+        if event_count == 0 {
+            return Ok(());
         }
+
+        let block_hash = self.block.hash();
+        let topoheight = self.inner.topoheight;
+
+        // Convert common::ContractEvent to storage::StoredContractEvent
+        let stored_events: Vec<StoredContractEvent> = events
+            .into_iter()
+            .enumerate()
+            .map(|(idx, event)| StoredContractEvent {
+                contract: contract.clone(),
+                tx_hash: tx_hash.clone(),
+                block_hash: block_hash.clone(),
+                topoheight,
+                log_index: idx as u32,
+                topics: event.topics,
+                data: event.data,
+            })
+            .collect();
+
+        // Store events to persistent storage
+        self.inner
+            .storage
+            .store_contract_events(stored_events)
+            .await?;
+
+        if log::log_enabled!(log::Level::Debug) {
+            debug!(
+                "Contract {} emitted {} events in TX {} (persisted at topoheight {})",
+                contract, event_count, tx_hash, topoheight
+            );
+        }
+
         Ok(())
     }
 

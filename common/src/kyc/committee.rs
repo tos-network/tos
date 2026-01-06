@@ -611,9 +611,11 @@ impl CommitteeApproval {
         }
     }
 
-    /// Check if approval has expired
+    /// Check if approval has expired or is from too far in the future
     pub fn is_expired(&self, current_time: u64) -> bool {
-        current_time.saturating_sub(self.timestamp) > APPROVAL_EXPIRY_SECONDS
+        let max_future = current_time.saturating_add(3600);
+        self.timestamp > max_future
+            || current_time.saturating_sub(self.timestamp) > APPROVAL_EXPIRY_SECONDS
     }
 
     /// Verify the approval signature against a message

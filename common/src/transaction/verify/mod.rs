@@ -3973,6 +3973,25 @@ impl Transaction {
                 }
             }
             TransactionType::BootstrapCommittee(payload) => {
+                // Defense-in-depth: Re-verify authorization in apply phase
+                let bootstrap_pubkey = {
+                    use crate::crypto::Address;
+                    let addr =
+                        Address::from_string(crate::config::BOOTSTRAP_ADDRESS).map_err(|e| {
+                            VerificationError::AnyError(anyhow::anyhow!(
+                                "Invalid bootstrap address configuration: {}",
+                                e
+                            ))
+                        })?;
+                    addr.to_public_key()
+                };
+
+                if self.get_source() != &bootstrap_pubkey {
+                    return Err(VerificationError::AnyError(anyhow::anyhow!(
+                        "BootstrapCommittee can only be submitted by BOOTSTRAP_ADDRESS"
+                    )));
+                }
+
                 // Convert CommitteeMemberInit to CommitteeMemberInfo
                 let members: Vec<crate::kyc::CommitteeMemberInfo> = payload
                     .get_members()
