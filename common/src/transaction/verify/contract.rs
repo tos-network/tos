@@ -48,14 +48,18 @@ impl Transaction {
     /// does the cache get merged via `merge_contract_changes()`. On failure, the
     /// cache is simply dropped, providing automatic atomic rollback.
     ///
-    /// ## Gas Attack Protection
+    /// ## Gas Consumption on Failure
     ///
-    /// Failed executions automatically consume `max_gas` (see Err branch below),
-    /// preventing "free invoke" attacks where an attacker could repeatedly fail
-    /// contract calls without cost. The gas distribution on failure:
-    /// - 30% burned to network (TX_GAS_BURN_PERCENT)
-    /// - 70% paid to miners as fees
-    /// - 0% refunded to caller
+    /// There are two failure modes with different gas semantics:
+    ///
+    /// **Executor Error (Err)**: VM crash, invalid bytecode, etc.
+    /// - Forced `gas_used = max_gas` to prevent "free invoke" attacks
+    /// - 30% burned, 70% to miners, 0% refunded
+    ///
+    /// **Non-zero Exit Code**: Contract logic failure (revert, assert, etc.)
+    /// - `gas_used` = actual VM consumption before failure
+    /// - Remaining gas (`max_gas - gas_used`) is refunded to caller
+    /// - This is standard EVM/SVM semantics for reverts
     ///
     /// ## Deposit Handling
     ///
@@ -202,11 +206,17 @@ impl Transaction {
                             contract
                         );
                     }
+                    // Truncate error message to prevent chain bloat (DoS protection)
+                    const MAX_ERROR_RETURN_DATA: usize = 4096;
+                    let mut error_msg = format!("Execution error: {e}").into_bytes();
+                    if error_msg.len() > MAX_ERROR_RETURN_DATA {
+                        error_msg.truncate(MAX_ERROR_RETURN_DATA);
+                    }
                     // Return a failure result with max_gas consumed
                     crate::contract::ContractExecutionResult {
                         exit_code: None,
                         gas_used: max_gas,
-                        return_data: Some(format!("Execution error: {e}").into_bytes()),
+                        return_data: Some(error_msg),
                         transfers: vec![],
                         events: vec![],
                         cache: None, // No cache to merge on error
@@ -255,6 +265,16 @@ impl Transaction {
             // Merge VM storage writes into chain_state cache
             // Only storage is merged - balances/events/memory are handled separately
             if let Some(vm_cache) = vm_cache {
+                // Safety check: VM cache should only contain storage writes.
+                // Balances are managed by chain_state.cache, events via add_contract_events(),
+                // and memory is transient. If TAKO starts writing to these fields, we need
+                // to update the merge strategy to avoid conflicts.
+                debug_assert!(
+                    vm_cache.balances.is_empty(),
+                    "VM cache must not write balances"
+                );
+                debug_assert!(vm_cache.events.is_empty(), "VM cache must not write events");
+                debug_assert!(vm_cache.memory.is_empty(), "VM cache must not write memory");
                 cache.merge_overlay_storage_only(vm_cache);
             }
             let tracker = chain_state.tracker;
