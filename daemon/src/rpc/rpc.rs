@@ -182,12 +182,26 @@ async fn maybe_send_callback(
             }
         }
         PaymentStatus::Underpaid => {
-            // Underpaid is a final state - merchant MUST be notified even if
-            // a previous Mempool/Confirming callback was sent
-            // Only skip if we already sent an Underpaid callback
-            if stored.last_callback_status == Some(PaymentStatus::Underpaid) {
-                return;
+            // Underpaid handling depends on confirmation level:
+            // - If confirmations < 8: Send PaymentReceived, allow future callbacks
+            // - If confirmations >= 8: Send PaymentUnderpaid (final), block future
+            //
+            // SECURITY FIX: Only set last_callback_status = Underpaid when confirmations >= 8
+            // Otherwise, early underpaid detection would block the final PaymentUnderpaid callback
+            let is_final = confirmations >= 8;
+
+            if is_final {
+                // Final underpaid state - only skip if already sent final underpaid
+                if stored.last_callback_status == Some(PaymentStatus::Underpaid) {
+                    return;
+                }
+            } else {
+                // Not final yet - skip if any callback already sent
+                if stored.last_callback_status.is_some() {
+                    return;
+                }
             }
+
             if let (Some(tx_hash), Some(amount)) = (tx_hash, amount) {
                 send_payment_callback(
                     Arc::clone(&CALLBACK_SERVICE),
@@ -199,7 +213,15 @@ async fn maybe_send_callback(
                     expected_amount,
                     confirmations,
                 );
-                update_payment_callback_status(payment_id, PaymentStatus::Underpaid).await;
+                // Only mark as Underpaid when final (>= 8 confirmations)
+                // This allows the PaymentUnderpaid callback to be sent later
+                if is_final {
+                    update_payment_callback_status(payment_id, PaymentStatus::Underpaid).await;
+                } else {
+                    // Mark as Confirming so we don't re-send PaymentReceived
+                    // but still allow future PaymentUnderpaid when confirmations >= 8
+                    update_payment_callback_status(payment_id, PaymentStatus::Confirming).await;
+                }
             }
         }
         PaymentStatus::Pending => {}
