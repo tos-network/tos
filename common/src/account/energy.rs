@@ -917,8 +917,20 @@ impl EnergyResource {
             return Err("Amount below minimum unfreeze amount".to_string());
         }
 
-        if self.frozen_tos < whole_tos_amount {
-            return Err("Insufficient frozen TOS".to_string());
+        // Calculate self-frozen TOS from freeze_records (excludes delegated amounts)
+        // This ensures we only check against TOS that can actually be unfrozen via this method
+        // Delegated TOS must be unfrozen via unfreeze_delegated_entry() instead
+        let self_frozen_total: u64 = self
+            .freeze_records
+            .iter()
+            .map(|r| r.amount)
+            .fold(0u64, |acc, amt| acc.saturating_add(amt));
+
+        if self_frozen_total < whole_tos_amount {
+            return Err(
+                "Insufficient self-frozen TOS (delegated TOS must be unfrozen separately)"
+                    .to_string(),
+            );
         }
 
         // Check if can add pending unfreeze

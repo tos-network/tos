@@ -647,10 +647,13 @@ impl KycProvider for RocksStorage {
             .ok_or(BlockchainError::KycNotFound)?;
 
         // Read the stored previous status from before the suspension
-        // For legacy records (before this fix), default to Active for backward compatibility
+        // If previous_status is not found (legacy records or data corruption),
+        // default to Suspended for safety - requires manual verification to restore
+        // This is more conservative than defaulting to Active which could grant
+        // unintended access to a previously Revoked or Pending user
         let previous_status: KycStatus = self
             .load_optional_from_disk(Column::KycEmergencyPreviousStatus, user.as_bytes())?
-            .unwrap_or(KycStatus::Active);
+            .unwrap_or(KycStatus::Suspended);
 
         kyc_data.status = previous_status;
         self.insert_into_disk(Column::KycData, user.as_bytes(), &kyc_data)?;
