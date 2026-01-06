@@ -1805,7 +1805,7 @@ mod tests {
     #[test]
     fn test_energy_tx_default_fee_is_zero() {
         let duration = FreezeDuration::new(3).unwrap();
-        let energy_builder = EnergyBuilder::freeze_tos(1 * crate::config::COIN_VALUE, duration);
+        let energy_builder = EnergyBuilder::freeze_tos(crate::config::COIN_VALUE, duration);
 
         let builder = TransactionBuilder::new(
             TxVersion::T0,
@@ -1818,7 +1818,7 @@ mod tests {
             FeeBuilder::default(),
         );
 
-        let mut state = DummyFeeState::default();
+        let mut state = DummyFeeState;
         let fee = builder.estimate_fees(&mut state).unwrap();
         assert_eq!(fee, 0);
     }

@@ -890,11 +890,8 @@ mod malicious_input_tests {
     }
 
     /// Test: Approval with future timestamp (time manipulation)
-    /// Note: Current implementation does NOT validate future timestamps.
-    /// The is_expired check uses saturating_sub which returns 0 for future timestamps,
-    /// meaning future timestamps are not considered expired.
-    /// This test documents the current behavior - future timestamps are ACCEPTED.
-    /// Consider this a potential security improvement for the future.
+    /// Security fix: Future timestamps are now REJECTED to prevent time manipulation attacks.
+    /// Approvals must have timestamps at or before the current time.
     #[test]
     fn test_malicious_future_timestamp() {
         let (committee, keypairs) =
@@ -934,11 +931,10 @@ mod malicious_input_tests {
             current_time,
         );
 
-        // Current behavior: Future timestamps are ACCEPTED (not validated)
-        // This test documents the behavior; consider adding future timestamp rejection
+        // Security hardening: Future timestamps are now REJECTED
         assert!(
-            result.is_ok(),
-            "Future timestamps are currently accepted (behavior documented)"
+            result.is_err(),
+            "Future timestamps should be rejected to prevent time manipulation attacks"
         );
     }
 }
