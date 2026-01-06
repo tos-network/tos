@@ -99,6 +99,9 @@ impl CallbackService {
     }
 
     /// Deliver callback with retry logic
+    ///
+    /// Uses config.max_retries and config.timeout_seconds
+    /// instead of hardcoded CALLBACK_RETRY_DELAYS_MS and CALLBACK_TIMEOUT_SECONDS
     async fn deliver_with_retry(
         &self,
         config: &CallbackConfig,
@@ -137,21 +140,46 @@ impl CallbackService {
         let timestamp = payload_for_send.timestamp;
         let signature = generate_callback_signature(&config.secret, timestamp, &body);
 
-        for (attempt, delay_ms) in CALLBACK_RETRY_DELAYS_MS.iter().enumerate() {
+        // Use config.max_retries instead of hardcoded array length
+        let max_attempts = config.max_retries as usize;
+        let mut attempts_made = 0u32;
+
+        for attempt in 0..max_attempts {
             if attempt > 0 {
+                // Use exponential backoff: 1s, 5s, 25s, 125s, ...
+                // Fall back to hardcoded delays if within range, otherwise calculate
+                let delay_ms = if attempt < CALLBACK_RETRY_DELAYS_MS.len() {
+                    CALLBACK_RETRY_DELAYS_MS[attempt]
+                } else {
+                    // Exponential backoff: 1000 * 5^attempt (capped at 5 minutes)
+                    let base_delay = 1000u64;
+                    let multiplier = 5u64.saturating_pow(attempt as u32);
+                    base_delay.saturating_mul(multiplier).min(300_000)
+                };
+
                 if log::log_enabled!(log::Level::Debug) {
                     debug!(
                         "Retrying callback to {} (attempt {}/{})",
                         config.url,
                         attempt + 1,
-                        CALLBACK_RETRY_DELAYS_MS.len()
+                        max_attempts
                     );
                 }
-                tokio::time::sleep(Duration::from_millis(*delay_ms)).await;
+                tokio::time::sleep(Duration::from_millis(delay_ms)).await;
             }
 
+            attempts_made = (attempt + 1) as u32;
+
+            // Use config.timeout_seconds for request timeout
             match self
-                .send_callback(&config.url, &body, timestamp, &signature, &idempotency_key)
+                .send_callback_with_timeout(
+                    &config.url,
+                    &body,
+                    timestamp,
+                    &signature,
+                    &idempotency_key,
+                    config.timeout_seconds,
+                )
                 .await
             {
                 Ok(()) => {
@@ -178,11 +206,12 @@ impl CallbackService {
 
         CallbackResult::Failed {
             error: "All retry attempts exhausted".to_string(),
-            attempts: CALLBACK_RETRY_DELAYS_MS.len() as u32,
+            attempts: attempts_made,
         }
     }
 
-    /// Send a single callback request
+    /// Send a single callback request (using default client timeout)
+    #[allow(dead_code)]
     async fn send_callback(
         &self,
         url: &str,
@@ -190,6 +219,27 @@ impl CallbackService {
         timestamp: u64,
         signature: &str,
         idempotency_key: &str,
+    ) -> Result<(), String> {
+        self.send_callback_with_timeout(
+            url,
+            body,
+            timestamp,
+            signature,
+            idempotency_key,
+            CALLBACK_TIMEOUT_SECONDS,
+        )
+        .await
+    }
+
+    /// Send a single callback request with configurable timeout
+    async fn send_callback_with_timeout(
+        &self,
+        url: &str,
+        body: &str,
+        timestamp: u64,
+        signature: &str,
+        idempotency_key: &str,
+        timeout_seconds: u64,
     ) -> Result<(), String> {
         // Validate URL is HTTPS (security requirement)
         if !url.starts_with("https://") {
@@ -204,6 +254,7 @@ impl CallbackService {
             .header("X-TOS-Timestamp", timestamp.to_string())
             .header("X-TOS-Idempotency", idempotency_key)
             .body(body.to_string())
+            .timeout(Duration::from_secs(timeout_seconds))
             .send()
             .await
             .map_err(|e| format!("Request failed: {}", e))?;
@@ -237,6 +288,9 @@ pub fn create_callback_config(callback_url: String, webhook_secret: Vec<u8>) -> 
 /// This is a helper function to send a callback when a payment is detected.
 /// It should be called from the blockchain event handler when a payment
 /// matches a registered payment request with a callback URL.
+///
+/// If `expected_amount` is provided and amount < expected_amount, the callback
+/// will use PaymentUnderpaid instead of PaymentConfirmed for confirmed payments.
 pub fn send_payment_callback(
     service: Arc<CallbackService>,
     callback_url: String,
@@ -244,12 +298,24 @@ pub fn send_payment_callback(
     payment_id: String,
     tx_hash: Hash,
     amount: u64,
+    expected_amount: Option<u64>,
     confirmations: u64,
 ) {
     let config = create_callback_config(callback_url, webhook_secret);
     let payload = if confirmations >= 8 {
-        // Stable/confirmed payment
-        CallbackPayload::payment_confirmed(payment_id, tx_hash, amount, confirmations)
+        // Check if payment is underpaid before marking as confirmed
+        if let Some(expected) = expected_amount {
+            if amount < expected {
+                // Underpaid payment - use distinct callback type
+                CallbackPayload::payment_underpaid(payment_id, tx_hash, amount, confirmations)
+            } else {
+                // Fully paid and confirmed
+                CallbackPayload::payment_confirmed(payment_id, tx_hash, amount, confirmations)
+            }
+        } else {
+            // No expected amount, just confirm
+            CallbackPayload::payment_confirmed(payment_id, tx_hash, amount, confirmations)
+        }
     } else {
         // Payment received but not yet stable
         CallbackPayload::payment_received(payment_id, tx_hash, amount, confirmations)

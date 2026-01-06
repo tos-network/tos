@@ -128,6 +128,9 @@ async fn maybe_send_callback(
         None => return,
     };
 
+    // Get expected amount from stored request for underpaid detection
+    let expected_amount = stored.amount;
+
     match status {
         PaymentStatus::Confirmed => {
             if stored.last_callback_status == Some(PaymentStatus::Confirmed) {
@@ -141,6 +144,7 @@ async fn maybe_send_callback(
                     payment_id.to_string(),
                     tx_hash,
                     amount,
+                    expected_amount,
                     confirmations,
                 );
                 update_payment_callback_status(payment_id, PaymentStatus::Confirmed).await;
@@ -170,6 +174,7 @@ async fn maybe_send_callback(
                     payment_id.to_string(),
                     tx_hash,
                     amount,
+                    expected_amount,
                     confirmations,
                 );
                 update_payment_callback_status(payment_id, status).await;
