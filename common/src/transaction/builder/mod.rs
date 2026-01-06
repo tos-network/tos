@@ -26,7 +26,9 @@ use super::{
 use crate::account::FreezeDuration;
 use crate::ai_mining::AIMiningPayload;
 use crate::{
-    config::{BURN_PER_CONTRACT, MAX_GAS_USAGE_PER_TX, TOS_ASSET, UNO_ASSET},
+    config::{
+        BURN_PER_CONTRACT, MAX_GAS_USAGE_PER_TX, MIN_SHIELD_TOS_AMOUNT, TOS_ASSET, UNO_ASSET,
+    },
     crypto::{
         elgamal::{
             Ciphertext, CompressedPublicKey, DecryptHandle, KeyPair, PedersenCommitment,
@@ -97,12 +99,12 @@ pub enum GenerationError<T> {
     InvalidModule,
     #[error("Configured max gas is above the network limit")]
     MaxGasReached,
-    #[error("Energy fee type can only be used with Transfer transactions")]
+    #[error("Energy fee type can only be used with transfer-type transactions")]
     InvalidEnergyFeeType,
-    #[error("Energy fee type cannot be used for transfers to new addresses")]
-    InvalidEnergyFeeForNewAddress,
     #[error("UNO transfers must use UNO_ASSET")]
     InvalidUnoAsset,
+    #[error("Shield amount must be at least 100 TOS")]
+    ShieldAmountTooLow,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -492,9 +494,15 @@ impl TransactionBuilder {
 
                 let expected_fee = if let Some(ref fee_type) = self.fee_type {
                     if *fee_type == FeeType::Energy
-                        && matches!(self.data, TransactionTypeBuilder::Transfers(_))
+                        && matches!(
+                            self.data,
+                            TransactionTypeBuilder::Transfers(_)
+                                | TransactionTypeBuilder::UnoTransfers(_)
+                                | TransactionTypeBuilder::ShieldTransfers(_)
+                                | TransactionTypeBuilder::UnshieldTransfers(_)
+                        )
                     {
-                        // Use energy fee calculation for transfer transactions
+                        // Use energy fee calculation for transfer-type transactions
                         calculate_energy_fee(size, transfers, new_addresses)
                     } else {
                         // Use regular fee calculation (TOS or UNO/Unshield)
@@ -697,27 +705,24 @@ impl TransactionBuilder {
     where
         <B as FeeHelper>::Error: for<'a> std::convert::From<&'a str>,
     {
-        // Validate that Energy fee type can only be used with Transfer transactions
+        // Validate that Energy fee type can only be used with transfer-type transactions
         if let Some(fee_type) = &self.fee_type {
-            if *fee_type == FeeType::Energy
-                && !matches!(self.data, TransactionTypeBuilder::Transfers(_))
-            {
-                return Err(GenerationError::InvalidEnergyFeeType);
-            }
-
-            // Validate that Energy fee type cannot be used for transfers to new addresses
             if *fee_type == FeeType::Energy {
-                if let TransactionTypeBuilder::Transfers(transfers) = &self.data {
-                    for transfer in transfers {
-                        if !state
-                            .is_account_registered(transfer.destination.get_public_key())
-                            .map_err(GenerationError::State)?
-                        {
-                            return Err(GenerationError::InvalidEnergyFeeForNewAddress);
-                        }
+                match &self.data {
+                    TransactionTypeBuilder::Transfers(_)
+                    | TransactionTypeBuilder::UnoTransfers(_)
+                    | TransactionTypeBuilder::ShieldTransfers(_)
+                    | TransactionTypeBuilder::UnshieldTransfers(_) => {
+                        // These transaction types can use Energy fees
+                    }
+                    _ => {
+                        return Err(GenerationError::InvalidEnergyFeeType);
                     }
                 }
             }
+
+            // NOTE: Energy fee type is now allowed for transfers to new addresses
+            // The previous restriction has been removed to improve Energy usability
         }
 
         // Compute the fees
@@ -1320,6 +1325,13 @@ impl TransactionBuilder {
             return Err(GenerationError::MaxTransferCountReached);
         }
 
+        // Validate minimum Shield amount (anti-money-laundering measure)
+        for transfer in shield_transfers {
+            if transfer.amount < MIN_SHIELD_TOS_AMOUNT {
+                return Err(GenerationError::ShieldAmountTooLow);
+            }
+        }
+
         // Get the nonce
         let nonce = state.get_nonce().map_err(GenerationError::State)?;
         state
@@ -1849,7 +1861,7 @@ mod tests {
         )
         .with_fee_type(energy_fee.clone());
 
-        // Test invalid case: Energy fee with non-Transfer transaction
+        // Test invalid case: Energy fee with non-transfer-type transaction (e.g., Burn)
         let burn_builder = TransactionTypeBuilder::Burn(BurnPayload {
             asset: Hash::zero(),
             amount: 100,
@@ -1873,29 +1885,37 @@ mod tests {
         assert!(matches!(energy_fee, FeeType::Energy));
         assert!(matches!(burn_builder, TransactionTypeBuilder::Burn(_)));
 
-        // Verify that the validation logic is correct
+        // Verify that the validation logic is correct:
+        // Energy fee should only be allowed with transfer-type transactions
+        // (Transfers, UnoTransfers, ShieldTransfers, UnshieldTransfers)
         let fee_type = Some(FeeType::Energy);
-        let is_transfer = matches!(burn_builder, TransactionTypeBuilder::Transfers(_));
-        let should_fail = fee_type == Some(FeeType::Energy) && !is_transfer;
+        let is_transfer_type = matches!(
+            burn_builder,
+            TransactionTypeBuilder::Transfers(_)
+                | TransactionTypeBuilder::UnoTransfers(_)
+                | TransactionTypeBuilder::ShieldTransfers(_)
+                | TransactionTypeBuilder::UnshieldTransfers(_)
+        );
+        let should_fail = fee_type == Some(FeeType::Energy) && !is_transfer_type;
 
         assert!(
             should_fail,
-            "Energy fee type should only be allowed with Transfer transactions"
+            "Energy fee type should only be allowed with transfer-type transactions"
         );
     }
 
     #[test]
-    fn test_energy_fee_for_new_address_validation() {
+    fn test_energy_fee_allowed_for_new_addresses() {
         use super::super::FeeType;
 
-        // Test that Energy fee type cannot be used for transfers to new addresses
+        // Test that Energy fee type IS now allowed for transfers to new addresses
+        // (This restriction has been removed to improve Energy usability)
         let energy_fee = FeeType::Energy;
 
-        // Create a transfer to a new address (non-existent account)
-        // We'll use a simple test that validates the logic without complex type construction
-        let transfer_to_new_address = TransactionTypeBuilder::Transfers(vec![]);
+        // Create a transfer transaction
+        let transfer_builder = TransactionTypeBuilder::Transfers(vec![]);
 
-        // This should cause an error when building due to new address validation
+        // Energy fee with transfers is valid (new address restriction removed)
         let _builder = TransactionBuilder::new(
             TxVersion::T0,
             0, // chain_id: 0 for tests
@@ -1903,22 +1923,19 @@ mod tests {
                 tos_crypto::curve25519_dalek::ristretto::CompressedRistretto::default(),
             ),
             None,
-            transfer_to_new_address.clone(),
+            transfer_builder.clone(),
             FeeBuilder::Value(0),
         )
         .with_fee_type(energy_fee.clone());
 
-        // Verify that the validation logic is correct
+        // Verify Energy + Transfers is a valid combination
         let fee_type = Some(FeeType::Energy);
-        let is_transfer = matches!(
-            transfer_to_new_address,
-            TransactionTypeBuilder::Transfers(_)
-        );
-        let should_fail = fee_type == Some(FeeType::Energy) && is_transfer;
+        let is_transfer = matches!(transfer_builder, TransactionTypeBuilder::Transfers(_));
+        let is_valid_combination = fee_type == Some(FeeType::Energy) && is_transfer;
 
         assert!(
-            should_fail,
-            "Energy fee type should not be allowed for transfers to new addresses"
+            is_valid_combination,
+            "Energy fee type should be allowed with Transfer transactions (including to new addresses)"
         );
     }
 }

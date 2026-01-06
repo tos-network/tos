@@ -64,4 +64,6 @@ pub enum VerificationError<T> {
     Overflow,
     #[error("Invalid transfer amount")]
     InvalidTransferAmount,
+    #[error("Shield amount must be at least 100 TOS")]
+    ShieldAmountTooLow,
 }

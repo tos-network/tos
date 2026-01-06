@@ -19,7 +19,9 @@ use tos_kernel::ModuleValidator;
 use super::{payload::EnergyPayload, ContractDeposit, Role, Transaction, TransactionType};
 use crate::{
     account::EnergyResource,
-    config::{BURN_PER_CONTRACT, MAX_GAS_USAGE_PER_TX, TOS_ASSET, UNO_ASSET},
+    config::{
+        BURN_PER_CONTRACT, MAX_GAS_USAGE_PER_TX, MIN_SHIELD_TOS_AMOUNT, TOS_ASSET, UNO_ASSET,
+    },
     contract::ContractProvider,
     crypto::{
         elgamal::{Ciphertext, DecompressionError, DecryptHandle, PedersenCommitment, PublicKey},
@@ -673,6 +675,11 @@ impl Transaction {
                     // Validate amount is non-zero
                     if transfer.get_amount() == 0 {
                         return Err(VerificationError::InvalidTransferAmount);
+                    }
+
+                    // Validate minimum Shield amount (anti-money-laundering measure)
+                    if transfer.get_amount() < MIN_SHIELD_TOS_AMOUNT {
+                        return Err(VerificationError::ShieldAmountTooLow);
                     }
 
                     // Shield transfers only support TOS asset
@@ -1626,9 +1633,19 @@ impl Transaction {
             return Err(VerificationError::InvalidFormat);
         }
 
-        // Validate that Energy fee type can only be used with Transfer transactions
-        if self.get_fee_type().is_energy() && !matches!(self.data, TransactionType::Transfers(_)) {
-            return Err(VerificationError::InvalidFormat);
+        // Validate that Energy fee type can only be used with transfer-type transactions
+        if self.get_fee_type().is_energy() {
+            match &self.data {
+                TransactionType::Transfers(_)
+                | TransactionType::UnoTransfers(_)
+                | TransactionType::ShieldTransfers(_)
+                | TransactionType::UnshieldTransfers(_) => {
+                    // These transaction types can use Energy fees
+                }
+                _ => {
+                    return Err(VerificationError::InvalidFormat);
+                }
+            }
         }
 
         trace!("Pre-verifying transaction on state");
@@ -1680,22 +1697,8 @@ impl Transaction {
                         return Err(VerificationError::SenderIsReceiver);
                     }
 
-                    // Energy fee transfers cannot send to new (non-existent) accounts
-                    // This prevents using energy to create new accounts for free
-                    if self.get_fee_type().is_energy() {
-                        let dest_exists = state
-                            .account_exists(transfer.get_destination())
-                            .await
-                            .map_err(VerificationError::State)?;
-                        if !dest_exists {
-                            if log::log_enabled!(log::Level::Debug) {
-                                debug!(
-                                    "Energy fee transfer rejected: destination account does not exist"
-                                );
-                            }
-                            return Err(VerificationError::InvalidFormat);
-                        }
-                    }
+                    // NOTE: Energy fee type is now allowed for transfers to new addresses
+                    // The previous restriction has been removed to improve Energy usability
 
                     if let Some(extra_data) = transfer.get_extra_data() {
                         let size = extra_data.size();
@@ -1936,6 +1939,11 @@ impl Transaction {
                 for transfer in transfers.iter() {
                     if transfer.get_amount() == 0 {
                         return Err(VerificationError::InvalidTransferAmount);
+                    }
+
+                    // Validate minimum Shield amount (anti-money-laundering measure)
+                    if transfer.get_amount() < MIN_SHIELD_TOS_AMOUNT {
+                        return Err(VerificationError::ShieldAmountTooLow);
                     }
 
                     // Shield transfers only support TOS asset
@@ -2909,41 +2917,47 @@ impl Transaction {
 
         // Handle energy consumption if this transaction uses energy for fees
         if self.get_fee_type().is_energy() {
-            // Only transfer transactions can use energy fees
-            if let TransactionType::Transfers(_) = &self.data {
-                let energy_cost = self.calculate_energy_cost();
+            // Transfer-type transactions can use energy fees
+            match &self.data {
+                TransactionType::Transfers(_)
+                | TransactionType::UnoTransfers(_)
+                | TransactionType::ShieldTransfers(_)
+                | TransactionType::UnshieldTransfers(_) => {
+                    let energy_cost = self.calculate_energy_cost();
 
-                // Get user's energy resource
-                let energy_resource = state
-                    .get_energy_resource(Cow::Borrowed(&self.source))
-                    .await
-                    .map_err(VerificationError::State)?;
-
-                if let Some(mut energy_resource) = energy_resource {
-                    let topoheight = state.get_verification_topoheight();
-
-                    // Check if user has enough energy
-                    if !energy_resource.has_enough_energy(topoheight, energy_cost) {
-                        return Err(VerificationError::InsufficientEnergy(energy_cost));
-                    }
-
-                    // Consume energy
-                    energy_resource
-                        .consume_energy(energy_cost, topoheight)
-                        .map_err(|_| VerificationError::InsufficientEnergy(energy_cost))?;
-
-                    // Update energy resource in state
-                    state
-                        .set_energy_resource(Cow::Borrowed(&self.source), energy_resource)
+                    // Get user's energy resource
+                    let energy_resource = state
+                        .get_energy_resource(Cow::Borrowed(&self.source))
                         .await
                         .map_err(VerificationError::State)?;
 
-                    if log::log_enabled!(log::Level::Debug) {
-                        debug!("Consumed {energy_cost} energy for transaction {tx_hash}");
+                    if let Some(mut energy_resource) = energy_resource {
+                        let topoheight = state.get_verification_topoheight();
+
+                        // Check if user has enough energy
+                        if !energy_resource.has_enough_energy(topoheight, energy_cost) {
+                            return Err(VerificationError::InsufficientEnergy(energy_cost));
+                        }
+
+                        // Consume energy
+                        energy_resource
+                            .consume_energy(energy_cost, topoheight)
+                            .map_err(|_| VerificationError::InsufficientEnergy(energy_cost))?;
+
+                        // Update energy resource in state
+                        state
+                            .set_energy_resource(Cow::Borrowed(&self.source), energy_resource)
+                            .await
+                            .map_err(VerificationError::State)?;
+
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("Consumed {energy_cost} energy for transaction {tx_hash}");
+                        }
+                    } else {
+                        return Err(VerificationError::InsufficientEnergy(energy_cost));
                     }
-                } else {
-                    return Err(VerificationError::InsufficientEnergy(energy_cost));
                 }
+                _ => {}
             }
         }
 

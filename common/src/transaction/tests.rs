@@ -1459,7 +1459,13 @@ async fn test_freeze_delegation_requires_existing_delegatee() {
 }
 
 #[tokio::test]
-async fn test_energy_fee_transfer_rejects_new_address() {
+async fn test_energy_fee_transfer_allows_new_address() {
+    // Test that Energy fee transfers to new (non-existent) addresses are now ALLOWED
+    // (The previous restriction has been removed to improve Energy usability)
+    //
+    // Note: The verify() phase only checks format and spending validity.
+    // Energy consumption happens in the apply() phase (BlockchainApplyState).
+    // Therefore, verify() should SUCCEED for Energy fee transfers to new addresses.
     let mut alice = Account::new();
     alice.set_balance(TOS_ASSET, 10 * COIN_VALUE);
     let bob = Account::new();
@@ -1488,6 +1494,8 @@ async fn test_energy_fee_transfer_rejects_new_address() {
         FeeBuilder::Value(0),
     )
     .with_fee_type(FeeType::Energy);
+
+    // Transaction building should succeed (no new address restriction in builder)
     let tx = builder.build(&mut state, &alice.keypair).unwrap();
 
     let mut verify_state = ChainState::new();
@@ -1505,7 +1513,16 @@ async fn test_energy_fee_transfer_rejects_new_address() {
     let result = Arc::new(tx)
         .verify(&tx_hash, &mut verify_state, &NoZKPCache)
         .await;
-    assert!(result.is_err());
+
+    // Verification should SUCCEED because:
+    // 1. The new address restriction has been removed
+    // 2. Energy consumption happens in apply() phase, not verify()
+    // 3. The format and spending checks pass
+    assert!(
+        result.is_ok(),
+        "Energy fee transfer to new address should succeed in verify(): {:?}",
+        result
+    );
 }
 
 #[async_trait]
