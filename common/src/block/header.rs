@@ -1,7 +1,7 @@
 use super::{Algorithm, MinerWork, EXTRA_NONCE_SIZE};
 use crate::{
     block::{BlockVersion, BLOCK_WORK_SIZE, HEADER_WORK_SIZE},
-    config::TIPS_LIMIT,
+    config::{MAX_TXS_PER_BLOCK, TIPS_LIMIT},
     crypto::{elgamal::CompressedPublicKey, hash, pow_hash, Hash, Hashable, HASH_SIZE},
     immutable::Immutable,
     serializer::{Reader, ReaderError, Serializer, Writer},
@@ -284,9 +284,7 @@ impl Serializer for BlockHeader {
 
         let txs_count = reader.read_u16()?;
         // Validate txs_count before allocation to prevent memory exhaustion DoS
-        // Maximum based on block size limits: 1.25MB / minimum_tx_size (~100 bytes) ≈ 13,000 txs
-        // Using 10,000 as a safe upper bound
-        const MAX_TXS_PER_BLOCK: u16 = 10_000;
+        // Uses centralized constant from config.rs (derived from MAX_BLOCK_SIZE)
         if txs_count > MAX_TXS_PER_BLOCK {
             debug!(
                 "Error, too many transactions in block header: {} > {}",

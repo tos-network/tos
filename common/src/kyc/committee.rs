@@ -7,6 +7,9 @@
 //
 // Reference: TOS-KYC-Level-Design.md Section 4
 
+// Import and re-export centralized timing constants from config.rs
+// This ensures consistency while maintaining backward compatibility
+pub use crate::config::{APPROVAL_EXPIRY_SECONDS, APPROVAL_FUTURE_TOLERANCE_SECONDS};
 use crate::crypto::{Hash, PublicKey, Signature};
 use crate::kyc::{KycError, KycRegion, KycResult};
 use crate::network::Network;
@@ -21,9 +24,6 @@ pub const DEFAULT_KYC_THRESHOLD: u8 = 1;
 
 /// Emergency suspension timeout in seconds (24 hours)
 pub const EMERGENCY_SUSPENSION_TIMEOUT: u64 = 24 * 3600;
-
-/// Approval expiry time in seconds (24 hours)
-pub const APPROVAL_EXPIRY_SECONDS: u64 = 24 * 3600;
 
 /// Security committee definition
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -612,8 +612,9 @@ impl CommitteeApproval {
     }
 
     /// Check if approval has expired or is from too far in the future
+    /// Uses centralized timing constants from config.rs for consistency
     pub fn is_expired(&self, current_time: u64) -> bool {
-        let max_future = current_time.saturating_add(3600);
+        let max_future = current_time.saturating_add(APPROVAL_FUTURE_TOLERANCE_SECONDS);
         self.timestamp > max_future
             || current_time.saturating_sub(self.timestamp) > APPROVAL_EXPIRY_SECONDS
     }

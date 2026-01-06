@@ -148,6 +148,33 @@ cargo clippy --package tos_daemon --package tos_common --package tos_wallet --li
 - Build scripts and tools
 - Cases where panic is truly unrecoverable (document with `// SAFETY:` comment)
 
+#### Panic/Expect/Unwrap Policy by Code Path
+
+This policy defines when panic-inducing code is acceptable:
+
+| Code Path | `unwrap()` | `expect()` | `panic!()` | Notes |
+|-----------|------------|------------|------------|-------|
+| **Startup/Init** (main, config loading) | ⚠️ | ✅ | ✅ | Fatal errors should exit with clear message |
+| **Consensus/Validation** (block, tx verify) | ❌ | ❌ | ❌ | Must return `Result` and reject invalid input |
+| **Network/RPC Input** (P2P, JSON-RPC, WS) | ❌ | ❌ | ❌ | Must handle malformed input gracefully |
+| **Deserialization** (Reader, serde) | ❌ | ❌ | ❌ | Return `ReaderError`/`serde::Error` |
+| **Storage Operations** (RocksDB) | ❌ | ⚠️ | ❌ | Use `expect` only for DB init, not queries |
+| **Lock Acquisition** (Mutex/RwLock) | ⚠️ | ⚠️ | ❌ | Prefer `try_lock` or handle poison gracefully |
+| **Test Code** (`#[cfg(test)]`) | ✅ | ✅ | ✅ | Acceptable for test assertions |
+
+**Legend:** ✅ = Allowed, ⚠️ = Allowed with justification comment, ❌ = Prohibited
+
+**Rationale:**
+- Startup failures should crash fast with clear error messages
+- Consensus path panics can cause network splits - must be avoided
+- Remote input handlers that panic create DoS vulnerabilities
+- Test code can panic freely for assertion failures
+
+**Documentation Requirements:**
+- All `expect()` calls in production code must have descriptive messages
+- All `// SAFETY:` comments must explain why panic is unrecoverable
+- Lock `expect()` should document why poison is impossible or handled elsewhere
+
 ### 5. Git Workflow
 
 **RULE: Follow the standard commit and push workflow.**

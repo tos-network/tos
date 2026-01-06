@@ -129,6 +129,29 @@ pub const MAX_BLOCK_SIZE: usize = (BYTES_PER_KB * BYTES_PER_KB) + (256 * BYTES_P
 // BlockDAG rules
 pub const TIPS_LIMIT: usize = 3; // maximum 3 TIPS per block
 
+// ===== DoS PROTECTION LIMITS =====
+// These constants form a unified defense against resource exhaustion attacks.
+// All deserialization and allocation paths MUST check these limits BEFORE allocating memory.
+
+/// Maximum transactions per block (derived from MAX_BLOCK_SIZE / minimum_tx_size)
+/// Calculation: 1.25MB / ~100 bytes minimum tx ≈ 13,000 txs, using 10,000 as safe upper bound
+pub const MAX_TXS_PER_BLOCK: u16 = 10_000;
+
+/// Maximum referral upline traversal depth to prevent circular reference attacks
+pub const MAX_UPLINE_LEVELS: u8 = 20;
+
+// ===== KYC/APPROVAL TIMING CONSTANTS =====
+// Centralized timing constants for KYC approval system to ensure consistency.
+
+/// Approval expiry period: 24 hours in seconds
+/// Approvals older than this are considered expired and rejected
+pub const APPROVAL_EXPIRY_SECONDS: u64 = 24 * 3600;
+
+/// Future timestamp tolerance: 1 hour in seconds
+/// Approvals with timestamps more than this far in the future are rejected
+/// This prevents timestamp manipulation attacks while allowing for clock drift
+pub const APPROVAL_FUTURE_TOLERANCE_SECONDS: u64 = 3600;
+
 // Initialize the configuration
 pub fn init() {
     // register the opaque types
