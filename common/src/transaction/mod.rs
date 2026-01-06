@@ -717,9 +717,21 @@ impl Serializer for Transaction {
         // UNO fields: source_commitments and range_proof
         // Only written for UNO transactions
         if self.has_uno_transfers() {
-            let len: u8 = self.source_commitments.len() as u8;
+            // source_commitments represents assets in UNO transfers, realistically limited
+            // This debug_assert catches programming errors; verification phase enforces the limit
+            debug_assert!(
+                self.source_commitments.len() <= u8::MAX as usize,
+                "source_commitments length {} exceeds u8 max, serialization would truncate",
+                self.source_commitments.len()
+            );
+            // Clamp length to u8::MAX and only write that many items
+            // This ensures the written length matches actual items written
+            // preventing deserialization corruption if limit is exceeded
+            let len: u8 = self.source_commitments.len().min(u8::MAX as usize) as u8;
             writer.write_u8(len);
-            for sc in &self.source_commitments {
+            // CRITICAL: Only iterate up to `len` items to match the header
+            // Previously this wrote ALL items regardless of clamped length
+            for sc in self.source_commitments.iter().take(len as usize) {
                 sc.write(writer);
             }
             if let Some(ref rp) = self.range_proof {

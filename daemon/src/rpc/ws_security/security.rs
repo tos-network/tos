@@ -300,11 +300,14 @@ impl WebSocketSecurity {
                 }
 
                 // Check if origin matches any allowed origin
+                // SECURITY FIX: Use exact match instead of starts_with to prevent bypass
+                // Example attack: allowed="https://trusted.com", attacker uses "https://trusted.com.evil.com"
+                // starts_with would incorrectly allow this, exact match prevents it
                 let is_allowed = self
                     .config
                     .allowed_origins
                     .iter()
-                    .any(|allowed| origin.starts_with(allowed));
+                    .any(|allowed| origin == allowed);
 
                 if is_allowed {
                     Ok(())

@@ -482,17 +482,47 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for Applicable
         contract: &Hash,
         tx_hash: &'a Hash,
     ) -> Result<(), BlockchainError> {
-        // Contract events are logged but not persisted in this simplified version
-        // In the full version, these would be stored for event filtering
+        // Persist contract events to storage
+        // This enables event filtering and querying
+        use crate::core::storage::StoredContractEvent;
+        use tos_common::crypto::Hashable;
+
         let event_count = events.len();
-        if event_count > 0 {
-            if log::log_enabled!(log::Level::Debug) {
-                debug!(
-                    "Contract {} emitted {} events in TX {} (not persisted)",
-                    contract, event_count, tx_hash
-                );
-            }
+        if event_count == 0 {
+            return Ok(());
         }
+
+        let block_hash = self.block.hash();
+        let topoheight = self.inner.topoheight;
+
+        // Convert common::ContractEvent to storage::StoredContractEvent
+        let stored_events: Vec<StoredContractEvent> = events
+            .into_iter()
+            .enumerate()
+            .map(|(idx, event)| StoredContractEvent {
+                contract: contract.clone(),
+                tx_hash: tx_hash.clone(),
+                block_hash: block_hash.clone(),
+                topoheight,
+                log_index: idx as u32,
+                topics: event.topics,
+                data: event.data,
+            })
+            .collect();
+
+        // Store events to persistent storage
+        self.inner
+            .storage
+            .store_contract_events(stored_events)
+            .await?;
+
+        if log::log_enabled!(log::Level::Debug) {
+            debug!(
+                "Contract {} emitted {} events in TX {} (persisted at topoheight {})",
+                contract, event_count, tx_hash, topoheight
+            );
+        }
+
         Ok(())
     }
 
@@ -823,7 +853,29 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for Applicable
         user: &'a CompressedPublicKey,
     ) -> Result<Option<tos_common::kyc::KycStatus>, BlockchainError> {
         let kyc_data = self.inner.storage.get_kyc(user).await?;
-        Ok(kyc_data.map(|d| d.status))
+        if let Some(data) = kyc_data {
+            if data.status == tos_common::kyc::KycStatus::Suspended {
+                if let Some((_reason_hash, expires_at)) =
+                    self.inner.storage.get_emergency_suspension(user).await?
+                {
+                    let current_time = self.get_verification_timestamp();
+                    if current_time >= expires_at {
+                        // Get previous status, but if missing, keep user as Suspended
+                        // to prevent unauthorized status elevation from missing data
+                        let previous_status = self
+                            .inner
+                            .storage
+                            .get_emergency_previous_status(user)
+                            .await?
+                            .unwrap_or(data.status); // Fall back to stored status (Suspended)
+                        return Ok(Some(previous_status));
+                    }
+                }
+            }
+            Ok(Some(data.status))
+        } else {
+            Ok(None)
+        }
     }
 
     async fn get_kyc_level(

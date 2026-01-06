@@ -150,10 +150,13 @@ impl Transaction {
     ) -> Ciphertext {
         let mut output = Ciphertext::zero();
 
-        // Fees are applied to the UNO asset for privacy-preserving transfers
-        if *asset == UNO_ASSET {
-            output += tos_crypto::curve25519_dalek::Scalar::from(self.fee);
-        }
+        // Fees are paid via TOS (Energy consumption), not UNO
+        // In Energy model, fees are paid via TOS (Energy consumption), not UNO
+        // Fee handling is done in plaintext TOS balance, not encrypted UNO balance
+        // OLD CODE (REMOVED):
+        // if *asset == UNO_ASSET {
+        //     output += tos_crypto::curve25519_dalek::Scalar::from(self.get_fee_limit());
+        // }
 
         // Sum up all UNO transfers for this asset
         if let TransactionType::UnoTransfers(transfers) = &self.data {
@@ -575,8 +578,15 @@ impl Transaction {
             TransactionType::AIMining(_) => {
                 // AI Mining transactions don't require special verification beyond basic checks for now
             }
-            TransactionType::BindReferrer(_) => {
-                // BindReferrer validation is handled by the referral provider
+            TransactionType::BindReferrer(payload) => {
+                // Validate extra_data size to prevent mempool/storage bloat
+                // BindReferrer has extra_data field but was missing size validation
+                if let Some(extra_data) = payload.get_extra_data() {
+                    let size = extra_data.size();
+                    if size > EXTRA_DATA_LIMIT_SIZE {
+                        return Err(VerificationError::TransferExtraDataSize);
+                    }
+                }
             }
             TransactionType::BatchReferralReward(payload) => {
                 // BatchReferralReward validation
@@ -663,6 +673,14 @@ impl Transaction {
                     // Validate amount is non-zero
                     if transfer.get_amount() == 0 {
                         return Err(VerificationError::InvalidTransferAmount);
+                    }
+
+                    // Shield transfers only support TOS asset
+                    // UNO is a single-asset privacy layer for TOS only
+                    if *transfer.get_asset() != TOS_ASSET {
+                        return Err(VerificationError::AnyError(anyhow!(
+                            "Shield transfers only support TOS asset"
+                        )));
                     }
 
                     // SECURITY: Verify Shield commitment proof
@@ -841,8 +859,34 @@ impl Transaction {
                     }
                 }
             }
+            TransactionType::AIMining(payload) => {
+                // Enforce AIMining fee/stake/reward spending on-chain
+                use crate::ai_mining::AIMiningPayload;
+                match payload {
+                    AIMiningPayload::RegisterMiner { registration_fee, .. } => {
+                        let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                        *current = current
+                            .checked_add(*registration_fee)
+                            .ok_or(VerificationError::Overflow)?;
+                    }
+                    AIMiningPayload::SubmitAnswer { stake_amount, .. } => {
+                        let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                        *current = current
+                            .checked_add(*stake_amount)
+                            .ok_or(VerificationError::Overflow)?;
+                    }
+                    AIMiningPayload::PublishTask { reward_amount, .. } => {
+                        let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                        *current = current
+                            .checked_add(*reward_amount)
+                            .ok_or(VerificationError::Overflow)?;
+                    }
+                    AIMiningPayload::ValidateAnswer { .. } => {
+                        // ValidateAnswer does not spend TOS directly
+                    }
+                }
+            }
             TransactionType::MultiSig(_)
-            | TransactionType::AIMining(_)
             | TransactionType::BindReferrer(_)
             // KYC transactions don't spend assets directly (only fee)
             | TransactionType::SetKyc(_)
@@ -920,6 +964,47 @@ impl Transaction {
 
         // Two-phase unfreeze: UnfreezeTos creates pending, WithdrawUnfrozen credits balance
         // UnfreezeTos does NOT credit balance immediately - TOS stays in pending state
+
+        // Deduct sender UNO balance for UnoTransfers
+        // This ensures cached UNO transactions also update balance during verification
+        // Previously, only pre_verify_uno updated balance, but cached TXs use verify_dynamic_parts
+        if let TransactionType::UnoTransfers(transfers) = &self.data {
+            if log::log_enabled!(log::Level::Trace) {
+                trace!(
+                    "verify_dynamic_parts: Processing UnoTransfers for source {:?}",
+                    self.source
+                );
+            }
+
+            // Decompress transfer ciphertexts to compute total spending
+            let mut output = Ciphertext::zero();
+            for transfer in transfers.iter() {
+                let decompressed = DecompressedUnoTransferCt::decompress(transfer)
+                    .map_err(ProofVerificationError::from)?;
+                output += decompressed.get_ciphertext(Role::Sender);
+            }
+
+            // Get sender's UNO balance and deduct spending
+            let sender_uno_balance = state
+                .get_sender_uno_balance(&self.source, &UNO_ASSET, &self.reference)
+                .await
+                .map_err(VerificationError::State)?;
+
+            if log::log_enabled!(log::Level::Trace) {
+                trace!(
+                    "verify_dynamic_parts: UnoTransfer deducting from UNO balance for source {:?}",
+                    self.source
+                );
+            }
+
+            *sender_uno_balance -= &output;
+
+            // Track sender output for final balance calculation
+            state
+                .add_sender_uno_output(&self.source, &UNO_ASSET, output)
+                .await
+                .map_err(VerificationError::State)?;
+        }
 
         // Deduct sender UNO balance for UnshieldTransfers
         // Similar to pre_verify_uno but without CommitmentEqProof (amount is plaintext)
@@ -1749,8 +1834,14 @@ impl Transaction {
             TransactionType::AIMining(_) => {
                 // AI Mining transactions don't require special verification beyond basic checks for now
             }
-            TransactionType::BindReferrer(_) => {
-                // BindReferrer transactions are validated by the referral provider at execution time
+            TransactionType::BindReferrer(payload) => {
+                // Validate extra_data size to prevent mempool/storage bloat
+                if let Some(extra_data) = payload.get_extra_data() {
+                    let size = extra_data.size();
+                    if size > EXTRA_DATA_LIMIT_SIZE {
+                        return Err(VerificationError::TransferExtraDataSize);
+                    }
+                }
             }
             TransactionType::BatchReferralReward(payload) => {
                 // BatchReferralReward validation - check payload is valid
@@ -1845,6 +1936,14 @@ impl Transaction {
                 for transfer in transfers.iter() {
                     if transfer.get_amount() == 0 {
                         return Err(VerificationError::InvalidTransferAmount);
+                    }
+
+                    // Shield transfers only support TOS asset
+                    // UNO is a single-asset privacy layer for TOS only
+                    if *transfer.get_asset() != TOS_ASSET {
+                        return Err(VerificationError::AnyError(anyhow!(
+                            "Shield transfers only support TOS asset"
+                        )));
                     }
 
                     // SECURITY: Verify Shield commitment proof
@@ -2221,8 +2320,34 @@ impl Transaction {
                     }
                 }
             }
+            TransactionType::AIMining(payload) => {
+                // Enforce AIMining fee/stake/reward spending on-chain
+                use crate::ai_mining::AIMiningPayload;
+                match payload {
+                    AIMiningPayload::RegisterMiner { registration_fee, .. } => {
+                        let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                        *current = current
+                            .checked_add(*registration_fee)
+                            .ok_or(VerificationError::Overflow)?;
+                    }
+                    AIMiningPayload::SubmitAnswer { stake_amount, .. } => {
+                        let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                        *current = current
+                            .checked_add(*stake_amount)
+                            .ok_or(VerificationError::Overflow)?;
+                    }
+                    AIMiningPayload::PublishTask { reward_amount, .. } => {
+                        let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                        *current = current
+                            .checked_add(*reward_amount)
+                            .ok_or(VerificationError::Overflow)?;
+                    }
+                    AIMiningPayload::ValidateAnswer { .. } => {
+                        // ValidateAnswer does not spend TOS directly
+                    }
+                }
+            }
             TransactionType::MultiSig(_)
-            | TransactionType::AIMining(_)
             | TransactionType::BindReferrer(_)
             // KYC transactions don't spend assets directly (only fee)
             | TransactionType::SetKyc(_)
@@ -2608,8 +2733,34 @@ impl Transaction {
                     }
                 }
             }
+            TransactionType::AIMining(payload) => {
+                // Enforce AIMining fee/stake/reward spending on-chain
+                use crate::ai_mining::AIMiningPayload;
+                match payload {
+                    AIMiningPayload::RegisterMiner { registration_fee, .. } => {
+                        let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                        *current = current
+                            .checked_add(*registration_fee)
+                            .ok_or(VerificationError::Overflow)?;
+                    }
+                    AIMiningPayload::SubmitAnswer { stake_amount, .. } => {
+                        let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                        *current = current
+                            .checked_add(*stake_amount)
+                            .ok_or(VerificationError::Overflow)?;
+                    }
+                    AIMiningPayload::PublishTask { reward_amount, .. } => {
+                        let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                        *current = current
+                            .checked_add(*reward_amount)
+                            .ok_or(VerificationError::Overflow)?;
+                    }
+                    AIMiningPayload::ValidateAnswer { .. } => {
+                        // ValidateAnswer does not spend TOS directly
+                    }
+                }
+            }
             TransactionType::MultiSig(_)
-            | TransactionType::AIMining(_)
             | TransactionType::BindReferrer(_)
             // KYC transactions don't spend assets directly (only fee)
             | TransactionType::SetKyc(_)
@@ -3648,14 +3799,16 @@ impl Transaction {
                         ))
                     })?;
 
-                // SECURITY FIX (Issue #34): Pass transferred_at to bind approval signatures to timestamp
-                // SECURITY FIX (Issue #44): Pass network for cross-network replay protection
+                // Pass transferred_at to bind approval signatures to timestamp
+                // Pass network for cross-network replay protection
+                // Pass current_level to bind approval to user's KYC level
                 crate::kyc::verify_transfer_kyc_dest_approvals(
                     &network,
                     &dest_committee,
                     payload.get_dest_approvals(),
                     payload.get_source_committee_id(),
                     payload.get_account(),
+                    current_level,
                     payload.get_new_data_hash(),
                     payload.get_transferred_at(),
                     current_time,
@@ -3822,6 +3975,25 @@ impl Transaction {
                 }
             }
             TransactionType::BootstrapCommittee(payload) => {
+                // Defense-in-depth: Re-verify authorization in apply phase
+                let bootstrap_pubkey = {
+                    use crate::crypto::Address;
+                    let addr =
+                        Address::from_string(crate::config::BOOTSTRAP_ADDRESS).map_err(|e| {
+                            VerificationError::AnyError(anyhow::anyhow!(
+                                "Invalid bootstrap address configuration: {}",
+                                e
+                            ))
+                        })?;
+                    addr.to_public_key()
+                };
+
+                if self.get_source() != &bootstrap_pubkey {
+                    return Err(VerificationError::AnyError(anyhow::anyhow!(
+                        "BootstrapCommittee can only be submitted by BOOTSTRAP_ADDRESS"
+                    )));
+                }
+
                 // Convert CommitteeMemberInit to CommitteeMemberInfo
                 let members: Vec<crate::kyc::CommitteeMemberInfo> = payload
                     .get_members()
@@ -3969,12 +4141,20 @@ impl Transaction {
                     | crate::transaction::CommitteeUpdateData::UpdateMemberStatus {
                         public_key,
                         ..
-                    } => committee.get_member(public_key).map(|member| {
-                        (
+                    } => {
+                        // Member MUST exist for these operations
+                        let member = committee.get_member(public_key).ok_or_else(|| {
+                            VerificationError::AnyError(anyhow::anyhow!(
+                                "Member {:?} not found in committee {}",
+                                public_key,
+                                payload.get_committee_id()
+                            ))
+                        })?;
+                        Some((
                             member.status == crate::kyc::MemberStatus::Active,
                             member.role.can_approve(),
-                        )
-                    }),
+                        ))
+                    }
                     _ => None,
                 }
                 .unwrap_or((true, true));
@@ -4332,8 +4512,34 @@ impl Transaction {
                     }
                 }
             }
+            TransactionType::AIMining(payload) => {
+                // Enforce AIMining fee/stake/reward spending on-chain
+                use crate::ai_mining::AIMiningPayload;
+                match payload {
+                    AIMiningPayload::RegisterMiner { registration_fee, .. } => {
+                        let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                        *current = current
+                            .checked_add(*registration_fee)
+                            .ok_or(VerificationError::Overflow)?;
+                    }
+                    AIMiningPayload::SubmitAnswer { stake_amount, .. } => {
+                        let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                        *current = current
+                            .checked_add(*stake_amount)
+                            .ok_or(VerificationError::Overflow)?;
+                    }
+                    AIMiningPayload::PublishTask { reward_amount, .. } => {
+                        let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                        *current = current
+                            .checked_add(*reward_amount)
+                            .ok_or(VerificationError::Overflow)?;
+                    }
+                    AIMiningPayload::ValidateAnswer { .. } => {
+                        // ValidateAnswer does not spend TOS directly
+                    }
+                }
+            }
             TransactionType::MultiSig(_)
-            | TransactionType::AIMining(_)
             | TransactionType::BindReferrer(_)
             // KYC transactions don't spend assets directly (only fee)
             | TransactionType::SetKyc(_)

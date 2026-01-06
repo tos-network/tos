@@ -635,10 +635,39 @@ impl RocksStorage {
 
     /// Calculate team size recursively (real-time, expensive)
     async fn calculate_team_size(&self, user: &PublicKey) -> Result<u64, BlockchainError> {
+        // Add visited set to prevent infinite loops on cyclic referral graphs
+        // Even though bind_referrer checks for cycles up to MAX_UPLINE_LEVELS (20),
+        // a longer cycle could theoretically exist from legacy data or corruption.
+        // This visited set ensures we never process the same node twice.
         let mut total = 0u64;
         let mut stack = vec![user.clone()];
+        let mut visited = std::collections::HashSet::new();
+        visited.insert(user.clone());
+
+        // Also add a maximum iteration limit for safety
+        const MAX_TEAM_SIZE_ITERATIONS: u64 = 1_000_000;
+        let mut iterations = 0u64;
 
         while let Some(current) = stack.pop() {
+            // Safety limit to prevent excessive CPU usage
+            // Return error instead of truncating to prevent incorrect reward calculations
+            iterations = iterations.saturating_add(1);
+            if iterations > MAX_TEAM_SIZE_ITERATIONS {
+                if log::log_enabled!(log::Level::Error) {
+                    log::error!(
+                        "calculate_team_size exceeded max iterations ({}) for user {:?}, \
+                         possible data corruption or attack",
+                        MAX_TEAM_SIZE_ITERATIONS,
+                        user
+                    );
+                }
+                return Err(BlockchainError::Any(anyhow::anyhow!(
+                    "Team size calculation exceeded maximum iterations ({}), \
+                     possible cyclic referral graph or data corruption",
+                    MAX_TEAM_SIZE_ITERATIONS
+                )));
+            }
+
             // Get direct referrals for current user
             let mut offset = 0;
             loop {
@@ -647,8 +676,11 @@ impl RocksStorage {
                     .await?;
 
                 for referral in &result.referrals {
-                    total = total.saturating_add(1);
-                    stack.push(referral.clone());
+                    // Skip already visited nodes (cycle protection)
+                    if visited.insert(referral.clone()) {
+                        total = total.saturating_add(1);
+                        stack.push(referral.clone());
+                    }
                 }
 
                 if !result.has_more {

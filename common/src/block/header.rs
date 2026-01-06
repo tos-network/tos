@@ -1,7 +1,7 @@
 use super::{Algorithm, MinerWork, EXTRA_NONCE_SIZE};
 use crate::{
     block::{BlockVersion, BLOCK_WORK_SIZE, HEADER_WORK_SIZE},
-    config::TIPS_LIMIT,
+    config::{MAX_TXS_PER_BLOCK, TIPS_LIMIT},
     crypto::{elgamal::CompressedPublicKey, hash, pow_hash, Hash, Hashable, HASH_SIZE},
     immutable::Immutable,
     serializer::{Reader, ReaderError, Serializer, Writer},
@@ -25,12 +25,30 @@ pub fn serialize_extra_nonce<S: serde::Serializer>(
 }
 
 // Deserialize the extra nonce from a hexadecimal string
+// Add length validation before copy_from_slice to prevent panic
 pub fn deserialize_extra_nonce<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
 ) -> Result<[u8; EXTRA_NONCE_SIZE], D::Error> {
     let mut extra_nonce = [0u8; EXTRA_NONCE_SIZE];
     let hex = String::deserialize(deserializer)?;
+    // SECURITY FIX: Limit input length to prevent memory exhaustion DoS
+    const MAX_HEX_LENGTH: usize = EXTRA_NONCE_SIZE * 2;
+    if hex.len() > MAX_HEX_LENGTH {
+        return Err(serde::de::Error::custom(format!(
+            "Invalid extraNonce: hex string length {} exceeds maximum {}",
+            hex.len(),
+            MAX_HEX_LENGTH
+        )));
+    }
     let decoded = hex::decode(hex).map_err(serde::de::Error::custom)?;
+    // SECURITY FIX: Validate length before copy_from_slice to prevent panic
+    if decoded.len() != EXTRA_NONCE_SIZE {
+        return Err(serde::de::Error::custom(format!(
+            "Invalid extraNonce: expected {} bytes, got {}",
+            EXTRA_NONCE_SIZE,
+            decoded.len()
+        )));
+    }
     extra_nonce.copy_from_slice(&decoded);
     Ok(extra_nonce)
 }
@@ -265,6 +283,15 @@ impl Serializer for BlockHeader {
         }
 
         let txs_count = reader.read_u16()?;
+        // Validate txs_count before allocation to prevent memory exhaustion DoS
+        // Uses centralized constant from config.rs (derived from MAX_BLOCK_SIZE)
+        if txs_count > MAX_TXS_PER_BLOCK {
+            debug!(
+                "Error, too many transactions in block header: {} > {}",
+                txs_count, MAX_TXS_PER_BLOCK
+            );
+            return Err(ReaderError::InvalidValue);
+        }
         let mut txs_hashes = IndexSet::with_capacity(txs_count as usize);
         for _ in 0..txs_count {
             if !txs_hashes.insert(reader.read_hash()?) {
@@ -361,5 +388,84 @@ mod tests {
         let serialized = "00000000000000002d0000018f1cbd697000000000000000000eded85557e887b45989a727b6786e1bd250de65042d9381822fa73d01d2c4ff01d3a0154853dbb01dc28c9102e9d94bea355b8ee0d82c3e078ac80841445e86520000d67ad13934337b85c34985491c437386c95de0d97017131088724cfbedebdc55";
         let header = BlockHeader::from_hex(serialized).unwrap();
         assert!(header.to_hex() == serialized);
+    }
+
+    // ============================================================================
+    // extra_nonce Deserialization Boundary Tests
+    // Verifies that deserialize_extra_nonce properly validates input length
+    // ============================================================================
+
+    mod extra_nonce_deserialization_tests {
+        use crate::block::EXTRA_NONCE_SIZE;
+        use serde::de::IntoDeserializer;
+
+        /// Test valid 32-byte hex string (64 hex chars) deserializes correctly
+        #[test]
+        fn test_valid_extra_nonce_deserializes() {
+            // Valid 32-byte hex string (64 hex characters)
+            let valid_hex = "00".repeat(32);
+            assert_eq!(valid_hex.len(), 64);
+
+            // Create a deserializer from the string
+            let deserializer: serde::de::value::StrDeserializer<serde_json::Error> =
+                valid_hex.as_str().into_deserializer();
+
+            let result = super::super::deserialize_extra_nonce(deserializer);
+            assert!(result.is_ok(), "Valid 32-byte hex should deserialize");
+            assert_eq!(result.unwrap(), [0u8; EXTRA_NONCE_SIZE]);
+        }
+
+        /// Test that hex string too short fails
+        #[test]
+        fn test_short_extra_nonce_fails() {
+            // 31 bytes = 62 hex chars (too short)
+            let short_hex = "00".repeat(31);
+            assert_eq!(short_hex.len(), 62);
+
+            let deserializer: serde::de::value::StrDeserializer<serde_json::Error> =
+                short_hex.as_str().into_deserializer();
+
+            let result = super::super::deserialize_extra_nonce(deserializer);
+            assert!(result.is_err(), "31-byte hex should fail");
+            let err_msg = result.unwrap_err().to_string();
+            assert!(
+                err_msg.contains("expected 32 bytes"),
+                "Error should mention expected length: {}",
+                err_msg
+            );
+        }
+
+        /// Test that extremely long hex string is rejected early (DoS prevention)
+        #[test]
+        fn test_extremely_long_hex_rejected_early() {
+            // Create hex string much longer than max allowed
+            // MAX_HEX_LENGTH = EXTRA_NONCE_SIZE * 2 = 64
+            let extremely_long_hex = "00".repeat(1000);
+            assert_eq!(extremely_long_hex.len(), 2000);
+
+            let deserializer: serde::de::value::StrDeserializer<serde_json::Error> =
+                extremely_long_hex.as_str().into_deserializer();
+
+            let result = super::super::deserialize_extra_nonce(deserializer);
+            assert!(result.is_err(), "Extremely long hex should be rejected");
+            let err_msg = result.unwrap_err().to_string();
+            assert!(
+                err_msg.contains("exceeds maximum"),
+                "Error should mention max length exceeded: {}",
+                err_msg
+            );
+        }
+
+        /// Test empty hex string fails
+        #[test]
+        fn test_empty_extra_nonce_fails() {
+            let empty_hex = "";
+
+            let deserializer: serde::de::value::StrDeserializer<serde_json::Error> =
+                empty_hex.into_deserializer();
+
+            let result = super::super::deserialize_extra_nonce(deserializer);
+            assert!(result.is_err(), "Empty hex should fail");
+        }
     }
 }

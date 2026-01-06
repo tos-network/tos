@@ -126,10 +126,14 @@ impl Transaction {
         };
 
         // Execute the contract
+        // Convert execution errors to is_success=false instead of returning Err.
+        // This prevents state corruption when contract execution fails - balance was already
+        // deducted in apply_without_verify, so returning Err would leave state inconsistent.
+        // Instead, treat execution errors as failed executions with max_gas consumed.
         let execution_result = {
             let provider = contract_environment.provider;
             let tx_sender_hash = Hash::new(*self.get_source().as_bytes());
-            executor
+            match executor
                 .execute(
                     &bytecode,
                     provider,
@@ -144,9 +148,27 @@ impl Transaction {
                     parameters,
                 )
                 .await
-                .map_err(|e| {
-                    VerificationError::ModuleError(format!("Contract execution failed: {e:#}"))
-                })?
+            {
+                Ok(result) => result,
+                Err(e) => {
+                    // Log the error but don't propagate it as Err
+                    // This ensures deposits are refunded and state remains consistent
+                    if log::log_enabled!(log::Level::Error) {
+                        log::error!(
+                            "Contract {} execution error (treating as failure): {e:#}",
+                            contract
+                        );
+                    }
+                    // Return a failure result with max_gas consumed
+                    crate::contract::ContractExecutionResult {
+                        exit_code: None,
+                        gas_used: max_gas,
+                        return_data: Some(format!("Execution error: {e}").into_bytes()),
+                        transfers: vec![],
+                        events: vec![],
+                    }
+                }
+            }
         };
 
         let used_gas = execution_result.gas_used;

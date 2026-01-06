@@ -16,8 +16,9 @@ pub use record::*;
 
 use serde::{Deserialize, Serialize};
 
-/// Maximum number of upline levels that can be queried
-pub const MAX_UPLINE_LEVELS: u8 = 20;
+// Re-export centralized DoS protection constant from config
+// This ensures consistency across the codebase
+pub use crate::config::MAX_UPLINE_LEVELS;
 
 /// Maximum number of direct referrals returned per page
 pub const MAX_DIRECT_REFERRALS_PER_PAGE: u32 = 1000;

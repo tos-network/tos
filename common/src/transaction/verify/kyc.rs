@@ -7,7 +7,9 @@
 // State-dependent validations (committee existence, member authorization, etc.)
 // are handled at execution time by the KycProvider.
 
-use crate::kyc::{is_valid_kyc_level, level_to_tier, CommitteeApproval, APPROVAL_EXPIRY_SECONDS};
+use crate::kyc::{
+    is_valid_kyc_level, level_to_tier, CommitteeApproval, KycRegion, APPROVAL_EXPIRY_SECONDS,
+};
 use crate::transaction::payload::{
     AppealKycPayload, BootstrapCommitteePayload, EmergencySuspendPayload, RegisterCommitteePayload,
     RenewKycPayload, RevokeKycPayload, SetKycPayload, TransferKycPayload, UpdateCommitteePayload,
@@ -63,9 +65,17 @@ pub fn verify_set_kyc<E>(
         )));
     }
 
+    // Validate data_hash is non-zero (must link to off-chain verification data)
+    let zero_hash = crate::crypto::Hash::zero();
+    if payload.get_data_hash() == &zero_hash {
+        return Err(VerificationError::AnyError(anyhow::anyhow!(
+            "KYC data hash cannot be empty - must link to off-chain verification data"
+        )));
+    }
+
     // Validate verified_at is reasonable (not in far future)
     // Allow up to 1 hour in the future for clock skew
-    let max_future = current_time + 3600;
+    let max_future = current_time.saturating_add(3600);
 
     if payload.get_verified_at() > max_future {
         return Err(VerificationError::AnyError(anyhow::anyhow!(
@@ -105,6 +115,14 @@ pub fn verify_revoke_kyc<E>(
         )));
     }
 
+    // Require documented reason for revocation
+    let zero_hash = crate::crypto::Hash::zero();
+    if payload.get_reason_hash() == &zero_hash {
+        return Err(VerificationError::AnyError(anyhow::anyhow!(
+            "Revocation reason hash cannot be empty - must document justification"
+        )));
+    }
+
     Ok(())
 }
 
@@ -127,8 +145,16 @@ pub fn verify_renew_kyc<E>(
         )));
     }
 
+    // Validate data_hash is non-zero
+    let zero_hash = crate::crypto::Hash::zero();
+    if payload.get_data_hash() == &zero_hash {
+        return Err(VerificationError::AnyError(anyhow::anyhow!(
+            "Renewal data hash cannot be empty"
+        )));
+    }
+
     // Validate verified_at is reasonable
-    let max_future = current_time + 3600;
+    let max_future = current_time.saturating_add(3600);
 
     if payload.get_verified_at() > max_future {
         return Err(VerificationError::AnyError(anyhow::anyhow!(
@@ -198,6 +224,14 @@ pub fn verify_transfer_kyc<E>(
         )));
     }
 
+    // Validate new_data_hash is non-zero
+    let zero_hash = crate::crypto::Hash::zero();
+    if payload.get_new_data_hash() == &zero_hash {
+        return Err(VerificationError::AnyError(anyhow::anyhow!(
+            "Transfer data hash cannot be empty"
+        )));
+    }
+
     // Check for duplicate approvers across both committees
     // (same person cannot approve for both source and destination)
     let mut all_approvers = std::collections::HashSet::new();
@@ -213,7 +247,7 @@ pub fn verify_transfer_kyc<E>(
     }
 
     // Validate transferred_at is reasonable (not in far future)
-    let max_future = current_time + 3600;
+    let max_future = current_time.saturating_add(3600);
     if payload.get_transferred_at() > max_future {
         return Err(VerificationError::AnyError(anyhow::anyhow!(
             "Transfer timestamp too far in the future"
@@ -240,10 +274,10 @@ pub fn verify_appeal_kyc<E>(
         )));
     }
 
-    // SECURITY FIX (Issue #43): Appeal submitted_at must be within a reasonable window
+    // Appeal submitted_at must be within a reasonable window
     // to prevent backdating attacks that could bypass time-based appeal policies.
     // We enforce both upper and lower bounds on the submission timestamp.
-    let max_future = current_time + 3600; // 1 hour future tolerance
+    let max_future = current_time.saturating_add(3600); // 1 hour future tolerance
     let max_past = current_time.saturating_sub(3600); // 1 hour past tolerance
 
     if payload.get_submitted_at() > max_future {
@@ -451,6 +485,14 @@ pub fn verify_register_committee<E>(
     if payload.get_approvals().is_empty() {
         return Err(VerificationError::AnyError(anyhow::anyhow!(
             "RegisterCommittee requires at least 1 approval from parent committee"
+        )));
+    }
+
+    // Reject Global and Unspecified regions - only bootstrap can create global
+    let region = payload.get_region();
+    if region.is_global() || region == KycRegion::Unspecified {
+        return Err(VerificationError::AnyError(anyhow::anyhow!(
+            "Cannot register committee with Global or Unspecified region"
         )));
     }
 
@@ -993,10 +1035,19 @@ pub fn verify_emergency_suspend<E>(
         )));
     }
 
+    // Require documented reason for suspension
+    let zero_hash = crate::crypto::Hash::zero();
+    if payload.get_reason_hash() == &zero_hash {
+        return Err(VerificationError::AnyError(anyhow::anyhow!(
+            "Suspension reason hash cannot be empty - must document justification"
+        )));
+    }
+
     // Validate expires_at is reasonable (24 hours from now, with some tolerance)
     // expires_at should be approximately 24 hours from now (allow 1 hour tolerance)
-    let min_expires = current_time + EMERGENCY_SUSPEND_TIMEOUT - 3600;
-    let max_expires = current_time + EMERGENCY_SUSPEND_TIMEOUT + 3600;
+    let base_expires = current_time.saturating_add(EMERGENCY_SUSPEND_TIMEOUT);
+    let min_expires = base_expires.saturating_sub(3600);
+    let max_expires = base_expires.saturating_add(3600);
 
     if payload.get_expires_at() < min_expires || payload.get_expires_at() > max_expires {
         return Err(VerificationError::AnyError(anyhow::anyhow!(
@@ -1038,7 +1089,7 @@ fn verify_approvals<E>(
     // Validate approval timestamps are reasonable
     // 1. Not too far in the future (1 hour tolerance)
     // 2. Not too old (expires after APPROVAL_EXPIRY_SECONDS)
-    let max_future = current_time + 3600;
+    let max_future = current_time.saturating_add(3600);
     let min_valid = current_time.saturating_sub(APPROVAL_EXPIRY_SECONDS);
 
     for approval in approvals {
@@ -1090,6 +1141,11 @@ mod tests {
         addr.to_public_key()
     }
 
+    fn create_test_hash(seed: u8) -> Hash {
+        let bytes = [seed; 32];
+        Hash::new(bytes)
+    }
+
     fn create_test_approval(seed: u8) -> CommitteeApproval {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -1117,8 +1173,8 @@ mod tests {
             create_test_pubkey(1),
             31, // Valid level (Tier 2)
             now,
-            Hash::zero(),
-            Hash::zero(),
+            create_test_hash(1), // Non-zero data hash
+            create_test_hash(2), // Non-zero committee hash
             vec![create_test_approval(1)],
         );
 
@@ -1137,8 +1193,8 @@ mod tests {
             create_test_pubkey(1),
             100, // Invalid level
             now,
-            Hash::zero(),
-            Hash::zero(),
+            create_test_hash(1),
+            create_test_hash(2),
             vec![create_test_approval(1)],
         );
 
@@ -1158,8 +1214,8 @@ mod tests {
             create_test_pubkey(1),
             2047, // Tier 5
             now,
-            Hash::zero(),
-            Hash::zero(),
+            create_test_hash(1),
+            create_test_hash(2),
             vec![create_test_approval(1)],
         );
 
@@ -1171,8 +1227,8 @@ mod tests {
             create_test_pubkey(1),
             2047, // Tier 5
             now,
-            Hash::zero(),
-            Hash::zero(),
+            create_test_hash(1),
+            create_test_hash(2),
             vec![create_test_approval(1), create_test_approval(2)],
         );
 
@@ -1260,8 +1316,8 @@ mod tests {
 
         let payload = EmergencySuspendPayload::new(
             create_test_pubkey(1),
-            Hash::zero(),
-            Hash::zero(),
+            create_test_hash(1), // Non-zero reason hash
+            create_test_hash(2), // Non-zero committee hash
             vec![create_test_approval(1), create_test_approval(2)],
             now + EMERGENCY_SUSPEND_TIMEOUT,
         );
@@ -1279,8 +1335,8 @@ mod tests {
 
         let payload = EmergencySuspendPayload::new(
             create_test_pubkey(1),
-            Hash::zero(),
-            Hash::zero(),
+            create_test_hash(1),
+            create_test_hash(2),
             vec![create_test_approval(1)], // Only 1 approval
             now + EMERGENCY_SUSPEND_TIMEOUT,
         );
