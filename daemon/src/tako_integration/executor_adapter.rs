@@ -125,6 +125,7 @@ impl ContractExecutor for TakoContractExecutor {
             return_data,
             transfers,
             events,
+            cache,
             ..
         } = result;
 
@@ -163,6 +164,10 @@ impl ContractExecutor for TakoContractExecutor {
 
             // Events emitted by the contract
             events: contract_events,
+
+            // VM cache overlay containing storage writes
+            // Will be merged on success via merge_overlay_storage_only()
+            cache: Some(cache),
         })
     }
 
