@@ -482,9 +482,23 @@ impl Default for RocksDBConfig {
 
 /// VRF (Verifiable Random Function) configuration for block producers
 ///
-/// VRF provides verifiable randomness for smart contracts. When enabled,
-/// block producers sign each block hash with their VRF private key,
-/// and contracts can access this verifiable random value.
+/// VRF is mandatory for all nodes. Block producers sign each block hash
+/// with their VRF private key, and contracts can access this verifiable
+/// random value via the `tos_vrf_random()` syscall.
+///
+/// # Key Management
+///
+/// VRF private key can be provided in order of priority:
+/// 1. CLI option: `--vrf-private-key <hex>`
+/// 2. Environment variable: `VRF_PRIVATE_KEY=<hex>`
+/// 3. Auto-generated: If neither is set, a new keypair is generated
+///    and the private key is printed to console (save it for reuse!)
+///
+/// For systemd services, set the environment variable in the service file:
+/// ```ini
+/// [Service]
+/// Environment="VRF_PRIVATE_KEY=your_hex_key_here"
+/// ```
 ///
 /// # Security
 ///
@@ -494,16 +508,10 @@ impl Default for RocksDBConfig {
 /// which could allow VRF manipulation attacks.
 #[derive(Debug, Clone, clap::Args, Serialize, Deserialize, Default)]
 pub struct VrfConfig {
-    /// Enable VRF (Verifiable Random Function) for smart contracts.
-    /// When enabled, block producers sign block hashes with VRF key
-    /// to provide verifiable randomness to contracts.
-    #[clap(name = "enable-vrf", long)]
-    #[serde(default)]
-    pub enable: bool,
     /// VRF private key in hex format (64 hex chars = 32 bytes).
-    /// If not provided when VRF is enabled, a new keypair will be generated.
-    /// The public key will be logged at startup.
-    #[clap(name = "vrf-private-key", long)]
+    /// If not provided, checks VRF_PRIVATE_KEY environment variable.
+    /// If neither is set, a new keypair will be generated and printed.
+    #[clap(name = "vrf-private-key", long, env = "VRF_PRIVATE_KEY")]
     #[serde(default)]
     pub private_key: Option<WrappedVrfSecret>,
     /// Allowed VRF public keys (hex, 32 bytes).

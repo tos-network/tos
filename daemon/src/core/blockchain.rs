@@ -167,10 +167,8 @@ pub struct Blockchain<S: Storage> {
     disable_zkp_cache: bool,
     // Contract executor for running smart contracts (TOS Kernel - TAKO)
     executor: Arc<TakoContractExecutor>,
-    // VRF enabled flag (network-level assumption)
-    vrf_enabled: bool,
-    // VRF key manager for block producers
-    vrf_manager: Option<VrfKeyManager>,
+    // VRF key manager for block producers (mandatory for all nodes)
+    vrf_manager: VrfKeyManager,
     // Optional whitelist for VRF public keys
     vrf_allowed_keys: Option<HashSet<[u8; 32]>>,
 }
@@ -279,14 +277,14 @@ impl<S: Storage> Blockchain<S> {
 
         let environment = build_environment::<S>().build();
 
-        let vrf_enabled = config.vrf.enable;
+        // VRF whitelist configuration (optional but recommended for production)
         let vrf_allowed_keys = if config.vrf.allowed_public_keys.is_empty() {
-            if vrf_enabled && network != Network::Devnet {
+            if network != Network::Devnet {
                 // SECURITY: On mainnet/testnet, empty VRF whitelist allows any keypair
                 // which could enable VRF manipulation attacks
                 if log::log_enabled!(log::Level::Warn) {
                     warn!(
-                        "VRF enabled without allowed-public-keys whitelist on {}. \
+                        "VRF whitelist not configured on {}. \
                          This is insecure for production - any VRF keypair will be accepted. \
                          Consider setting --vrf-allowed-public-key for each authorized producer.",
                         network
@@ -309,23 +307,53 @@ impl<S: Storage> Blockchain<S> {
             }
             Some(allowed)
         };
-        let vrf_manager = if vrf_enabled {
-            match config.vrf.private_key.as_ref() {
-                Some(secret) => {
-                    let manager = VrfKeyManager::from_secret(secret)
-                        .map_err(|e| anyhow!("Failed to load VRF secret: {}", e))?;
-                    Some(manager)
+
+        // VRF is mandatory for all nodes
+        let vrf_manager = match config.vrf.private_key.as_ref() {
+            Some(secret) => VrfKeyManager::from_secret(secret)
+                .map_err(|e| anyhow!("Failed to load VRF secret: {}", e))?,
+            None => {
+                let manager = VrfKeyManager::new();
+                // Print the generated key to console so user can save it
+                // Using println! instead of log to ensure it's always visible
+                println!();
+                println!(
+                    "╔═══════════════════════════════════════════════════════════════════════╗"
+                );
+                println!(
+                    "║  VRF PRIVATE KEY GENERATED                                            ║"
+                );
+                println!(
+                    "╠═══════════════════════════════════════════════════════════════════════╣"
+                );
+                println!(
+                    "║  No VRF private key provided. A new keypair has been generated.       ║"
+                );
+                println!(
+                    "║  SAVE THIS KEY to reuse the same VRF identity on restart:             ║"
+                );
+                println!(
+                    "║                                                                       ║"
+                );
+                println!(
+                    "║  VRF_PRIVATE_KEY={}                       ║",
+                    manager.secret_key_hex()
+                );
+                println!(
+                    "║                                                                       ║"
+                );
+                println!(
+                    "║  Set via environment variable or --vrf-private-key CLI option.        ║"
+                );
+                println!(
+                    "╚═══════════════════════════════════════════════════════════════════════╝"
+                );
+                println!();
+                if log::log_enabled!(log::Level::Warn) {
+                    warn!("No VRF key provided; generated an in-memory keypair (key printed to console)");
                 }
-                None => {
-                    let manager = VrfKeyManager::new();
-                    if log::log_enabled!(log::Level::Warn) {
-                        warn!("VRF enabled without a key; generated an in-memory keypair");
-                    }
-                    Some(manager)
-                }
+                manager
             }
-        } else {
-            None
         };
 
         info!("Initializing chain...");
@@ -355,7 +383,6 @@ impl<S: Storage> Blockchain<S> {
             flush_db_every_n_blocks: config.flush_db_every_n_blocks,
             disable_zkp_cache: config.disable_zkp_cache,
             executor: Arc::new(TakoContractExecutor::new()),
-            vrf_enabled,
             vrf_manager,
             vrf_allowed_keys,
         };
@@ -925,7 +952,8 @@ impl<S: Storage> Blockchain<S> {
             hash = header.get_pow_hash(algorithm)?;
         }
 
-        if self.vrf_enabled && header.get_height() > 0 && header.get_vrf_data().is_none() {
+        // VRF is mandatory for all blocks (except genesis)
+        if header.get_height() > 0 && header.get_vrf_data().is_none() {
             let block_hash = header.hash();
             let vrf = self.build_block_vrf_data(&block_hash)?;
             header.set_vrf_data(Some(vrf));
@@ -1104,11 +1132,8 @@ impl<S: Storage> Blockchain<S> {
     }
 
     fn build_block_vrf_data(&self, block_hash: &Hash) -> Result<BlockVrfData, BlockchainError> {
-        let manager = self
+        let data = self
             .vrf_manager
-            .as_ref()
-            .ok_or(BlockchainError::VrfKeyNotConfigured)?;
-        let data = manager
             .sign(block_hash.as_bytes())
             .map_err(|e| BlockchainError::InvalidVrfData(block_hash.clone(), e.to_string()))?;
         Ok(BlockVrfData::new(
@@ -1127,13 +1152,11 @@ impl<S: Storage> Blockchain<S> {
             return Ok(None);
         }
 
+        // VRF is mandatory for all non-genesis blocks
         let vrf = match block.get_header().get_vrf_data() {
             Some(vrf) => vrf,
             None => {
-                if self.vrf_enabled {
-                    return Err(BlockchainError::MissingVrfData(block_hash.clone()));
-                }
-                return Ok(None);
+                return Err(BlockchainError::MissingVrfData(block_hash.clone()));
             }
         };
 
@@ -2938,11 +2961,8 @@ impl<S: Storage> Blockchain<S> {
         let mut block = block;
         let start = Instant::now();
 
-        if mining
-            && self.vrf_enabled
-            && block.get_height() > 0
-            && block.get_header().get_vrf_data().is_none()
-        {
+        // VRF is mandatory for all non-genesis blocks
+        if mining && block.get_height() > 0 && block.get_header().get_vrf_data().is_none() {
             let block_hash = block.hash();
             let vrf = self.build_block_vrf_data(&block_hash)?;
             let (header, transactions) = block.split();
@@ -3537,9 +3557,8 @@ impl<S: Storage> Blockchain<S> {
             );
         }
 
-        if self.vrf_enabled {
-            self.verify_block_vrf_data(block_hash.as_ref(), &block)?;
-        }
+        // VRF verification is mandatory for all blocks
+        self.verify_block_vrf_data(block_hash.as_ref(), &block)?;
 
         let (block, txs) = block.split();
         let block = block.into_arc();
