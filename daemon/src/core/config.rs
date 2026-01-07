@@ -1,10 +1,11 @@
+use crate::vrf::WrappedVrfSecret;
 use crate::{
     config::*,
     p2p::diffie_hellman::{KeyVerificationAction, WrappedSecret},
 };
 use humantime::Duration as HumanDuration;
 use serde::{Deserialize, Serialize};
-use std::time::Duration;
+use std::{path::PathBuf, time::Duration};
 use tos_common::{crypto::Hash, prompt::LogLevel, utils::detect_available_parallelism};
 
 use super::{
@@ -479,6 +480,35 @@ impl Default for RocksDBConfig {
     }
 }
 
+/// VRF (Verifiable Random Function) configuration for block producers
+///
+/// VRF provides verifiable randomness for smart contracts. When enabled,
+/// block producers sign each block hash with their VRF private key,
+/// and contracts can access this verifiable random value.
+#[derive(Debug, Clone, clap::Args, Serialize, Deserialize, Default)]
+pub struct VrfConfig {
+    /// Enable VRF (Verifiable Random Function) for smart contracts.
+    /// When enabled, block producers sign block hashes with VRF key
+    /// to provide verifiable randomness to contracts.
+    #[clap(name = "enable-vrf", long)]
+    #[serde(default)]
+    pub enable: bool,
+    /// VRF private key in hex format (64 hex chars = 32 bytes).
+    /// If not provided when VRF is enabled, a new keypair will be generated.
+    /// The public key will be logged at startup.
+    #[clap(name = "vrf-private-key", long)]
+    #[serde(default)]
+    pub private_key: Option<WrappedVrfSecret>,
+    /// VRF private key file path (hex-encoded secret).
+    #[clap(name = "vrf-key-file", long)]
+    #[serde(default)]
+    pub key_file: Option<PathBuf>,
+    /// Allowed VRF public keys (hex, 32 bytes). If set, blocks must use one of these keys.
+    #[clap(name = "vrf-allowed-public-key", long)]
+    #[serde(default)]
+    pub allowed_public_keys: Vec<String>,
+}
+
 #[derive(Debug, Clone, clap::Args, Serialize, Deserialize)]
 pub struct Config {
     /// RPC configuration
@@ -490,6 +520,10 @@ pub struct Config {
     /// RocksDB Backend if enabled
     #[clap(flatten)]
     pub rocksdb: RocksDBConfig,
+    /// VRF (Verifiable Random Function) configuration
+    #[clap(flatten)]
+    #[serde(default)]
+    pub vrf: VrfConfig,
     /// Set dir path for blockchain storage.
     /// This will be appended by the network name for the database directory.
     /// It must ends with a slash.

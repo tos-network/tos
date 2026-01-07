@@ -302,6 +302,12 @@ pub enum BlockchainError {
     InvalidTipsDifficulty(Hash, Hash),
     #[error("Invalid block version")]
     InvalidBlockVersion,
+    #[error("Block {0} missing VRF data")]
+    MissingVrfData(Hash),
+    #[error("Block {0} has invalid VRF data: {1}")]
+    InvalidVrfData(Hash, String),
+    #[error("VRF is enabled but no local VRF key is configured")]
+    VrfKeyNotConfigured,
     #[error("Invalid tx version")]
     InvalidTxVersion,
     #[error("Block is already in chain")]

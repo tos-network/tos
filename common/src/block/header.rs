@@ -1,4 +1,5 @@
 use super::{Algorithm, MinerWork, EXTRA_NONCE_SIZE};
+use crate::block::BlockVrfData;
 use crate::{
     block::{BlockVersion, BLOCK_WORK_SIZE, HEADER_WORK_SIZE},
     config::{MAX_TXS_PER_BLOCK, TIPS_LIMIT},
@@ -76,6 +77,10 @@ pub struct BlockHeader {
     pub miner: CompressedPublicKey,
     // All transactions hashes of the block
     pub txs_hashes: IndexSet<Hash>,
+    /// Optional VRF data (public key, output, proof) for verifiable randomness
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vrf: Option<BlockVrfData>,
 }
 
 impl BlockHeader {
@@ -97,6 +102,7 @@ impl BlockHeader {
             extra_nonce,
             miner,
             txs_hashes,
+            vrf: None,
         }
     }
 
@@ -166,6 +172,14 @@ impl BlockHeader {
 
     pub fn get_txs_hashes(&self) -> &IndexSet<Hash> {
         &self.txs_hashes
+    }
+
+    pub fn get_vrf_data(&self) -> Option<&BlockVrfData> {
+        self.vrf.as_ref()
+    }
+
+    pub fn set_vrf_data(&mut self, vrf: Option<BlockVrfData>) {
+        self.vrf = vrf;
     }
 
     pub fn take_txs_hashes(self) -> IndexSet<Hash> {
@@ -258,7 +272,13 @@ impl Serializer for BlockHeader {
             writer.write_hash(tx); // 32
         }
         self.miner.write(writer); // 60 + (N*32) + (T*32) + 32 = 92 + (N*32) + (T*32)
-                                  // Minimum size is 92 bytes
+        writer.write_u8(if self.vrf.is_some() { 1 } else { 0 });
+        if let Some(vrf) = &self.vrf {
+            writer.write_bytes(&vrf.public_key);
+            writer.write_bytes(&vrf.output);
+            writer.write_bytes(&vrf.proof);
+        }
+        // Minimum size is 93 bytes (includes VRF flag)
     }
 
     fn read(reader: &mut Reader) -> Result<BlockHeader, ReaderError> {
@@ -301,6 +321,20 @@ impl Serializer for BlockHeader {
         }
 
         let miner = CompressedPublicKey::read(reader)?;
+        let vrf_flag = reader.read_u8()?;
+        let vrf = match vrf_flag {
+            0 => None,
+            1 => {
+                let public_key = reader.read_bytes_32()?;
+                let output = reader.read_bytes_32()?;
+                let proof = reader.read_bytes_64()?;
+                Some(BlockVrfData::new(public_key, output, proof))
+            }
+            _ => {
+                debug!("Error, invalid VRF flag in block header: {}", vrf_flag);
+                return Err(ReaderError::InvalidValue);
+            }
+        };
         Ok(BlockHeader {
             version,
             extra_nonce,
@@ -310,6 +344,7 @@ impl Serializer for BlockHeader {
             miner,
             nonce,
             txs_hashes,
+            vrf,
         })
     }
 
@@ -321,6 +356,11 @@ impl Serializer for BlockHeader {
         // Version is u8
         let version_size = 1;
 
+        let vrf_size = if self.vrf.is_some() {
+            1 + 32 + 32 + 64
+        } else {
+            1
+        };
         EXTRA_NONCE_SIZE
             + tips_size
             + txs_size
@@ -329,6 +369,7 @@ impl Serializer for BlockHeader {
             + self.timestamp.size()
             + self.height.size()
             + self.nonce.size()
+            + vrf_size
     }
 }
 
@@ -354,7 +395,7 @@ impl Display for BlockHeader {
 mod tests {
     use super::BlockHeader;
     use crate::{
-        block::BlockVersion,
+        block::{BlockVersion, BlockVrfData},
         crypto::{Hash, Hashable, KeyPair},
         serializer::Serializer,
     };
@@ -385,9 +426,37 @@ mod tests {
 
     #[test]
     fn test_block_template_from_hex() {
-        let serialized = "00000000000000002d0000018f1cbd697000000000000000000eded85557e887b45989a727b6786e1bd250de65042d9381822fa73d01d2c4ff01d3a0154853dbb01dc28c9102e9d94bea355b8ee0d82c3e078ac80841445e86520000d67ad13934337b85c34985491c437386c95de0d97017131088724cfbedebdc55";
+        let serialized = "00000000000000002d0000018f1cbd697000000000000000000eded85557e887b45989a727b6786e1bd250de65042d9381822fa73d01d2c4ff01d3a0154853dbb01dc28c9102e9d94bea355b8ee0d82c3e078ac80841445e86520000d67ad13934337b85c34985491c437386c95de0d97017131088724cfbedebdc5500";
         let header = BlockHeader::from_hex(serialized).unwrap();
         assert!(header.to_hex() == serialized);
+    }
+
+    #[test]
+    fn test_block_header_vrf_roundtrip() {
+        let mut tips = IndexSet::new();
+        tips.insert(Hash::zero());
+
+        let miner = KeyPair::new().get_public_key().compress();
+        let mut header = BlockHeader::new(
+            BlockVersion::Nobunaga,
+            1,
+            1,
+            tips,
+            [0u8; 32],
+            miner,
+            IndexSet::new(),
+        );
+
+        let vrf = BlockVrfData::new([1u8; 32], [2u8; 32], [3u8; 64]);
+        header.set_vrf_data(Some(vrf.clone()));
+
+        let serialized = header.to_bytes();
+        let parsed = BlockHeader::from_bytes(&serialized).unwrap();
+        let parsed_vrf = parsed.get_vrf_data().unwrap();
+
+        assert_eq!(parsed_vrf.public_key, vrf.public_key);
+        assert_eq!(parsed_vrf.output, vrf.output);
+        assert_eq!(parsed_vrf.proof, vrf.proof);
     }
 
     // ============================================================================

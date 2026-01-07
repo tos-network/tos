@@ -23,11 +23,21 @@ use tos_common::{
 };
 
 use super::{ExecutionResult, TakoExecutor};
+use crate::vrf::VrfData;
+use std::sync::RwLock;
 
 /// TOS Kernel(TAKO) implementation of ContractExecutor trait
 ///
 /// This adapter bridges the generic ContractExecutor interface with
 /// TOS Kernel(TAKO)'s specific execution engine.
+///
+/// # VRF Support
+///
+/// The executor can optionally hold VRF data for verifiable randomness.
+/// When VRF data is set, contract executions will have access to VRF syscalls:
+/// - `tos_vrf_random` - Get VRF output + proof + derived random
+/// - `tos_vrf_verify` - Verify VRF proof
+/// - `tos_vrf_public_key` - Get block producer's VRF public key
 ///
 /// # Example
 ///
@@ -50,12 +60,41 @@ use super::{ExecutionResult, TakoExecutor};
 /// // Inject into transaction state
 /// let state = ParallelChainState::new(0, Arc::new(executor));
 /// ```
-pub struct TakoContractExecutor;
+pub struct TakoContractExecutor {
+    /// Optional VRF data for verifiable randomness
+    /// When set, contracts can access VRF syscalls
+    vrf_data: RwLock<Option<VrfData>>,
+}
 
 impl TakoContractExecutor {
     /// Create a new TAKO contract executor
     pub fn new() -> Self {
-        Self
+        Self {
+            vrf_data: RwLock::new(None),
+        }
+    }
+
+    /// Set VRF data for contract executions
+    ///
+    /// # Arguments
+    ///
+    /// * `vrf_data` - VRF data (public_key, output, proof) from block producer
+    pub fn set_vrf_data(&self, vrf_data: Option<VrfData>) {
+        if let Ok(mut guard) = self.vrf_data.write() {
+            *guard = vrf_data;
+        }
+    }
+
+    /// Get a clone of the current VRF data
+    pub fn get_vrf_data(&self) -> Option<VrfData> {
+        self.vrf_data.read().ok().and_then(|guard| guard.clone())
+    }
+
+    /// Clear VRF data
+    pub fn clear_vrf_data(&self) {
+        if let Ok(mut guard) = self.vrf_data.write() {
+            *guard = None;
+        }
     }
 }
 
@@ -95,8 +134,14 @@ impl ContractExecutor for TakoContractExecutor {
             trace!("TAKO executor: Input data size: {} bytes", input_data.len());
         }
 
-        // Execute via TOS Kernel(TAKO)
-        let result = TakoExecutor::execute(
+        // Get VRF data if available
+        let vrf_data = self.get_vrf_data();
+        if log::log_enabled!(log::Level::Debug) && vrf_data.is_some() {
+            debug!("TAKO executor: VRF data available for contract execution");
+        }
+
+        // Execute via TOS Kernel(TAKO) with optional VRF data
+        let result = TakoExecutor::execute_with_vrf(
             bytecode,
             provider,
             topoheight,
@@ -108,6 +153,7 @@ impl ContractExecutor for TakoContractExecutor {
             tx_sender,
             &input_data,
             Some(max_gas),
+            vrf_data.as_ref(),
         )?;
 
         if log::log_enabled!(log::Level::Debug) {
