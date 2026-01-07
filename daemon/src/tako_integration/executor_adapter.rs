@@ -86,12 +86,34 @@ impl TakoContractExecutor {
     ///
     /// This method is thread-safe. Multiple blocks can have their VRF data
     /// set concurrently without overwriting each other.
+    ///
+    /// # Panics
+    ///
+    /// Logs an error if the lock is poisoned (another thread panicked while holding the lock).
     pub fn set_vrf_data(&self, block_hash: &Hash, vrf_data: Option<VrfData>) {
-        if let Ok(mut guard) = self.vrf_data.write() {
-            if let Some(data) = vrf_data {
-                guard.insert(*block_hash.as_bytes(), data);
-            } else {
-                guard.remove(block_hash.as_bytes());
+        match self.vrf_data.write() {
+            Ok(mut guard) => {
+                if let Some(data) = vrf_data {
+                    guard.insert(*block_hash.as_bytes(), data);
+                } else {
+                    guard.remove(block_hash.as_bytes());
+                }
+            }
+            Err(poisoned) => {
+                // Lock is poisoned - recover the data and continue
+                // This is safe because we're only storing VRF data
+                if log::log_enabled!(log::Level::Error) {
+                    log::error!(
+                        "VRF data lock was poisoned, recovering: block_hash={}",
+                        block_hash
+                    );
+                }
+                let mut guard = poisoned.into_inner();
+                if let Some(data) = vrf_data {
+                    guard.insert(*block_hash.as_bytes(), data);
+                } else {
+                    guard.remove(block_hash.as_bytes());
+                }
             }
         }
     }
@@ -105,19 +127,42 @@ impl TakoContractExecutor {
     /// # Returns
     ///
     /// VRF data if set for this block, None otherwise
+    ///
+    /// # Panics
+    ///
+    /// Logs an error if the lock is poisoned.
     pub fn get_vrf_data(&self, block_hash: &Hash) -> Option<VrfData> {
-        self.vrf_data
-            .read()
-            .ok()
-            .and_then(|guard| guard.get(block_hash.as_bytes()).cloned())
+        match self.vrf_data.read() {
+            Ok(guard) => guard.get(block_hash.as_bytes()).cloned(),
+            Err(poisoned) => {
+                if log::log_enabled!(log::Level::Error) {
+                    log::error!(
+                        "VRF data lock was poisoned during read, recovering: block_hash={}",
+                        block_hash
+                    );
+                }
+                poisoned.into_inner().get(block_hash.as_bytes()).cloned()
+            }
+        }
     }
 
     /// Clear VRF data for a specific block hash
     ///
     /// Should be called after block execution completes to prevent memory leaks.
     pub fn clear_vrf_data(&self, block_hash: &Hash) {
-        if let Ok(mut guard) = self.vrf_data.write() {
-            guard.remove(block_hash.as_bytes());
+        match self.vrf_data.write() {
+            Ok(mut guard) => {
+                guard.remove(block_hash.as_bytes());
+            }
+            Err(poisoned) => {
+                if log::log_enabled!(log::Level::Error) {
+                    log::error!(
+                        "VRF data lock was poisoned during clear, recovering: block_hash={}",
+                        block_hash
+                    );
+                }
+                poisoned.into_inner().remove(block_hash.as_bytes());
+            }
         }
     }
 }

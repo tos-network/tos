@@ -44,10 +44,8 @@
 //! ```
 
 mod keypair;
-mod storage;
 
 pub use keypair::{VrfData, VrfKeyManager, WrappedVrfSecret};
-pub use storage::{read_vrf_secret_from_file, write_vrf_secret_to_file};
 
 // Re-export tos-crypto VRF types for convenience
 pub use tos_crypto::vrf::{

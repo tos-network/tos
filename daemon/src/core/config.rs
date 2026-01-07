@@ -5,7 +5,7 @@ use crate::{
 };
 use humantime::Duration as HumanDuration;
 use serde::{Deserialize, Serialize};
-use std::{path::PathBuf, time::Duration};
+use std::time::Duration;
 use tos_common::{crypto::Hash, prompt::LogLevel, utils::detect_available_parallelism};
 
 use super::{
@@ -503,15 +503,9 @@ pub struct VrfConfig {
     /// VRF private key in hex format (64 hex chars = 32 bytes).
     /// If not provided when VRF is enabled, a new keypair will be generated.
     /// The public key will be logged at startup.
-    /// WARNING: Prefer --vrf-key-file to avoid shell history leakage.
     #[clap(name = "vrf-private-key", long)]
     #[serde(default)]
     pub private_key: Option<WrappedVrfSecret>,
-    /// VRF private key file path (hex-encoded secret).
-    /// File permissions must be 0600 on Unix systems.
-    #[clap(name = "vrf-key-file", long)]
-    #[serde(default)]
-    pub key_file: Option<PathBuf>,
     /// Allowed VRF public keys (hex, 32 bytes).
     /// RECOMMENDED for production: blocks will be rejected if VRF key is not in whitelist.
     /// Can specify multiple times for multiple producers.

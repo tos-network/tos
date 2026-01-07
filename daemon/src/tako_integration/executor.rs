@@ -547,15 +547,15 @@ impl TakoExecutor {
 
             // Validate VRF to set vrf_validated_hash
             // This ensures contracts can only access validated VRF data
-            if let Err(e) = invoke_context.validate_vrf() {
+            // SECURITY: Invalid VRF data is a hard error - do not continue execution
+            invoke_context.validate_vrf().map_err(|e| {
                 if log::log_enabled!(log::Level::Error) {
                     error!("VRF validation failed: {}", e);
                 }
-                // Continue execution without VRF (contracts will get error from syscall)
-                invoke_context.vrf_public_key = None;
-                invoke_context.vrf_output = None;
-                invoke_context.vrf_proof = None;
-            } else if log::log_enabled!(log::Level::Debug) {
+                TakoExecutionError::VrfValidationFailed(e)
+            })?;
+
+            if log::log_enabled!(log::Level::Debug) {
                 debug!(
                     "VRF data injected: public_key={}, output={}",
                     hex::encode(vrf.public_key.as_bytes()),

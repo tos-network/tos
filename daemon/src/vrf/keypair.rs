@@ -41,15 +41,17 @@ impl FromStr for WrappedVrfSecret {
     type Err = VrfError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let decoded: [u8; VRF_SECRET_KEY_SIZE] = hex::decode(s)
-            .map_err(|e| VrfError::InvalidSecretKey(format!("Invalid hex: {}", e)))?
-            .try_into()
-            .map_err(|_| VrfError::InvalidLength {
+        let decoded = hex::decode(s)
+            .map_err(|e| VrfError::InvalidSecretKey(format!("Invalid hex: {}", e)))?;
+
+        let decoded_len = decoded.len();
+        let decoded_array: [u8; VRF_SECRET_KEY_SIZE] =
+            decoded.try_into().map_err(|_| VrfError::InvalidLength {
                 expected: VRF_SECRET_KEY_SIZE,
-                actual: 0,
+                actual: decoded_len,
             })?;
 
-        let secret = VrfSecretKey::from_bytes(&decoded)?;
+        let secret = VrfSecretKey::from_bytes(&decoded_array)?;
         Ok(Self(secret))
     }
 }
@@ -71,6 +73,16 @@ impl<'a> Deserialize<'a> for WrappedVrfSecret {
         D: serde::Deserializer<'a>,
     {
         let s = String::deserialize(deserializer)?;
+
+        // SECURITY: Detect serialized redacted values and provide clear error
+        // This prevents confusion when loading configs that were dumped with redacted keys
+        if s == "[REDACTED]" {
+            return Err(serde::de::Error::custom(
+                "Cannot deserialize redacted VRF secret key. \
+                 Provide the actual hex-encoded secret key (64 hex chars = 32 bytes).",
+            ));
+        }
+
         WrappedVrfSecret::from_str(&s).map_err(serde::de::Error::custom)
     }
 }

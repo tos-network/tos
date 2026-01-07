@@ -25,10 +25,7 @@ use crate::{
         DaemonRpcServer, SharedDaemonRpcServer,
     },
     tako_integration::TakoContractExecutor,
-    vrf::{
-        read_vrf_secret_from_file, write_vrf_secret_to_file, VrfData, VrfKeyManager, VrfOutput,
-        VrfProof, VrfPublicKey, WrappedVrfSecret,
-    },
+    vrf::{VrfData, VrfKeyManager, VrfOutput, VrfProof, VrfPublicKey},
 };
 use anyhow::{anyhow, Context, Error};
 use futures::{stream, TryStreamExt};
@@ -313,45 +310,19 @@ impl<S: Storage> Blockchain<S> {
             Some(allowed)
         };
         let vrf_manager = if vrf_enabled {
-            if config.vrf.private_key.is_some() && config.vrf.key_file.is_some() {
-                return Err(anyhow!(
-                    "VRF config error: both vrf-private-key and vrf-key-file are set"
-                ));
-            }
-
-            match (
-                config.vrf.private_key.as_ref(),
-                config.vrf.key_file.as_ref(),
-            ) {
-                (Some(secret), None) => {
+            match config.vrf.private_key.as_ref() {
+                Some(secret) => {
                     let manager = VrfKeyManager::from_secret(secret)
                         .map_err(|e| anyhow!("Failed to load VRF secret: {}", e))?;
                     Some(manager)
                 }
-                (None, Some(path)) => {
-                    if path.exists() {
-                        let secret = read_vrf_secret_from_file(path)?;
-                        let manager = VrfKeyManager::from_secret(&secret)
-                            .map_err(|e| anyhow!("Failed to load VRF secret: {}", e))?;
-                        Some(manager)
-                    } else {
-                        let manager = VrfKeyManager::new();
-                        let secret_hex = manager.secret_key_hex();
-                        let wrapped: WrappedVrfSecret = secret_hex
-                            .parse()
-                            .map_err(|e| anyhow!("Failed to wrap VRF secret: {}", e))?;
-                        write_vrf_secret_to_file(path, &wrapped)?;
-                        Some(manager)
-                    }
-                }
-                (None, None) => {
+                None => {
                     let manager = VrfKeyManager::new();
                     if log::log_enabled!(log::Level::Warn) {
                         warn!("VRF enabled without a key; generated an in-memory keypair");
                     }
                     Some(manager)
                 }
-                _ => None,
             }
         } else {
             None

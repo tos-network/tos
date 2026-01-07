@@ -34,7 +34,7 @@ fn main() {
     }
 
     // check if the length is even
-    if genesis_hex.len() % 2 != 0 {
+    if !genesis_hex.len().is_multiple_of(2) {
         println!("error: string length is not even!");
     } else {
         println!("string length is even, can be parsed to byte array");

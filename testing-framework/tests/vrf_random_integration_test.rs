@@ -38,7 +38,7 @@ fn cache_get_bytes(cache: &ContractCache, key: &[u8]) -> Option<Vec<u8>> {
         value
             .as_ref()
             .and_then(|cell| cell.as_bytes().ok())
-            .map(|bytes| bytes.clone())
+            .cloned()
     })
 }
 
