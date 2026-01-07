@@ -36,6 +36,8 @@ pub const UNO_FEE_PER_KB: u64 = 10000;
 pub const UNO_FEE_PER_ACCOUNT_CREATION: u64 = 0; // Free account creation (no fee)
 pub const UNO_FEE_PER_TRANSFER: u64 = 5000;
 pub const UNO_FEE_PER_MULTISIG_SIGNATURE: u64 = 500;
+/// Fixed UNO fee per transfer (burned, not rewarded to miners)
+pub const UNO_BURN_FEE_PER_TRANSFER: u64 = UNO_FEE_PER_TRANSFER;
 
 // Contracts rules
 // 1 TOS per contract deployed

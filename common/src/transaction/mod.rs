@@ -82,6 +82,8 @@ pub enum FeeType {
     TOS,
     /// Transaction uses Energy for fees (only available for Transfer transactions)
     Energy,
+    /// Transaction uses UNO for fees (UnoTransfers only, fee burned)
+    UNO,
 }
 
 impl FeeType {
@@ -93,6 +95,10 @@ impl FeeType {
     pub fn is_tos(&self) -> bool {
         matches!(self, FeeType::TOS)
     }
+    /// Check if this fee type is UNO-based
+    pub fn is_uno(&self) -> bool {
+        matches!(self, FeeType::UNO)
+    }
 }
 
 impl Serializer for FeeType {
@@ -100,6 +106,7 @@ impl Serializer for FeeType {
         let v = match self {
             FeeType::TOS => 0u8,
             FeeType::Energy => 1u8,
+            FeeType::UNO => 2u8,
         };
         writer.write_u8(v);
     }
@@ -107,6 +114,7 @@ impl Serializer for FeeType {
         match reader.read_u8()? {
             0 => Ok(FeeType::TOS),
             1 => Ok(FeeType::Energy),
+            2 => Ok(FeeType::UNO),
             _ => Err(ReaderError::InvalidValue),
         }
     }
@@ -129,7 +137,7 @@ pub struct Transaction {
     data: TransactionType,
     /// Fees in Tos (TOS or Energy depending on fee_type)
     fee: u64,
-    /// Fee type: TOS or Energy
+    /// Fee type: TOS, Energy, or UNO
     fee_type: FeeType,
     /// nonce must be equal to the one on chain account
     /// used to prevent replay attacks and have ordered transactions
@@ -230,6 +238,7 @@ impl Transaction {
             match fee_type {
                 FeeType::TOS => 0u64,
                 FeeType::Energy => 1u64,
+                FeeType::UNO => 2u64,
             },
         );
         transcript.append_u64(b"nonce", nonce);

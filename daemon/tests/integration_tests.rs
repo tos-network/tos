@@ -229,6 +229,9 @@ impl MockChainState {
                         }
                         self.set_energy_balance(sender.clone(), available_energy - fee);
                     }
+                    FeeType::UNO => {
+                        return Err("UNO fee type is only supported for UnoTransfers".into());
+                    }
                 }
             }
             TransactionType::Burn(_) => {
@@ -1204,49 +1207,70 @@ fn is_valid_fee_type_combination(tx_type: &TransactionType, fee_type: &FeeType) 
     match (tx_type, fee_type) {
         (TransactionType::Transfers(_), FeeType::TOS) => true,
         (TransactionType::Transfers(_), FeeType::Energy) => true,
+        (TransactionType::Transfers(_), FeeType::UNO) => false,
         (TransactionType::Burn(_), FeeType::TOS) => true,
         (TransactionType::Burn(_), FeeType::Energy) => false,
+        (TransactionType::Burn(_), FeeType::UNO) => false,
         (TransactionType::MultiSig(_), FeeType::TOS) => true,
         (TransactionType::MultiSig(_), FeeType::Energy) => false,
+        (TransactionType::MultiSig(_), FeeType::UNO) => false,
         (TransactionType::InvokeContract(_), FeeType::TOS) => true,
         (TransactionType::InvokeContract(_), FeeType::Energy) => false,
+        (TransactionType::InvokeContract(_), FeeType::UNO) => false,
         (TransactionType::DeployContract(_), FeeType::TOS) => true,
         (TransactionType::DeployContract(_), FeeType::Energy) => false,
+        (TransactionType::DeployContract(_), FeeType::UNO) => false,
         (TransactionType::Energy(_), FeeType::TOS) => true,
         (TransactionType::Energy(_), FeeType::Energy) => false,
+        (TransactionType::Energy(_), FeeType::UNO) => false,
         (TransactionType::AIMining(_), FeeType::TOS) => true,
         (TransactionType::AIMining(_), FeeType::Energy) => false,
+        (TransactionType::AIMining(_), FeeType::UNO) => false,
         (TransactionType::BindReferrer(_), FeeType::TOS) => true,
         (TransactionType::BindReferrer(_), FeeType::Energy) => false,
+        (TransactionType::BindReferrer(_), FeeType::UNO) => false,
         (TransactionType::BatchReferralReward(_), FeeType::TOS) => true,
         (TransactionType::BatchReferralReward(_), FeeType::Energy) => false,
+        (TransactionType::BatchReferralReward(_), FeeType::UNO) => false,
         // KYC transaction types - all use TOS fee type only
         (TransactionType::SetKyc(_), FeeType::TOS) => true,
         (TransactionType::SetKyc(_), FeeType::Energy) => false,
+        (TransactionType::SetKyc(_), FeeType::UNO) => false,
         (TransactionType::RevokeKyc(_), FeeType::TOS) => true,
         (TransactionType::RevokeKyc(_), FeeType::Energy) => false,
+        (TransactionType::RevokeKyc(_), FeeType::UNO) => false,
         (TransactionType::RenewKyc(_), FeeType::TOS) => true,
         (TransactionType::RenewKyc(_), FeeType::Energy) => false,
+        (TransactionType::RenewKyc(_), FeeType::UNO) => false,
         (TransactionType::BootstrapCommittee(_), FeeType::TOS) => true,
         (TransactionType::BootstrapCommittee(_), FeeType::Energy) => false,
+        (TransactionType::BootstrapCommittee(_), FeeType::UNO) => false,
         (TransactionType::RegisterCommittee(_), FeeType::TOS) => true,
         (TransactionType::RegisterCommittee(_), FeeType::Energy) => false,
+        (TransactionType::RegisterCommittee(_), FeeType::UNO) => false,
         (TransactionType::UpdateCommittee(_), FeeType::TOS) => true,
         (TransactionType::UpdateCommittee(_), FeeType::Energy) => false,
+        (TransactionType::UpdateCommittee(_), FeeType::UNO) => false,
         (TransactionType::EmergencySuspend(_), FeeType::TOS) => true,
         (TransactionType::EmergencySuspend(_), FeeType::Energy) => false,
+        (TransactionType::EmergencySuspend(_), FeeType::UNO) => false,
         (TransactionType::TransferKyc(_), FeeType::TOS) => true,
         (TransactionType::TransferKyc(_), FeeType::Energy) => false,
+        (TransactionType::TransferKyc(_), FeeType::UNO) => false,
         (TransactionType::AppealKyc(_), FeeType::TOS) => true,
         (TransactionType::AppealKyc(_), FeeType::Energy) => false,
-        // UNO (privacy transfers) - use TOS fee type only
+        (TransactionType::AppealKyc(_), FeeType::UNO) => false,
+        // UNO (privacy transfers) - allow TOS or UNO fee type
         (TransactionType::UnoTransfers(_), FeeType::TOS) => true,
         (TransactionType::UnoTransfers(_), FeeType::Energy) => false,
+        (TransactionType::UnoTransfers(_), FeeType::UNO) => true,
         // Shield/Unshield transfers - use TOS fee type only
         (TransactionType::ShieldTransfers(_), FeeType::TOS) => true,
         (TransactionType::ShieldTransfers(_), FeeType::Energy) => false,
+        (TransactionType::ShieldTransfers(_), FeeType::UNO) => false,
         (TransactionType::UnshieldTransfers(_), FeeType::TOS) => true,
         (TransactionType::UnshieldTransfers(_), FeeType::Energy) => false,
+        (TransactionType::UnshieldTransfers(_), FeeType::UNO) => false,
     }
 }
 

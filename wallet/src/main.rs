@@ -1946,8 +1946,9 @@ async fn transfer(manager: &CommandManager, mut args: ArgumentManager) -> Result
         match fee_type_str.to_lowercase().as_str() {
             "tos" => Some(tos_common::transaction::FeeType::TOS),
             "energy" => Some(tos_common::transaction::FeeType::Energy),
+            "uno" => Some(tos_common::transaction::FeeType::UNO),
             _ => {
-                manager.error("Invalid fee_type. Use 'tos' or 'energy'");
+                manager.error("Invalid fee_type. Use 'tos', 'energy', or 'uno'");
                 return Ok(());
             }
         }
@@ -2044,6 +2045,7 @@ async fn transfer(manager: &CommandManager, mut args: ArgumentManager) -> Result
                 {
                     tos_common::transaction::FeeType::TOS => "TOS",
                     tos_common::transaction::FeeType::Energy => "Energy",
+                    tos_common::transaction::FeeType::UNO => "UNO",
                 }
             ));
             tx
@@ -2099,8 +2101,9 @@ async fn transfer_all(
         match fee_type_str.to_lowercase().as_str() {
             "tos" => Some(tos_common::transaction::FeeType::TOS),
             "energy" => Some(tos_common::transaction::FeeType::Energy),
+            "uno" => Some(tos_common::transaction::FeeType::UNO),
             _ => {
-                manager.error("Invalid fee_type. Use 'tos' or 'energy'");
+                manager.error("Invalid fee_type. Use 'tos', 'energy', or 'uno'");
                 return Ok(());
             }
         }
@@ -2188,6 +2191,7 @@ async fn transfer_all(
                 format!("TOS fees: {}", format_tos(estimated_fees))
             }
             tos_common::transaction::FeeType::Energy => "Energy fees: 0 TOS".to_string(),
+            tos_common::transaction::FeeType::UNO => "UNO fees: 0 TOS".to_string(),
         }
     } else {
         format!("TOS fees: {}", format_tos(estimated_fees))
@@ -2278,6 +2282,7 @@ async fn transfer_all(
                     {
                         tos_common::transaction::FeeType::TOS => "TOS",
                         tos_common::transaction::FeeType::Energy => "Energy",
+                        tos_common::transaction::FeeType::UNO => "UNO",
                     }
                 ));
                 tx
