@@ -576,8 +576,18 @@ impl TransactionBuilder {
                 match self.fee_builder {
                     // SAFE: f64 used for client-side fee estimation only
                     // Network only validates that fee is sufficient, not how it was calculated
-                    FeeBuilder::Multiplier(multiplier) => (expected_fee as f64 * multiplier) as u64,
-                    FeeBuilder::Boost(boost) => expected_fee + boost,
+                    // Use saturating conversions to prevent overflow
+                    FeeBuilder::Multiplier(multiplier) => {
+                        let result = expected_fee as f64 * multiplier;
+                        // Guard against overflow: cap at u64::MAX if result exceeds
+                        if result >= u64::MAX as f64 {
+                            u64::MAX
+                        } else {
+                            result as u64
+                        }
+                    }
+                    // Use saturating_add to prevent overflow in fee boost
+                    FeeBuilder::Boost(boost) => expected_fee.saturating_add(boost),
                     _ => expected_fee,
                 }
             }
