@@ -26,7 +26,9 @@ use super::{
 use crate::account::FreezeDuration;
 use crate::ai_mining::AIMiningPayload;
 use crate::{
-    config::{BURN_PER_CONTRACT, MAX_GAS_USAGE_PER_TX, TOS_ASSET, UNO_ASSET},
+    config::{
+        BURN_PER_CONTRACT, MAX_GAS_USAGE_PER_TX, MIN_SHIELD_TOS_AMOUNT, TOS_ASSET, UNO_ASSET,
+    },
     crypto::{
         elgamal::{
             Ciphertext, CompressedPublicKey, DecryptHandle, KeyPair, PedersenCommitment,
@@ -39,7 +41,7 @@ use crate::{
         Hash, ProtocolTranscript, HASH_SIZE, SIGNATURE_SIZE,
     },
     serializer::Serializer,
-    utils::{calculate_energy_fee, calculate_tx_fee, calculate_uno_tx_fee},
+    utils::{calculate_tx_fee, calculate_uno_tx_fee},
 };
 use indexmap::{IndexMap, IndexSet};
 use serde::{Deserialize, Serialize};
@@ -97,12 +99,12 @@ pub enum GenerationError<T> {
     InvalidModule,
     #[error("Configured max gas is above the network limit")]
     MaxGasReached,
-    #[error("Energy fee type can only be used with Transfer transactions")]
+    #[error("Energy fee type can only be used with transfer-type transactions")]
     InvalidEnergyFeeType,
-    #[error("Energy fee type cannot be used for transfers to new addresses")]
-    InvalidEnergyFeeForNewAddress,
     #[error("UNO transfers must use UNO_ASSET")]
     InvalidUnoAsset,
+    #[error("Shield amount must be at least 100 TOS")]
+    ShieldAmountTooLow,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -456,7 +458,7 @@ impl TransactionBuilder {
             _ => {
                 // Compute the size and transfers count
                 let size = self.estimate_size();
-                // Extract transfer count for all transfer types (TOS, UNO, Unshield)
+                // Extract transfer count for all transfer types (TOS, UNO, Shield, Unshield)
                 let (transfers, new_addresses) = match &self.data {
                     TransactionTypeBuilder::Transfers(transfers) => {
                         let mut new_addresses = 0;
@@ -472,6 +474,11 @@ impl TransactionBuilder {
                     }
                     TransactionTypeBuilder::UnoTransfers(transfers) => {
                         // UNO transfers: count outputs, no new address fee (UNO-only accounts)
+                        (transfers.len(), 0)
+                    }
+                    TransactionTypeBuilder::ShieldTransfers(transfers) => {
+                        // Shield transfers: TOS -> UNO, count outputs
+                        // No new address check needed (receiver already has UNO balance)
                         (transfers.len(), 0)
                     }
                     TransactionTypeBuilder::UnshieldTransfers(transfers) => {
@@ -492,15 +499,23 @@ impl TransactionBuilder {
 
                 let expected_fee = if let Some(ref fee_type) = self.fee_type {
                     if *fee_type == FeeType::Energy
-                        && matches!(self.data, TransactionTypeBuilder::Transfers(_))
+                        && matches!(
+                            self.data,
+                            TransactionTypeBuilder::Transfers(_)
+                                | TransactionTypeBuilder::UnoTransfers(_)
+                                | TransactionTypeBuilder::ShieldTransfers(_)
+                                | TransactionTypeBuilder::UnshieldTransfers(_)
+                        )
                     {
-                        // Use energy fee calculation for transfer transactions
-                        calculate_energy_fee(size, transfers, new_addresses)
+                        // Energy fee transactions must have fee = 0
+                        // Energy cost is paid via energy consumption, not the fee field
+                        0
                     } else {
-                        // Use regular fee calculation (TOS or UNO/Unshield)
-                        // UNO and Unshield transfers have ZK proofs and need higher fees
+                        // Use regular fee calculation (TOS or UNO/Shield/Unshield)
+                        // UNO, Shield, and Unshield transfers have ZK proofs and need higher fees
                         let fee_calc =
                             if matches!(self.data, TransactionTypeBuilder::UnoTransfers(_))
+                                || matches!(self.data, TransactionTypeBuilder::ShieldTransfers(_))
                                 || matches!(self.data, TransactionTypeBuilder::UnshieldTransfers(_))
                             {
                                 calculate_uno_tx_fee
@@ -515,9 +530,10 @@ impl TransactionBuilder {
                         )
                     }
                 } else {
-                    // Default to TOS fees (or UNO fees for UNO/Unshield transfers)
-                    // UNO and Unshield transfers have ZK proofs and need higher fees
+                    // Default to TOS fees (or UNO fees for UNO/Shield/Unshield transfers)
+                    // UNO, Shield, and Unshield transfers have ZK proofs and need higher fees
                     let fee_calc = if matches!(self.data, TransactionTypeBuilder::UnoTransfers(_))
+                        || matches!(self.data, TransactionTypeBuilder::ShieldTransfers(_))
                         || matches!(self.data, TransactionTypeBuilder::UnshieldTransfers(_))
                     {
                         calculate_uno_tx_fee
@@ -548,14 +564,23 @@ impl TransactionBuilder {
     /// Compute the full cost of the transaction
     /// In Stake 2.0, fee_limit is the max TOS willing to burn
     /// Actual fee deduction happens during execution based on energy consumption
-    pub fn get_transaction_cost(&self, fee_limit: u64, asset: &Hash) -> u64 {
+    /// When fee_type is Energy, fees are not deducted from TOS balance
+    pub fn get_transaction_cost(
+        &self,
+        fee_limit: u64,
+        asset: &Hash,
+        fee_type: Option<&FeeType>,
+    ) -> u64 {
         let mut cost = 0;
 
-        // fee_limit is ALWAYS added to TOS cost, not UNO
-        // In Energy model, fees are paid via TOS (Energy consumption)
-        // UNO transfers spend from encrypted balance for amounts, but fees from TOS
+        // fee_limit is added to TOS cost only when fee_type is TOS (or unspecified)
+        // When fee_type is Energy, fees are paid via energy consumption, not TOS
         if *asset == TOS_ASSET {
-            cost += fee_limit;
+            // Only add fee to TOS cost if fee_type is not Energy
+            let is_energy_fee = fee_type.map(|ft| ft.is_energy()).unwrap_or(false);
+            if !is_energy_fee {
+                cost += fee_limit;
+            }
         }
 
         match &self.data {
@@ -697,27 +722,24 @@ impl TransactionBuilder {
     where
         <B as FeeHelper>::Error: for<'a> std::convert::From<&'a str>,
     {
-        // Validate that Energy fee type can only be used with Transfer transactions
+        // Validate that Energy fee type can only be used with transfer-type transactions
         if let Some(fee_type) = &self.fee_type {
-            if *fee_type == FeeType::Energy
-                && !matches!(self.data, TransactionTypeBuilder::Transfers(_))
-            {
-                return Err(GenerationError::InvalidEnergyFeeType);
-            }
-
-            // Validate that Energy fee type cannot be used for transfers to new addresses
             if *fee_type == FeeType::Energy {
-                if let TransactionTypeBuilder::Transfers(transfers) = &self.data {
-                    for transfer in transfers {
-                        if !state
-                            .is_account_registered(transfer.destination.get_public_key())
-                            .map_err(GenerationError::State)?
-                        {
-                            return Err(GenerationError::InvalidEnergyFeeForNewAddress);
-                        }
+                match &self.data {
+                    TransactionTypeBuilder::Transfers(_)
+                    | TransactionTypeBuilder::UnoTransfers(_)
+                    | TransactionTypeBuilder::ShieldTransfers(_)
+                    | TransactionTypeBuilder::UnshieldTransfers(_) => {
+                        // These transaction types can use Energy fees
+                    }
+                    _ => {
+                        return Err(GenerationError::InvalidEnergyFeeType);
                     }
                 }
             }
+
+            // NOTE: Energy fee type is now allowed for transfers to new addresses
+            // The previous restriction has been removed to improve Energy usability
         }
 
         // Compute the fees
@@ -734,8 +756,9 @@ impl TransactionBuilder {
 
         // Update balances for used assets
         let used_assets = self.data.used_assets();
+        let fee_type_ref = self.fee_type.as_ref();
         for asset in used_assets.iter() {
-            let cost = self.get_transaction_cost(fee, asset);
+            let cost = self.get_transaction_cost(fee, asset, fee_type_ref);
             let current_balance = state
                 .get_account_balance(asset)
                 .map_err(GenerationError::State)?;
@@ -1093,9 +1116,10 @@ impl TransactionBuilder {
                 .take(used_assets.len())
                 .collect();
 
+        let fee_type_ref = self.fee_type.as_ref();
         let mut range_proof_values: Vec<u64> = Vec::with_capacity(used_assets.len());
         for asset in &used_assets {
-            let cost = self.get_transaction_cost(fee, asset);
+            let cost = self.get_transaction_cost(fee, asset, fee_type_ref);
             let current_balance = state
                 .get_uno_balance(asset)
                 .map_err(GenerationError::State)?;
@@ -1132,7 +1156,9 @@ impl TransactionBuilder {
 
                 // Compute new source ciphertext by subtracting transfers
                 let mut new_source_ciphertext = source_current_ciphertext;
-                if **asset == TOS_ASSET {
+                // Only subtract fee from TOS ciphertext if fee_type is not Energy
+                // When fee_type is Energy, fees are paid via energy consumption, not TOS
+                if **asset == TOS_ASSET && !fee_type.is_energy() {
                     new_source_ciphertext -= Scalar::from(fee);
                 }
                 for transfer in &transfers_commitments {
@@ -1320,6 +1346,13 @@ impl TransactionBuilder {
             return Err(GenerationError::MaxTransferCountReached);
         }
 
+        // Validate minimum Shield amount (anti-money-laundering measure)
+        for transfer in shield_transfers {
+            if transfer.amount < MIN_SHIELD_TOS_AMOUNT {
+                return Err(GenerationError::ShieldAmountTooLow);
+            }
+        }
+
         // Get the nonce
         let nonce = state.get_nonce().map_err(GenerationError::State)?;
         state
@@ -1329,20 +1362,33 @@ impl TransactionBuilder {
         // Get reference
         let reference = state.get_reference();
 
-        // Calculate total cost (amount + fees)
+        // Calculate fees
         let fee = self.estimate_fees(state)?;
         let total_amount: u64 = shield_transfers.iter().map(|t| t.amount).sum();
-        let total_cost = total_amount
-            .checked_add(fee)
-            .ok_or_else(|| GenerationError::State("Overflow in shield transfer cost".into()))?;
+
+        // Determine if fee is Energy-based (fee not deducted from TOS)
+        let is_energy_fee = self
+            .fee_type
+            .as_ref()
+            .map(|ft| ft.is_energy())
+            .unwrap_or(false);
+
+        // Calculate TOS cost: amount + fee (unless Energy fee)
+        let tos_cost = if is_energy_fee {
+            total_amount
+        } else {
+            total_amount
+                .checked_add(fee)
+                .ok_or_else(|| GenerationError::State("Overflow in shield transfer cost".into()))?
+        };
 
         // Check and deduct TOS balance
         let current_balance = state
             .get_account_balance(&TOS_ASSET)
             .map_err(GenerationError::State)?;
 
-        let new_balance = current_balance.checked_sub(total_cost).ok_or_else(|| {
-            GenerationError::InsufficientFunds(TOS_ASSET, total_cost, current_balance)
+        let new_balance = current_balance.checked_sub(tos_cost).ok_or_else(|| {
+            GenerationError::InsufficientFunds(TOS_ASSET, tos_cost, current_balance)
         })?;
 
         state
@@ -1391,7 +1437,8 @@ impl TransactionBuilder {
             .collect::<Result<Vec<_>, GenerationError<B::Error>>>()?;
 
         let data = TransactionType::ShieldTransfers(transfer_payloads);
-        let fee_type = FeeType::TOS;
+        // Use builder's fee_type if set, otherwise default to TOS
+        let fee_type = self.fee_type.unwrap_or(FeeType::TOS);
 
         let unsigned_tx = UnsignedTransaction::new_with_fee_type(
             self.version,
@@ -1447,22 +1494,25 @@ impl TransactionBuilder {
         // Calculate total unshield amount
         let total_amount: u64 = unshield_transfers.iter().map(|t| t.amount).sum();
 
-        // Fees are paid from TOS balance (plaintext)
+        // Fees are paid from TOS balance (plaintext) or Energy
         let fee = self.estimate_fees(state)?;
-        let fee_type = FeeType::TOS;
+        // Use builder's fee_type if set, otherwise default to TOS
+        let fee_type = self.fee_type.clone().unwrap_or(FeeType::TOS);
 
-        // Check TOS balance for fees
-        let current_tos_balance = state
-            .get_account_balance(&TOS_ASSET)
-            .map_err(GenerationError::State)?;
+        // Only deduct TOS balance for fees when fee_type is not Energy
+        if !fee_type.is_energy() {
+            let current_tos_balance = state
+                .get_account_balance(&TOS_ASSET)
+                .map_err(GenerationError::State)?;
 
-        let new_tos_balance = current_tos_balance.checked_sub(fee).ok_or_else(|| {
-            GenerationError::InsufficientFunds(TOS_ASSET, fee, current_tos_balance)
-        })?;
+            let new_tos_balance = current_tos_balance.checked_sub(fee).ok_or_else(|| {
+                GenerationError::InsufficientFunds(TOS_ASSET, fee, current_tos_balance)
+            })?;
 
-        state
-            .update_account_balance(&TOS_ASSET, new_tos_balance)
-            .map_err(GenerationError::State)?;
+            state
+                .update_account_balance(&TOS_ASSET, new_tos_balance)
+                .map_err(GenerationError::State)?;
+        }
 
         // Check UNO balance and create source commitment with range proof
         // This is critical to prevent spending more UNO than available
@@ -1849,7 +1899,7 @@ mod tests {
         )
         .with_fee_type(energy_fee.clone());
 
-        // Test invalid case: Energy fee with non-Transfer transaction
+        // Test invalid case: Energy fee with non-transfer-type transaction (e.g., Burn)
         let burn_builder = TransactionTypeBuilder::Burn(BurnPayload {
             asset: Hash::zero(),
             amount: 100,
@@ -1873,29 +1923,37 @@ mod tests {
         assert!(matches!(energy_fee, FeeType::Energy));
         assert!(matches!(burn_builder, TransactionTypeBuilder::Burn(_)));
 
-        // Verify that the validation logic is correct
+        // Verify that the validation logic is correct:
+        // Energy fee should only be allowed with transfer-type transactions
+        // (Transfers, UnoTransfers, ShieldTransfers, UnshieldTransfers)
         let fee_type = Some(FeeType::Energy);
-        let is_transfer = matches!(burn_builder, TransactionTypeBuilder::Transfers(_));
-        let should_fail = fee_type == Some(FeeType::Energy) && !is_transfer;
+        let is_transfer_type = matches!(
+            burn_builder,
+            TransactionTypeBuilder::Transfers(_)
+                | TransactionTypeBuilder::UnoTransfers(_)
+                | TransactionTypeBuilder::ShieldTransfers(_)
+                | TransactionTypeBuilder::UnshieldTransfers(_)
+        );
+        let should_fail = fee_type == Some(FeeType::Energy) && !is_transfer_type;
 
         assert!(
             should_fail,
-            "Energy fee type should only be allowed with Transfer transactions"
+            "Energy fee type should only be allowed with transfer-type transactions"
         );
     }
 
     #[test]
-    fn test_energy_fee_for_new_address_validation() {
+    fn test_energy_fee_allowed_for_new_addresses() {
         use super::super::FeeType;
 
-        // Test that Energy fee type cannot be used for transfers to new addresses
+        // Test that Energy fee type IS now allowed for transfers to new addresses
+        // (This restriction has been removed to improve Energy usability)
         let energy_fee = FeeType::Energy;
 
-        // Create a transfer to a new address (non-existent account)
-        // We'll use a simple test that validates the logic without complex type construction
-        let transfer_to_new_address = TransactionTypeBuilder::Transfers(vec![]);
+        // Create a transfer transaction
+        let transfer_builder = TransactionTypeBuilder::Transfers(vec![]);
 
-        // This should cause an error when building due to new address validation
+        // Energy fee with transfers is valid (new address restriction removed)
         let _builder = TransactionBuilder::new(
             TxVersion::T0,
             0, // chain_id: 0 for tests
@@ -1903,22 +1961,106 @@ mod tests {
                 tos_crypto::curve25519_dalek::ristretto::CompressedRistretto::default(),
             ),
             None,
-            transfer_to_new_address.clone(),
+            transfer_builder.clone(),
             FeeBuilder::Value(0),
         )
         .with_fee_type(energy_fee.clone());
 
-        // Verify that the validation logic is correct
+        // Verify Energy + Transfers is a valid combination
         let fee_type = Some(FeeType::Energy);
-        let is_transfer = matches!(
-            transfer_to_new_address,
-            TransactionTypeBuilder::Transfers(_)
-        );
-        let should_fail = fee_type == Some(FeeType::Energy) && is_transfer;
+        let is_transfer = matches!(transfer_builder, TransactionTypeBuilder::Transfers(_));
+        let is_valid_combination = fee_type == Some(FeeType::Energy) && is_transfer;
 
         assert!(
-            should_fail,
-            "Energy fee type should not be allowed for transfers to new addresses"
+            is_valid_combination,
+            "Energy fee type should be allowed with Transfer transactions (including to new addresses)"
+        );
+    }
+
+    #[test]
+    fn test_energy_fee_type_allowed_for_uno_shield_unshield() {
+        use super::super::FeeType;
+
+        // Test that Energy fee type is allowed for all transfer-type transactions
+        let energy_fee = FeeType::Energy;
+
+        // UnoTransfers should be allowed
+        let uno_builder = TransactionTypeBuilder::UnoTransfers(vec![]);
+        let is_uno_allowed = matches!(
+            uno_builder,
+            TransactionTypeBuilder::Transfers(_)
+                | TransactionTypeBuilder::UnoTransfers(_)
+                | TransactionTypeBuilder::ShieldTransfers(_)
+                | TransactionTypeBuilder::UnshieldTransfers(_)
+        );
+        assert!(
+            is_uno_allowed,
+            "Energy fee should be allowed for UnoTransfers"
+        );
+
+        // ShieldTransfers should be allowed
+        let shield_builder = TransactionTypeBuilder::ShieldTransfers(vec![]);
+        let is_shield_allowed = matches!(
+            shield_builder,
+            TransactionTypeBuilder::Transfers(_)
+                | TransactionTypeBuilder::UnoTransfers(_)
+                | TransactionTypeBuilder::ShieldTransfers(_)
+                | TransactionTypeBuilder::UnshieldTransfers(_)
+        );
+        assert!(
+            is_shield_allowed,
+            "Energy fee should be allowed for ShieldTransfers"
+        );
+
+        // UnshieldTransfers should be allowed
+        let unshield_builder = TransactionTypeBuilder::UnshieldTransfers(vec![]);
+        let is_unshield_allowed = matches!(
+            unshield_builder,
+            TransactionTypeBuilder::Transfers(_)
+                | TransactionTypeBuilder::UnoTransfers(_)
+                | TransactionTypeBuilder::ShieldTransfers(_)
+                | TransactionTypeBuilder::UnshieldTransfers(_)
+        );
+        assert!(
+            is_unshield_allowed,
+            "Energy fee should be allowed for UnshieldTransfers"
+        );
+
+        // Verify Energy fee type is set correctly
+        assert!(matches!(energy_fee, FeeType::Energy));
+    }
+
+    #[test]
+    fn test_shield_minimum_amount_validation() {
+        // Test that Shield minimum amount is enforced (100 TOS)
+        use crate::config::{COIN_VALUE, MIN_SHIELD_TOS_AMOUNT};
+
+        // Verify the constant value
+        assert_eq!(
+            MIN_SHIELD_TOS_AMOUNT,
+            COIN_VALUE * 100,
+            "MIN_SHIELD_TOS_AMOUNT should be 100 TOS"
+        );
+
+        // Test that amounts below minimum should be rejected
+        let below_minimum = MIN_SHIELD_TOS_AMOUNT - 1;
+        assert!(
+            below_minimum < MIN_SHIELD_TOS_AMOUNT,
+            "Amount below minimum should fail validation"
+        );
+
+        // Test that amounts at minimum should be accepted
+        let at_minimum = MIN_SHIELD_TOS_AMOUNT;
+        assert!(
+            at_minimum >= MIN_SHIELD_TOS_AMOUNT,
+            "Amount at minimum should pass validation"
+        );
+
+        // Test that amounts above minimum should be accepted
+        let above_minimum = MIN_SHIELD_TOS_AMOUNT + COIN_VALUE;
+        assert!(
+            above_minimum >= MIN_SHIELD_TOS_AMOUNT,
+            "Amount above minimum should pass validation"
         );
     }
 }

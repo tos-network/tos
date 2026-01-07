@@ -5,7 +5,7 @@ use std::{
 };
 use tos_common::{
     crypto::{Hash, PublicKey},
-    transaction::Transaction,
+    transaction::{FeeType, Transaction},
 };
 
 // this struct is used to store transaction with its hash and its size in bytes
@@ -32,21 +32,49 @@ impl Eq for TxSelectorEntry<'_> {}
 #[derive(PartialEq, Eq)]
 struct Transactions<'a>(VecDeque<TxSelectorEntry<'a>>);
 
+/// Compares two transactions for ordering in the TX selector.
+/// TOS-fee transactions have priority over Energy-fee transactions.
+/// Within the same fee type, higher fees have priority.
+fn compare_tx_priority(a: &Transaction, b: &Transaction) -> Ordering {
+    // First compare by fee_type: TOS (0) < Energy (1) in raw value,
+    // but we want TOS to have HIGHER priority, so reverse the comparison
+    let a_is_energy = *a.get_fee_type() == FeeType::Energy;
+    let b_is_energy = *b.get_fee_type() == FeeType::Energy;
+
+    match (a_is_energy, b_is_energy) {
+        (false, true) => Ordering::Greater, // TOS > Energy
+        (true, false) => Ordering::Less,    // Energy < TOS
+        (true, true) => {
+            // Both Energy: compare by energy cost (transfer count), not fee field
+            // This prevents ordering manipulation by inflating the fee field
+            a.calculate_energy_cost().cmp(&b.calculate_energy_cost())
+        }
+        (false, false) => {
+            // Both TOS: compare by fee value
+            a.get_fee().cmp(&b.get_fee())
+        }
+    }
+}
+
 impl PartialOrd for Transactions<'_> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.0
-            .front()
-            .map(|e| e.tx.get_fee())
-            .partial_cmp(&other.0.front().map(|e| e.tx.get_fee()))
+        match (self.0.front(), other.0.front()) {
+            (Some(a), Some(b)) => Some(compare_tx_priority(a.tx, b.tx)),
+            (Some(_), None) => Some(Ordering::Greater),
+            (None, Some(_)) => Some(Ordering::Less),
+            (None, None) => Some(Ordering::Equal),
+        }
     }
 }
 
 impl Ord for Transactions<'_> {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.0
-            .front()
-            .map(|e| e.tx.get_fee())
-            .cmp(&other.0.front().map(|e| e.tx.get_fee()))
+        match (self.0.front(), other.0.front()) {
+            (Some(a), Some(b)) => compare_tx_priority(a.tx, b.tx),
+            (Some(_), None) => Ordering::Greater,
+            (None, Some(_)) => Ordering::Less,
+            (None, None) => Ordering::Equal,
+        }
     }
 }
 

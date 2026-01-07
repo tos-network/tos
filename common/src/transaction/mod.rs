@@ -386,23 +386,26 @@ impl Transaction {
     }
 
     /// Calculate energy cost for this transaction
-    /// Only applicable for transfer transactions with energy fees
+    /// Applicable for transfer-type transactions with energy fees
+    /// (Transfers, UnoTransfers, ShieldTransfers, UnshieldTransfers)
     pub fn calculate_energy_cost(&self) -> u64 {
         if !self.fee_type.is_energy() {
             return 0;
         }
 
-        match &self.data {
-            TransactionType::Transfers(transfers) => {
-                let tx_size = self.size();
-                let output_count = transfers.len();
-                let new_addresses = 0; // This would need to be calculated from state
+        let output_count = match &self.data {
+            TransactionType::Transfers(transfers) => transfers.len(),
+            TransactionType::UnoTransfers(transfers) => transfers.len(),
+            TransactionType::ShieldTransfers(transfers) => transfers.len(),
+            TransactionType::UnshieldTransfers(transfers) => transfers.len(),
+            _ => return 0, // Only transfer-type transactions can use energy fees
+        };
 
-                use crate::utils::calculate_energy_fee;
-                calculate_energy_fee(tx_size, output_count, new_addresses)
-            }
-            _ => 0, // Only transfer transactions can use energy fees
-        }
+        let tx_size = self.size();
+        let new_addresses = 0; // This would need to be calculated from state
+
+        use crate::utils::calculate_energy_fee;
+        calculate_energy_fee(tx_size, output_count, new_addresses)
     }
 
     /// Get the bytes that were used for signing this transaction
