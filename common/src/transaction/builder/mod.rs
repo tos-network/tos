@@ -28,6 +28,7 @@ use crate::ai_mining::AIMiningPayload;
 use crate::{
     config::{
         BURN_PER_CONTRACT, MAX_GAS_USAGE_PER_TX, MIN_SHIELD_TOS_AMOUNT, TOS_ASSET, UNO_ASSET,
+        UNO_BURN_FEE_PER_TRANSFER,
     },
     crypto::{
         elgamal::{
@@ -101,10 +102,14 @@ pub enum GenerationError<T> {
     MaxGasReached,
     #[error("Energy fee type can only be used with transfer-type transactions")]
     InvalidEnergyFeeType,
+    #[error("UNO fee type can only be used with UnoTransfers")]
+    InvalidUnoFeeType,
     #[error("UNO transfers must use UNO_ASSET")]
     InvalidUnoAsset,
     #[error("Shield amount must be at least 100 TOS")]
     ShieldAmountTooLow,
+    #[error("Overflow during fee calculation")]
+    Overflow,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -137,7 +142,7 @@ pub struct TransactionBuilder {
     required_thresholds: Option<u8>,
     data: TransactionTypeBuilder,
     fee_builder: FeeBuilder,
-    /// Optional fee type (TOS or Energy). If None, use default logic.
+    /// Optional fee type (TOS, Energy, or UNO). If None, use default logic.
     fee_type: Option<super::FeeType>,
 }
 
@@ -181,6 +186,13 @@ impl TransactionBuilder {
         self
     }
 
+    /// Create a transaction builder with UNO-based fees (UnoTransfers only)
+    pub fn with_uno_fee(mut self) -> Self {
+        self.fee_builder = FeeBuilder::Value(0);
+        self.fee_type = Some(FeeType::UNO);
+        self
+    }
+
     /// Estimate by hand the bytes size of a final TX
     // Returns bytes size and transfers count
     pub fn estimate_size(&self) -> usize {
@@ -193,7 +205,7 @@ impl TransactionBuilder {
         + 1
         // Fee u64
         + 8
-        // Fee type byte (TOS or Energy)
+        // Fee type byte (TOS, Energy, or UNO)
         + 1
         // Nonce u64
         + 8
@@ -452,6 +464,14 @@ impl TransactionBuilder {
             return Ok(0);
         }
 
+        if let Some(fee_type) = &self.fee_type {
+            if *fee_type == FeeType::UNO
+                && matches!(self.data, TransactionTypeBuilder::UnoTransfers(_))
+            {
+                return Ok(0);
+            }
+        }
+
         let calculated_fee = match self.fee_builder {
             // If the value is set, use it
             FeeBuilder::Value(value) => value,
@@ -498,7 +518,12 @@ impl TransactionBuilder {
                 };
 
                 let expected_fee = if let Some(ref fee_type) = self.fee_type {
-                    if *fee_type == FeeType::Energy
+                    if *fee_type == FeeType::UNO
+                        && matches!(self.data, TransactionTypeBuilder::UnoTransfers(_))
+                    {
+                        // UNO fee is burned from encrypted balance, fee field stays 0
+                        0
+                    } else if *fee_type == FeeType::Energy
                         && matches!(
                             self.data,
                             TransactionTypeBuilder::Transfers(_)
@@ -551,8 +576,18 @@ impl TransactionBuilder {
                 match self.fee_builder {
                     // SAFE: f64 used for client-side fee estimation only
                     // Network only validates that fee is sufficient, not how it was calculated
-                    FeeBuilder::Multiplier(multiplier) => (expected_fee as f64 * multiplier) as u64,
-                    FeeBuilder::Boost(boost) => expected_fee + boost,
+                    // Use saturating conversions to prevent overflow
+                    FeeBuilder::Multiplier(multiplier) => {
+                        let result = expected_fee as f64 * multiplier;
+                        // Guard against overflow: cap at u64::MAX if result exceeds
+                        if result >= u64::MAX as f64 {
+                            u64::MAX
+                        } else {
+                            result as u64
+                        }
+                    }
+                    // Use saturating_add to prevent overflow in fee boost
+                    FeeBuilder::Boost(boost) => expected_fee.saturating_add(boost),
                     _ => expected_fee,
                 }
             }
@@ -570,8 +605,8 @@ impl TransactionBuilder {
         fee_limit: u64,
         asset: &Hash,
         fee_type: Option<&FeeType>,
-    ) -> u64 {
-        let mut cost = 0;
+    ) -> Option<u64> {
+        let mut cost = 0u64;
 
         // fee_limit is added to TOS cost only when fee_type is TOS (or unspecified)
         // When fee_type is Energy, fees are paid via energy consumption, not TOS
@@ -579,7 +614,7 @@ impl TransactionBuilder {
             // Only add fee to TOS cost if fee_type is not Energy
             let is_energy_fee = fee_type.map(|ft| ft.is_energy()).unwrap_or(false);
             if !is_energy_fee {
-                cost += fee_limit;
+                cost = cost.checked_add(fee_limit)?;
             }
         }
 
@@ -587,7 +622,7 @@ impl TransactionBuilder {
             TransactionTypeBuilder::Transfers(transfers) => {
                 for transfer in transfers {
                     if &transfer.asset == asset {
-                        cost += transfer.amount;
+                        cost = cost.checked_add(transfer.amount)?;
                     }
                 }
             }
@@ -595,43 +630,43 @@ impl TransactionBuilder {
                 // UNO transfers also consume the plaintext amount (for cost calculation)
                 for transfer in transfers {
                     if &transfer.asset == asset {
-                        cost += transfer.amount;
+                        cost = cost.checked_add(transfer.amount)?;
                     }
                 }
             }
             TransactionTypeBuilder::Burn(payload) => {
                 if *asset == payload.asset {
-                    cost += payload.amount
+                    cost = cost.checked_add(payload.amount)?;
                 }
             }
             TransactionTypeBuilder::MultiSig(_) => {}
             TransactionTypeBuilder::InvokeContract(payload) => {
                 if let Some(deposit) = payload.deposits.get(asset) {
-                    cost += deposit.amount;
+                    cost = cost.checked_add(deposit.amount)?;
                 }
 
                 if *asset == TOS_ASSET {
-                    cost += payload.max_gas;
+                    cost = cost.checked_add(payload.max_gas)?;
                 }
             }
             TransactionTypeBuilder::DeployContract(payload) => {
                 if *asset == TOS_ASSET {
-                    cost += BURN_PER_CONTRACT;
+                    cost = cost.checked_add(BURN_PER_CONTRACT)?;
                 }
 
                 if let Some(invoke) = payload.invoke.as_ref() {
                     if let Some(deposit) = invoke.deposits.get(asset) {
-                        cost += deposit.amount;
+                        cost = cost.checked_add(deposit.amount)?;
                     }
 
                     if *asset == TOS_ASSET {
-                        cost += invoke.max_gas;
+                        cost = cost.checked_add(invoke.max_gas)?;
                     }
                 }
             }
             TransactionTypeBuilder::Energy(payload) => {
                 if *asset == TOS_ASSET {
-                    cost += payload.amount;
+                    cost = cost.checked_add(payload.amount)?;
                 }
             }
             TransactionTypeBuilder::AIMining(payload) => {
@@ -642,21 +677,21 @@ impl TransactionBuilder {
                             registration_fee,
                             ..
                         } => {
-                            cost += *registration_fee;
+                            cost = cost.checked_add(*registration_fee)?;
                         }
                         crate::ai_mining::AIMiningPayload::SubmitAnswer {
                             stake_amount, ..
                         } => {
-                            cost += *stake_amount;
+                            cost = cost.checked_add(*stake_amount)?;
                             // Add answer content gas cost
-                            cost += payload.calculate_content_gas_cost();
+                            cost = cost.checked_add(payload.calculate_content_gas_cost())?;
                         }
                         crate::ai_mining::AIMiningPayload::PublishTask {
                             reward_amount, ..
                         } => {
-                            cost += *reward_amount;
+                            cost = cost.checked_add(*reward_amount)?;
                             // Add description gas cost
-                            cost += payload.calculate_description_gas_cost();
+                            cost = cost.checked_add(payload.calculate_description_gas_cost())?;
                         }
                         _ => {}
                     }
@@ -670,7 +705,7 @@ impl TransactionBuilder {
             TransactionTypeBuilder::ShieldTransfers(transfers) => {
                 for transfer in transfers {
                     if &transfer.asset == asset {
-                        cost += transfer.amount;
+                        cost = cost.checked_add(transfer.amount)?;
                     }
                 }
             }
@@ -678,13 +713,22 @@ impl TransactionBuilder {
             TransactionTypeBuilder::UnshieldTransfers(transfers) => {
                 for transfer in transfers {
                     if &transfer.asset == asset {
-                        cost += transfer.amount;
+                        cost = cost.checked_add(transfer.amount)?;
                     }
                 }
             }
         }
 
-        cost
+        if *asset == UNO_ASSET && fee_type.map(|ft| ft.is_uno()).unwrap_or(false) {
+            let transfer_count = match &self.data {
+                TransactionTypeBuilder::UnoTransfers(t) => t.len(),
+                _ => return Some(cost),
+            };
+            let uno_fee = UNO_BURN_FEE_PER_TRANSFER.checked_mul(transfer_count as u64)?;
+            cost = cost.checked_add(uno_fee)?;
+        }
+
+        Some(cost)
     }
 
     // Build deposits for contracts (simplified - no proofs)
@@ -738,6 +782,15 @@ impl TransactionBuilder {
                 }
             }
 
+            if *fee_type == FeeType::UNO {
+                match &self.data {
+                    TransactionTypeBuilder::UnoTransfers(_) => {}
+                    _ => {
+                        return Err(GenerationError::InvalidUnoFeeType);
+                    }
+                }
+            }
+
             // NOTE: Energy fee type is now allowed for transfers to new addresses
             // The previous restriction has been removed to improve Energy usability
         }
@@ -758,7 +811,9 @@ impl TransactionBuilder {
         let used_assets = self.data.used_assets();
         let fee_type_ref = self.fee_type.as_ref();
         for asset in used_assets.iter() {
-            let cost = self.get_transaction_cost(fee, asset, fee_type_ref);
+            let cost = self
+                .get_transaction_cost(fee, asset, fee_type_ref)
+                .ok_or(GenerationError::Overflow)?;
             let current_balance = state
                 .get_account_balance(asset)
                 .map_err(GenerationError::State)?;
@@ -1015,55 +1070,64 @@ impl TransactionBuilder {
     where
         <B as FeeHelper>::Error: for<'a> std::convert::From<&'a str>,
     {
-        // Verify we have UNO transfers
-        let transfers = match &mut self.data {
-            TransactionTypeBuilder::UnoTransfers(ref mut t) => t,
-            _ => {
-                return Err(GenerationError::State(
-                    "build_uno_unsigned requires UnoTransfers".into(),
-                ))
-            }
-        };
-
-        if transfers.is_empty() {
-            return Err(GenerationError::EmptyTransfers);
-        }
-        if transfers.len() > MAX_TRANSFER_COUNT {
-            return Err(GenerationError::MaxTransferCountReached);
-        }
-
-        // Validate transfers
-        let mut extra_data_size = 0;
-        for transfer in transfers.iter_mut() {
-            if *transfer.destination.get_public_key() == self.source {
-                return Err(GenerationError::SenderIsReceiver);
-            }
-            if state.is_mainnet() != transfer.destination.is_mainnet() {
-                return Err(GenerationError::InvalidNetwork);
-            }
-            if transfer.asset != UNO_ASSET {
-                return Err(GenerationError::InvalidUnoAsset);
-            }
-            if transfer.extra_data.is_some() && !transfer.destination.is_normal() {
-                return Err(GenerationError::ExtraDataAndIntegratedAddress);
-            }
-
-            // Extract integrated address data
-            if let Some(extra_data) = transfer.destination.extract_data_only() {
-                transfer.extra_data = Some(extra_data);
-            }
-
-            if let Some(extra_data) = &transfer.extra_data {
-                let size = extra_data.size();
-                if size > EXTRA_DATA_LIMIT_SIZE {
-                    return Err(GenerationError::ExtraDataTooLarge);
+        // Verify we have UNO transfers and validate them
+        // Use a block to limit the mutable borrow scope
+        {
+            let transfers = match &mut self.data {
+                TransactionTypeBuilder::UnoTransfers(ref mut t) => t,
+                _ => {
+                    return Err(GenerationError::State(
+                        "build_uno_unsigned requires UnoTransfers".into(),
+                    ))
                 }
-                extra_data_size += size;
+            };
+
+            if transfers.is_empty() {
+                return Err(GenerationError::EmptyTransfers);
             }
-        }
-        if extra_data_size > EXTRA_DATA_LIMIT_SUM_SIZE {
-            return Err(GenerationError::ExtraDataTooLarge);
-        }
+            if transfers.len() > MAX_TRANSFER_COUNT {
+                return Err(GenerationError::MaxTransferCountReached);
+            }
+
+            // Validate transfers
+            let mut extra_data_size = 0;
+            for transfer in transfers.iter_mut() {
+                if *transfer.destination.get_public_key() == self.source {
+                    return Err(GenerationError::SenderIsReceiver);
+                }
+                if state.is_mainnet() != transfer.destination.is_mainnet() {
+                    return Err(GenerationError::InvalidNetwork);
+                }
+                if transfer.asset != UNO_ASSET {
+                    return Err(GenerationError::InvalidUnoAsset);
+                }
+                if transfer.extra_data.is_some() && !transfer.destination.is_normal() {
+                    return Err(GenerationError::ExtraDataAndIntegratedAddress);
+                }
+
+                // Extract integrated address data
+                if let Some(extra_data) = transfer.destination.extract_data_only() {
+                    transfer.extra_data = Some(extra_data);
+                }
+
+                if let Some(extra_data) = &transfer.extra_data {
+                    let size = extra_data.size();
+                    if size > EXTRA_DATA_LIMIT_SIZE {
+                        return Err(GenerationError::ExtraDataTooLarge);
+                    }
+                    extra_data_size += size;
+                }
+            }
+            if extra_data_size > EXTRA_DATA_LIMIT_SUM_SIZE {
+                return Err(GenerationError::ExtraDataTooLarge);
+            }
+        } // mutable borrow ends here
+
+        // Now get immutable access for calculations
+        let transfers = match &self.data {
+            TransactionTypeBuilder::UnoTransfers(t) => t,
+            _ => unreachable!(), // Already validated above
+        };
 
         // Compute fees
         let fee = self.estimate_fees(state)?;
@@ -1077,6 +1141,20 @@ impl TransactionBuilder {
         let reference = state.get_reference();
         let used_assets = self.data.used_assets();
         let fee_type = self.fee_type.clone().unwrap_or(FeeType::TOS);
+        let transfer_sum = transfers.iter().try_fold(0u64, |acc, transfer| {
+            acc.checked_add(transfer.amount)
+                .ok_or(GenerationError::Overflow)
+        })?;
+        let uno_fee = if fee_type.is_uno() {
+            UNO_BURN_FEE_PER_TRANSFER
+                .checked_mul(transfers.len() as u64)
+                .ok_or(GenerationError::Overflow)?
+        } else {
+            0
+        };
+        let total_deduction = transfer_sum
+            .checked_add(uno_fee)
+            .ok_or(GenerationError::Overflow)?;
 
         // Create transfer commitments
         let transfers_commitments: Vec<UnoTransferWithCommitment> = match &self.data {
@@ -1119,7 +1197,12 @@ impl TransactionBuilder {
         let fee_type_ref = self.fee_type.as_ref();
         let mut range_proof_values: Vec<u64> = Vec::with_capacity(used_assets.len());
         for asset in &used_assets {
-            let cost = self.get_transaction_cost(fee, asset, fee_type_ref);
+            let cost = if **asset == UNO_ASSET {
+                total_deduction
+            } else {
+                self.get_transaction_cost(fee, asset, fee_type_ref)
+                    .ok_or(GenerationError::Overflow)?
+            };
             let current_balance = state
                 .get_uno_balance(asset)
                 .map_err(GenerationError::State)?;
@@ -1160,6 +1243,9 @@ impl TransactionBuilder {
                 // When fee_type is Energy, fees are paid via energy consumption, not TOS
                 if **asset == TOS_ASSET && !fee_type.is_energy() {
                     new_source_ciphertext -= Scalar::from(fee);
+                }
+                if **asset == UNO_ASSET && fee_type.is_uno() {
+                    new_source_ciphertext -= Scalar::from(uno_fee);
                 }
                 for transfer in &transfers_commitments {
                     if &transfer.inner.asset == *asset {

@@ -33,25 +33,36 @@ impl Eq for TxSelectorEntry<'_> {}
 struct Transactions<'a>(VecDeque<TxSelectorEntry<'a>>);
 
 /// Compares two transactions for ordering in the TX selector.
-/// TOS-fee transactions have priority over Energy-fee transactions.
-/// Within the same fee type, higher fees have priority.
+/// Priority order: TOS > Energy > UNO. Within the same fee type, higher fees have priority.
 fn compare_tx_priority(a: &Transaction, b: &Transaction) -> Ordering {
-    // First compare by fee_type: TOS (0) < Energy (1) in raw value,
-    // but we want TOS to have HIGHER priority, so reverse the comparison
-    let a_is_energy = *a.get_fee_type() == FeeType::Energy;
-    let b_is_energy = *b.get_fee_type() == FeeType::Energy;
+    let a_fee_type = a.get_fee_type();
+    let b_fee_type = b.get_fee_type();
 
-    match (a_is_energy, b_is_energy) {
-        (false, true) => Ordering::Greater, // TOS > Energy
-        (true, false) => Ordering::Less,    // Energy < TOS
-        (true, true) => {
-            // Both Energy: compare by energy cost (transfer count), not fee field
-            // This prevents ordering manipulation by inflating the fee field
+    match (a_fee_type, b_fee_type) {
+        (FeeType::TOS, FeeType::Energy) | (FeeType::TOS, FeeType::UNO) => Ordering::Greater,
+        (FeeType::Energy, FeeType::TOS) | (FeeType::UNO, FeeType::TOS) => Ordering::Less,
+        (FeeType::Energy, FeeType::UNO) => Ordering::Greater,
+        (FeeType::UNO, FeeType::Energy) => Ordering::Less,
+        (FeeType::TOS, FeeType::TOS) => a.get_fee().cmp(&b.get_fee()),
+        (FeeType::Energy, FeeType::Energy) => {
             a.calculate_energy_cost().cmp(&b.calculate_energy_cost())
         }
-        (false, false) => {
-            // Both TOS: compare by fee value
-            a.get_fee().cmp(&b.get_fee())
+        (FeeType::UNO, FeeType::UNO) => {
+            let a_count = match a.get_data() {
+                tos_common::transaction::TransactionType::Transfers(t) => t.len(),
+                tos_common::transaction::TransactionType::UnoTransfers(t) => t.len(),
+                tos_common::transaction::TransactionType::ShieldTransfers(t) => t.len(),
+                tos_common::transaction::TransactionType::UnshieldTransfers(t) => t.len(),
+                _ => 0,
+            };
+            let b_count = match b.get_data() {
+                tos_common::transaction::TransactionType::Transfers(t) => t.len(),
+                tos_common::transaction::TransactionType::UnoTransfers(t) => t.len(),
+                tos_common::transaction::TransactionType::ShieldTransfers(t) => t.len(),
+                tos_common::transaction::TransactionType::UnshieldTransfers(t) => t.len(),
+                _ => 0,
+            };
+            a_count.cmp(&b_count)
         }
     }
 }

@@ -11,7 +11,7 @@ use indexmap::IndexMap;
 use log::{debug, trace};
 use tos_crypto::{
     bulletproofs::RangeProof,
-    curve25519_dalek::{ristretto::CompressedRistretto, traits::Identity, RistrettoPoint},
+    curve25519_dalek::{ristretto::CompressedRistretto, traits::Identity, RistrettoPoint, Scalar},
     merlin::Transcript,
 };
 use tos_kernel::ModuleValidator;
@@ -21,6 +21,7 @@ use crate::{
     account::EnergyResource,
     config::{
         BURN_PER_CONTRACT, MAX_GAS_USAGE_PER_TX, MIN_SHIELD_TOS_AMOUNT, TOS_ASSET, UNO_ASSET,
+        UNO_BURN_FEE_PER_TRANSFER,
     },
     contract::ContractProvider,
     crypto::{
@@ -145,31 +146,45 @@ impl Transaction {
 
     /// Get the UNO output ciphertext for a specific asset
     /// This is used to calculate the total spending from encrypted balance
-    fn get_uno_sender_output_ct(
+    fn get_uno_sender_output_ct<E>(
         &self,
         asset: &Hash,
         decompressed_transfers: &[DecompressedUnoTransferCt],
-    ) -> Ciphertext {
+    ) -> Result<Ciphertext, VerificationError<E>> {
         let mut output = Ciphertext::zero();
 
-        // Fees are paid via TOS (Energy consumption), not UNO
-        // In Energy model, fees are paid via TOS (Energy consumption), not UNO
-        // Fee handling is done in plaintext TOS balance, not encrypted UNO balance
-        // OLD CODE (REMOVED):
-        // if *asset == UNO_ASSET {
-        //     output += tos_crypto::curve25519_dalek::Scalar::from(self.get_fee_limit());
-        // }
-
-        // Sum up all UNO transfers for this asset
-        if let TransactionType::UnoTransfers(transfers) = &self.data {
-            for (transfer, d) in transfers.iter().zip(decompressed_transfers.iter()) {
-                if asset == transfer.get_asset() {
-                    output += d.get_ciphertext(Role::Sender);
+        let transfers = match &self.data {
+            TransactionType::UnoTransfers(transfers) => transfers,
+            _ => {
+                if self.get_fee_type().is_uno() {
+                    return Err(VerificationError::InvalidFormat);
                 }
+                return Ok(output);
+            }
+        };
+
+        debug_assert_eq!(
+            transfers.len(),
+            decompressed_transfers.len(),
+            "Length mismatch: {} transfers but {} decompressed",
+            transfers.len(),
+            decompressed_transfers.len()
+        );
+
+        if *asset == UNO_ASSET && self.get_fee_type().is_uno() {
+            let uno_fee = UNO_BURN_FEE_PER_TRANSFER
+                .checked_mul(transfers.len() as u64)
+                .ok_or(VerificationError::Overflow)?;
+            output += Scalar::from(uno_fee);
+        }
+
+        for (transfer, d) in transfers.iter().zip(decompressed_transfers.iter()) {
+            if asset == transfer.get_asset() {
+                output += d.get_ciphertext(Role::Sender);
             }
         }
 
-        output
+        Ok(output)
     }
 
     /// Verify that source commitment assets match the UNO transfer assets
@@ -984,12 +999,14 @@ impl Transaction {
             }
 
             // Decompress transfer ciphertexts to compute total spending
-            let mut output = Ciphertext::zero();
+            let mut transfers_decompressed = Vec::with_capacity(transfers.len());
             for transfer in transfers.iter() {
                 let decompressed = DecompressedUnoTransferCt::decompress(transfer)
                     .map_err(ProofVerificationError::from)?;
-                output += decompressed.get_ciphertext(Role::Sender);
+                transfers_decompressed.push(decompressed);
             }
+
+            let output = self.get_uno_sender_output_ct(&UNO_ASSET, &transfers_decompressed)?;
 
             // Get sender's UNO balance and deduct spending
             let sender_uno_balance = state
@@ -1070,6 +1087,10 @@ impl Transaction {
 
         if !self.has_valid_version_format() {
             return Err(VerificationError::InvalidFormat);
+        }
+
+        if self.get_fee_type().is_uno() && self.fee != 0 {
+            return Err(VerificationError::InvalidFee(0, self.fee));
         }
 
         // UNO transactions must have source commitments and range proof
@@ -1229,7 +1250,7 @@ impl Transaction {
         {
             // Calculate output ciphertext (total spending for this asset)
             let output =
-                self.get_uno_sender_output_ct(commitment.get_asset(), &transfers_decompressed);
+                self.get_uno_sender_output_ct(commitment.get_asset(), &transfers_decompressed)?;
 
             // Get sender's UNO balance ciphertext
             let source_verification_ciphertext = state
@@ -1645,6 +1666,27 @@ impl Transaction {
                     // Energy fees must be zero to prevent miner reward inflation
                     if self.fee != 0 {
                         return Err(VerificationError::InvalidFee(0, self.fee));
+                    }
+                }
+                _ => {
+                    return Err(VerificationError::InvalidFormat);
+                }
+            }
+        }
+
+        if self.get_fee_type().is_uno() {
+            match &self.data {
+                TransactionType::UnoTransfers(_) => {
+                    if self.fee != 0 {
+                        return Err(VerificationError::InvalidFee(0, self.fee));
+                    }
+
+                    if !self
+                        .source_commitments
+                        .iter()
+                        .any(|c| c.get_asset() == &UNO_ASSET)
+                    {
+                        return Err(VerificationError::Commitments);
                     }
                 }
                 _ => {
@@ -2897,12 +2939,14 @@ impl Transaction {
             }
 
             // Decompress transfer ciphertexts to compute total spending
-            let mut output = Ciphertext::zero();
+            let mut transfers_decompressed = Vec::with_capacity(transfers.len());
             for transfer in transfers.iter() {
                 let decompressed = DecompressedUnoTransferCt::decompress(transfer)
                     .map_err(ProofVerificationError::from)?;
-                output += decompressed.get_ciphertext(Role::Sender);
+                transfers_decompressed.push(decompressed);
             }
+
+            let output = self.get_uno_sender_output_ct(&UNO_ASSET, &transfers_decompressed)?;
 
             // Get sender's UNO balance and deduct spending
             let source_uno_balance = state
@@ -2918,6 +2962,16 @@ impl Transaction {
                 .add_sender_uno_output(&self.source, &UNO_ASSET, output)
                 .await
                 .map_err(VerificationError::State)?;
+
+            if self.get_fee_type().is_uno() {
+                let uno_fee = UNO_BURN_FEE_PER_TRANSFER
+                    .checked_mul(transfers.len() as u64)
+                    .ok_or(VerificationError::Overflow)?;
+                state
+                    .add_burned_coins(uno_fee)
+                    .await
+                    .map_err(VerificationError::State)?;
+            }
         }
 
         // Handle energy consumption if this transaction uses energy for fees
