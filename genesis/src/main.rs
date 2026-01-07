@@ -1,3 +1,29 @@
+//! Genesis Block Generator for TOS Network
+//!
+//! This tool generates new genesis blocks for mainnet or testnet.
+//! The output includes the block hex and hash that should be copied
+//! to `daemon/src/config.rs`.
+//!
+//! # Usage
+//!
+//! Generate mainnet genesis block (default):
+//! ```bash
+//! cargo run -p tos_genesis
+//! ```
+//!
+//! Generate testnet genesis block:
+//! ```bash
+//! cargo run -p tos_genesis -- testnet
+//! ```
+//!
+//! # Output
+//!
+//! The tool will output:
+//! - Block hex string (for MAINNET_GENESIS_BLOCK or TESTNET_GENESIS_BLOCK)
+//! - Block hash bytes (for MAINNET_GENESIS_BLOCK_HASH or TESTNET_GENESIS_BLOCK_HASH)
+//!
+//! Copy the output to `daemon/src/config.rs` to update the genesis blocks.
+
 use indexmap::IndexSet;
 use std::env;
 use tos_common::{

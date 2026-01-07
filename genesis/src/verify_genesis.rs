@@ -1,3 +1,27 @@
+//! Genesis Block Verifier for TOS Network
+//!
+//! This tool verifies that the genesis block constants in this file
+//! can be correctly parsed and displays their properties.
+//!
+//! # Usage
+//!
+//! ```bash
+//! cargo run -p tos_genesis --bin verify_genesis
+//! ```
+//!
+//! # Output
+//!
+//! For each network (MAINNET, TESTNET), displays:
+//! - Block version, height, timestamp
+//! - Miner public key
+//! - Tips and transactions hashes
+//! - POW hash and block hash
+//!
+//! # Verification
+//!
+//! The genesis block constants below MUST match `daemon/src/config.rs`.
+//! If you update the genesis blocks, update both files.
+
 use tos_common::{block::Block, crypto::Hashable, serializer::Serializer};
 
 // Genesis block constants (must match daemon/src/config.rs)
