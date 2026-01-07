@@ -511,10 +511,11 @@ impl TransactionBuilder {
                         // Energy cost is paid via energy consumption, not the fee field
                         0
                     } else {
-                        // Use regular fee calculation (TOS or UNO/Unshield)
-                        // UNO and Unshield transfers have ZK proofs and need higher fees
+                        // Use regular fee calculation (TOS or UNO/Shield/Unshield)
+                        // UNO, Shield, and Unshield transfers have ZK proofs and need higher fees
                         let fee_calc =
                             if matches!(self.data, TransactionTypeBuilder::UnoTransfers(_))
+                                || matches!(self.data, TransactionTypeBuilder::ShieldTransfers(_))
                                 || matches!(self.data, TransactionTypeBuilder::UnshieldTransfers(_))
                             {
                                 calculate_uno_tx_fee
