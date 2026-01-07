@@ -529,9 +529,10 @@ impl TransactionBuilder {
                         )
                     }
                 } else {
-                    // Default to TOS fees (or UNO fees for UNO/Unshield transfers)
-                    // UNO and Unshield transfers have ZK proofs and need higher fees
+                    // Default to TOS fees (or UNO fees for UNO/Shield/Unshield transfers)
+                    // UNO, Shield, and Unshield transfers have ZK proofs and need higher fees
                     let fee_calc = if matches!(self.data, TransactionTypeBuilder::UnoTransfers(_))
+                        || matches!(self.data, TransactionTypeBuilder::ShieldTransfers(_))
                         || matches!(self.data, TransactionTypeBuilder::UnshieldTransfers(_))
                     {
                         calculate_uno_tx_fee
