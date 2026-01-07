@@ -1,4 +1,35 @@
+use crate::crypto::elgamal::CompressedPublicKey;
 use tos_crypto::vrf::{VRF_OUTPUT_SIZE, VRF_PROOF_SIZE, VRF_PUBLIC_KEY_SIZE};
+
+/// Domain separator for VRF input computation.
+/// This prevents cross-protocol attacks and ensures inputs are unique to TOS VRF.
+const VRF_INPUT_DOMAIN: &[u8] = b"TOS-VRF-INPUT-v1";
+
+/// Compute VRF input that binds to block producer identity.
+///
+/// This prevents VRF proof substitution attacks where an attacker
+/// with a valid VRF key replaces another miner's VRF proof.
+///
+/// # Security
+///
+/// The VRF input is computed as:
+/// ```text
+/// vrf_input = BLAKE3("TOS-VRF-INPUT-v1" || block_hash || miner_public_key)
+/// ```
+///
+/// This ensures:
+/// 1. Different miners produce different VRF inputs (even for same block hash)
+/// 2. An attacker cannot reuse another miner's VRF proof
+/// 3. The domain separator prevents cross-protocol attacks
+pub fn compute_vrf_input(block_hash: &[u8; 32], miner: &CompressedPublicKey) -> [u8; 32] {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(VRF_INPUT_DOMAIN);
+    hasher.update(block_hash);
+    hasher.update(miner.as_bytes());
+
+    let hash = hasher.finalize();
+    *hash.as_bytes()
+}
 
 /// VRF data committed in a block.
 ///

@@ -27,6 +27,17 @@ use tos_common::{
 use super::{ExecutionResult, TakoExecutor};
 use crate::vrf::VrfData;
 
+/// VRF execution context containing VRF data and miner identity
+///
+/// This struct bundles VRF data with the miner's public key for identity binding.
+/// The miner_public_key is needed by InvokeContext.validate_vrf() to compute
+/// the correct VRF input hash: `BLAKE3("TOS-VRF-INPUT-v1" || block_hash || miner_public_key)`
+#[derive(Clone)]
+struct VrfExecutionContext {
+    vrf_data: VrfData,
+    miner_public_key: [u8; 32],
+}
+
 /// TOS Kernel(TAKO) implementation of ContractExecutor trait
 ///
 /// This adapter bridges the generic ContractExecutor interface with
@@ -62,25 +73,26 @@ use crate::vrf::VrfData;
 /// let state = ParallelChainState::new(0, Arc::new(executor));
 /// ```
 pub struct TakoContractExecutor {
-    /// VRF data keyed by block_hash for thread-safe concurrent execution
-    /// Each block execution can have its own VRF data without race conditions
-    vrf_data: RwLock<HashMap<[u8; 32], VrfData>>,
+    /// VRF execution context keyed by block_hash for thread-safe concurrent execution
+    /// Each block execution can have its own VRF data and miner identity without race conditions
+    vrf_context: RwLock<HashMap<[u8; 32], VrfExecutionContext>>,
 }
 
 impl TakoContractExecutor {
     /// Create a new TAKO contract executor
     pub fn new() -> Self {
         Self {
-            vrf_data: RwLock::new(HashMap::new()),
+            vrf_context: RwLock::new(HashMap::new()),
         }
     }
 
-    /// Set VRF data for a specific block hash
+    /// Set VRF data and miner public key for a specific block hash
     ///
     /// # Arguments
     ///
     /// * `block_hash` - The block hash to associate VRF data with
     /// * `vrf_data` - VRF data (public_key, output, proof) from block producer
+    /// * `miner_public_key` - Block producer's compressed public key for identity binding
     ///
     /// # Thread Safety
     ///
@@ -90,11 +102,22 @@ impl TakoContractExecutor {
     /// # Panics
     ///
     /// Logs an error if the lock is poisoned (another thread panicked while holding the lock).
-    pub fn set_vrf_data(&self, block_hash: &Hash, vrf_data: Option<VrfData>) {
-        match self.vrf_data.write() {
+    pub fn set_vrf_data(
+        &self,
+        block_hash: &Hash,
+        vrf_data: Option<VrfData>,
+        miner_public_key: Option<[u8; 32]>,
+    ) {
+        match self.vrf_context.write() {
             Ok(mut guard) => {
-                if let Some(data) = vrf_data {
-                    guard.insert(*block_hash.as_bytes(), data);
+                if let (Some(data), Some(miner)) = (vrf_data, miner_public_key) {
+                    guard.insert(
+                        *block_hash.as_bytes(),
+                        VrfExecutionContext {
+                            vrf_data: data,
+                            miner_public_key: miner,
+                        },
+                    );
                 } else {
                     guard.remove(block_hash.as_bytes());
                 }
@@ -104,13 +127,19 @@ impl TakoContractExecutor {
                 // This is safe because we're only storing VRF data
                 if log::log_enabled!(log::Level::Error) {
                     log::error!(
-                        "VRF data lock was poisoned, recovering: block_hash={}",
+                        "VRF context lock was poisoned, recovering: block_hash={}",
                         block_hash
                     );
                 }
                 let mut guard = poisoned.into_inner();
-                if let Some(data) = vrf_data {
-                    guard.insert(*block_hash.as_bytes(), data);
+                if let (Some(data), Some(miner)) = (vrf_data, miner_public_key) {
+                    guard.insert(
+                        *block_hash.as_bytes(),
+                        VrfExecutionContext {
+                            vrf_data: data,
+                            miner_public_key: miner,
+                        },
+                    );
                 } else {
                     guard.remove(block_hash.as_bytes());
                 }
@@ -118,7 +147,7 @@ impl TakoContractExecutor {
         }
     }
 
-    /// Get VRF data for a specific block hash
+    /// Get VRF execution context for a specific block hash
     ///
     /// # Arguments
     ///
@@ -126,22 +155,27 @@ impl TakoContractExecutor {
     ///
     /// # Returns
     ///
-    /// VRF data if set for this block, None otherwise
+    /// Tuple of (VrfData, miner_public_key) if set for this block, None otherwise
     ///
     /// # Panics
     ///
     /// Logs an error if the lock is poisoned.
-    pub fn get_vrf_data(&self, block_hash: &Hash) -> Option<VrfData> {
-        match self.vrf_data.read() {
-            Ok(guard) => guard.get(block_hash.as_bytes()).cloned(),
+    pub fn get_vrf_context(&self, block_hash: &Hash) -> Option<(VrfData, [u8; 32])> {
+        match self.vrf_context.read() {
+            Ok(guard) => guard
+                .get(block_hash.as_bytes())
+                .map(|ctx| (ctx.vrf_data.clone(), ctx.miner_public_key)),
             Err(poisoned) => {
                 if log::log_enabled!(log::Level::Error) {
                     log::error!(
-                        "VRF data lock was poisoned during read, recovering: block_hash={}",
+                        "VRF context lock was poisoned during read, recovering: block_hash={}",
                         block_hash
                     );
                 }
-                poisoned.into_inner().get(block_hash.as_bytes()).cloned()
+                poisoned
+                    .into_inner()
+                    .get(block_hash.as_bytes())
+                    .map(|ctx| (ctx.vrf_data.clone(), ctx.miner_public_key))
             }
         }
     }
@@ -150,14 +184,14 @@ impl TakoContractExecutor {
     ///
     /// Should be called after block execution completes to prevent memory leaks.
     pub fn clear_vrf_data(&self, block_hash: &Hash) {
-        match self.vrf_data.write() {
+        match self.vrf_context.write() {
             Ok(mut guard) => {
                 guard.remove(block_hash.as_bytes());
             }
             Err(poisoned) => {
                 if log::log_enabled!(log::Level::Error) {
                     log::error!(
-                        "VRF data lock was poisoned during clear, recovering: block_hash={}",
+                        "VRF context lock was poisoned during clear, recovering: block_hash={}",
                         block_hash
                     );
                 }
@@ -203,13 +237,22 @@ impl ContractExecutor for TakoContractExecutor {
             trace!("TAKO executor: Input data size: {} bytes", input_data.len());
         }
 
-        // Get VRF data for this specific block (thread-safe lookup)
-        let vrf_data = self.get_vrf_data(block_hash);
-        if log::log_enabled!(log::Level::Debug) && vrf_data.is_some() {
-            debug!("TAKO executor: VRF data available for block {}", block_hash);
+        // Get VRF context (VRF data + miner public key) for this specific block
+        let vrf_context = self.get_vrf_context(block_hash);
+        if log::log_enabled!(log::Level::Debug) && vrf_context.is_some() {
+            debug!(
+                "TAKO executor: VRF context available for block {}",
+                block_hash
+            );
         }
 
-        // Execute via TOS Kernel(TAKO) with optional VRF data
+        // Split VRF context into its components
+        let (vrf_data, miner_public_key) = match vrf_context {
+            Some((vrf, miner)) => (Some(vrf), Some(miner)),
+            None => (None, None),
+        };
+
+        // Execute via TOS Kernel(TAKO) with optional VRF data and miner identity
         let result = TakoExecutor::execute_with_vrf(
             bytecode,
             provider,
@@ -223,6 +266,7 @@ impl ContractExecutor for TakoContractExecutor {
             &input_data,
             Some(max_gas),
             vrf_data.as_ref(),
+            miner_public_key.as_ref(),
         )?;
 
         if log::log_enabled!(log::Level::Debug) {

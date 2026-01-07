@@ -8,7 +8,7 @@ pub use block::Block;
 pub use header::BlockHeader;
 pub use miner::{Algorithm, MinerWork, Worker};
 pub use version::BlockVersion;
-pub use vrf::BlockVrfData;
+pub use vrf::{compute_vrf_input, BlockVrfData};
 
 use crate::crypto::{Hash, HASH_SIZE};
 

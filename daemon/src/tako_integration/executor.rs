@@ -216,6 +216,7 @@ impl TakoExecutor {
     /// # Arguments
     ///
     /// * `vrf_data` - Optional VRF data (public_key, output, proof) from block producer
+    /// * `miner_public_key` - Block producer's compressed public key for VRF identity binding
     #[allow(clippy::too_many_arguments)]
     pub fn execute_with_vrf(
         bytecode: &[u8],
@@ -230,6 +231,7 @@ impl TakoExecutor {
         input_data: &[u8],
         compute_budget: Option<u64>,
         vrf_data: Option<&VrfData>,
+        miner_public_key: Option<&[u8; 32]>,
     ) -> Result<ExecutionResult, TakoExecutionError> {
         Self::execute_with_features_and_referral(
             bytecode,
@@ -246,6 +248,7 @@ impl TakoExecutor {
             &SVMFeatureSet::production(),
             None, // No referral provider
             vrf_data,
+            miner_public_key,
         )
     }
 
@@ -294,6 +297,7 @@ impl TakoExecutor {
             &SVMFeatureSet::production(),
             Some(referral_provider),
             None, // VRF data not available in this method
+            None, // Miner public key not available
         )
     }
 
@@ -370,7 +374,7 @@ impl TakoExecutor {
         compute_budget: Option<u64>,
         feature_set: &SVMFeatureSet,
     ) -> Result<ExecutionResult, TakoExecutionError> {
-        // Execute without referral provider or VRF (backward compatibility)
+        // Execute without referral provider, VRF, or miner identity (backward compatibility)
         Self::execute_with_features_and_referral(
             bytecode,
             provider,
@@ -386,6 +390,7 @@ impl TakoExecutor {
             feature_set,
             None, // No referral provider
             None, // No VRF data
+            None, // No miner public key
         )
     }
 
@@ -421,6 +426,7 @@ impl TakoExecutor {
         feature_set: &SVMFeatureSet,
         referral_provider: Option<&mut (dyn ReferralProvider + Send + Sync)>,
         vrf_data: Option<&VrfData>, // VRF data for verifiable randomness
+        miner_public_key: Option<&[u8; 32]>, // Block producer's key for VRF identity binding
     ) -> Result<ExecutionResult, TakoExecutionError> {
         use log::{debug, error, info, warn};
 
@@ -545,6 +551,11 @@ impl TakoExecutor {
             invoke_context.vrf_output = Some(vrf.output.to_bytes());
             invoke_context.vrf_proof = Some(vrf.proof.to_bytes());
 
+            // Set miner public key for VRF identity binding
+            // This is required for validate_vrf() to compute the correct VRF input:
+            // vrf_input = BLAKE3("TOS-VRF-INPUT-v1" || block_hash || miner_public_key)
+            invoke_context.miner_public_key = miner_public_key.copied();
+
             // Validate VRF to set vrf_validated_hash
             // This ensures contracts can only access validated VRF data
             // SECURITY: Invalid VRF data is a hard error - do not continue execution
@@ -557,9 +568,10 @@ impl TakoExecutor {
 
             if log::log_enabled!(log::Level::Debug) {
                 debug!(
-                    "VRF data injected: public_key={}, output={}",
+                    "VRF data injected: public_key={}, output={}, miner={}",
                     hex::encode(vrf.public_key.as_bytes()),
-                    hex::encode(vrf.output.as_bytes())
+                    hex::encode(vrf.output.as_bytes()),
+                    miner_public_key.map_or_else(|| "none".to_string(), hex::encode)
                 );
             }
         }

@@ -6,6 +6,8 @@
 use std::{fmt, str::FromStr};
 
 use serde::{Deserialize, Serialize};
+use tos_common::block::compute_vrf_input;
+use tos_common::crypto::elgamal::CompressedPublicKey;
 use tos_crypto::vrf::{
     VrfError, VrfKeypair, VrfOutput, VrfProof, VrfPublicKey, VrfSecretKey, VRF_SECRET_KEY_SIZE,
 };
@@ -173,22 +175,41 @@ impl VrfKeyManager {
         hex::encode(self.keypair.secret_key().to_bytes())
     }
 
-    /// Sign a block hash to produce VRF data
+    /// Sign a block hash to produce VRF data bound to the miner's identity.
+    ///
+    /// # Security
+    ///
+    /// The VRF input is computed as:
+    /// ```text
+    /// vrf_input = BLAKE3("TOS-VRF-INPUT-v1" || block_hash || miner_public_key)
+    /// ```
+    ///
+    /// This ensures that even if an attacker has a whitelisted VRF key,
+    /// they cannot produce a valid VRF proof for another miner's block.
     ///
     /// # Arguments
     ///
-    /// * `block_hash` - The 32-byte block hash to sign
+    /// * `block_hash` - The 32-byte block hash
+    /// * `miner` - The block producer's compressed public key
     ///
     /// # Returns
     ///
     /// VRF data containing public key, output, and proof
-    pub fn sign(&self, block_hash: &[u8; 32]) -> Result<VrfData, VrfError> {
-        let (output, proof) = self.keypair.sign(block_hash)?;
+    pub fn sign(
+        &self,
+        block_hash: &[u8; 32],
+        miner: &CompressedPublicKey,
+    ) -> Result<VrfData, VrfError> {
+        // Compute VRF input with miner identity binding
+        let vrf_input = compute_vrf_input(block_hash, miner);
+        let (output, proof) = self.keypair.sign(&vrf_input)?;
 
         if log::log_enabled!(log::Level::Debug) {
             log::debug!(
-                "VRF signed block_hash={}, output={}",
+                "VRF signed block_hash={}, miner={}, vrf_input={}, output={}",
                 hex::encode(block_hash),
+                hex::encode(miner.as_bytes()),
+                hex::encode(vrf_input),
                 hex::encode(output.as_bytes())
             );
         }
@@ -200,13 +221,19 @@ impl VrfKeyManager {
         })
     }
 
-    /// Verify VRF data against a block hash
+    /// Verify VRF data against a block hash and miner identity.
     ///
     /// This is mainly for testing/debugging purposes.
-    /// In production, verification happens in InvokeContext::validate_vrf().
-    pub fn verify(&self, block_hash: &[u8; 32], data: &VrfData) -> Result<(), VrfError> {
+    /// In production, verification happens in blockchain.rs verify_block_vrf_data().
+    pub fn verify(
+        &self,
+        block_hash: &[u8; 32],
+        miner: &CompressedPublicKey,
+        data: &VrfData,
+    ) -> Result<(), VrfError> {
+        let vrf_input = compute_vrf_input(block_hash, miner);
         data.public_key
-            .verify(block_hash, &data.output, &data.proof)
+            .verify(&vrf_input, &data.output, &data.proof)
     }
 }
 
@@ -219,6 +246,13 @@ impl Default for VrfKeyManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tos_common::crypto::KeyPair;
+
+    /// Create a test miner key
+    fn test_miner_key() -> CompressedPublicKey {
+        let keypair = KeyPair::new();
+        keypair.get_public_key().compress()
+    }
 
     #[test]
     fn test_new_key_manager() {
@@ -231,16 +265,18 @@ mod tests {
     fn test_sign_and_verify() {
         let manager = VrfKeyManager::new();
         let block_hash = [0x42u8; 32];
+        let miner = test_miner_key();
 
-        let data = manager.sign(&block_hash).unwrap();
+        let data = manager.sign(&block_hash, &miner).unwrap();
 
         // Verify the signature
-        assert!(manager.verify(&block_hash, &data).is_ok());
+        assert!(manager.verify(&block_hash, &miner, &data).is_ok());
 
-        // Verify with public key directly
+        // Verify with public key directly using vrf_input
+        let vrf_input = compute_vrf_input(&block_hash, &miner);
         assert!(data
             .public_key
-            .verify(&block_hash, &data.output, &data.proof)
+            .verify(&vrf_input, &data.output, &data.proof)
             .is_ok());
     }
 
@@ -248,11 +284,12 @@ mod tests {
     fn test_deterministic_output() {
         let manager = VrfKeyManager::new();
         let block_hash = [0x42u8; 32];
+        let miner = test_miner_key();
 
-        let data1 = manager.sign(&block_hash).unwrap();
-        let data2 = manager.sign(&block_hash).unwrap();
+        let data1 = manager.sign(&block_hash, &miner).unwrap();
+        let data2 = manager.sign(&block_hash, &miner).unwrap();
 
-        // Same block hash should produce same output
+        // Same block hash + miner should produce same output
         assert_eq!(data1.output.as_bytes(), data2.output.as_bytes());
     }
 
@@ -273,8 +310,9 @@ mod tests {
 
         // Signatures should produce same output
         let block_hash = [0x42u8; 32];
-        let data1 = manager1.sign(&block_hash).unwrap();
-        let data2 = manager2.sign(&block_hash).unwrap();
+        let miner = test_miner_key();
+        let data1 = manager1.sign(&block_hash, &miner).unwrap();
+        let data2 = manager2.sign(&block_hash, &miner).unwrap();
         assert_eq!(data1.output.as_bytes(), data2.output.as_bytes());
     }
 
@@ -290,5 +328,59 @@ mod tests {
             manager.public_key().as_bytes(),
             manager2.public_key().as_bytes()
         );
+    }
+
+    #[test]
+    fn test_vrf_bound_to_miner() {
+        // Setup: Two different miners
+        let miner_a = test_miner_key();
+        let miner_b = test_miner_key();
+        let manager = VrfKeyManager::new();
+        let block_hash = [0x42u8; 32];
+
+        // Sign VRF for miner A
+        let vrf_data = manager.sign(&block_hash, &miner_a).unwrap();
+
+        // Verify succeeds for miner A
+        assert!(manager.verify(&block_hash, &miner_a, &vrf_data).is_ok());
+
+        // Verify FAILS for miner B (different miner, same VRF proof)
+        assert!(manager.verify(&block_hash, &miner_b, &vrf_data).is_err());
+    }
+
+    #[test]
+    fn test_vrf_different_blocks_same_miner() {
+        let miner = test_miner_key();
+        let manager = VrfKeyManager::new();
+
+        let block_hash_1 = [0x01u8; 32];
+        let block_hash_2 = [0x02u8; 32];
+
+        let vrf_1 = manager.sign(&block_hash_1, &miner).unwrap();
+        let vrf_2 = manager.sign(&block_hash_2, &miner).unwrap();
+
+        // Different blocks produce different VRF outputs
+        assert_ne!(vrf_1.output.as_bytes(), vrf_2.output.as_bytes());
+
+        // Each proof only valid for its own block
+        assert!(manager.verify(&block_hash_1, &miner, &vrf_1).is_ok());
+        assert!(manager.verify(&block_hash_2, &miner, &vrf_2).is_ok());
+
+        // Cross-verification fails
+        assert!(manager.verify(&block_hash_1, &miner, &vrf_2).is_err());
+        assert!(manager.verify(&block_hash_2, &miner, &vrf_1).is_err());
+    }
+
+    #[test]
+    fn test_different_miners_different_vrf_input() {
+        let miner_a = test_miner_key();
+        let miner_b = test_miner_key();
+        let block_hash = [0x42u8; 32];
+
+        let vrf_input_a = compute_vrf_input(&block_hash, &miner_a);
+        let vrf_input_b = compute_vrf_input(&block_hash, &miner_b);
+
+        // Same block hash but different miners should produce different VRF inputs
+        assert_ne!(vrf_input_a, vrf_input_b);
     }
 }

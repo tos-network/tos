@@ -57,15 +57,18 @@ use tos_common::{
     },
     asset::{AssetData, VersionedAssetData},
     block::{
-        get_combined_hash_for_tips, Block, BlockHeader, BlockVersion, BlockVrfData, TopoHeight,
-        EXTRA_NONCE_SIZE,
+        compute_vrf_input, get_combined_hash_for_tips, Block, BlockHeader, BlockVersion,
+        BlockVrfData, TopoHeight, EXTRA_NONCE_SIZE,
     },
     config::{
         COIN_DECIMALS, MAXIMUM_SUPPLY, MAX_BLOCK_SIZE, MAX_TRANSACTION_SIZE, TIPS_LIMIT, TOS_ASSET,
         UNO_ASSET,
     },
     contract::{build_environment, ContractExecutor},
-    crypto::{random::secure_random_bytes, Hash, Hashable, PublicKey, HASH_SIZE},
+    crypto::{
+        elgamal::CompressedPublicKey, random::secure_random_bytes, Hash, Hashable, PublicKey,
+        HASH_SIZE,
+    },
     difficulty::{check_difficulty, CumulativeDifficulty, Difficulty},
     immutable::Immutable,
     network::Network,
@@ -182,9 +185,13 @@ impl<'a> VrfExecutorGuard<'a> {
     fn new(
         executor: &'a TakoContractExecutor,
         block_hash: &Hash,
-        vrf_data: Option<VrfData>,
+        vrf_data: Option<(VrfData, [u8; 32])>,
     ) -> Self {
-        executor.set_vrf_data(block_hash, vrf_data);
+        let (vrf, miner_key) = match vrf_data {
+            Some((vrf, miner)) => (Some(vrf), Some(miner)),
+            None => (None, None),
+        };
+        executor.set_vrf_data(block_hash, vrf, miner_key);
         Self {
             executor,
             block_hash: block_hash.clone(),
@@ -955,7 +962,8 @@ impl<S: Storage> Blockchain<S> {
         // VRF is mandatory for all blocks (except genesis)
         if header.get_height() > 0 && header.get_vrf_data().is_none() {
             let block_hash = header.hash();
-            let vrf = self.build_block_vrf_data(&block_hash)?;
+            let miner = header.get_miner();
+            let vrf = self.build_block_vrf_data(&block_hash, miner)?;
             header.set_vrf_data(Some(vrf));
         }
 
@@ -1131,10 +1139,14 @@ impl<S: Storage> Blockchain<S> {
         executor
     }
 
-    fn build_block_vrf_data(&self, block_hash: &Hash) -> Result<BlockVrfData, BlockchainError> {
+    fn build_block_vrf_data(
+        &self,
+        block_hash: &Hash,
+        miner: &CompressedPublicKey,
+    ) -> Result<BlockVrfData, BlockchainError> {
         let data = self
             .vrf_manager
-            .sign(block_hash.as_bytes())
+            .sign(block_hash.as_bytes(), miner)
             .map_err(|e| BlockchainError::InvalidVrfData(block_hash.clone(), e.to_string()))?;
         Ok(BlockVrfData::new(
             data.public_key.to_bytes(),
@@ -1143,11 +1155,15 @@ impl<S: Storage> Blockchain<S> {
         ))
     }
 
+    /// Verify VRF data in a block and return it for execution
+    ///
+    /// Returns both the VrfData and the miner's public key, which is needed
+    /// for VRF identity binding in contract execution (InvokeContext.miner_public_key)
     fn verify_block_vrf_data(
         &self,
         block_hash: &Hash,
         block: &Block,
-    ) -> Result<Option<VrfData>, BlockchainError> {
+    ) -> Result<Option<(VrfData, [u8; 32])>, BlockchainError> {
         if block.get_height() == 0 {
             return Ok(None);
         }
@@ -1175,15 +1191,25 @@ impl<S: Storage> Blockchain<S> {
         let proof = VrfProof::from_bytes(&vrf.proof)
             .map_err(|e| BlockchainError::InvalidVrfData(block_hash.clone(), e.to_string()))?;
 
+        // Compute VRF input with miner identity binding
+        // This prevents VRF proof substitution attacks
+        let miner = block.get_header().get_miner();
+        let vrf_input = compute_vrf_input(block_hash.as_bytes(), miner);
+
         public_key
-            .verify(block_hash.as_bytes(), &output, &proof)
+            .verify(&vrf_input, &output, &proof)
             .map_err(|e| BlockchainError::InvalidVrfData(block_hash.clone(), e.to_string()))?;
 
-        Ok(Some(VrfData {
-            public_key,
-            output,
-            proof,
-        }))
+        // Return VRF data and miner public key for InvokeContext identity binding
+        let miner_public_key = *miner.as_bytes();
+        Ok(Some((
+            VrfData {
+                public_key,
+                output,
+                proof,
+            },
+            miner_public_key,
+        )))
     }
 
     // Retrieve the cumulative difficulty of the chain
@@ -2964,7 +2990,8 @@ impl<S: Storage> Blockchain<S> {
         // VRF is mandatory for all non-genesis blocks
         if mining && block.get_height() > 0 && block.get_header().get_vrf_data().is_none() {
             let block_hash = block.hash();
-            let vrf = self.build_block_vrf_data(&block_hash)?;
+            let miner = block.get_header().get_miner().clone();
+            let vrf = self.build_block_vrf_data(&block_hash, &miner)?;
             let (header, transactions) = block.split();
             let mut header = header.into_owned();
             header.set_vrf_data(Some(vrf));
