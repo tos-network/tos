@@ -1153,7 +1153,9 @@ impl TransactionBuilder {
 
                 // Compute new source ciphertext by subtracting transfers
                 let mut new_source_ciphertext = source_current_ciphertext;
-                if **asset == TOS_ASSET {
+                // Only subtract fee from TOS ciphertext if fee_type is not Energy
+                // When fee_type is Energy, fees are paid via energy consumption, not TOS
+                if **asset == TOS_ASSET && !fee_type.is_energy() {
                     new_source_ciphertext -= Scalar::from(fee);
                 }
                 for transfer in &transfers_commitments {

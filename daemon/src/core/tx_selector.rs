@@ -44,8 +44,13 @@ fn compare_tx_priority(a: &Transaction, b: &Transaction) -> Ordering {
     match (a_is_energy, b_is_energy) {
         (false, true) => Ordering::Greater, // TOS > Energy
         (true, false) => Ordering::Less,    // Energy < TOS
-        _ => {
-            // Same fee type, compare by fee value
+        (true, true) => {
+            // Both Energy: compare by energy cost (transfer count), not fee field
+            // This prevents ordering manipulation by inflating the fee field
+            a.calculate_energy_cost().cmp(&b.calculate_energy_cost())
+        }
+        (false, false) => {
+            // Both TOS: compare by fee value
             a.get_fee().cmp(&b.get_fee())
         }
     }
