@@ -16,6 +16,8 @@
 /// ```
 use async_trait::async_trait;
 use log::{debug, trace};
+use std::collections::HashMap;
+use std::sync::RwLock;
 use tos_common::{
     block::TopoHeight,
     contract::{ContractEvent, ContractExecutionResult, ContractExecutor, ContractProvider},
@@ -24,7 +26,6 @@ use tos_common::{
 
 use super::{ExecutionResult, TakoExecutor};
 use crate::vrf::VrfData;
-use std::sync::RwLock;
 
 /// TOS Kernel(TAKO) implementation of ContractExecutor trait
 ///
@@ -61,39 +62,62 @@ use std::sync::RwLock;
 /// let state = ParallelChainState::new(0, Arc::new(executor));
 /// ```
 pub struct TakoContractExecutor {
-    /// Optional VRF data for verifiable randomness
-    /// When set, contracts can access VRF syscalls
-    vrf_data: RwLock<Option<VrfData>>,
+    /// VRF data keyed by block_hash for thread-safe concurrent execution
+    /// Each block execution can have its own VRF data without race conditions
+    vrf_data: RwLock<HashMap<[u8; 32], VrfData>>,
 }
 
 impl TakoContractExecutor {
     /// Create a new TAKO contract executor
     pub fn new() -> Self {
         Self {
-            vrf_data: RwLock::new(None),
+            vrf_data: RwLock::new(HashMap::new()),
         }
     }
 
-    /// Set VRF data for contract executions
+    /// Set VRF data for a specific block hash
     ///
     /// # Arguments
     ///
+    /// * `block_hash` - The block hash to associate VRF data with
     /// * `vrf_data` - VRF data (public_key, output, proof) from block producer
-    pub fn set_vrf_data(&self, vrf_data: Option<VrfData>) {
+    ///
+    /// # Thread Safety
+    ///
+    /// This method is thread-safe. Multiple blocks can have their VRF data
+    /// set concurrently without overwriting each other.
+    pub fn set_vrf_data(&self, block_hash: &Hash, vrf_data: Option<VrfData>) {
         if let Ok(mut guard) = self.vrf_data.write() {
-            *guard = vrf_data;
+            if let Some(data) = vrf_data {
+                guard.insert(*block_hash.as_bytes(), data);
+            } else {
+                guard.remove(block_hash.as_bytes());
+            }
         }
     }
 
-    /// Get a clone of the current VRF data
-    pub fn get_vrf_data(&self) -> Option<VrfData> {
-        self.vrf_data.read().ok().and_then(|guard| guard.clone())
+    /// Get VRF data for a specific block hash
+    ///
+    /// # Arguments
+    ///
+    /// * `block_hash` - The block hash to get VRF data for
+    ///
+    /// # Returns
+    ///
+    /// VRF data if set for this block, None otherwise
+    pub fn get_vrf_data(&self, block_hash: &Hash) -> Option<VrfData> {
+        self.vrf_data
+            .read()
+            .ok()
+            .and_then(|guard| guard.get(block_hash.as_bytes()).cloned())
     }
 
-    /// Clear VRF data
-    pub fn clear_vrf_data(&self) {
+    /// Clear VRF data for a specific block hash
+    ///
+    /// Should be called after block execution completes to prevent memory leaks.
+    pub fn clear_vrf_data(&self, block_hash: &Hash) {
         if let Ok(mut guard) = self.vrf_data.write() {
-            *guard = None;
+            guard.remove(block_hash.as_bytes());
         }
     }
 }
@@ -134,10 +158,10 @@ impl ContractExecutor for TakoContractExecutor {
             trace!("TAKO executor: Input data size: {} bytes", input_data.len());
         }
 
-        // Get VRF data if available
-        let vrf_data = self.get_vrf_data();
+        // Get VRF data for this specific block (thread-safe lookup)
+        let vrf_data = self.get_vrf_data(block_hash);
         if log::log_enabled!(log::Level::Debug) && vrf_data.is_some() {
-            debug!("TAKO executor: VRF data available for contract execution");
+            debug!("TAKO executor: VRF data available for block {}", block_hash);
         }
 
         // Execute via TOS Kernel(TAKO) with optional VRF data

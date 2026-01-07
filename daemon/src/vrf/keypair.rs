@@ -59,7 +59,9 @@ impl Serialize for WrappedVrfSecret {
     where
         S: serde::Serializer,
     {
-        serializer.serialize_str(&hex::encode(self.0.to_bytes()))
+        // SECURITY: Never serialize the actual secret key to prevent leakage
+        // in config dumps, logs, or telemetry. Use to_hex() explicitly if needed.
+        serializer.serialize_str("[REDACTED]")
     }
 }
 

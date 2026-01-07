@@ -180,18 +180,26 @@ pub struct Blockchain<S: Storage> {
 
 struct VrfExecutorGuard<'a> {
     executor: &'a TakoContractExecutor,
+    block_hash: Hash,
 }
 
 impl<'a> VrfExecutorGuard<'a> {
-    fn new(executor: &'a TakoContractExecutor, vrf_data: Option<VrfData>) -> Self {
-        executor.set_vrf_data(vrf_data);
-        Self { executor }
+    fn new(
+        executor: &'a TakoContractExecutor,
+        block_hash: &Hash,
+        vrf_data: Option<VrfData>,
+    ) -> Self {
+        executor.set_vrf_data(block_hash, vrf_data);
+        Self {
+            executor,
+            block_hash: block_hash.clone(),
+        }
     }
 }
 
 impl<'a> Drop for VrfExecutorGuard<'a> {
     fn drop(&mut self) {
-        self.executor.clear_vrf_data();
+        self.executor.clear_vrf_data(&self.block_hash);
     }
 }
 
@@ -276,6 +284,18 @@ impl<S: Storage> Blockchain<S> {
 
         let vrf_enabled = config.vrf.enable;
         let vrf_allowed_keys = if config.vrf.allowed_public_keys.is_empty() {
+            if vrf_enabled && network != Network::Devnet {
+                // SECURITY: On mainnet/testnet, empty VRF whitelist allows any keypair
+                // which could enable VRF manipulation attacks
+                if log::log_enabled!(log::Level::Warn) {
+                    warn!(
+                        "VRF enabled without allowed-public-keys whitelist on {}. \
+                         This is insecure for production - any VRF keypair will be accepted. \
+                         Consider setting --vrf-allowed-public-key for each authorized producer.",
+                        network
+                    );
+                }
+            }
             None
         } else {
             let mut allowed = HashSet::new();
@@ -283,6 +303,12 @@ impl<S: Storage> Blockchain<S> {
                 let key = VrfPublicKey::from_hex(hex)
                     .map_err(|e| anyhow!("Invalid VRF allowed public key {}: {}", hex, e))?;
                 allowed.insert(key.to_bytes());
+            }
+            if log::log_enabled!(log::Level::Info) {
+                info!(
+                    "VRF whitelist configured with {} allowed public key(s)",
+                    allowed.len()
+                );
             }
             Some(allowed)
         };
@@ -3904,7 +3930,7 @@ impl<S: Storage> Blockchain<S> {
                     );
                 }
                 let vrf_data = self.verify_block_vrf_data(&hash, &block)?;
-                let _vrf_guard = VrfExecutorGuard::new(&self.executor, vrf_data);
+                let _vrf_guard = VrfExecutorGuard::new(&self.executor, &hash, vrf_data);
                 let mut chain_state = ApplicableChainState::new(
                     &mut *storage,
                     &self.environment,

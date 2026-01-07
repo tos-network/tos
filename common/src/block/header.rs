@@ -15,6 +15,7 @@ use std::{
     fmt::Error,
     fmt::{Display, Formatter},
 };
+use tos_crypto::vrf::{VRF_OUTPUT_SIZE, VRF_PROOF_SIZE, VRF_PUBLIC_KEY_SIZE};
 use tos_hash::Error as TosHashError;
 
 // Serialize the extra nonce in a hexadecimal string
@@ -272,6 +273,8 @@ impl Serializer for BlockHeader {
             writer.write_hash(tx); // 32
         }
         self.miner.write(writer); // 60 + (N*32) + (T*32) + 32 = 92 + (N*32) + (T*32)
+
+        // VRF field: flag byte (0 = no VRF, 1 = VRF present) + optional VRF data
         writer.write_u8(if self.vrf.is_some() { 1 } else { 0 });
         if let Some(vrf) = &self.vrf {
             writer.write_bytes(&vrf.public_key);
@@ -321,10 +324,18 @@ impl Serializer for BlockHeader {
         }
 
         let miner = CompressedPublicKey::read(reader)?;
+
+        // VRF field: flag byte followed by optional VRF data
         let vrf_flag = reader.read_u8()?;
         let vrf = match vrf_flag {
             0 => None,
             1 => {
+                // Static assertions to ensure VRF sizes match reader functions
+                // If tos_crypto changes sizes, this will fail at compile time
+                const _: () = assert!(VRF_PUBLIC_KEY_SIZE == 32);
+                const _: () = assert!(VRF_OUTPUT_SIZE == 32);
+                const _: () = assert!(VRF_PROOF_SIZE == 64);
+
                 let public_key = reader.read_bytes_32()?;
                 let output = reader.read_bytes_32()?;
                 let proof = reader.read_bytes_64()?;
@@ -357,9 +368,10 @@ impl Serializer for BlockHeader {
         let version_size = 1;
 
         let vrf_size = if self.vrf.is_some() {
-            1 + 32 + 32 + 64
+            // 1 byte flag + public_key + output + proof
+            1 + VRF_PUBLIC_KEY_SIZE + VRF_OUTPUT_SIZE + VRF_PROOF_SIZE
         } else {
-            1
+            1 // flag only (0 = no VRF)
         };
         EXTRA_NONCE_SIZE
             + tips_size

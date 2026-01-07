@@ -66,6 +66,18 @@ impl<'de> serde::Deserialize<'de> for BlockVrfData {
 }
 
 fn decode_fixed<const N: usize, E: serde::de::Error>(value: &str) -> Result<[u8; N], E> {
+    // SECURITY: Limit hex string length to prevent DoS via unbounded allocation
+    // Expected length is N*2 hex chars, allow small margin for whitespace
+    const MAX_HEX_MARGIN: usize = 4;
+    let max_len = N * 2 + MAX_HEX_MARGIN;
+    if value.len() > max_len {
+        return Err(E::custom(format!(
+            "hex string too long: {} > {}",
+            value.len(),
+            max_len
+        )));
+    }
+
     let bytes = hex::decode(value).map_err(E::custom)?;
     let array: [u8; N] = bytes
         .try_into()

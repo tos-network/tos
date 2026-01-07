@@ -485,6 +485,13 @@ impl Default for RocksDBConfig {
 /// VRF provides verifiable randomness for smart contracts. When enabled,
 /// block producers sign each block hash with their VRF private key,
 /// and contracts can access this verifiable random value.
+///
+/// # Security
+///
+/// For production networks (mainnet/testnet), you SHOULD configure
+/// `allowed_public_keys` to restrict which VRF keys are accepted.
+/// Without a whitelist, any valid VRF keypair will be accepted,
+/// which could allow VRF manipulation attacks.
 #[derive(Debug, Clone, clap::Args, Serialize, Deserialize, Default)]
 pub struct VrfConfig {
     /// Enable VRF (Verifiable Random Function) for smart contracts.
@@ -496,14 +503,18 @@ pub struct VrfConfig {
     /// VRF private key in hex format (64 hex chars = 32 bytes).
     /// If not provided when VRF is enabled, a new keypair will be generated.
     /// The public key will be logged at startup.
+    /// WARNING: Prefer --vrf-key-file to avoid shell history leakage.
     #[clap(name = "vrf-private-key", long)]
     #[serde(default)]
     pub private_key: Option<WrappedVrfSecret>,
     /// VRF private key file path (hex-encoded secret).
+    /// File permissions must be 0600 on Unix systems.
     #[clap(name = "vrf-key-file", long)]
     #[serde(default)]
     pub key_file: Option<PathBuf>,
-    /// Allowed VRF public keys (hex, 32 bytes). If set, blocks must use one of these keys.
+    /// Allowed VRF public keys (hex, 32 bytes).
+    /// RECOMMENDED for production: blocks will be rejected if VRF key is not in whitelist.
+    /// Can specify multiple times for multiple producers.
     #[clap(name = "vrf-allowed-public-key", long)]
     #[serde(default)]
     pub allowed_public_keys: Vec<String>,
