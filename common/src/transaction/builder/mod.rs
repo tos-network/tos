@@ -561,14 +561,23 @@ impl TransactionBuilder {
     /// Compute the full cost of the transaction
     /// In Stake 2.0, fee_limit is the max TOS willing to burn
     /// Actual fee deduction happens during execution based on energy consumption
-    pub fn get_transaction_cost(&self, fee_limit: u64, asset: &Hash) -> u64 {
+    /// When fee_type is Energy, fees are not deducted from TOS balance
+    pub fn get_transaction_cost(
+        &self,
+        fee_limit: u64,
+        asset: &Hash,
+        fee_type: Option<&FeeType>,
+    ) -> u64 {
         let mut cost = 0;
 
-        // fee_limit is ALWAYS added to TOS cost, not UNO
-        // In Energy model, fees are paid via TOS (Energy consumption)
-        // UNO transfers spend from encrypted balance for amounts, but fees from TOS
+        // fee_limit is added to TOS cost only when fee_type is TOS (or unspecified)
+        // When fee_type is Energy, fees are paid via energy consumption, not TOS
         if *asset == TOS_ASSET {
-            cost += fee_limit;
+            // Only add fee to TOS cost if fee_type is not Energy
+            let is_energy_fee = fee_type.map(|ft| ft.is_energy()).unwrap_or(false);
+            if !is_energy_fee {
+                cost += fee_limit;
+            }
         }
 
         match &self.data {
@@ -744,8 +753,9 @@ impl TransactionBuilder {
 
         // Update balances for used assets
         let used_assets = self.data.used_assets();
+        let fee_type_ref = self.fee_type.as_ref();
         for asset in used_assets.iter() {
-            let cost = self.get_transaction_cost(fee, asset);
+            let cost = self.get_transaction_cost(fee, asset, fee_type_ref);
             let current_balance = state
                 .get_account_balance(asset)
                 .map_err(GenerationError::State)?;
@@ -1103,9 +1113,10 @@ impl TransactionBuilder {
                 .take(used_assets.len())
                 .collect();
 
+        let fee_type_ref = self.fee_type.as_ref();
         let mut range_proof_values: Vec<u64> = Vec::with_capacity(used_assets.len());
         for asset in &used_assets {
-            let cost = self.get_transaction_cost(fee, asset);
+            let cost = self.get_transaction_cost(fee, asset, fee_type_ref);
             let current_balance = state
                 .get_uno_balance(asset)
                 .map_err(GenerationError::State)?;
@@ -1346,20 +1357,33 @@ impl TransactionBuilder {
         // Get reference
         let reference = state.get_reference();
 
-        // Calculate total cost (amount + fees)
+        // Calculate fees
         let fee = self.estimate_fees(state)?;
         let total_amount: u64 = shield_transfers.iter().map(|t| t.amount).sum();
-        let total_cost = total_amount
-            .checked_add(fee)
-            .ok_or_else(|| GenerationError::State("Overflow in shield transfer cost".into()))?;
+
+        // Determine if fee is Energy-based (fee not deducted from TOS)
+        let is_energy_fee = self
+            .fee_type
+            .as_ref()
+            .map(|ft| ft.is_energy())
+            .unwrap_or(false);
+
+        // Calculate TOS cost: amount + fee (unless Energy fee)
+        let tos_cost = if is_energy_fee {
+            total_amount
+        } else {
+            total_amount
+                .checked_add(fee)
+                .ok_or_else(|| GenerationError::State("Overflow in shield transfer cost".into()))?
+        };
 
         // Check and deduct TOS balance
         let current_balance = state
             .get_account_balance(&TOS_ASSET)
             .map_err(GenerationError::State)?;
 
-        let new_balance = current_balance.checked_sub(total_cost).ok_or_else(|| {
-            GenerationError::InsufficientFunds(TOS_ASSET, total_cost, current_balance)
+        let new_balance = current_balance.checked_sub(tos_cost).ok_or_else(|| {
+            GenerationError::InsufficientFunds(TOS_ASSET, tos_cost, current_balance)
         })?;
 
         state
@@ -1468,20 +1492,22 @@ impl TransactionBuilder {
         // Fees are paid from TOS balance (plaintext) or Energy
         let fee = self.estimate_fees(state)?;
         // Use builder's fee_type if set, otherwise default to TOS
-        let fee_type = self.fee_type.unwrap_or(FeeType::TOS);
+        let fee_type = self.fee_type.clone().unwrap_or(FeeType::TOS);
 
-        // Check TOS balance for fees
-        let current_tos_balance = state
-            .get_account_balance(&TOS_ASSET)
-            .map_err(GenerationError::State)?;
+        // Only deduct TOS balance for fees when fee_type is not Energy
+        if !fee_type.is_energy() {
+            let current_tos_balance = state
+                .get_account_balance(&TOS_ASSET)
+                .map_err(GenerationError::State)?;
 
-        let new_tos_balance = current_tos_balance.checked_sub(fee).ok_or_else(|| {
-            GenerationError::InsufficientFunds(TOS_ASSET, fee, current_tos_balance)
-        })?;
+            let new_tos_balance = current_tos_balance.checked_sub(fee).ok_or_else(|| {
+                GenerationError::InsufficientFunds(TOS_ASSET, fee, current_tos_balance)
+            })?;
 
-        state
-            .update_account_balance(&TOS_ASSET, new_tos_balance)
-            .map_err(GenerationError::State)?;
+            state
+                .update_account_balance(&TOS_ASSET, new_tos_balance)
+                .map_err(GenerationError::State)?;
+        }
 
         // Check UNO balance and create source commitment with range proof
         // This is critical to prevent spending more UNO than available

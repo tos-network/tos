@@ -326,7 +326,14 @@ impl<'a, S: Storage> MempoolState<'a, S> {
             return Ok(());
         }
 
-        if matches!(tx.get_data(), TransactionType::Transfers(_)) {
+        // Handle energy consumption for all transfer-type transactions
+        if matches!(
+            tx.get_data(),
+            TransactionType::Transfers(_)
+                | TransactionType::UnoTransfers(_)
+                | TransactionType::ShieldTransfers(_)
+                | TransactionType::UnshieldTransfers(_)
+        ) {
             let energy_cost = tx.calculate_energy_cost();
             if energy_cost == 0 {
                 return Ok(());
