@@ -1634,6 +1634,7 @@ impl Transaction {
         }
 
         // Validate that Energy fee type can only be used with transfer-type transactions
+        // and that fee must be zero for Energy fee transactions
         if self.get_fee_type().is_energy() {
             match &self.data {
                 TransactionType::Transfers(_)
@@ -1641,6 +1642,10 @@ impl Transaction {
                 | TransactionType::ShieldTransfers(_)
                 | TransactionType::UnshieldTransfers(_) => {
                     // These transaction types can use Energy fees
+                    // Energy fees must be zero to prevent miner reward inflation
+                    if self.fee != 0 {
+                        return Err(VerificationError::InvalidFee(0, self.fee));
+                    }
                 }
                 _ => {
                     return Err(VerificationError::InvalidFormat);

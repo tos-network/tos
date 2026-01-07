@@ -66,4 +66,6 @@ pub enum VerificationError<T> {
     InvalidTransferAmount,
     #[error("Shield amount must be at least 100 TOS")]
     ShieldAmountTooLow,
+    #[error("Invalid fee: expected {0}, got {1}")]
+    InvalidFee(u64, u64),
 }

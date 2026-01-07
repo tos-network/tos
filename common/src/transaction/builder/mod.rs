@@ -41,7 +41,7 @@ use crate::{
         Hash, ProtocolTranscript, HASH_SIZE, SIGNATURE_SIZE,
     },
     serializer::Serializer,
-    utils::{calculate_energy_fee, calculate_tx_fee, calculate_uno_tx_fee},
+    utils::{calculate_tx_fee, calculate_uno_tx_fee},
 };
 use indexmap::{IndexMap, IndexSet};
 use serde::{Deserialize, Serialize};
@@ -507,8 +507,9 @@ impl TransactionBuilder {
                                 | TransactionTypeBuilder::UnshieldTransfers(_)
                         )
                     {
-                        // Use energy fee calculation for transfer-type transactions
-                        calculate_energy_fee(size, transfers, new_addresses)
+                        // Energy fee transactions must have fee = 0
+                        // Energy cost is paid via energy consumption, not the fee field
+                        0
                     } else {
                         // Use regular fee calculation (TOS or UNO/Unshield)
                         // UNO and Unshield transfers have ZK proofs and need higher fees
