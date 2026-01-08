@@ -728,6 +728,227 @@ fn test_nft_batch_burn() {
 }
 
 // ============================================================================
+// Test 2d: Freeze/Thaw NFTs
+// ============================================================================
+
+fn create_test_collection_with_freeze_authority(
+    id_byte: u8,
+    creator_byte: u8,
+    freeze_authority_byte: u8,
+) -> NftCollection {
+    NftCollection {
+        id: test_hash(id_byte),
+        creator: test_pubkey(creator_byte),
+        name: "Test Collection".to_string(),
+        symbol: "TEST".to_string(),
+        base_uri: "https://example.com/".to_string(),
+        max_supply: Some(1000),
+        total_supply: 0,
+        next_token_id: 1,
+        royalty: Royalty {
+            recipient: test_pubkey(creator_byte),
+            basis_points: 500, // 5%
+        },
+        mint_authority: MintAuthority::Public {
+            price: 0,
+            payment_recipient: test_pubkey(creator_byte),
+            max_per_address: 10,
+        },
+        freeze_authority: Some(test_pubkey(freeze_authority_byte)),
+        metadata_authority: None,
+        is_paused: false,
+        created_at: 100,
+    }
+}
+
+#[test]
+fn test_nft_freeze_thaw() {
+    println!("\n=== Test: nft_freeze_thaw ===");
+
+    let mut storage = MockNftStorage::new();
+
+    // Create collection with freeze_authority (0xDD)
+    let collection = create_test_collection_with_freeze_authority(0x05, 0xAA, 0xDD);
+    storage.add_collection(collection);
+
+    let mut adapter = TosNftAdapter::new(&mut storage);
+
+    let collection_id = test_address(0x05);
+    let creator = test_address(0xAA);
+    let owner = test_address(0xBB);
+    let freeze_authority = test_address(0xDD);
+    let not_freeze_authority = test_address(0xEE);
+
+    // Mint an NFT
+    let token_id = adapter
+        .mint(&collection_id, &owner, b"test_uri", &creator, 100)
+        .expect("mint should succeed");
+    println!("  Minted token: {}", token_id);
+
+    // Check initial frozen state (should be false)
+    let is_frozen = adapter
+        .is_frozen(&collection_id, token_id)
+        .expect("is_frozen should succeed");
+    assert!(!is_frozen, "Token should not be frozen initially");
+    println!("  Initial frozen state: {} (expected false)", is_frozen);
+
+    // Test 1: Freeze by freeze_authority
+    let result = adapter.freeze(&collection_id, token_id, &freeze_authority);
+    assert!(result.is_ok(), "Freeze should succeed: {:?}", result.err());
+    println!("  Freeze by authority: PASS");
+
+    // Verify frozen state
+    let is_frozen = adapter
+        .is_frozen(&collection_id, token_id)
+        .expect("is_frozen should succeed");
+    assert!(is_frozen, "Token should be frozen");
+    println!("  Frozen state after freeze: {} (expected true)", is_frozen);
+
+    // Test 2: Try to freeze already frozen token (should fail)
+    let result = adapter.freeze(&collection_id, token_id, &freeze_authority);
+    assert!(result.is_err(), "Freezing already frozen token should fail");
+    println!("  Freeze already frozen: correctly failed");
+
+    // Test 3: Try to thaw by non-authority (should fail)
+    let result = adapter.thaw(&collection_id, token_id, &not_freeze_authority);
+    assert!(result.is_err(), "Thaw by non-authority should fail");
+    println!("  Thaw by non-authority: correctly failed");
+
+    // Test 4: Thaw by freeze_authority
+    let result = adapter.thaw(&collection_id, token_id, &freeze_authority);
+    assert!(result.is_ok(), "Thaw should succeed: {:?}", result.err());
+    println!("  Thaw by authority: PASS");
+
+    // Verify thawed state
+    let is_frozen = adapter
+        .is_frozen(&collection_id, token_id)
+        .expect("is_frozen should succeed");
+    assert!(!is_frozen, "Token should not be frozen after thaw");
+    println!("  Frozen state after thaw: {} (expected false)", is_frozen);
+
+    // Test 5: Try to thaw already thawed token (should fail)
+    let result = adapter.thaw(&collection_id, token_id, &freeze_authority);
+    assert!(result.is_err(), "Thawing already thawed token should fail");
+    println!("  Thaw already thawed: correctly failed");
+
+    // Test 6: Try to freeze by non-authority (should fail)
+    let result = adapter.freeze(&collection_id, token_id, &not_freeze_authority);
+    assert!(result.is_err(), "Freeze by non-authority should fail");
+    println!("  Freeze by non-authority: correctly failed");
+
+    println!("nft_freeze_thaw: ALL PASS");
+}
+
+#[test]
+fn test_nft_batch_freeze_thaw() {
+    println!("\n=== Test: nft_batch_freeze_thaw ===");
+
+    let mut storage = MockNftStorage::new();
+
+    // Create collection with freeze_authority (0xDD)
+    let collection = create_test_collection_with_freeze_authority(0x06, 0xAA, 0xDD);
+    storage.add_collection(collection);
+
+    let mut adapter = TosNftAdapter::new(&mut storage);
+
+    let collection_id = test_address(0x06);
+    let creator = test_address(0xAA);
+    let owner = test_address(0xBB);
+    let freeze_authority = test_address(0xDD);
+
+    // Mint 3 NFTs
+    let token_id1 = adapter
+        .mint(&collection_id, &owner, b"uri1", &creator, 100)
+        .expect("mint 1 should succeed");
+    let token_id2 = adapter
+        .mint(&collection_id, &owner, b"uri2", &creator, 100)
+        .expect("mint 2 should succeed");
+    let token_id3 = adapter
+        .mint(&collection_id, &owner, b"uri3", &creator, 100)
+        .expect("mint 3 should succeed");
+    println!(
+        "  Minted tokens: {}, {}, {}",
+        token_id1, token_id2, token_id3
+    );
+
+    // Verify all tokens are not frozen
+    assert!(
+        !adapter.is_frozen(&collection_id, token_id1).unwrap(),
+        "Token 1 should not be frozen"
+    );
+    assert!(
+        !adapter.is_frozen(&collection_id, token_id2).unwrap(),
+        "Token 2 should not be frozen"
+    );
+    assert!(
+        !adapter.is_frozen(&collection_id, token_id3).unwrap(),
+        "Token 3 should not be frozen"
+    );
+    println!("  All tokens unfrozen: PASS");
+
+    // Batch freeze
+    let tokens: [([u8; 32], u64); 3] = [
+        (collection_id, token_id1),
+        (collection_id, token_id2),
+        (collection_id, token_id3),
+    ];
+    let result = adapter.batch_freeze(&tokens, &freeze_authority);
+    assert!(
+        result.is_ok(),
+        "batch_freeze should succeed: {:?}",
+        result.err()
+    );
+    println!("  Batch freeze 3 tokens: PASS");
+
+    // Verify all tokens are frozen
+    assert!(
+        adapter.is_frozen(&collection_id, token_id1).unwrap(),
+        "Token 1 should be frozen"
+    );
+    assert!(
+        adapter.is_frozen(&collection_id, token_id2).unwrap(),
+        "Token 2 should be frozen"
+    );
+    assert!(
+        adapter.is_frozen(&collection_id, token_id3).unwrap(),
+        "Token 3 should be frozen"
+    );
+    println!("  All tokens frozen: PASS");
+
+    // Batch thaw
+    let result = adapter.batch_thaw(&tokens, &freeze_authority);
+    assert!(
+        result.is_ok(),
+        "batch_thaw should succeed: {:?}",
+        result.err()
+    );
+    println!("  Batch thaw 3 tokens: PASS");
+
+    // Verify all tokens are unfrozen
+    assert!(
+        !adapter.is_frozen(&collection_id, token_id1).unwrap(),
+        "Token 1 should not be frozen"
+    );
+    assert!(
+        !adapter.is_frozen(&collection_id, token_id2).unwrap(),
+        "Token 2 should not be frozen"
+    );
+    assert!(
+        !adapter.is_frozen(&collection_id, token_id3).unwrap(),
+        "Token 3 should not be frozen"
+    );
+    println!("  All tokens unfrozen after thaw: PASS");
+
+    // Test error case: empty batch
+    let empty_tokens: [([u8; 32], u64); 0] = [];
+    let result = adapter.batch_freeze(&empty_tokens, &freeze_authority);
+    assert!(result.is_err(), "Empty batch should fail");
+    println!("  Empty batch error: PASS");
+
+    println!("nft_batch_freeze_thaw: ALL PASS");
+}
+
+// ============================================================================
 // Test 3: Transfer NFT
 // ============================================================================
 
@@ -1187,6 +1408,13 @@ fn test_nft_syscalls_summary() {
     println!("    - tos_nft_get_approved        (1000 CU)");
     println!("    - tos_nft_set_approval_for_all (2000 CU)");
     println!("    - tos_nft_is_approved_for_all (500 CU)");
+    println!();
+    println!("  Freeze Operations:");
+    println!("    - tos_nft_freeze              (2000 CU)");
+    println!("    - tos_nft_thaw                (2000 CU)");
+    println!("    - tos_nft_is_frozen           (500 CU)");
+    println!("    - tos_nft_batch_freeze        (2000 CU + 1500 CU/item)");
+    println!("    - tos_nft_batch_thaw          (2000 CU + 1500 CU/item)");
     println!();
     println!("Architecture:");
     println!("  Smart Contract -> TAKO Syscall -> TosNftAdapter -> NftStorage");

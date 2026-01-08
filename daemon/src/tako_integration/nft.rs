@@ -8,8 +8,8 @@
 
 use tos_common::crypto::{Hash, PublicKey};
 use tos_common::nft::operations::{
-    burn, create_collection, mint, transfer, CreateCollectionParams, MintParams, NftStorage,
-    RuntimeContext,
+    burn, create_collection, freeze, is_frozen, mint, thaw, transfer, CreateCollectionParams,
+    MintParams, NftStorage, RuntimeContext,
 };
 use tos_common::nft::{MintAuthority, Nft, NftCollection, NftError, NftResult};
 use tos_common::serializer::Serializer;
@@ -455,6 +455,136 @@ impl<'a, S: NftStorage> TakoNftProvider for TosNftAdapter<'a, S> {
                 EbpfError::SyscallError(Box::new(std::io::Error::new(
                     std::io::ErrorKind::Other,
                     format!("Burn failed at index {}: {}", i, e),
+                )))
+            })?;
+        }
+
+        Ok(())
+    }
+
+    fn freeze(
+        &mut self,
+        collection: &[u8; 32],
+        token_id: u64,
+        caller: &[u8; 32],
+    ) -> Result<(), EbpfError> {
+        let collection_hash = Self::bytes_to_hash(collection);
+        let caller_pk = Self::bytes_to_pubkey(caller)?;
+        let ctx = RuntimeContext::new(caller_pk, 0);
+
+        freeze(self.storage, &ctx, &collection_hash, token_id).map_err(|e| {
+            EbpfError::SyscallError(Box::new(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("Freeze failed: {}", e),
+            )))
+        })
+    }
+
+    fn thaw(
+        &mut self,
+        collection: &[u8; 32],
+        token_id: u64,
+        caller: &[u8; 32],
+    ) -> Result<(), EbpfError> {
+        let collection_hash = Self::bytes_to_hash(collection);
+        let caller_pk = Self::bytes_to_pubkey(caller)?;
+        let ctx = RuntimeContext::new(caller_pk, 0);
+
+        thaw(self.storage, &ctx, &collection_hash, token_id).map_err(|e| {
+            EbpfError::SyscallError(Box::new(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("Thaw failed: {}", e),
+            )))
+        })
+    }
+
+    fn is_frozen(&self, collection: &[u8; 32], token_id: u64) -> Result<bool, EbpfError> {
+        let hash = Self::bytes_to_hash(collection);
+        is_frozen(self.storage, &hash, token_id).map_err(|e| {
+            EbpfError::SyscallError(Box::new(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("is_frozen query failed: {}", e),
+            )))
+        })
+    }
+
+    fn batch_freeze(
+        &mut self,
+        tokens: &[([u8; 32], u64)],
+        caller: &[u8; 32],
+    ) -> Result<(), EbpfError> {
+        // Validate inputs
+        if tokens.is_empty() {
+            return Err(EbpfError::SyscallError(Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "Empty tokens list",
+            ))));
+        }
+
+        const MAX_BATCH_SIZE: usize = 100;
+        if tokens.len() > MAX_BATCH_SIZE {
+            return Err(EbpfError::SyscallError(Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!(
+                    "Batch size {} exceeds maximum {}",
+                    tokens.len(),
+                    MAX_BATCH_SIZE
+                ),
+            ))));
+        }
+
+        let caller_pk = Self::bytes_to_pubkey(caller)?;
+        let ctx = RuntimeContext::new(caller_pk, 0);
+
+        for (i, (collection, token_id)) in tokens.iter().enumerate() {
+            let collection_hash = Self::bytes_to_hash(collection);
+
+            freeze(self.storage, &ctx, &collection_hash, *token_id).map_err(|e| {
+                EbpfError::SyscallError(Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!("Freeze failed at index {}: {}", i, e),
+                )))
+            })?;
+        }
+
+        Ok(())
+    }
+
+    fn batch_thaw(
+        &mut self,
+        tokens: &[([u8; 32], u64)],
+        caller: &[u8; 32],
+    ) -> Result<(), EbpfError> {
+        // Validate inputs
+        if tokens.is_empty() {
+            return Err(EbpfError::SyscallError(Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "Empty tokens list",
+            ))));
+        }
+
+        const MAX_BATCH_SIZE: usize = 100;
+        if tokens.len() > MAX_BATCH_SIZE {
+            return Err(EbpfError::SyscallError(Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!(
+                    "Batch size {} exceeds maximum {}",
+                    tokens.len(),
+                    MAX_BATCH_SIZE
+                ),
+            ))));
+        }
+
+        let caller_pk = Self::bytes_to_pubkey(caller)?;
+        let ctx = RuntimeContext::new(caller_pk, 0);
+
+        for (i, (collection, token_id)) in tokens.iter().enumerate() {
+            let collection_hash = Self::bytes_to_hash(collection);
+
+            thaw(self.storage, &ctx, &collection_hash, *token_id).map_err(|e| {
+                EbpfError::SyscallError(Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!("Thaw failed at index {}: {}", i, e),
                 )))
             })?;
         }

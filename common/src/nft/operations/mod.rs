@@ -8,6 +8,7 @@
 
 mod burn;
 mod collection;
+mod freeze;
 mod mint;
 mod query;
 mod transfer;
@@ -15,6 +16,7 @@ mod validation;
 
 pub use burn::*;
 pub use collection::*;
+pub use freeze::*;
 pub use mint::*;
 pub use query::*;
 pub use transfer::*;

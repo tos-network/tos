@@ -51,6 +51,9 @@ pub enum NftError {
     #[error("Token is frozen")]
     TokenFrozen = 102,
 
+    #[error("Token is not frozen")]
+    TokenNotFrozen = 103,
+
     // ========================================
     // Permission errors (200-299)
     // ========================================
@@ -261,6 +264,7 @@ impl NftError {
             100 => Some(Self::TokenNotFound),
             101 => Some(Self::TokenAlreadyExists),
             102 => Some(Self::TokenFrozen),
+            103 => Some(Self::TokenNotFrozen),
             200 => Some(Self::NotOwner),
             201 => Some(Self::NotApproved),
             202 => Some(Self::NotCreator),
@@ -336,6 +340,7 @@ mod tests {
             NftError::TokenNotFound,
             NftError::TokenAlreadyExists,
             NftError::TokenFrozen,
+            NftError::TokenNotFrozen,
             NftError::NotOwner,
             NftError::NotApproved,
             NftError::NotCreator,
