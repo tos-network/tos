@@ -16,7 +16,6 @@ TOS Network is a next-generation blockchain platform built with Rust, focusing o
 - **tos_miner** - Mining program
 - **tos_wallet** - Wallet application
 - **tos_genesis** - Genesis block generator
-- **tos_ai_miner** - AI mining program
 
 ## Quick Start
 

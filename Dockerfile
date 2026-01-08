@@ -43,7 +43,6 @@ COPY daemon ./daemon
 COPY miner ./miner
 COPY wallet ./wallet
 COPY genesis ./genesis
-COPY ai_miner ./ai_miner
 
 # Build the specified binary
 RUN TOS_COMMIT_HASH=${commit_hash} cargo build --release --bin $app

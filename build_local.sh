@@ -10,7 +10,7 @@ if [[ -f "$HOME/.cargo/env" ]]; then
     source "$HOME/.cargo/env"
 fi
 
-binaries=("tos_daemon" "tos_miner" "tos_wallet" "tos_genesis" "tos_ai_miner")
+binaries=("tos_daemon" "tos_miner" "tos_wallet" "tos_genesis")
 
 echo "🔨 Building TOS Network for local platform..."
 

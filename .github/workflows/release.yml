@@ -45,9 +45,8 @@ jobs:
         cp target/${{ matrix.target }}/release/tos_daemon release/
         cp target/${{ matrix.target }}/release/tos_miner release/
         cp target/${{ matrix.target }}/release/tos_wallet release/
-        cp target/${{ matrix.target }}/release/tos_ai_miner release/
         cd release
-        shasum -a 256 tos_daemon tos_miner tos_wallet tos_ai_miner > checksums.txt
+        shasum -a 256 tos_daemon tos_miner tos_wallet > checksums.txt
         cd ..
         tar -czvf ${{ matrix.artifact_name }}.tar.gz -C release .
 

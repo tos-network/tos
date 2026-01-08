@@ -9,7 +9,7 @@ if [[ -f "$HOME/.cargo/env" ]]; then
 fi
 
 targets=("aarch64-unknown-linux-gnu" "armv7-unknown-linux-gnueabihf" "x86_64-unknown-linux-musl" "x86_64-unknown-linux-gnu" "x86_64-pc-windows-gnu" "x86_64-apple-darwin" "aarch64-apple-darwin")
-binaries=("tos_daemon" "tos_miner" "tos_wallet" "tos_genesis" "tos_ai_miner")
+binaries=("tos_daemon" "tos_miner" "tos_wallet" "tos_genesis")
 extra_files=("README.md" "BOOTSTRAP_NODE_DEPLOYMENT.md" "LICENSE")
 
 # verify that we have cross installed

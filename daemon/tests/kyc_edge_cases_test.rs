@@ -784,19 +784,6 @@ impl<'a> BlockchainApplyState<'a, DummyContractProvider, TestError> for EdgeCase
         Ok(())
     }
 
-    async fn get_ai_mining_state(
-        &mut self,
-    ) -> Result<Option<tos_common::ai_mining::AIMiningState>, TestError> {
-        Ok(None)
-    }
-
-    async fn set_ai_mining_state(
-        &mut self,
-        _state: &tos_common::ai_mining::AIMiningState,
-    ) -> Result<(), TestError> {
-        Ok(())
-    }
-
     fn get_contract_executor(&self) -> Arc<dyn ContractExecutor> {
         self.executor.clone()
     }

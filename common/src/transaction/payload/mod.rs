@@ -1,4 +1,3 @@
-mod ai_mining;
 mod burn;
 mod contract;
 mod energy;
@@ -20,4 +19,3 @@ pub use shield_transfer::*;
 pub use transfer::*;
 pub use uno_transfer::*;
 pub use unshield_transfer::*;
-// pub use ai_mining::*; // Re-exported through ai_mining module

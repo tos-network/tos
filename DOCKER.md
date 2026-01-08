@@ -26,11 +26,8 @@ docker-compose up tos-daemon
 # Start daemon with miner
 docker-compose --profile miner up
 
-# Start daemon with AI miner
-docker-compose --profile ai-miner up
-
 # Start all services
-docker-compose --profile miner --profile ai-miner --profile wallet up
+docker-compose --profile miner --profile wallet up
 ```
 
 ## Available Components
@@ -39,7 +36,6 @@ docker-compose --profile miner --profile ai-miner --profile wallet up
 - **tos_miner** - Mining program
 - **tos_wallet** - Wallet program
 - **tos_genesis** - Genesis block generator
-- **tos_ai_miner** - AI mining program
 
 ## Docker Build Script
 
@@ -102,17 +98,6 @@ tos-miner:
     - TOS_MINER_THREADS=${TOS_MINER_THREADS:-4}
 ```
 
-#### TOS AI Miner
-```yaml
-tos-ai-miner:
-  environment:
-    - TOS_DAEMON_URL=http://tos-daemon:8080
-    - TOS_AI_MINER_ADDRESS=${TOS_AI_MINER_ADDRESS}
-    - TOS_AI_MODEL_PATH=${TOS_AI_MODEL_PATH:-/models}
-  volumes:
-    - tos-ai-models:/models
-```
-
 ### Environment Variables
 
 Copy `.env.example` to `.env` and configure:
@@ -124,7 +109,6 @@ cp .env.example .env
 Key variables:
 - `TOS_NETWORK` - Network type (mainnet/testnet)
 - `TOS_MINER_ADDRESS` - Your mining wallet address
-- `TOS_AI_MINER_ADDRESS` - Your AI mining wallet address
 - `RUST_LOG` - Logging level (debug/info/warn/error)
 
 ### Profiles
@@ -135,14 +119,11 @@ Use profiles to run specific combinations:
 # Only daemon
 docker-compose up tos-daemon
 
-# Daemon + traditional miner
+# Daemon + miner
 docker-compose --profile miner up
 
-# Daemon + AI miner
-docker-compose --profile ai-miner up
-
 # Everything
-docker-compose --profile miner --profile ai-miner --profile wallet up
+docker-compose --profile miner --profile wallet up
 ```
 
 ## Manual Docker Commands
