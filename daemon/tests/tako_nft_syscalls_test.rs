@@ -2,12 +2,13 @@
 //!
 //! Tests the NFT syscalls through the TosNftAdapter with a mock NFT storage.
 //!
-//! Syscalls tested (16 total):
+//! Syscalls tested (17 total):
 //! - tos_nft_create_collection
 //! - tos_nft_collection_exists
 //! - tos_nft_mint
 //! - tos_nft_batch_mint
 //! - tos_nft_burn
+//! - tos_nft_batch_burn
 //! - tos_nft_transfer
 //! - tos_nft_batch_transfer
 //! - tos_nft_exists
@@ -623,6 +624,107 @@ fn test_nft_batch_transfer() {
     println!("  Non-owner transfer error: PASS");
 
     println!("nft_batch_transfer: ALL PASS");
+}
+
+// ============================================================================
+// Test 2c: Batch Burn NFTs
+// ============================================================================
+
+#[test]
+fn test_nft_batch_burn() {
+    println!("\n=== Test: nft_batch_burn ===");
+
+    let mut storage = MockNftStorage::new();
+
+    // Add a test collection with public minting
+    let collection = create_test_collection(0x04, 0xAA);
+    storage.add_collection(collection);
+
+    let mut adapter = TosNftAdapter::new(&mut storage);
+
+    let collection_id = test_address(0x04);
+    let creator = test_address(0xAA);
+    let owner = test_address(0xBB);
+
+    // Mint 3 NFTs to owner
+    let token_id1 = adapter
+        .mint(&collection_id, &owner, b"uri1", &creator, 100)
+        .expect("mint 1 should succeed");
+    let token_id2 = adapter
+        .mint(&collection_id, &owner, b"uri2", &creator, 100)
+        .expect("mint 2 should succeed");
+    let token_id3 = adapter
+        .mint(&collection_id, &owner, b"uri3", &creator, 100)
+        .expect("mint 3 should succeed");
+    println!(
+        "  Minted tokens: {}, {}, {}",
+        token_id1, token_id2, token_id3
+    );
+
+    // Verify owner has 3 NFTs
+    let balance = adapter.balance_of(&collection_id, &owner).unwrap();
+    assert_eq!(balance, 3, "Owner should have 3 NFTs");
+    println!("  Owner balance before: {}", balance);
+
+    // Verify all tokens exist
+    assert!(adapter.nft_exists(&collection_id, token_id1).unwrap());
+    assert!(adapter.nft_exists(&collection_id, token_id2).unwrap());
+    assert!(adapter.nft_exists(&collection_id, token_id3).unwrap());
+    println!("  All tokens exist: PASS");
+
+    // Prepare batch burn
+    let burns: [([u8; 32], u64); 3] = [
+        (collection_id, token_id1),
+        (collection_id, token_id2),
+        (collection_id, token_id3),
+    ];
+
+    // Batch burn
+    let result = adapter.batch_burn(&burns, &owner);
+    assert!(
+        result.is_ok(),
+        "batch_burn should succeed: {:?}",
+        result.err()
+    );
+    println!("  Batch burn 3 NFTs: PASS");
+
+    // Verify owner has 0 NFTs
+    let balance = adapter.balance_of(&collection_id, &owner).unwrap();
+    assert_eq!(balance, 0, "Owner should have 0 NFTs after burn");
+    println!("  Owner balance after: {}", balance);
+
+    // Verify all tokens no longer exist
+    assert!(
+        !adapter.nft_exists(&collection_id, token_id1).unwrap(),
+        "Token 1 should not exist"
+    );
+    assert!(
+        !adapter.nft_exists(&collection_id, token_id2).unwrap(),
+        "Token 2 should not exist"
+    );
+    assert!(
+        !adapter.nft_exists(&collection_id, token_id3).unwrap(),
+        "Token 3 should not exist"
+    );
+    println!("  All tokens burned: PASS");
+
+    // Test error case: empty batch
+    let empty_burns: [([u8; 32], u64); 0] = [];
+    let result = adapter.batch_burn(&empty_burns, &owner);
+    assert!(result.is_err(), "Empty batch should fail");
+    println!("  Empty batch error: PASS");
+
+    // Test error case: not owner (mint a new token first)
+    let token_id4 = adapter
+        .mint(&collection_id, &owner, b"uri4", &creator, 100)
+        .expect("mint 4 should succeed");
+    let fake_owner = test_address(0x99);
+    let burns_not_owned: [([u8; 32], u64); 1] = [(collection_id, token_id4)];
+    let result = adapter.batch_burn(&burns_not_owned, &fake_owner);
+    assert!(result.is_err(), "Burn by non-owner should fail");
+    println!("  Non-owner burn error: PASS");
+
+    println!("nft_batch_burn: ALL PASS");
 }
 
 // ============================================================================

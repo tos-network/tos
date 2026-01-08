@@ -420,6 +420,48 @@ impl<'a, S: NftStorage> TakoNftProvider for TosNftAdapter<'a, S> {
         Ok(())
     }
 
+    fn batch_burn(
+        &mut self,
+        burns: &[([u8; 32], u64)],
+        caller: &[u8; 32],
+    ) -> Result<(), EbpfError> {
+        // Validate inputs
+        if burns.is_empty() {
+            return Err(EbpfError::SyscallError(Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "Empty burns list",
+            ))));
+        }
+
+        const MAX_BATCH_SIZE: usize = 100;
+        if burns.len() > MAX_BATCH_SIZE {
+            return Err(EbpfError::SyscallError(Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!(
+                    "Batch size {} exceeds maximum {}",
+                    burns.len(),
+                    MAX_BATCH_SIZE
+                ),
+            ))));
+        }
+
+        let caller_pk = Self::bytes_to_pubkey(caller)?;
+        let ctx = RuntimeContext::new(caller_pk, 0);
+
+        for (i, (collection, token_id)) in burns.iter().enumerate() {
+            let collection_hash = Self::bytes_to_hash(collection);
+
+            burn(self.storage, &ctx, &collection_hash, *token_id).map_err(|e| {
+                EbpfError::SyscallError(Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!("Burn failed at index {}: {}", i, e),
+                )))
+            })?;
+        }
+
+        Ok(())
+    }
+
     fn get_nft(&self, collection: &[u8; 32], token_id: u64) -> Result<Option<NftData>, EbpfError> {
         let hash = Self::bytes_to_hash(collection);
         let nft_opt = self.storage.get_nft(&hash, token_id);
