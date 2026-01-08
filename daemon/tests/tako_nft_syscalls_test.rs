@@ -2572,6 +2572,245 @@ fn test_nft_transfer_ownership_to_zero_address() {
 }
 
 // ============================================================================
+// Test: URI Length Validation
+// ============================================================================
+
+#[test]
+fn test_nft_uri_length_validation() {
+    println!("\n=== Test: nft_uri_length_validation ===");
+
+    let mut storage = MockNftStorage::new();
+
+    // Create collection with metadata_authority
+    let collection = create_test_collection_with_all_authorities(0x25, 0xAA, 0xDD, 0xEE);
+    storage.add_collection(collection);
+
+    let mut adapter = TosNftAdapter::new(&mut storage);
+
+    let collection_id = test_address(0x25);
+    let creator = test_address(0xAA);
+    let owner = test_address(0xBB);
+    let metadata_authority = test_address(0xEE);
+
+    // Mint an NFT
+    let token_id = adapter
+        .mint(&collection_id, &owner, b"initial_uri", &creator, 100)
+        .expect("mint should succeed");
+    println!("  Minted token {}", token_id);
+
+    // Test 1: set_token_uri with valid length should succeed
+    let valid_uri = "x".repeat(512); // MAX_METADATA_URI_LENGTH = 512
+    let result = adapter.set_token_uri(
+        &collection_id,
+        token_id,
+        valid_uri.as_bytes(),
+        &metadata_authority,
+    );
+    assert!(
+        result.is_ok(),
+        "URI at max length (512) should succeed: {:?}",
+        result.err()
+    );
+    println!("  512-byte URI accepted: PASS");
+
+    // Test 2: set_token_uri exceeding limit should fail
+    let long_uri = "x".repeat(513); // One byte over limit
+    let result = adapter.set_token_uri(
+        &collection_id,
+        token_id,
+        long_uri.as_bytes(),
+        &metadata_authority,
+    );
+    assert!(result.is_err(), "URI exceeding 512 bytes should fail");
+    println!("  513-byte URI rejected: PASS");
+
+    // Test 3: update_collection base_uri with valid length should succeed
+    let valid_base_uri = "y".repeat(256); // MAX_BASE_URI_LENGTH = 256
+    let result = adapter.update_collection(
+        &collection_id,
+        &creator,
+        Some(valid_base_uri.as_bytes()),
+        None,
+        0,
+    );
+    assert!(
+        result.is_ok(),
+        "Base URI at max length (256) should succeed: {:?}",
+        result.err()
+    );
+    println!("  256-byte base_uri accepted: PASS");
+
+    // Test 4: update_collection base_uri exceeding limit should fail
+    let long_base_uri = "y".repeat(257); // One byte over limit
+    let result = adapter.update_collection(
+        &collection_id,
+        &creator,
+        Some(long_base_uri.as_bytes()),
+        None,
+        0,
+    );
+    assert!(result.is_err(), "Base URI exceeding 256 bytes should fail");
+    println!("  257-byte base_uri rejected: PASS");
+
+    println!("nft_uri_length_validation: ALL PASS");
+}
+
+// ============================================================================
+// Test: Attribute Key/Value Length Validation
+// ============================================================================
+
+#[test]
+fn test_nft_attribute_length_validation() {
+    println!("\n=== Test: nft_attribute_length_validation ===");
+
+    let mut storage = MockNftStorage::new();
+
+    // Create collection with metadata_authority
+    let collection = create_test_collection_with_all_authorities(0x26, 0xAA, 0xDD, 0xEE);
+    storage.add_collection(collection);
+
+    let mut adapter = TosNftAdapter::new(&mut storage);
+
+    let collection_id = test_address(0x26);
+    let creator = test_address(0xAA);
+    let owner = test_address(0xBB);
+    let metadata_authority = test_address(0xEE);
+
+    // Mint an NFT
+    let token_id = adapter
+        .mint(&collection_id, &owner, b"test_uri", &creator, 100)
+        .expect("mint should succeed");
+    println!("  Minted token {}", token_id);
+
+    // Test 1: Key at max length should succeed
+    let max_key = "k".repeat(32); // MAX_ATTRIBUTE_KEY_LENGTH = 32
+    let result = adapter.update_attribute(
+        &collection_id,
+        token_id,
+        max_key.as_bytes(),
+        &[42u8], // Boolean true
+        2,       // Boolean type
+        &metadata_authority,
+    );
+    assert!(
+        result.is_ok(),
+        "Key at max length (32) should succeed: {:?}",
+        result.err()
+    );
+    println!("  32-byte key accepted: PASS");
+
+    // Test 2: Key exceeding limit should fail
+    let long_key = "k".repeat(33); // One byte over limit
+    let result = adapter.update_attribute(
+        &collection_id,
+        token_id,
+        long_key.as_bytes(),
+        &[1u8],
+        2,
+        &metadata_authority,
+    );
+    assert!(result.is_err(), "Key exceeding 32 bytes should fail");
+    println!("  33-byte key rejected: PASS");
+
+    // Test 3: String value at max length should succeed
+    let max_value = "v".repeat(256); // MAX_ATTRIBUTE_STRING_LENGTH = 256
+    let result = adapter.update_attribute(
+        &collection_id,
+        token_id,
+        b"valid_str",
+        max_value.as_bytes(),
+        0, // String type
+        &metadata_authority,
+    );
+    assert!(
+        result.is_ok(),
+        "String value at max length (256) should succeed: {:?}",
+        result.err()
+    );
+    println!("  256-byte string value accepted: PASS");
+
+    // Test 4: String value exceeding limit should fail
+    let long_value = "v".repeat(257); // One byte over limit
+    let result = adapter.update_attribute(
+        &collection_id,
+        token_id,
+        b"long_str",
+        long_value.as_bytes(),
+        0, // String type
+        &metadata_authority,
+    );
+    assert!(
+        result.is_err(),
+        "String value exceeding 256 bytes should fail"
+    );
+    println!("  257-byte string value rejected: PASS");
+
+    println!("nft_attribute_length_validation: ALL PASS");
+}
+
+// ============================================================================
+// Test: Approval Cleared on Transfer
+// ============================================================================
+
+#[test]
+fn test_nft_approval_cleared_on_transfer() {
+    println!("\n=== Test: nft_approval_cleared_on_transfer ===");
+
+    let mut storage = MockNftStorage::new();
+
+    // Create a collection
+    let collection = create_test_collection(0x27, 0xAA);
+    storage.add_collection(collection);
+
+    let mut adapter = TosNftAdapter::new(&mut storage);
+
+    let collection_id = test_address(0x27);
+    let creator = test_address(0xAA);
+    let owner = test_address(0xBB);
+    let approved = test_address(0xCC);
+    let new_owner = test_address(0xDD);
+
+    // Mint an NFT to owner
+    let token_id = adapter
+        .mint(&collection_id, &owner, b"test_uri", &creator, 100)
+        .expect("mint should succeed");
+    println!("  Minted token {} to owner", token_id);
+
+    // Approve a spender
+    let result = adapter.approve(&collection_id, token_id, Some(&approved), &owner);
+    assert!(result.is_ok(), "Approve should succeed: {:?}", result.err());
+    println!("  Approved spender: PASS");
+
+    // Verify approval exists
+    let approved_addr = adapter
+        .get_approved(&collection_id, token_id)
+        .expect("get_approved should succeed");
+    assert!(approved_addr.is_some(), "Should have approved address");
+    println!("  Approval exists before transfer: PASS");
+
+    // Transfer the NFT (from owner to new_owner, called by owner)
+    let result = adapter.transfer(&collection_id, token_id, &owner, &new_owner, &owner);
+    assert!(
+        result.is_ok(),
+        "Transfer should succeed: {:?}",
+        result.err()
+    );
+    println!("  Transferred to new owner: PASS");
+
+    // Verify approval is cleared after transfer
+    let approved_after = adapter
+        .get_approved(&collection_id, token_id)
+        .expect("get_approved should succeed");
+    assert!(
+        approved_after.is_none(),
+        "Approval should be cleared after transfer"
+    );
+    println!("  Approval cleared after transfer: PASS");
+
+    println!("nft_approval_cleared_on_transfer: ALL PASS");
+}
+
+// ============================================================================
 // Summary Test
 // ============================================================================
 

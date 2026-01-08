@@ -8,10 +8,14 @@
 
 use tos_common::crypto::{Hash, PublicKey};
 use tos_common::nft::operations::{
-    burn, create_collection, freeze, is_frozen, mint, thaw, transfer, CreateCollectionParams,
-    MintParams, NftStorage, RuntimeContext,
+    burn, create_collection, freeze, is_frozen, is_identity_key, mint, thaw, transfer,
+    CreateCollectionParams, MintParams, NftStorage, RuntimeContext,
 };
-use tos_common::nft::{MintAuthority, Nft, NftCollection, NftError, NftResult};
+use tos_common::nft::{
+    MintAuthority, Nft, NftCollection, NftError, NftResult, MAX_ATTRIBUTES_COUNT,
+    MAX_ATTRIBUTE_KEY_LENGTH, MAX_ATTRIBUTE_STRING_LENGTH, MAX_BASE_URI_LENGTH,
+    MAX_METADATA_URI_LENGTH,
+};
 use tos_common::serializer::Serializer;
 // TAKO's NftProvider trait (aliased to avoid conflict)
 use tos_program_runtime::storage::{NftCollectionData, NftData, NftProvider as TakoNftProvider};
@@ -798,6 +802,17 @@ impl<'a, S: NftStorage> TakoNftProvider for TosNftAdapter<'a, S> {
             )))
         })?;
 
+        // Validate URI length
+        if new_uri_str.len() > MAX_METADATA_URI_LENGTH {
+            return Err(EbpfError::SyscallError(Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!(
+                    "Metadata URI exceeds maximum length of {} bytes",
+                    MAX_METADATA_URI_LENGTH
+                ),
+            ))));
+        }
+
         nft.metadata_uri = new_uri_str;
 
         // 5. Save the updated NFT
@@ -839,6 +854,18 @@ impl<'a, S: NftStorage> TakoNftProvider for TosNftAdapter<'a, S> {
                     "Invalid UTF-8 in base_uri",
                 )))
             })?;
+
+            // Validate base_uri length
+            if new_uri.len() > MAX_BASE_URI_LENGTH {
+                return Err(EbpfError::SyscallError(Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    format!(
+                        "Base URI exceeds maximum length of {} bytes",
+                        MAX_BASE_URI_LENGTH
+                    ),
+                ))));
+            }
+
             nft_collection.base_uri = new_uri;
         }
 
@@ -852,15 +879,15 @@ impl<'a, S: NftStorage> TakoNftProvider for TosNftAdapter<'a, S> {
         }
 
         if let Some(recipient_bytes) = new_royalty_recipient {
-            // Validate: recipient cannot be zero address
-            if recipient_bytes == &[0u8; 32] {
+            let recipient_pk = Self::bytes_to_pubkey(recipient_bytes)?;
+
+            // Validate: recipient cannot be identity (zero) key
+            if is_identity_key(&recipient_pk) {
                 return Err(EbpfError::SyscallError(Box::new(std::io::Error::new(
                     std::io::ErrorKind::InvalidInput,
                     "Cannot set royalty recipient to zero address",
                 ))));
             }
-
-            let recipient_pk = Self::bytes_to_pubkey(recipient_bytes)?;
 
             // Validate royalty_bps
             if new_royalty_bps > 10000 {
@@ -888,17 +915,17 @@ impl<'a, S: NftStorage> TakoNftProvider for TosNftAdapter<'a, S> {
         caller: &[u8; 32],
         new_owner: &[u8; 32],
     ) -> Result<(), EbpfError> {
-        // Validate: new_owner cannot be zero address
-        if new_owner == &[0u8; 32] {
+        let hash = Self::bytes_to_hash(collection);
+        let caller_pk = Self::bytes_to_pubkey(caller)?;
+        let new_owner_pk = Self::bytes_to_pubkey(new_owner)?;
+
+        // Validate: new_owner cannot be identity (zero) key
+        if is_identity_key(&new_owner_pk) {
             return Err(EbpfError::SyscallError(Box::new(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 "Cannot transfer ownership to zero address",
             ))));
         }
-
-        let hash = Self::bytes_to_hash(collection);
-        let caller_pk = Self::bytes_to_pubkey(caller)?;
-        let new_owner_pk = Self::bytes_to_pubkey(new_owner)?;
 
         // 1. Get the collection
         let mut nft_collection = self.storage.get_collection(&hash).ok_or_else(|| {
@@ -968,7 +995,7 @@ impl<'a, S: NftStorage> TakoNftProvider for TosNftAdapter<'a, S> {
             )))
         })?;
 
-        // 4. Parse the key
+        // 4. Parse the key and validate length
         let key_str = String::from_utf8(key.to_vec()).map_err(|_| {
             EbpfError::SyscallError(Box::new(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
@@ -976,16 +1003,39 @@ impl<'a, S: NftStorage> TakoNftProvider for TosNftAdapter<'a, S> {
             )))
         })?;
 
+        // Validate key length
+        if key_str.len() > MAX_ATTRIBUTE_KEY_LENGTH {
+            return Err(EbpfError::SyscallError(Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!(
+                    "Attribute key exceeds maximum length of {} bytes",
+                    MAX_ATTRIBUTE_KEY_LENGTH
+                ),
+            ))));
+        }
+
         // 5. Parse the value based on value_type
         let attr_value = match value_type {
             0 => {
-                // String
+                // String - validate length
                 let s = String::from_utf8(value.to_vec()).map_err(|_| {
                     EbpfError::SyscallError(Box::new(std::io::Error::new(
                         std::io::ErrorKind::InvalidData,
                         "Invalid UTF-8 in attribute value",
                     )))
                 })?;
+
+                // Validate string value length
+                if s.len() > MAX_ATTRIBUTE_STRING_LENGTH {
+                    return Err(EbpfError::SyscallError(Box::new(std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        format!(
+                            "Attribute string value exceeds maximum length of {} bytes",
+                            MAX_ATTRIBUTE_STRING_LENGTH
+                        ),
+                    ))));
+                }
+
                 tos_common::nft::AttributeValue::String(s)
             }
             1 => {
@@ -1036,12 +1086,14 @@ impl<'a, S: NftStorage> TakoNftProvider for TosNftAdapter<'a, S> {
             }
         }
         if !found {
-            // Check max attributes limit (e.g., 64)
-            const MAX_ATTRIBUTES: usize = 64;
-            if nft.attributes.len() >= MAX_ATTRIBUTES {
+            // Check max attributes limit (32 per common/src/nft/types.rs)
+            if nft.attributes.len() >= MAX_ATTRIBUTES_COUNT {
                 return Err(EbpfError::SyscallError(Box::new(std::io::Error::new(
                     std::io::ErrorKind::InvalidInput,
-                    "Maximum attributes limit reached",
+                    format!(
+                        "Maximum attributes limit of {} reached",
+                        MAX_ATTRIBUTES_COUNT
+                    ),
                 ))));
             }
             nft.attributes.push((key_str, attr_value));
