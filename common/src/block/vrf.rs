@@ -1,9 +1,14 @@
 use crate::crypto::elgamal::CompressedPublicKey;
+use crate::crypto::SIGNATURE_SIZE;
 use tos_crypto::vrf::{VRF_OUTPUT_SIZE, VRF_PROOF_SIZE, VRF_PUBLIC_KEY_SIZE};
 
 /// Domain separator for VRF input computation.
 /// This prevents cross-protocol attacks and ensures inputs are unique to TOS VRF.
 const VRF_INPUT_DOMAIN: &[u8] = b"TOS-VRF-INPUT-v1";
+
+/// Domain separator for VRF binding signature.
+/// This binds a VRF key to a specific miner for a specific block.
+const VRF_BINDING_DOMAIN: &[u8] = b"TOS-VRF-BINDING-v1";
 
 /// Compute VRF input that binds to block producer identity.
 ///
@@ -31,15 +36,64 @@ pub fn compute_vrf_input(block_hash: &[u8; 32], miner: &CompressedPublicKey) -> 
     *hash.as_bytes()
 }
 
+/// Compute the message that miner signs to bind VRF key to block.
+///
+/// This creates a unique binding between:
+/// - The chain (via chain_id) - prevents cross-chain replay
+/// - The VRF public key being used
+/// - The specific block (via block_hash)
+///
+/// # Security
+///
+/// The binding message is computed as:
+/// ```text
+/// message = BLAKE3("TOS-VRF-BINDING-v1" || chain_id || vrf_public_key || block_hash)
+/// ```
+///
+/// This message is then signed by the miner using their keypair.
+/// The signature proves the miner authorized this VRF key for this block.
+///
+/// # Arguments
+///
+/// * `chain_id` - Network::chain_id() value (0=Mainnet, 1=Testnet, 2=Stagenet, 3=Devnet)
+/// * `vrf_public_key` - The VRF public key being bound
+/// * `block_hash` - The block hash (excludes VRF fields)
+pub fn compute_vrf_binding_message(
+    chain_id: u64,
+    vrf_public_key: &[u8; VRF_PUBLIC_KEY_SIZE],
+    block_hash: &[u8; 32],
+) -> [u8; 32] {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(VRF_BINDING_DOMAIN);
+    hasher.update(&chain_id.to_le_bytes());
+    hasher.update(vrf_public_key);
+    hasher.update(block_hash);
+    *hasher.finalize().as_bytes()
+}
+
 /// VRF data committed in a block.
 ///
 /// This data is produced by the block producer and validated by nodes
 /// before contract execution to enable verifiable randomness syscalls.
+///
+/// # Security
+///
+/// The `binding_signature` field prevents VRF proof substitution attacks.
+/// It is the miner's signature over:
+/// ```text
+/// BLAKE3("TOS-VRF-BINDING-v1" || chain_id || vrf_public_key || block_hash)
+/// ```
+/// This proves the miner authorized this specific VRF key for this block.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BlockVrfData {
+    /// VRF public key (32 bytes)
     pub public_key: [u8; VRF_PUBLIC_KEY_SIZE],
+    /// VRF output - the verifiable random value (32 bytes)
     pub output: [u8; VRF_OUTPUT_SIZE],
+    /// VRF proof for verification (64 bytes)
     pub proof: [u8; VRF_PROOF_SIZE],
+    /// Miner's signature binding VRF key to this block (64 bytes)
+    pub binding_signature: [u8; SIGNATURE_SIZE],
 }
 
 impl BlockVrfData {
@@ -47,11 +101,13 @@ impl BlockVrfData {
         public_key: [u8; VRF_PUBLIC_KEY_SIZE],
         output: [u8; VRF_OUTPUT_SIZE],
         proof: [u8; VRF_PROOF_SIZE],
+        binding_signature: [u8; SIGNATURE_SIZE],
     ) -> Self {
         Self {
             public_key,
             output,
             proof,
+            binding_signature,
         }
     }
 }
@@ -62,10 +118,11 @@ impl serde::Serialize for BlockVrfData {
         S: serde::Serializer,
     {
         use serde::ser::SerializeStruct;
-        let mut state = serializer.serialize_struct("BlockVrfData", 3)?;
+        let mut state = serializer.serialize_struct("BlockVrfData", 4)?;
         state.serialize_field("public_key", &hex::encode(self.public_key))?;
         state.serialize_field("output", &hex::encode(self.output))?;
         state.serialize_field("proof", &hex::encode(self.proof))?;
+        state.serialize_field("binding_signature", &hex::encode(self.binding_signature))?;
         state.end()
     }
 }
@@ -80,6 +137,7 @@ impl<'de> serde::Deserialize<'de> for BlockVrfData {
             public_key: String,
             output: String,
             proof: String,
+            binding_signature: String,
         }
 
         let helper = BlockVrfDataHex::deserialize(deserializer)?;
@@ -87,11 +145,14 @@ impl<'de> serde::Deserialize<'de> for BlockVrfData {
         let public_key = decode_fixed::<VRF_PUBLIC_KEY_SIZE, D::Error>(&helper.public_key)?;
         let output = decode_fixed::<VRF_OUTPUT_SIZE, D::Error>(&helper.output)?;
         let proof = decode_fixed::<VRF_PROOF_SIZE, D::Error>(&helper.proof)?;
+        let binding_signature =
+            decode_fixed::<SIGNATURE_SIZE, D::Error>(&helper.binding_signature)?;
 
         Ok(BlockVrfData {
             public_key,
             output,
             proof,
+            binding_signature,
         })
     }
 }

@@ -45,7 +45,10 @@
 
 mod keypair;
 
-pub use keypair::{VrfData, VrfKeyManager, WrappedVrfSecret};
+pub use keypair::{
+    MinerKeyError, VrfData, VrfKeyManager, WrappedMinerSecret, WrappedVrfSecret,
+    MINER_SECRET_KEY_SIZE,
+};
 
 // Re-export tos-crypto VRF types for convenience
 pub use tos_crypto::vrf::{

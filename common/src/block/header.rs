@@ -280,6 +280,7 @@ impl Serializer for BlockHeader {
             writer.write_bytes(&vrf.public_key);
             writer.write_bytes(&vrf.output);
             writer.write_bytes(&vrf.proof);
+            writer.write_bytes(&vrf.binding_signature);
         }
         // Minimum size is 93 bytes (includes VRF flag)
     }
@@ -339,7 +340,13 @@ impl Serializer for BlockHeader {
                 let public_key = reader.read_bytes_32()?;
                 let output = reader.read_bytes_32()?;
                 let proof = reader.read_bytes_64()?;
-                Some(BlockVrfData::new(public_key, output, proof))
+                let binding_signature = reader.read_bytes_64()?;
+                Some(BlockVrfData::new(
+                    public_key,
+                    output,
+                    proof,
+                    binding_signature,
+                ))
             }
             _ => {
                 debug!("Error, invalid VRF flag in block header: {}", vrf_flag);
@@ -459,7 +466,7 @@ mod tests {
             IndexSet::new(),
         );
 
-        let vrf = BlockVrfData::new([1u8; 32], [2u8; 32], [3u8; 64]);
+        let vrf = BlockVrfData::new([1u8; 32], [2u8; 32], [3u8; 64], [4u8; 64]);
         header.set_vrf_data(Some(vrf.clone()));
 
         let serialized = header.to_bytes();
@@ -469,6 +476,7 @@ mod tests {
         assert_eq!(parsed_vrf.public_key, vrf.public_key);
         assert_eq!(parsed_vrf.output, vrf.output);
         assert_eq!(parsed_vrf.proof, vrf.proof);
+        assert_eq!(parsed_vrf.binding_signature, vrf.binding_signature);
     }
 
     // ============================================================================

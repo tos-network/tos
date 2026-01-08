@@ -1,4 +1,4 @@
-use crate::vrf::WrappedVrfSecret;
+use crate::vrf::{WrappedMinerSecret, WrappedVrfSecret};
 use crate::{
     config::*,
     p2p::diffie_hellman::{KeyVerificationAction, WrappedSecret},
@@ -514,6 +514,13 @@ pub struct VrfConfig {
     #[clap(name = "vrf-private-key", long, env = "VRF_PRIVATE_KEY")]
     #[serde(default)]
     pub private_key: Option<WrappedVrfSecret>,
+    /// Miner private key in hex format (64 hex chars = 32 bytes).
+    /// Required for VRF binding signature when mining blocks.
+    /// If not provided, checks MINER_PRIVATE_KEY environment variable.
+    /// For external miners, binding signatures must be provided by the miner.
+    #[clap(name = "miner-private-key", long, env = "MINER_PRIVATE_KEY")]
+    #[serde(default)]
+    pub miner_private_key: Option<WrappedMinerSecret>,
     /// Allowed VRF public keys (hex, 32 bytes).
     /// RECOMMENDED for production: blocks will be rejected if VRF key is not in whitelist.
     /// Can specify multiple times for multiple producers.
