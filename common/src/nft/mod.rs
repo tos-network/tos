@@ -13,12 +13,15 @@
 // Module Structure:
 // - error: Error codes and types
 // - types: Core data structures (NftCollection, Nft, etc.)
-// - storage: Storage key prefixes and helpers (to be implemented)
+// - storage: Storage key prefixes and helpers
+// - operations: Core operation logic (create, mint, transfer, burn, query)
 
 mod error;
+pub mod operations;
 mod storage;
 mod types;
 
 pub use error::*;
+pub use operations::*;
 pub use storage::*;
 pub use types::*;
