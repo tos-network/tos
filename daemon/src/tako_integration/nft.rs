@@ -678,7 +678,27 @@ impl<'a, S: NftStorage> TakoNftProvider for TosNftAdapter<'a, S> {
 
         // Set or clear approval
         nft.approved = match operator {
-            Some(op) => Some(Self::bytes_to_pubkey(op)?),
+            Some(op) => {
+                let operator_pk = Self::bytes_to_pubkey(op)?;
+
+                // Cannot approve self
+                if operator_pk == caller_pk {
+                    return Err(EbpfError::SyscallError(Box::new(std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "Cannot approve self as operator",
+                    ))));
+                }
+
+                // Cannot approve identity (zero) key
+                if is_identity_key(&operator_pk) {
+                    return Err(EbpfError::SyscallError(Box::new(std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "Cannot approve zero address as operator",
+                    ))));
+                }
+
+                Some(operator_pk)
+            }
             None => None,
         };
 
@@ -1148,13 +1168,24 @@ impl<'a, S: NftStorage> TakoNftProvider for TosNftAdapter<'a, S> {
             )))
         })?;
 
-        // 4. Parse the key
+        // 4. Parse the key and validate length
         let key_str = String::from_utf8(key.to_vec()).map_err(|_| {
             EbpfError::SyscallError(Box::new(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 "Invalid UTF-8 in attribute key",
             )))
         })?;
+
+        // Validate key length
+        if key_str.len() > MAX_ATTRIBUTE_KEY_LENGTH {
+            return Err(EbpfError::SyscallError(Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!(
+                    "Attribute key exceeds maximum length of {} bytes",
+                    MAX_ATTRIBUTE_KEY_LENGTH
+                ),
+            ))));
+        }
 
         // 5. Find and remove the attribute
         let original_len = nft.attributes.len();

@@ -2867,6 +2867,147 @@ fn test_nft_approval_cleared_on_transfer() {
 }
 
 // ============================================================================
+// Test: Approve Validation (self and identity key)
+// ============================================================================
+
+#[test]
+fn test_nft_approve_validation() {
+    println!("\n=== Test: nft_approve_validation ===");
+
+    let mut storage = MockNftStorage::new();
+
+    // Create a collection
+    let collection = create_test_collection(0x29, 0xAA);
+    storage.add_collection(collection);
+
+    let mut adapter = TosNftAdapter::new(&mut storage);
+
+    let collection_id = test_address(0x29);
+    let creator = test_address(0xAA);
+    let owner = test_address(0xBB);
+    let valid_operator = test_address(0xCC);
+    let zero_address = [0u8; 32];
+
+    // Mint an NFT to owner
+    let token_id = adapter
+        .mint(&collection_id, &owner, b"test_uri", &creator, 100)
+        .expect("mint should succeed");
+    println!("  Minted token {} to owner", token_id);
+
+    // Test 1: Self-approval should fail
+    let result = adapter.approve(&collection_id, token_id, Some(&owner), &owner);
+    assert!(result.is_err(), "Self-approval should fail");
+    println!("  Self-approval rejected: PASS");
+
+    // Test 2: Zero address approval should fail
+    let result = adapter.approve(&collection_id, token_id, Some(&zero_address), &owner);
+    assert!(result.is_err(), "Zero address approval should fail");
+    println!("  Zero address approval rejected: PASS");
+
+    // Test 3: Valid operator approval should succeed
+    let result = adapter.approve(&collection_id, token_id, Some(&valid_operator), &owner);
+    assert!(
+        result.is_ok(),
+        "Valid operator approval should succeed: {:?}",
+        result.err()
+    );
+    println!("  Valid operator approval accepted: PASS");
+
+    // Test 4: Clearing approval (None) should succeed
+    let result = adapter.approve(&collection_id, token_id, None, &owner);
+    assert!(
+        result.is_ok(),
+        "Clearing approval should succeed: {:?}",
+        result.err()
+    );
+    println!("  Clearing approval accepted: PASS");
+
+    println!("nft_approve_validation: ALL PASS");
+}
+
+// ============================================================================
+// Test: Remove Attribute Key Length Validation
+// ============================================================================
+
+#[test]
+fn test_nft_remove_attribute_key_length() {
+    println!("\n=== Test: nft_remove_attribute_key_length ===");
+
+    let mut storage = MockNftStorage::new();
+
+    // Create collection with metadata_authority
+    let collection = create_test_collection_with_all_authorities(0x30, 0xAA, 0xDD, 0xEE);
+    storage.add_collection(collection);
+
+    let mut adapter = TosNftAdapter::new(&mut storage);
+
+    let collection_id = test_address(0x30);
+    let creator = test_address(0xAA);
+    let owner = test_address(0xBB);
+    let metadata_authority = test_address(0xEE);
+
+    // Mint an NFT
+    let token_id = adapter
+        .mint(&collection_id, &owner, b"test_uri", &creator, 100)
+        .expect("mint should succeed");
+    println!("  Minted token {}", token_id);
+
+    // First add an attribute with valid key
+    let result = adapter.update_attribute(
+        &collection_id,
+        token_id,
+        b"valid_key",
+        &[1u8],
+        2, // Boolean
+        &metadata_authority,
+    );
+    assert!(result.is_ok(), "Adding attribute should succeed");
+    println!("  Added test attribute: PASS");
+
+    // Test 1: Remove with key at max length should succeed
+    // First add with max length key
+    let max_key = "k".repeat(32);
+    let result = adapter.update_attribute(
+        &collection_id,
+        token_id,
+        max_key.as_bytes(),
+        &[1u8],
+        2,
+        &metadata_authority,
+    );
+    assert!(
+        result.is_ok(),
+        "Adding max-length key attribute should succeed"
+    );
+
+    let result = adapter.remove_attribute(
+        &collection_id,
+        token_id,
+        max_key.as_bytes(),
+        &metadata_authority,
+    );
+    assert!(
+        result.is_ok(),
+        "Remove with 32-byte key should succeed: {:?}",
+        result.err()
+    );
+    println!("  32-byte key removal accepted: PASS");
+
+    // Test 2: Remove with key exceeding limit should fail
+    let long_key = "k".repeat(33);
+    let result = adapter.remove_attribute(
+        &collection_id,
+        token_id,
+        long_key.as_bytes(),
+        &metadata_authority,
+    );
+    assert!(result.is_err(), "Remove with 33-byte key should fail");
+    println!("  33-byte key removal rejected: PASS");
+
+    println!("nft_remove_attribute_key_length: ALL PASS");
+}
+
+// ============================================================================
 // Summary Test
 // ============================================================================
 
