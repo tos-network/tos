@@ -2194,6 +2194,182 @@ fn test_nft_immutable_collection_attributes() {
 }
 
 // ============================================================================
+// Test 17: Edge Cases - Input Validation
+// ============================================================================
+
+#[test]
+fn test_nft_update_collection_royalty_without_recipient() {
+    println!("\n=== Test: nft_update_collection_royalty_without_recipient ===");
+
+    let mut storage = MockNftStorage::new();
+
+    // Create a collection
+    let collection = create_test_collection(0x20, 0xAA);
+    storage.add_collection(collection);
+
+    let mut adapter = TosNftAdapter::new(&mut storage);
+
+    let collection_id = test_address(0x20);
+    let creator = test_address(0xAA);
+
+    // Test: Providing royalty_bps > 0 without recipient should fail
+    let result = adapter.update_collection(
+        &collection_id,
+        &creator,
+        None, // No base_uri update
+        None, // No recipient - but royalty_bps is non-zero!
+        500,  // 5% royalty
+    );
+    assert!(result.is_err(), "Royalty bps without recipient should fail");
+    println!("  Royalty bps without recipient rejected: PASS");
+
+    // Test: royalty_bps = 0 with no recipient should succeed (no-op)
+    let result = adapter.update_collection(
+        &collection_id,
+        &creator,
+        None, // No base_uri update
+        None, // No recipient
+        0,    // No royalty update
+    );
+    assert!(
+        result.is_ok(),
+        "No royalty update (0 bps, no recipient) should succeed: {:?}",
+        result.err()
+    );
+    println!("  Zero royalty bps without recipient accepted: PASS");
+
+    println!("nft_update_collection_royalty_without_recipient: ALL PASS");
+}
+
+#[test]
+fn test_nft_update_attribute_number_validation() {
+    println!("\n=== Test: nft_update_attribute_number_validation ===");
+
+    let mut storage = MockNftStorage::new();
+
+    // Create collection with metadata_authority
+    let collection = create_test_collection_with_all_authorities(0x21, 0xAA, 0xDD, 0xEE);
+    storage.add_collection(collection);
+
+    let mut adapter = TosNftAdapter::new(&mut storage);
+
+    let collection_id = test_address(0x21);
+    let creator = test_address(0xAA);
+    let owner = test_address(0xBB);
+    let metadata_authority = test_address(0xEE);
+
+    // Mint an NFT
+    let token_id = adapter
+        .mint(&collection_id, &owner, b"ipfs://test", &creator, 100)
+        .expect("mint should succeed");
+    println!("  Minted token {}", token_id);
+
+    // Test 1: Exactly 8 bytes should succeed
+    let valid_number = 42i64.to_le_bytes();
+    assert_eq!(valid_number.len(), 8, "i64 should be 8 bytes");
+    let result = adapter.update_attribute(
+        &collection_id,
+        token_id,
+        b"score",
+        &valid_number,
+        1, // Number type
+        &metadata_authority,
+    );
+    assert!(
+        result.is_ok(),
+        "8-byte number should succeed: {:?}",
+        result.err()
+    );
+    println!("  8-byte number accepted: PASS");
+
+    // Test 2: Less than 8 bytes should fail
+    let short_value = [1u8, 2u8, 3u8, 4u8]; // Only 4 bytes
+    let result = adapter.update_attribute(
+        &collection_id,
+        token_id,
+        b"bad_num1",
+        &short_value,
+        1, // Number type
+        &metadata_authority,
+    );
+    assert!(result.is_err(), "< 8 bytes should fail for Number type");
+    println!("  4-byte number rejected: PASS");
+
+    // Test 3: More than 8 bytes should fail
+    let long_value = [1u8, 2u8, 3u8, 4u8, 5u8, 6u8, 7u8, 8u8, 9u8, 10u8]; // 10 bytes
+    let result = adapter.update_attribute(
+        &collection_id,
+        token_id,
+        b"bad_num2",
+        &long_value,
+        1, // Number type
+        &metadata_authority,
+    );
+    assert!(result.is_err(), "> 8 bytes should fail for Number type");
+    println!("  10-byte number rejected: PASS");
+
+    // Test 4: Empty value should fail
+    let empty_value: [u8; 0] = [];
+    let result = adapter.update_attribute(
+        &collection_id,
+        token_id,
+        b"bad_num3",
+        &empty_value,
+        1, // Number type
+        &metadata_authority,
+    );
+    assert!(result.is_err(), "Empty value should fail for Number type");
+    println!("  Empty number rejected: PASS");
+
+    println!("nft_update_attribute_number_validation: ALL PASS");
+}
+
+#[test]
+fn test_nft_transfer_ownership_to_zero_address() {
+    println!("\n=== Test: nft_transfer_ownership_to_zero_address ===");
+
+    let mut storage = MockNftStorage::new();
+
+    // Create a collection
+    let collection = create_test_collection(0x22, 0xAA);
+    storage.add_collection(collection);
+
+    let mut adapter = TosNftAdapter::new(&mut storage);
+
+    let collection_id = test_address(0x22);
+    let creator = test_address(0xAA);
+    let zero_address = [0u8; 32]; // Zero address
+
+    // Test: Transfer to zero address should fail
+    let result = adapter.transfer_collection_ownership(&collection_id, &creator, &zero_address);
+    assert!(result.is_err(), "Transfer to zero address should fail");
+    println!("  Transfer to zero address rejected: PASS");
+
+    // Verify ownership unchanged
+    let current = adapter
+        .get_collection(&collection_id)
+        .unwrap()
+        .expect("Collection should exist");
+    assert_eq!(
+        current.creator, creator,
+        "Creator should remain unchanged after failed transfer"
+    );
+    println!("  Creator unchanged: PASS");
+
+    // Test: Valid transfer should still work
+    let valid_new_owner = test_address(0xBB);
+    let result = adapter.transfer_collection_ownership(&collection_id, &creator, &valid_new_owner);
+    assert!(
+        result.is_ok(),
+        "Valid transfer should succeed: {:?}",
+        result.err()
+    );
+    println!("  Valid transfer succeeded: PASS");
+
+    println!("nft_transfer_ownership_to_zero_address: ALL PASS");
+}
+
+// ============================================================================
 // Summary Test
 // ============================================================================
 

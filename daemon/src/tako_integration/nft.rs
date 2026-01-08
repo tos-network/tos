@@ -843,6 +843,14 @@ impl<'a, S: NftStorage> TakoNftProvider for TosNftAdapter<'a, S> {
         }
 
         // 4. Update royalty if provided
+        // Validate: if royalty_bps is non-zero, recipient must be provided
+        if new_royalty_bps > 0 && new_royalty_recipient.is_none() {
+            return Err(EbpfError::SyscallError(Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "Royalty basis points provided without recipient",
+            ))));
+        }
+
         if let Some(recipient_bytes) = new_royalty_recipient {
             let recipient_pk = Self::bytes_to_pubkey(recipient_bytes)?;
 
@@ -872,6 +880,14 @@ impl<'a, S: NftStorage> TakoNftProvider for TosNftAdapter<'a, S> {
         caller: &[u8; 32],
         new_owner: &[u8; 32],
     ) -> Result<(), EbpfError> {
+        // Validate: new_owner cannot be zero address
+        if new_owner == &[0u8; 32] {
+            return Err(EbpfError::SyscallError(Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "Cannot transfer ownership to zero address",
+            ))));
+        }
+
         let hash = Self::bytes_to_hash(collection);
         let caller_pk = Self::bytes_to_pubkey(caller)?;
         let new_owner_pk = Self::bytes_to_pubkey(new_owner)?;
@@ -965,11 +981,11 @@ impl<'a, S: NftStorage> TakoNftProvider for TosNftAdapter<'a, S> {
                 tos_common::nft::AttributeValue::String(s)
             }
             1 => {
-                // Number (i64 as 8 bytes LE)
-                if value.len() < 8 {
+                // Number (i64 as 8 bytes LE) - must be exactly 8 bytes
+                if value.len() != 8 {
                     return Err(EbpfError::SyscallError(Box::new(std::io::Error::new(
                         std::io::ErrorKind::InvalidInput,
-                        "Number attribute requires 8 bytes",
+                        "Number attribute requires exactly 8 bytes",
                     ))));
                 }
                 let num = i64::from_le_bytes([
