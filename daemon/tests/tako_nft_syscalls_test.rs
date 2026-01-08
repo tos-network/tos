@@ -1377,6 +1377,230 @@ fn test_nft_unauthorized() {
 }
 
 // ============================================================================
+// Collection Query and Metadata Tests
+// ============================================================================
+
+fn create_test_collection_with_metadata_authority(
+    id_byte: u8,
+    creator_byte: u8,
+    metadata_authority_byte: u8,
+) -> NftCollection {
+    NftCollection {
+        id: test_hash(id_byte),
+        creator: test_pubkey(creator_byte),
+        name: "Mutable Collection".to_string(),
+        symbol: "MUT".to_string(),
+        base_uri: "https://example.com/".to_string(),
+        max_supply: Some(1000),
+        total_supply: 0,
+        next_token_id: 1,
+        royalty: Royalty {
+            recipient: test_pubkey(creator_byte),
+            basis_points: 500,
+        },
+        mint_authority: MintAuthority::Public {
+            price: 0,
+            payment_recipient: test_pubkey(creator_byte),
+            max_per_address: 10,
+        },
+        freeze_authority: None,
+        metadata_authority: Some(test_pubkey(metadata_authority_byte)),
+        is_paused: false,
+        created_at: 100,
+    }
+}
+
+#[test]
+fn test_nft_collection_query() {
+    println!("\n=== Test: nft_collection_query ===");
+
+    let mut storage = MockNftStorage::new();
+
+    // Create collection
+    let collection = create_test_collection(0x07, 0xAA);
+    storage.add_collection(collection);
+
+    let mut adapter = TosNftAdapter::new(&mut storage);
+
+    let collection_id = test_address(0x07);
+    let creator = test_address(0xAA);
+    let user1 = test_address(0xBB);
+    let user2 = test_address(0xCC);
+
+    // Initial total supply should be 0
+    let supply = adapter.get_total_supply(&collection_id).unwrap();
+    assert_eq!(supply, 0, "Initial supply should be 0");
+    println!("  Initial total supply (0): PASS");
+
+    // Initial mint count for creator (the minter) should be 0
+    // Note: get_mint_count tracks how many tokens the CALLER has minted,
+    // not how many tokens a user owns. This is for max_per_address enforcement.
+    let mint_count = adapter.get_mint_count(&collection_id, &creator).unwrap();
+    assert_eq!(mint_count, 0, "Initial mint count should be 0");
+    println!("  Initial mint count for minter (0): PASS");
+
+    // Mint 2 tokens to user1 (as creator)
+    let _token1 = adapter
+        .mint(&collection_id, &user1, b"uri1", &creator, 100)
+        .expect("mint 1 should succeed");
+    let _token2 = adapter
+        .mint(&collection_id, &user1, b"uri2", &creator, 100)
+        .expect("mint 2 should succeed");
+    println!("  Minted 2 tokens to user1 (by creator)");
+
+    // Total supply should now be 2
+    let supply = adapter.get_total_supply(&collection_id).unwrap();
+    assert_eq!(supply, 2, "Supply should be 2 after minting 2 tokens");
+    println!("  Total supply after minting (2): PASS");
+
+    // Mint count for creator (the minter) should be 2
+    let mint_count = adapter.get_mint_count(&collection_id, &creator).unwrap();
+    assert_eq!(mint_count, 2, "Mint count for creator should be 2");
+    println!("  Creator mint count (2): PASS");
+
+    // Mint count for user2 (hasn't minted yet) should be 0
+    let mint_count = adapter.get_mint_count(&collection_id, &user2).unwrap();
+    assert_eq!(mint_count, 0, "Mint count for user2 should be 0");
+    println!("  User2 mint count (0): PASS");
+
+    // Mint 1 token to user2 (as user2 - self mint)
+    let _token3 = adapter
+        .mint(&collection_id, &user2, b"uri3", &user2, 100)
+        .expect("mint 3 should succeed");
+
+    // Total supply should now be 3
+    let supply = adapter.get_total_supply(&collection_id).unwrap();
+    assert_eq!(supply, 3, "Supply should be 3 after minting 3 tokens total");
+    println!("  Total supply after 3rd mint (3): PASS");
+
+    // Mint count for user2 (who minted 1 token to themselves) should be 1
+    let mint_count = adapter.get_mint_count(&collection_id, &user2).unwrap();
+    assert_eq!(mint_count, 1, "Mint count for user2 should be 1");
+    println!("  User2 mint count after self-mint (1): PASS");
+
+    // Creator's mint count should still be 2
+    let mint_count = adapter.get_mint_count(&collection_id, &creator).unwrap();
+    assert_eq!(mint_count, 2, "Creator mint count should still be 2");
+    println!("  Creator mint count unchanged (2): PASS");
+
+    // Test non-existent collection
+    let fake_collection = test_address(0xFF);
+    let result = adapter.get_total_supply(&fake_collection);
+    assert!(result.is_err(), "Non-existent collection should error");
+    println!("  Non-existent collection error: PASS");
+
+    println!("nft_collection_query: ALL PASS");
+}
+
+#[test]
+fn test_nft_set_token_uri() {
+    println!("\n=== Test: nft_set_token_uri ===");
+
+    let mut storage = MockNftStorage::new();
+
+    // Create collection WITH metadata_authority (mutable URIs)
+    let collection = create_test_collection_with_metadata_authority(0x08, 0xAA, 0xEE);
+    storage.add_collection(collection);
+
+    let mut adapter = TosNftAdapter::new(&mut storage);
+
+    let collection_id = test_address(0x08);
+    let creator = test_address(0xAA);
+    let owner = test_address(0xBB);
+    let metadata_authority = test_address(0xEE);
+    let random_user = test_address(0xCC);
+
+    // Mint a token
+    let token_id = adapter
+        .mint(
+            &collection_id,
+            &owner,
+            b"ipfs://original_uri",
+            &creator,
+            100,
+        )
+        .expect("mint should succeed");
+    println!("  Minted token {} with original URI", token_id);
+
+    // Verify original URI
+    let uri_result = adapter.token_uri(&collection_id, token_id).unwrap();
+    assert!(uri_result.is_some(), "Token should have URI");
+    assert_eq!(
+        uri_result.as_ref().unwrap(),
+        b"ipfs://original_uri",
+        "URI should match"
+    );
+    println!("  Original URI verified: PASS");
+
+    // Update URI as metadata_authority
+    let new_uri = b"ipfs://updated_uri";
+    let result = adapter.set_token_uri(&collection_id, token_id, new_uri, &metadata_authority);
+    assert!(
+        result.is_ok(),
+        "metadata_authority should be able to update URI: {:?}",
+        result.err()
+    );
+    println!("  URI update by metadata_authority: PASS");
+
+    // Verify updated URI
+    let uri_result = adapter.token_uri(&collection_id, token_id).unwrap();
+    assert_eq!(
+        uri_result.as_ref().unwrap(),
+        b"ipfs://updated_uri",
+        "URI should be updated"
+    );
+    println!("  Updated URI verified: PASS");
+
+    // Try to update as non-authority (should fail)
+    let result = adapter.set_token_uri(&collection_id, token_id, b"bad_uri", &random_user);
+    assert!(
+        result.is_err(),
+        "Non-authority should not be able to update URI"
+    );
+    println!("  Non-authority update rejected: PASS");
+
+    // Try to update as owner (should fail - owner != metadata_authority)
+    let result = adapter.set_token_uri(&collection_id, token_id, b"bad_uri", &owner);
+    assert!(
+        result.is_err(),
+        "Owner should not be able to update URI (not metadata_authority)"
+    );
+    println!("  Owner update rejected: PASS");
+
+    // Drop adapter to release borrow on storage
+    drop(adapter);
+
+    // Test immutable collection (no metadata_authority)
+    let immutable_collection = create_test_collection(0x09, 0xAA);
+    storage.add_collection(immutable_collection);
+
+    // Create new adapter for immutable collection test
+    let mut adapter2 = TosNftAdapter::new(&mut storage);
+
+    let immutable_collection_id = test_address(0x09);
+    let token_id2 = adapter2
+        .mint(
+            &immutable_collection_id,
+            &owner,
+            b"immutable_uri",
+            &creator,
+            100,
+        )
+        .expect("mint should succeed");
+    println!("  Minted token {} in immutable collection", token_id2);
+
+    // Try to update URI in immutable collection (should fail)
+    let result = adapter2.set_token_uri(&immutable_collection_id, token_id2, b"new_uri", &creator);
+    assert!(
+        result.is_err(),
+        "Should not be able to update URI in immutable collection"
+    );
+    println!("  Immutable collection update rejected: PASS");
+
+    println!("nft_set_token_uri: ALL PASS");
+}
+
+// ============================================================================
 // Summary Test
 // ============================================================================
 
@@ -1391,6 +1615,8 @@ fn test_nft_syscalls_summary() {
     println!("  Collection Operations:");
     println!("    - tos_nft_collection_exists   (500 CU)");
     println!("    - tos_nft_set_minting_paused  (2000 CU)");
+    println!("    - tos_nft_get_total_supply    (500 CU)");
+    println!("    - tos_nft_get_mint_count      (500 CU)");
     println!();
     println!("  Token Operations:");
     println!("    - tos_nft_mint                (2000 CU + URI bytes)");
@@ -1415,6 +1641,9 @@ fn test_nft_syscalls_summary() {
     println!("    - tos_nft_is_frozen           (500 CU)");
     println!("    - tos_nft_batch_freeze        (2000 CU + 1500 CU/item)");
     println!("    - tos_nft_batch_thaw          (2000 CU + 1500 CU/item)");
+    println!();
+    println!("  Metadata Operations:");
+    println!("    - tos_nft_set_token_uri       (2000 CU + URI bytes)");
     println!();
     println!("Architecture:");
     println!("  Smart Contract -> TAKO Syscall -> TosNftAdapter -> NftStorage");

@@ -729,6 +729,80 @@ impl<'a, S: NftStorage> TakoNftProvider for TosNftAdapter<'a, S> {
             .storage
             .is_approved_for_all(&owner_pk, &hash, &operator_pk))
     }
+
+    fn get_total_supply(&self, collection: &[u8; 32]) -> Result<u64, EbpfError> {
+        let hash = Self::bytes_to_hash(collection);
+
+        match self.storage.get_collection(&hash) {
+            Some(col) => Ok(col.total_supply),
+            None => Err(EbpfError::SyscallError(Box::new(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "Collection not found",
+            )))),
+        }
+    }
+
+    fn get_mint_count(&self, collection: &[u8; 32], user: &[u8; 32]) -> Result<u64, EbpfError> {
+        let hash = Self::bytes_to_hash(collection);
+        let user_pk = Self::bytes_to_pubkey(user)?;
+
+        Ok(self.storage.get_mint_count(&hash, &user_pk))
+    }
+
+    fn set_token_uri(
+        &mut self,
+        collection: &[u8; 32],
+        token_id: u64,
+        new_uri: &[u8],
+        caller: &[u8; 32],
+    ) -> Result<(), EbpfError> {
+        let hash = Self::bytes_to_hash(collection);
+        let caller_pk = Self::bytes_to_pubkey(caller)?;
+
+        // 1. Get the collection and check metadata_authority
+        let nft_collection = self.storage.get_collection(&hash).ok_or_else(|| {
+            EbpfError::SyscallError(Box::new(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "Collection not found",
+            )))
+        })?;
+
+        // 2. Check if caller is metadata_authority
+        let metadata_authority = nft_collection.metadata_authority.as_ref().ok_or_else(|| {
+            EbpfError::SyscallError(Box::new(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "Collection has no metadata_authority (immutable URIs)",
+            )))
+        })?;
+
+        if caller_pk != *metadata_authority {
+            return Err(EbpfError::SyscallError(Box::new(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "Caller is not metadata_authority",
+            ))));
+        }
+
+        // 3. Get the NFT
+        let mut nft = self.storage.get_nft(&hash, token_id).ok_or_else(|| {
+            EbpfError::SyscallError(Box::new(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "Token not found",
+            )))
+        })?;
+
+        // 4. Update the URI
+        let new_uri_str = String::from_utf8(new_uri.to_vec()).map_err(|_| {
+            EbpfError::SyscallError(Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Invalid UTF-8 in URI",
+            )))
+        })?;
+
+        nft.metadata_uri = new_uri_str;
+
+        // 5. Save the updated NFT
+        self.storage.set_nft(&nft).map_err(Self::convert_error)
+    }
 }
 
 /// No-operation NFT storage - used as placeholder when no NFT storage is available
