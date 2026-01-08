@@ -324,43 +324,40 @@ impl<S: Storage> Blockchain<S> {
                 .map_err(|e| anyhow!("Failed to load VRF secret: {}", e))?,
             None => {
                 let manager = VrfKeyManager::new();
-                // Print the generated key to console so user can save it
-                // Using println! instead of log to ensure it's always visible
-                println!();
-                println!(
-                    "╔═══════════════════════════════════════════════════════════════════════╗"
-                );
-                println!(
-                    "║  VRF PRIVATE KEY GENERATED                                            ║"
-                );
-                println!(
-                    "╠═══════════════════════════════════════════════════════════════════════╣"
-                );
-                println!(
-                    "║  No VRF private key provided. A new keypair has been generated.       ║"
-                );
-                println!(
-                    "║  SAVE THIS KEY to reuse the same VRF identity on restart:             ║"
-                );
-                println!(
-                    "║                                                                       ║"
-                );
-                println!(
-                    "║  VRF_PRIVATE_KEY={}                       ║",
-                    manager.secret_key_hex()
-                );
-                println!(
-                    "║                                                                       ║"
-                );
-                println!(
-                    "║  Set via environment variable or --vrf-private-key CLI option.        ║"
-                );
-                println!(
-                    "╚═══════════════════════════════════════════════════════════════════════╝"
-                );
-                println!();
-                if log::log_enabled!(log::Level::Warn) {
-                    warn!("No VRF key provided; generated an in-memory keypair (key printed to console)");
+                // Write the generated key to a secure file instead of stdout
+                // This prevents secret key leakage to logs/terminal scrollback
+                let key_file_path = if let Some(ref dir) = config.dir_path {
+                    std::path::PathBuf::from(dir).join("vrf_private_key.hex")
+                } else {
+                    std::path::PathBuf::from("vrf_private_key.hex")
+                };
+
+                // Write key to file with secure permissions (0600)
+                let key_hex = manager.secret_key_hex();
+                match Self::write_secure_key_file(&key_file_path, &key_hex) {
+                    Ok(()) => {
+                        if log::log_enabled!(log::Level::Warn) {
+                            warn!(
+                                "No VRF key provided. Generated new keypair and saved to: {}",
+                                key_file_path.display()
+                            );
+                            warn!(
+                                "VRF public key: {}",
+                                hex::encode(manager.public_key().as_bytes())
+                            );
+                            warn!("To reuse this key, set --vrf-private-key or VRF_PRIVATE_KEY env var");
+                        }
+                    }
+                    Err(e) => {
+                        // Fall back to warning without file if write fails
+                        if log::log_enabled!(log::Level::Error) {
+                            error!(
+                                "Failed to write VRF key to {}: {}. Key will be lost on restart!",
+                                key_file_path.display(),
+                                e
+                            );
+                        }
+                    }
                 }
                 manager
             }
@@ -1176,6 +1173,41 @@ impl<S: Storage> Blockchain<S> {
             data.proof.to_bytes(),
             data.binding_signature.to_bytes(),
         ))
+    }
+
+    /// Write a secret key to a file with secure permissions (0600)
+    ///
+    /// This prevents secret key leakage by:
+    /// 1. Writing to a file instead of stdout (avoids terminal scrollback, logs)
+    /// 2. Setting file permissions to owner-only read/write (Unix)
+    #[cfg(unix)]
+    fn write_secure_key_file(path: &std::path::Path, key_hex: &str) -> std::io::Result<()> {
+        use std::fs::OpenOptions;
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600) // Owner read/write only
+            .open(path)?;
+
+        writeln!(file, "{}", key_hex)?;
+        file.sync_all()?;
+        Ok(())
+    }
+
+    /// Write a secret key to a file (Windows fallback - no Unix permissions)
+    #[cfg(not(unix))]
+    fn write_secure_key_file(path: &std::path::Path, key_hex: &str) -> std::io::Result<()> {
+        use std::fs::File;
+        use std::io::Write;
+
+        let mut file = File::create(path)?;
+        writeln!(file, "{}", key_hex)?;
+        file.sync_all()?;
+        Ok(())
     }
 
     /// Verify VRF data in a block and return it for execution
