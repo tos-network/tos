@@ -264,6 +264,76 @@ impl<'a, S: NftStorage> TakoNftProvider for TosNftAdapter<'a, S> {
         mint(self.storage, &ctx, params).map_err(Self::convert_error)
     }
 
+    fn batch_mint(
+        &mut self,
+        collection: &[u8; 32],
+        recipients: &[[u8; 32]],
+        uris: &[&[u8]],
+        caller: &[u8; 32],
+        block_height: u64,
+    ) -> Result<Vec<u64>, EbpfError> {
+        // Validate inputs
+        if recipients.is_empty() {
+            return Err(EbpfError::SyscallError(Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "Empty recipients list",
+            ))));
+        }
+
+        if recipients.len() != uris.len() {
+            return Err(EbpfError::SyscallError(Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "Recipients and URIs count mismatch",
+            ))));
+        }
+
+        const MAX_BATCH_SIZE: usize = 100;
+        if recipients.len() > MAX_BATCH_SIZE {
+            return Err(EbpfError::SyscallError(Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!(
+                    "Batch size {} exceeds maximum {}",
+                    recipients.len(),
+                    MAX_BATCH_SIZE
+                ),
+            ))));
+        }
+
+        let collection_hash = Self::bytes_to_hash(collection);
+        let caller_pk = Self::bytes_to_pubkey(caller)?;
+        let ctx = RuntimeContext::new(caller_pk, block_height);
+
+        let mut token_ids = Vec::with_capacity(recipients.len());
+
+        for (i, (recipient, uri)) in recipients.iter().zip(uris.iter()).enumerate() {
+            let to_pk = Self::bytes_to_pubkey(recipient).map_err(|e| {
+                EbpfError::SyscallError(Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("Invalid recipient public key at index {}: {}", i, e),
+                )))
+            })?;
+
+            let uri_str = String::from_utf8(uri.to_vec()).map_err(|_| {
+                EbpfError::SyscallError(Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("Invalid UTF-8 in token URI at index {}", i),
+                )))
+            })?;
+
+            let params = MintParams::new(collection_hash.clone(), to_pk).with_uri(uri_str);
+            let token_id = mint(self.storage, &ctx, params).map_err(|e| {
+                EbpfError::SyscallError(Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!("Mint failed at index {}: {}", i, e),
+                )))
+            })?;
+
+            token_ids.push(token_id);
+        }
+
+        Ok(token_ids)
+    }
+
     fn burn(
         &mut self,
         collection: &[u8; 32],

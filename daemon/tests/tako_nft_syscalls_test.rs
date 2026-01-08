@@ -2,10 +2,11 @@
 //!
 //! Tests the NFT syscalls through the TosNftAdapter with a mock NFT storage.
 //!
-//! Syscalls tested:
+//! Syscalls tested (15 total):
 //! - tos_nft_create_collection
 //! - tos_nft_collection_exists
 //! - tos_nft_mint
+//! - tos_nft_batch_mint
 //! - tos_nft_burn
 //! - tos_nft_transfer
 //! - tos_nft_exists
@@ -404,6 +405,114 @@ fn test_nft_mint() {
     println!("  Balance check: PASS");
 
     println!("nft_mint: ALL PASS");
+}
+
+// ============================================================================
+// Test 2b: Batch Mint NFTs
+// ============================================================================
+
+#[test]
+fn test_nft_batch_mint() {
+    println!("\n=== Test: nft_batch_mint ===");
+
+    let mut storage = MockNftStorage::new();
+
+    // Add a test collection with public minting
+    let collection = create_test_collection(0x02, 0xCC);
+    storage.add_collection(collection);
+
+    let mut adapter = TosNftAdapter::new(&mut storage);
+
+    let collection_id = test_address(0x02);
+    let caller = test_address(0xCC); // Creator
+
+    // Prepare batch: 3 recipients with different URIs
+    let recipient1 = test_address(0xD1);
+    let recipient2 = test_address(0xD2);
+    let recipient3 = test_address(0xD3);
+
+    let recipients = [recipient1, recipient2, recipient3];
+    let uri1 = b"ipfs://batch1";
+    let uri2 = b"ipfs://batch2";
+    let uri3 = b"ipfs://batch3";
+    let uris: Vec<&[u8]> = vec![uri1.as_slice(), uri2.as_slice(), uri3.as_slice()];
+    let block_height = 300u64;
+
+    // Batch mint 3 NFTs
+    let result = adapter.batch_mint(&collection_id, &recipients, &uris, &caller, block_height);
+    assert!(
+        result.is_ok(),
+        "batch_mint should succeed: {:?}",
+        result.err()
+    );
+    let token_ids = result.unwrap();
+    assert_eq!(token_ids.len(), 3, "Should mint 3 tokens");
+    assert_eq!(token_ids[0], 1, "First token ID should be 1");
+    assert_eq!(token_ids[1], 2, "Second token ID should be 2");
+    assert_eq!(token_ids[2], 3, "Third token ID should be 3");
+    println!("  Batch mint 3 NFTs: PASS (ids: {:?})", token_ids);
+
+    // Verify each recipient owns their NFT
+    for (i, (recipient, token_id)) in recipients.iter().zip(token_ids.iter()).enumerate() {
+        let owner = adapter.owner_of(&collection_id, *token_id);
+        assert!(owner.is_ok(), "owner_of should succeed for token {}", i);
+        assert_eq!(
+            owner.unwrap(),
+            Some(*recipient),
+            "Recipient {} should own token {}",
+            i,
+            token_id
+        );
+
+        let balance = adapter.balance_of(&collection_id, recipient);
+        assert!(balance.is_ok(), "balance_of should succeed");
+        assert_eq!(balance.unwrap(), 1, "Each recipient should have balance 1");
+    }
+    println!("  Ownership verification: PASS");
+
+    // Verify URIs
+    for (i, token_id) in token_ids.iter().enumerate() {
+        let uri = adapter.token_uri(&collection_id, *token_id);
+        assert!(uri.is_ok(), "token_uri should succeed for token {}", i);
+        let uri_bytes = uri.unwrap();
+        assert!(uri_bytes.is_some(), "URI should exist for token {}", i);
+        let expected_uri = format!("ipfs://batch{}", i + 1);
+        assert_eq!(
+            String::from_utf8(uri_bytes.unwrap()).unwrap(),
+            expected_uri,
+            "Token {} should have correct URI",
+            i
+        );
+    }
+    println!("  URI verification: PASS");
+
+    // Test error case: empty batch
+    let empty_recipients: [[u8; 32]; 0] = [];
+    let empty_uris: Vec<&[u8]> = vec![];
+    let result = adapter.batch_mint(
+        &collection_id,
+        &empty_recipients,
+        &empty_uris,
+        &caller,
+        block_height,
+    );
+    assert!(result.is_err(), "Empty batch should fail");
+    println!("  Empty batch error: PASS");
+
+    // Test error case: mismatched counts
+    let one_recipient = [test_address(0xE1)];
+    let two_uris: Vec<&[u8]> = vec![b"uri1", b"uri2"];
+    let result = adapter.batch_mint(
+        &collection_id,
+        &one_recipient,
+        &two_uris,
+        &caller,
+        block_height,
+    );
+    assert!(result.is_err(), "Mismatched counts should fail");
+    println!("  Mismatched counts error: PASS");
+
+    println!("nft_batch_mint: ALL PASS");
 }
 
 // ============================================================================
