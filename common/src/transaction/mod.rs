@@ -502,7 +502,6 @@ impl Serializer for TransactionType {
                 writer.write_u8(5);
                 payload.write(writer);
             }
-            // Note: Type ID 6 was previously used for AIMining (removed)
             TransactionType::BindReferrer(payload) => {
                 writer.write_u8(7);
                 payload.write(writer);
@@ -597,8 +596,6 @@ impl Serializer for TransactionType {
             3 => TransactionType::InvokeContract(InvokeContractPayload::read(reader)?),
             4 => TransactionType::DeployContract(DeployContractPayload::read(reader)?),
             5 => TransactionType::Energy(EnergyPayload::read(reader)?),
-            // Note: Type ID 6 was previously used for AIMining (removed)
-            6 => return Err(ReaderError::InvalidValue), // Reserved for backwards compatibility
             7 => TransactionType::BindReferrer(BindReferrerPayload::read(reader)?),
             8 => TransactionType::BatchReferralReward(BatchReferralRewardPayload::read(reader)?),
             // KYC transaction types (9-16)
