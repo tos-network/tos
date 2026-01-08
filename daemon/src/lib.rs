@@ -13,6 +13,11 @@
 extern crate log;
 
 pub mod config;
+
+// VRF (Verifiable Random Function) module for block producers
+// Must be declared before `core` since core/config.rs uses WrappedVrfSecret
+pub mod vrf;
+
 pub mod core;
 pub mod p2p;
 pub mod rpc;

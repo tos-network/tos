@@ -116,6 +116,13 @@ pub enum TakoExecutionError {
         /// Error details from the verification process
         error_details: String,
     },
+
+    /// VRF validation failed
+    ///
+    /// This error occurs when VRF data provided by block producer fails validation.
+    /// This is a security-critical error - invalid VRF must not be accepted.
+    #[error("VRF validation failed: {0}")]
+    VrfValidationFailed(String),
 }
 
 impl TakoExecutionError {
@@ -318,6 +325,7 @@ impl TakoExecutionError {
             Self::CpiInvocationFailed { .. } => "execution",
             Self::LoadedDataLimitExceeded { .. } => "resource_limit",
             Self::PrecompileVerificationFailed { .. } => "precompile",
+            Self::VrfValidationFailed(_) => "security",
         }
     }
 

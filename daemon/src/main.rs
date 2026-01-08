@@ -5,10 +5,12 @@
 #![warn(clippy::correctness)]
 
 pub mod config;
+// VRF must be declared before core (core/config.rs uses WrappedVrfSecret)
 pub mod core;
 pub mod p2p;
 pub mod rpc;
 pub mod tako_integration;
+pub mod vrf;
 
 use crate::config::MILLIS_PER_SECOND;
 use anyhow::{Context as AnyContext, Result};

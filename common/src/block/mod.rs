@@ -2,11 +2,13 @@ mod block;
 mod header;
 mod miner;
 mod version;
+mod vrf;
 
 pub use block::Block;
 pub use header::BlockHeader;
 pub use miner::{Algorithm, MinerWork, Worker};
 pub use version::BlockVersion;
+pub use vrf::{compute_vrf_binding_message, compute_vrf_input, BlockVrfData};
 
 use crate::crypto::{Hash, HASH_SIZE};
 

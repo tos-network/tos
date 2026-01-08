@@ -39,6 +39,7 @@ use super::{
     TosReferralAdapter, TosStorageAdapter,
 };
 use crate::core::storage::ReferralProvider;
+use crate::vrf::VrfData;
 
 /// Default compute budget for contract execution (200,000 compute units)
 ///
@@ -200,6 +201,57 @@ impl TakoExecutor {
         )
     }
 
+    /// Execute a TOS Kernel(TAKO) contract with VRF (Verifiable Random Function) data
+    ///
+    /// This method provides access to verifiable randomness for smart contracts.
+    /// Block producers sign block hashes with their VRF key, and contracts can
+    /// access this verifiable random value via syscalls.
+    ///
+    /// # VRF Syscalls Enabled
+    ///
+    /// - `tos_vrf_random` - Get VRF output + proof + derived random (500 CU)
+    /// - `tos_vrf_verify` - Verify VRF proof (3000 CU)
+    /// - `tos_vrf_public_key` - Get block producer's VRF public key (100 CU)
+    ///
+    /// # Arguments
+    ///
+    /// * `vrf_data` - Optional VRF data (public_key, output, proof) from block producer
+    /// * `miner_public_key` - Block producer's compressed public key for VRF identity binding
+    #[allow(clippy::too_many_arguments)]
+    pub fn execute_with_vrf(
+        bytecode: &[u8],
+        provider: &mut (dyn tos_common::contract::ContractProvider + Send),
+        topoheight: TopoHeight,
+        contract_hash: &Hash,
+        block_hash: &Hash,
+        block_height: u64,
+        block_timestamp: u64,
+        tx_hash: &Hash,
+        tx_sender: &Hash,
+        input_data: &[u8],
+        compute_budget: Option<u64>,
+        vrf_data: Option<&VrfData>,
+        miner_public_key: Option<&[u8; 32]>,
+    ) -> Result<ExecutionResult, TakoExecutionError> {
+        Self::execute_with_features_and_referral(
+            bytecode,
+            provider,
+            topoheight,
+            contract_hash,
+            block_hash,
+            block_height,
+            block_timestamp,
+            tx_hash,
+            tx_sender,
+            input_data,
+            compute_budget,
+            &SVMFeatureSet::production(),
+            None, // No referral provider
+            vrf_data,
+            miner_public_key,
+        )
+    }
+
     /// Execute a TOS Kernel(TAKO) contract with referral system access
     ///
     /// This method is similar to `execute()` but provides access to the native
@@ -244,6 +296,8 @@ impl TakoExecutor {
             compute_budget,
             &SVMFeatureSet::production(),
             Some(referral_provider),
+            None, // VRF data not available in this method
+            None, // Miner public key not available
         )
     }
 
@@ -320,7 +374,7 @@ impl TakoExecutor {
         compute_budget: Option<u64>,
         feature_set: &SVMFeatureSet,
     ) -> Result<ExecutionResult, TakoExecutionError> {
-        // Execute without referral provider (backward compatibility)
+        // Execute without referral provider, VRF, or miner identity (backward compatibility)
         Self::execute_with_features_and_referral(
             bytecode,
             provider,
@@ -334,7 +388,9 @@ impl TakoExecutor {
             input_data,
             compute_budget,
             feature_set,
-            None,
+            None, // No referral provider
+            None, // No VRF data
+            None, // No miner public key
         )
     }
 
@@ -369,6 +425,8 @@ impl TakoExecutor {
         compute_budget: Option<u64>,
         feature_set: &SVMFeatureSet,
         referral_provider: Option<&mut (dyn ReferralProvider + Send + Sync)>,
+        vrf_data: Option<&VrfData>, // VRF data for verifiable randomness
+        miner_public_key: Option<&[u8; 32]>, // Block producer's key for VRF identity binding
     ) -> Result<ExecutionResult, TakoExecutionError> {
         use log::{debug, error, info, warn};
 
@@ -485,7 +543,40 @@ impl TakoExecutor {
             tx_hash.as_bytes(),
         ));
 
-        // 7a. Wire referral provider (if available)
+        // 7b. Inject VRF data for verifiable randomness syscalls (if available)
+        // When enabled, block producers sign the block_hash with their VRF key
+        // to provide provably random values to contracts via tos_vrf_random()
+        if let Some(vrf) = vrf_data {
+            invoke_context.vrf_public_key = Some(vrf.public_key.to_bytes());
+            invoke_context.vrf_output = Some(vrf.output.to_bytes());
+            invoke_context.vrf_proof = Some(vrf.proof.to_bytes());
+
+            // Set miner public key for VRF identity binding
+            // This is required for validate_vrf() to compute the correct VRF input:
+            // vrf_input = BLAKE3("TOS-VRF-INPUT-v1" || block_hash || miner_public_key)
+            invoke_context.miner_public_key = miner_public_key.copied();
+
+            // Validate VRF to set vrf_validated_hash
+            // This ensures contracts can only access validated VRF data
+            // SECURITY: Invalid VRF data is a hard error - do not continue execution
+            invoke_context.validate_vrf().map_err(|e| {
+                if log::log_enabled!(log::Level::Error) {
+                    error!("VRF validation failed: {}", e);
+                }
+                TakoExecutionError::VrfValidationFailed(e)
+            })?;
+
+            if log::log_enabled!(log::Level::Debug) {
+                debug!(
+                    "VRF data injected: public_key={}, output={}, miner={}",
+                    hex::encode(vrf.public_key.as_bytes()),
+                    hex::encode(vrf.output.as_bytes()),
+                    miner_public_key.map_or_else(|| "none".to_string(), hex::encode)
+                );
+            }
+        }
+
+        // 7c. Wire referral provider (if available)
         // Enables contracts to access native referral system via tos_get_uplines, etc.
         if let Some(ref mut adapter) = referral_adapter {
             invoke_context.set_referral_provider(adapter);

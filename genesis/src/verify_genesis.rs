@@ -1,8 +1,36 @@
+//! Genesis Block Verifier for TOS Network
+//!
+//! This tool verifies that the genesis block constants in this file
+//! can be correctly parsed and displays their properties.
+//!
+//! # Usage
+//!
+//! ```bash
+//! cargo run -p tos_genesis --bin verify_genesis
+//! ```
+//!
+//! # Output
+//!
+//! For each network (MAINNET, TESTNET), displays:
+//! - Block version, height, timestamp
+//! - Miner public key
+//! - Tips and transactions hashes
+//! - POW hash and block hash
+//!
+//! # Verification
+//!
+//! The genesis block constants below MUST match `daemon/src/config.rs`.
+//! If you update the genesis blocks, update both files.
+
 use tos_common::{block::Block, crypto::Hashable, serializer::Serializer};
 
-fn main() {
-    let genesis_hex = "02000000000000000000000197ff69f08100000000000000000000000000000000000000000000000000000000000000000000000000000000000000043fa8495c7a031f2c7a68c602eaa36d5a744fa69e44822f6b7e13f5cc2a7410";
+// Genesis block constants (must match daemon/src/config.rs)
+// Format: header fields + VRF flag (00 = no VRF)
+const MAINNET_GENESIS_BLOCK: &str = "0000000000000000000000019ca6b1dc0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000043fa8495c7a031f2c7a68c602eaa36d5a744fa69e44822f6b7e13f5cc2a741000";
+const TESTNET_GENESIS_BLOCK: &str = "000000000000000000000001941f297c0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000043fa8495c7a031f2c7a68c602eaa36d5a744fa69e44822f6b7e13f5cc2a741000";
 
+fn verify_genesis(name: &str, genesis_hex: &str) {
+    println!("\n=== {} ===", name);
     println!("Genesis hex length: {}", genesis_hex.len());
     println!("Genesis hex: {}", genesis_hex);
 
@@ -53,4 +81,9 @@ fn main() {
             println!("Error parsing block: {:?}", e);
         }
     }
+}
+
+fn main() {
+    verify_genesis("MAINNET", MAINNET_GENESIS_BLOCK);
+    verify_genesis("TESTNET", TESTNET_GENESIS_BLOCK);
 }

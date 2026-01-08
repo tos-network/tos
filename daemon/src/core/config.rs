@@ -1,3 +1,4 @@
+use crate::vrf::{WrappedMinerSecret, WrappedVrfSecret};
 use crate::{
     config::*,
     p2p::diffie_hellman::{KeyVerificationAction, WrappedSecret},
@@ -479,6 +480,55 @@ impl Default for RocksDBConfig {
     }
 }
 
+/// VRF (Verifiable Random Function) configuration for block producers
+///
+/// VRF is mandatory for all nodes. Block producers sign each block hash
+/// with their VRF private key, and contracts can access this verifiable
+/// random value via the `tos_vrf_random()` syscall.
+///
+/// # Key Management
+///
+/// VRF private key can be provided in order of priority:
+/// 1. CLI option: `--vrf-private-key <hex>`
+/// 2. Environment variable: `VRF_PRIVATE_KEY=<hex>`
+/// 3. Auto-generated: If neither is set, a new keypair is generated
+///    and the private key is printed to console (save it for reuse!)
+///
+/// For systemd services, set the environment variable in the service file:
+/// ```ini
+/// [Service]
+/// Environment="VRF_PRIVATE_KEY=your_hex_key_here"
+/// ```
+///
+/// # Security
+///
+/// For production networks (mainnet/testnet), you SHOULD configure
+/// `allowed_public_keys` to restrict which VRF keys are accepted.
+/// Without a whitelist, any valid VRF keypair will be accepted,
+/// which could allow VRF manipulation attacks.
+#[derive(Debug, Clone, clap::Args, Serialize, Deserialize, Default)]
+pub struct VrfConfig {
+    /// VRF private key in hex format (64 hex chars = 32 bytes).
+    /// If not provided, checks VRF_PRIVATE_KEY environment variable.
+    /// If neither is set, a new keypair will be generated and printed.
+    #[clap(name = "vrf-private-key", long, env = "VRF_PRIVATE_KEY")]
+    #[serde(default)]
+    pub private_key: Option<WrappedVrfSecret>,
+    /// Miner private key in hex format (64 hex chars = 32 bytes).
+    /// Required for VRF binding signature when mining blocks.
+    /// If not provided, checks MINER_PRIVATE_KEY environment variable.
+    /// For external miners, binding signatures must be provided by the miner.
+    #[clap(name = "miner-private-key", long, env = "MINER_PRIVATE_KEY")]
+    #[serde(default)]
+    pub miner_private_key: Option<WrappedMinerSecret>,
+    /// Allowed VRF public keys (hex, 32 bytes).
+    /// RECOMMENDED for production: blocks will be rejected if VRF key is not in whitelist.
+    /// Can specify multiple times for multiple producers.
+    #[clap(name = "vrf-allowed-public-key", long)]
+    #[serde(default)]
+    pub allowed_public_keys: Vec<String>,
+}
+
 #[derive(Debug, Clone, clap::Args, Serialize, Deserialize)]
 pub struct Config {
     /// RPC configuration
@@ -490,6 +540,10 @@ pub struct Config {
     /// RocksDB Backend if enabled
     #[clap(flatten)]
     pub rocksdb: RocksDBConfig,
+    /// VRF (Verifiable Random Function) configuration
+    #[clap(flatten)]
+    #[serde(default)]
+    pub vrf: VrfConfig,
     /// Set dir path for blockchain storage.
     /// This will be appended by the network name for the database directory.
     /// It must ends with a slash.

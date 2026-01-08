@@ -25,8 +25,9 @@ use crate::{
         DaemonRpcServer, SharedDaemonRpcServer,
     },
     tako_integration::TakoContractExecutor,
+    vrf::{VrfData, VrfKeyManager, VrfOutput, VrfProof, VrfPublicKey},
 };
-use anyhow::{Context, Error};
+use anyhow::{anyhow, Context, Error};
 use futures::{stream, TryStreamExt};
 use indexmap::IndexSet;
 use log::{debug, error, info, trace, warn};
@@ -56,14 +57,18 @@ use tos_common::{
     },
     asset::{AssetData, VersionedAssetData},
     block::{
-        get_combined_hash_for_tips, Block, BlockHeader, BlockVersion, TopoHeight, EXTRA_NONCE_SIZE,
+        compute_vrf_binding_message, compute_vrf_input, get_combined_hash_for_tips, Block,
+        BlockHeader, BlockVersion, BlockVrfData, TopoHeight, EXTRA_NONCE_SIZE,
     },
     config::{
         COIN_DECIMALS, MAXIMUM_SUPPLY, MAX_BLOCK_SIZE, MAX_TRANSACTION_SIZE, TIPS_LIMIT, TOS_ASSET,
         UNO_ASSET,
     },
     contract::{build_environment, ContractExecutor},
-    crypto::{random::secure_random_bytes, Hash, Hashable, PublicKey, HASH_SIZE},
+    crypto::{
+        elgamal::CompressedPublicKey, random::secure_random_bytes, Hash, Hashable, KeyPair,
+        PublicKey, Signature, HASH_SIZE,
+    },
     difficulty::{check_difficulty, CumulativeDifficulty, Difficulty},
     immutable::Immutable,
     network::Network,
@@ -164,7 +169,43 @@ pub struct Blockchain<S: Storage> {
     // Disable the ZKP Cache
     disable_zkp_cache: bool,
     // Contract executor for running smart contracts (TOS Kernel - TAKO)
-    executor: Arc<dyn ContractExecutor>,
+    executor: Arc<TakoContractExecutor>,
+    // VRF key manager for block producers (mandatory for all nodes)
+    vrf_manager: VrfKeyManager,
+    // Optional whitelist for VRF public keys
+    vrf_allowed_keys: Option<HashSet<[u8; 32]>>,
+    // Optional miner keypair for VRF binding signature
+    // When set, blocks produced by this node include binding signatures
+    miner_keypair: Option<KeyPair>,
+}
+
+struct VrfExecutorGuard<'a> {
+    executor: &'a TakoContractExecutor,
+    block_hash: Hash,
+}
+
+impl<'a> VrfExecutorGuard<'a> {
+    fn new(
+        executor: &'a TakoContractExecutor,
+        block_hash: &Hash,
+        vrf_data: Option<(VrfData, [u8; 32])>,
+    ) -> Self {
+        let (vrf, miner_key) = match vrf_data {
+            Some((vrf, miner)) => (Some(vrf), Some(miner)),
+            None => (None, None),
+        };
+        executor.set_vrf_data(block_hash, vrf, miner_key);
+        Self {
+            executor,
+            block_hash: block_hash.clone(),
+        }
+    }
+}
+
+impl<'a> Drop for VrfExecutorGuard<'a> {
+    fn drop(&mut self) {
+        self.executor.clear_vrf_data(&self.block_hash);
+    }
 }
 
 impl<S: Storage> Blockchain<S> {
@@ -246,6 +287,82 @@ impl<S: Storage> Blockchain<S> {
 
         let environment = build_environment::<S>().build();
 
+        // VRF whitelist configuration (optional but recommended for production)
+        let vrf_allowed_keys = if config.vrf.allowed_public_keys.is_empty() {
+            if network != Network::Devnet {
+                // SECURITY: On mainnet/testnet, empty VRF whitelist allows any keypair
+                // which could enable VRF manipulation attacks
+                if log::log_enabled!(log::Level::Warn) {
+                    warn!(
+                        "VRF whitelist not configured on {}. \
+                         This is insecure for production - any VRF keypair will be accepted. \
+                         Consider setting --vrf-allowed-public-key for each authorized producer.",
+                        network
+                    );
+                }
+            }
+            None
+        } else {
+            let mut allowed = HashSet::new();
+            for hex in &config.vrf.allowed_public_keys {
+                let key = VrfPublicKey::from_hex(hex)
+                    .map_err(|e| anyhow!("Invalid VRF allowed public key {}: {}", hex, e))?;
+                allowed.insert(key.to_bytes());
+            }
+            if log::log_enabled!(log::Level::Info) {
+                info!(
+                    "VRF whitelist configured with {} allowed public key(s)",
+                    allowed.len()
+                );
+            }
+            Some(allowed)
+        };
+
+        // VRF is mandatory for all nodes
+        let vrf_manager = match config.vrf.private_key.as_ref() {
+            Some(secret) => VrfKeyManager::from_secret(secret)
+                .map_err(|e| anyhow!("Failed to load VRF secret: {}", e))?,
+            None => {
+                let manager = VrfKeyManager::new();
+                // Write the generated key to a secure file instead of stdout
+                // This prevents secret key leakage to logs/terminal scrollback
+                let key_file_path = if let Some(ref dir) = config.dir_path {
+                    std::path::PathBuf::from(dir).join("vrf_private_key.hex")
+                } else {
+                    std::path::PathBuf::from("vrf_private_key.hex")
+                };
+
+                // Write key to file with secure permissions (0600)
+                let key_hex = manager.secret_key_hex();
+                match Self::write_secure_key_file(&key_file_path, &key_hex) {
+                    Ok(()) => {
+                        if log::log_enabled!(log::Level::Warn) {
+                            warn!(
+                                "No VRF key provided. Generated new keypair and saved to: {}",
+                                key_file_path.display()
+                            );
+                            warn!(
+                                "VRF public key: {}",
+                                hex::encode(manager.public_key().as_bytes())
+                            );
+                            warn!("To reuse this key, set --vrf-private-key or VRF_PRIVATE_KEY env var");
+                        }
+                    }
+                    Err(e) => {
+                        // Fall back to warning without file if write fails
+                        if log::log_enabled!(log::Level::Error) {
+                            error!(
+                                "Failed to write VRF key to {}: {}. Key will be lost on restart!",
+                                key_file_path.display(),
+                                e
+                            );
+                        }
+                    }
+                }
+                manager
+            }
+        };
+
         info!("Initializing chain...");
         let blockchain = Self {
             height: AtomicU64::new(height),
@@ -273,6 +390,13 @@ impl<S: Storage> Blockchain<S> {
             flush_db_every_n_blocks: config.flush_db_every_n_blocks,
             disable_zkp_cache: config.disable_zkp_cache,
             executor: Arc::new(TakoContractExecutor::new()),
+            vrf_manager,
+            vrf_allowed_keys,
+            miner_keypair: config
+                .vrf
+                .miner_private_key
+                .as_ref()
+                .map(|s| s.keypair().clone()),
         };
 
         // include genesis block
@@ -840,6 +964,14 @@ impl<S: Storage> Blockchain<S> {
             hash = header.get_pow_hash(algorithm)?;
         }
 
+        // VRF is mandatory for all blocks (except genesis)
+        if header.get_height() > 0 && header.get_vrf_data().is_none() {
+            let block_hash = header.hash();
+            let miner = header.get_miner();
+            let vrf = self.build_block_vrf_data(&block_hash, miner)?;
+            header.set_vrf_data(Some(vrf));
+        }
+
         let block = self
             .build_block_from_header(Immutable::Owned(header))
             .await?;
@@ -1008,7 +1140,176 @@ impl<S: Storage> Blockchain<S> {
 
     // Get the contract executor (TOS Kernel - TAKO)
     pub fn get_executor(&self) -> Arc<dyn ContractExecutor> {
-        Arc::clone(&self.executor)
+        let executor: Arc<dyn ContractExecutor> = self.executor.clone();
+        executor
+    }
+
+    fn build_block_vrf_data(
+        &self,
+        block_hash: &Hash,
+        miner: &CompressedPublicKey,
+    ) -> Result<BlockVrfData, BlockchainError> {
+        // Get miner keypair for binding signature
+        let miner_keypair = self.miner_keypair.as_ref().ok_or_else(|| {
+            BlockchainError::InvalidVrfData(
+                block_hash.clone(),
+                "Miner private key required for VRF binding signature. \
+                 Configure --miner-private-key or set MINER_PRIVATE_KEY env var."
+                    .to_string(),
+            )
+        })?;
+
+        // Get chain ID for cross-chain replay protection
+        let chain_id = self.network.chain_id();
+
+        let data = self
+            .vrf_manager
+            .sign(chain_id, block_hash.as_bytes(), miner, miner_keypair)
+            .map_err(|e| BlockchainError::InvalidVrfData(block_hash.clone(), e.to_string()))?;
+
+        Ok(BlockVrfData::new(
+            data.public_key.to_bytes(),
+            data.output.to_bytes(),
+            data.proof.to_bytes(),
+            data.binding_signature.to_bytes(),
+        ))
+    }
+
+    /// Write a secret key to a file with secure permissions (0600)
+    ///
+    /// This prevents secret key leakage by:
+    /// 1. Writing to a file instead of stdout (avoids terminal scrollback, logs)
+    /// 2. Setting file permissions to owner-only read/write (Unix)
+    #[cfg(unix)]
+    fn write_secure_key_file(path: &std::path::Path, key_hex: &str) -> std::io::Result<()> {
+        use std::fs::OpenOptions;
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600) // Owner read/write only
+            .open(path)?;
+
+        writeln!(file, "{}", key_hex)?;
+        file.sync_all()?;
+        Ok(())
+    }
+
+    /// Write a secret key to a file (Windows fallback - no Unix permissions)
+    #[cfg(not(unix))]
+    fn write_secure_key_file(path: &std::path::Path, key_hex: &str) -> std::io::Result<()> {
+        use std::fs::File;
+        use std::io::Write;
+
+        let mut file = File::create(path)?;
+        writeln!(file, "{}", key_hex)?;
+        file.sync_all()?;
+        Ok(())
+    }
+
+    /// Verify VRF data in a block and return it for execution
+    ///
+    /// # Security
+    ///
+    /// This function verifies:
+    /// 1. VRF proof validity - proves the output was generated by the VRF key
+    /// 2. VRF key whitelist - only authorized VRF keys are accepted
+    /// 3. Binding signature - proves the miner authorized this VRF key for this block
+    ///
+    /// The binding signature prevents VRF proof substitution attacks where an attacker
+    /// with a whitelisted VRF key replaces another miner's VRF proof.
+    ///
+    /// Returns both the VrfData and the miner's public key, which is needed
+    /// for VRF identity binding in contract execution (InvokeContext.miner_public_key)
+    fn verify_block_vrf_data(
+        &self,
+        block_hash: &Hash,
+        block: &Block,
+    ) -> Result<Option<(VrfData, [u8; 32])>, BlockchainError> {
+        if block.get_height() == 0 {
+            return Ok(None);
+        }
+
+        // VRF is mandatory for all non-genesis blocks
+        let vrf = match block.get_header().get_vrf_data() {
+            Some(vrf) => vrf,
+            None => {
+                return Err(BlockchainError::MissingVrfData(block_hash.clone()));
+            }
+        };
+
+        // Parse VRF public key
+        let public_key = VrfPublicKey::from_bytes(&vrf.public_key)
+            .map_err(|e| BlockchainError::InvalidVrfData(block_hash.clone(), e.to_string()))?;
+
+        // Check VRF key whitelist
+        if let Some(allowed) = &self.vrf_allowed_keys {
+            if !allowed.contains(public_key.as_bytes()) {
+                return Err(BlockchainError::InvalidVrfData(
+                    block_hash.clone(),
+                    "unauthorized VRF public key".to_string(),
+                ));
+            }
+        }
+
+        // Parse VRF output and proof
+        let output = VrfOutput::from_bytes(&vrf.output)
+            .map_err(|e| BlockchainError::InvalidVrfData(block_hash.clone(), e.to_string()))?;
+        let proof = VrfProof::from_bytes(&vrf.proof)
+            .map_err(|e| BlockchainError::InvalidVrfData(block_hash.clone(), e.to_string()))?;
+
+        // Parse binding signature
+        let binding_signature = Signature::from_bytes(&vrf.binding_signature).map_err(|e| {
+            BlockchainError::InvalidVrfData(
+                block_hash.clone(),
+                format!("invalid binding signature: {}", e),
+            )
+        })?;
+
+        // Verify VRF proof with miner identity binding
+        let miner = block.get_header().get_miner();
+        let vrf_input = compute_vrf_input(block_hash.as_bytes(), miner);
+
+        public_key
+            .verify(&vrf_input, &output, &proof)
+            .map_err(|e| BlockchainError::InvalidVrfData(block_hash.clone(), e.to_string()))?;
+
+        // Verify binding signature - proves miner authorized this VRF key for this block
+        let chain_id = self.network.chain_id();
+        let vrf_public_key_bytes = public_key.to_bytes();
+        let binding_message =
+            compute_vrf_binding_message(chain_id, &vrf_public_key_bytes, block_hash.as_bytes());
+
+        // Decompress miner public key for signature verification
+        let miner_public_key_decompressed = miner.decompress().map_err(|e| {
+            BlockchainError::InvalidVrfData(
+                block_hash.clone(),
+                format!("invalid miner public key: {}", e),
+            )
+        })?;
+
+        if !binding_signature.verify(&binding_message, &miner_public_key_decompressed) {
+            return Err(BlockchainError::InvalidVrfData(
+                block_hash.clone(),
+                "binding signature verification failed: miner did not authorize this VRF key"
+                    .to_string(),
+            ));
+        }
+
+        // Return VRF data and miner public key for InvokeContext identity binding
+        let miner_public_key = *miner.as_bytes();
+        Ok(Some((
+            VrfData {
+                public_key,
+                output,
+                proof,
+                binding_signature,
+            },
+            miner_public_key,
+        )))
     }
 
     // Retrieve the cumulative difficulty of the chain
@@ -2783,7 +3084,19 @@ impl<S: Storage> Blockchain<S> {
         broadcast: BroadcastOption,
         mining: bool,
     ) -> Result<(), BlockchainError> {
+        let mut block = block;
         let start = Instant::now();
+
+        // VRF is mandatory for all non-genesis blocks
+        if mining && block.get_height() > 0 && block.get_header().get_vrf_data().is_none() {
+            let block_hash = block.hash();
+            let miner = block.get_header().get_miner().clone();
+            let vrf = self.build_block_vrf_data(&block_hash, &miner)?;
+            let (header, transactions) = block.split();
+            let mut header = header.into_owned();
+            header.set_vrf_data(Some(vrf));
+            block = Block::new(Immutable::Owned(header), transactions);
+        }
 
         // Expected version for this block
         let version = get_version_at_height(self.get_network(), block.get_height());
@@ -3371,6 +3684,9 @@ impl<S: Storage> Blockchain<S> {
             );
         }
 
+        // VRF verification is mandatory for all blocks
+        self.verify_block_vrf_data(block_hash.as_ref(), &block)?;
+
         let (block, txs) = block.split();
         let block = block.into_arc();
         let block_hash = block_hash.into_arc();
@@ -3730,6 +4046,8 @@ impl<S: Storage> Blockchain<S> {
                         block_hash
                     );
                 }
+                let vrf_data = self.verify_block_vrf_data(&hash, &block)?;
+                let _vrf_guard = VrfExecutorGuard::new(&self.executor, &hash, vrf_data);
                 let mut chain_state = ApplicableChainState::new(
                     &mut *storage,
                     &self.environment,
