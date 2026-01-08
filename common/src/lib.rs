@@ -20,6 +20,9 @@ pub mod referral;
 // Native KYC Level System module
 pub mod kyc;
 
+// Native NFT System module
+pub mod nft;
+
 pub mod asset;
 pub mod config;
 pub mod context;
