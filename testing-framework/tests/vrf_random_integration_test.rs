@@ -10,6 +10,7 @@
 
 use std::path::Path;
 
+use tos_common::block::compute_vrf_input;
 use tos_common::contract::ContractCache;
 use tos_common::crypto::{hash, Hash, KeyPair};
 use tos_daemon::{
@@ -46,6 +47,7 @@ async fn execute_vrf_contract(
     bytecode: &[u8],
     vrf_data: &VrfData,
     block_hash: &Hash,
+    miner_public_key: &[u8; 32],
 ) -> ContractCache {
     let contract_path = "tests/fixtures/vrf_random.so";
     if !Path::new(contract_path).exists() {
@@ -77,6 +79,7 @@ async fn execute_vrf_contract(
         &[],
         None,
         Some(vrf_data),
+        Some(miner_public_key),
     )
     .expect("Contract execution failed");
 
@@ -96,12 +99,21 @@ async fn test_vrf_random_syscall_in_contract() {
 
     let bytecode = std::fs::read(contract_path).expect("Failed to read vrf_random.so");
     let block_hash = Hash::new([9u8; 32]);
+    let miner_keypair = KeyPair::new();
+    let miner_compressed = miner_keypair.get_public_key().compress();
+    let miner_public_key = miner_compressed.as_bytes();
+    let chain_id: u64 = 3; // Devnet
     let vrf_manager = VrfKeyManager::new();
     let vrf_data: VrfData = vrf_manager
-        .sign(block_hash.as_bytes())
+        .sign(
+            chain_id,
+            block_hash.as_bytes(),
+            &miner_compressed,
+            &miner_keypair,
+        )
         .expect("Failed to sign VRF data");
 
-    let cache = execute_vrf_contract(&bytecode, &vrf_data, &block_hash).await;
+    let cache = execute_vrf_contract(&bytecode, &vrf_data, &block_hash, miner_public_key).await;
 
     let random = cache_get_bytes(&cache, b"vrf_random").expect("Missing vrf_random");
     let pre_output = cache_get_bytes(&cache, b"vrf_pre_output").expect("Missing vrf_pre_output");
@@ -137,7 +149,11 @@ async fn test_vrf_random_syscall_in_contract() {
     let pk = VrfPublicKey::from_bytes(&public_key).expect("Invalid VRF public key");
     let output = VrfOutput::from_bytes(&pre_output).expect("Invalid VRF output");
     let proof = VrfProof::from_bytes(&proof).expect("Invalid VRF proof");
-    pk.verify(block_hash.as_bytes(), &output, &proof)
+
+    // Compute VRF input with identity binding (same as signing)
+    let vrf_input = compute_vrf_input(block_hash.as_bytes(), &miner_compressed);
+
+    pk.verify(&vrf_input, &output, &proof)
         .expect("VRF verification failed");
 }
 
@@ -153,14 +169,23 @@ async fn test_vrf_random_syscall_fixed_key_deterministic() {
 
     let bytecode = std::fs::read(contract_path).expect("Failed to read vrf_random.so");
     let block_hash = Hash::new([9u8; 32]);
+    let miner_keypair = KeyPair::new();
+    let miner_compressed = miner_keypair.get_public_key().compress();
+    let miner_public_key = miner_compressed.as_bytes();
+    let chain_id: u64 = 3; // Devnet
     let fixed_secret = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
     let vrf_manager = VrfKeyManager::from_hex(fixed_secret).expect("Invalid fixed VRF secret");
     let vrf_data: VrfData = vrf_manager
-        .sign(block_hash.as_bytes())
+        .sign(
+            chain_id,
+            block_hash.as_bytes(),
+            &miner_compressed,
+            &miner_keypair,
+        )
         .expect("Failed to sign VRF data");
 
-    let cache_a = execute_vrf_contract(&bytecode, &vrf_data, &block_hash).await;
-    let cache_b = execute_vrf_contract(&bytecode, &vrf_data, &block_hash).await;
+    let cache_a = execute_vrf_contract(&bytecode, &vrf_data, &block_hash, miner_public_key).await;
+    let cache_b = execute_vrf_contract(&bytecode, &vrf_data, &block_hash, miner_public_key).await;
 
     let random_a = cache_get_bytes(&cache_a, b"vrf_random").expect("Missing vrf_random");
     let random_b = cache_get_bytes(&cache_b, b"vrf_random").expect("Missing vrf_random");
