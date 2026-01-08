@@ -5,6 +5,7 @@ mod executor_adapter;
 mod feature_set;
 mod kyc;
 mod loader;
+mod nft;
 pub mod precompile_cost;
 mod precompile_verifier;
 mod referral;
@@ -48,6 +49,7 @@ pub use executor_adapter::TakoContractExecutor;
 pub use feature_set::SVMFeatureSet;
 pub use kyc::TosKycAdapter;
 pub use loader::TosContractLoaderAdapter;
+pub use nft::{NoOpNftStorage, TosNftAdapter};
 pub use precompile_cost::{
     costs, estimate_single_precompile_cost, estimate_transaction_precompile_cost,
     TransactionCostEstimator,

@@ -35,11 +35,12 @@ use tos_tbpf::{
 };
 
 use super::{
-    SVMFeatureSet, TakoExecutionError, TosAccountAdapter, TosContractLoaderAdapter,
-    TosReferralAdapter, TosStorageAdapter,
+    NoOpNftStorage, SVMFeatureSet, TakoExecutionError, TosAccountAdapter, TosContractLoaderAdapter,
+    TosNftAdapter, TosReferralAdapter, TosStorageAdapter,
 };
 use crate::core::storage::ReferralProvider;
 use crate::vrf::VrfData;
+use tos_common::nft::operations::NftStorage;
 
 /// Default compute budget for contract execution (200,000 compute units)
 ///
@@ -428,6 +429,60 @@ impl TakoExecutor {
         vrf_data: Option<&VrfData>, // VRF data for verifiable randomness
         miner_public_key: Option<&[u8; 32]>, // Block producer's key for VRF identity binding
     ) -> Result<ExecutionResult, TakoExecutionError> {
+        Self::execute_with_all_providers::<NoOpNftStorage>(
+            bytecode,
+            provider,
+            topoheight,
+            contract_hash,
+            block_hash,
+            block_height,
+            block_timestamp,
+            tx_hash,
+            tx_sender,
+            input_data,
+            compute_budget,
+            feature_set,
+            referral_provider,
+            None, // No NFT provider
+            vrf_data,
+            miner_public_key,
+        )
+    }
+
+    /// Execute a TOS Kernel(TAKO) contract with all available providers
+    ///
+    /// This is the most comprehensive execution method, supporting all provider types:
+    /// - Referral provider for accessing the native referral system
+    /// - NFT provider for accessing the native NFT system
+    /// - VRF data for verifiable randomness
+    ///
+    /// # NFT System Access
+    ///
+    /// When `nft_provider` is provided, contracts can access the native NFT system
+    /// via syscalls for:
+    /// - Collection management (create, pause)
+    /// - Token operations (mint, burn, transfer)
+    /// - Ownership queries (owner_of, balance_of)
+    /// - Approval management (approve, set_approval_for_all)
+    #[allow(clippy::too_many_arguments)]
+    pub fn execute_with_all_providers<N: NftStorage>(
+        bytecode: &[u8],
+        provider: &mut (dyn tos_common::contract::ContractProvider + Send),
+        topoheight: TopoHeight,
+        contract_hash: &Hash,
+        block_hash: &Hash,
+        block_height: u64,
+        block_timestamp: u64,
+        tx_hash: &Hash,
+        tx_sender: &Hash,  // Using Hash type for sender (32 bytes)
+        input_data: &[u8], // Contract input parameters (entry point, user data)
+        compute_budget: Option<u64>,
+        feature_set: &SVMFeatureSet,
+        referral_provider: Option<&mut (dyn ReferralProvider + Send + Sync)>,
+        nft_provider: Option<&mut N>,        // NFT storage provider
+        vrf_data: Option<&VrfData>,          // VRF data for verifiable randomness
+        miner_public_key: Option<&[u8; 32]>, // Block producer's key for VRF identity binding
+    ) -> Result<ExecutionResult, TakoExecutionError> {
         use log::{debug, error, info, warn};
 
         if log::log_enabled!(log::Level::Info) {
@@ -472,6 +527,10 @@ impl TakoExecutor {
         // Created before InvokeContext to ensure proper lifetime (adapter must outlive InvokeContext)
         let mut referral_adapter =
             referral_provider.map(|p| TosReferralAdapter::new(p, topoheight));
+
+        // 3b. Create NFT adapter (if provider is available)
+        // NFT adapter bridges TAKO's NftProvider trait with TOS's NftStorage operations
+        let mut nft_adapter = nft_provider.map(TosNftAdapter::new);
 
         // 4. Create TBPF loader with syscalls (needed for InvokeContext creation)
         // Note: JIT compilation is enabled via the "jit" feature in Cargo.toml
@@ -582,6 +641,15 @@ impl TakoExecutor {
             invoke_context.set_referral_provider(adapter);
             if log::log_enabled!(log::Level::Debug) {
                 debug!("Referral provider wired to InvokeContext");
+            }
+        }
+
+        // 7d. Wire NFT provider (if available)
+        // Enables contracts to access native NFT system via nft_mint, nft_transfer, etc.
+        if let Some(ref mut adapter) = nft_adapter {
+            invoke_context.set_nft_provider(adapter);
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("NFT provider wired to InvokeContext");
             }
         }
 
