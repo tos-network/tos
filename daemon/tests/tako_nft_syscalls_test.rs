@@ -3,6 +3,7 @@
 //! Tests the NFT syscalls through the TosNftAdapter with a mock NFT storage.
 //!
 //! Syscalls tested:
+//! - tos_nft_create_collection
 //! - tos_nft_collection_exists
 //! - tos_nft_mint
 //! - tos_nft_burn
@@ -253,6 +254,105 @@ fn test_nft_collection_exists() {
     println!("  Non-existent collection: PASS");
 
     println!("nft_collection_exists: ALL PASS");
+}
+
+// ============================================================================
+// Test 1b: Create Collection
+// ============================================================================
+
+#[test]
+fn test_nft_create_collection() {
+    println!("\n=== Test: nft_create_collection ===");
+
+    let mut storage = MockNftStorage::new();
+
+    {
+        let mut adapter = TosNftAdapter::new(&mut storage);
+
+        let creator = test_address(0xAA);
+        let royalty_recipient = test_address(0xBB);
+        let name = b"Test Collection";
+        let symbol = b"TEST";
+        let base_uri = b"https://example.com/nft/";
+        let max_supply = 1000u64;
+        let royalty_bps = 500u16; // 5%
+        let max_per_address = 10u64;
+        let block_height = 100u64;
+
+        // Create collection
+        let result = adapter.create_collection(
+            &creator,
+            name,
+            symbol,
+            base_uri,
+            max_supply,
+            &royalty_recipient,
+            royalty_bps,
+            max_per_address,
+            block_height,
+        );
+        assert!(
+            result.is_ok(),
+            "create_collection should succeed: {:?}",
+            result.err()
+        );
+        let collection_id = result.unwrap();
+        println!("  Created collection: {:02x?}...", &collection_id[0..4]);
+
+        // Verify collection exists
+        let exists = adapter.collection_exists(&collection_id);
+        assert!(exists.is_ok(), "collection_exists should succeed");
+        assert!(exists.unwrap(), "Created collection should exist");
+        println!("  Collection exists: PASS");
+
+        // Verify collection data
+        let collection_data = adapter.get_collection(&collection_id);
+        assert!(collection_data.is_ok(), "get_collection should succeed");
+        let data = collection_data.unwrap();
+        assert!(data.is_some(), "Collection data should be present");
+        let data = data.unwrap();
+        assert_eq!(data.max_supply, max_supply, "Max supply should match");
+        assert_eq!(data.royalty_bps, royalty_bps, "Royalty BPS should match");
+        assert_eq!(
+            data.max_per_address, max_per_address,
+            "Max per address should match"
+        );
+        assert!(!data.minting_paused, "Minting should not be paused");
+        println!("  Collection data verified: PASS");
+    }
+
+    // Test creating second collection
+    {
+        let mut adapter = TosNftAdapter::new(&mut storage);
+
+        let creator = test_address(0xCC);
+        let result = adapter.create_collection(
+            &creator,
+            b"Second Collection",
+            b"SEC",
+            b"https://second.com/",
+            500,
+            &creator,
+            250,
+            5,
+            200,
+        );
+        assert!(result.is_ok(), "Second create_collection should succeed");
+        let collection_id2 = result.unwrap();
+        println!(
+            "  Created second collection: {:02x?}...",
+            &collection_id2[0..4]
+        );
+
+        let exists = adapter.collection_exists(&collection_id2);
+        assert!(
+            exists.is_ok() && exists.unwrap(),
+            "Second collection should exist"
+        );
+        println!("  Second collection exists: PASS");
+    }
+
+    println!("nft_create_collection: ALL PASS");
 }
 
 // ============================================================================
