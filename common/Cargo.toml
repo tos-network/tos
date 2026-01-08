@@ -1,6 +1,6 @@
 [package]
 name = "tos_common"
-version = "0.1.11"
+version = "0.1.12"
 edition = "2021"
 authors = ["TOS Network Team <info@tos.network>"]
 license = "BSD-3-Clause"
