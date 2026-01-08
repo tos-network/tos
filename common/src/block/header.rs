@@ -3,7 +3,9 @@ use crate::block::BlockVrfData;
 use crate::{
     block::{BlockVersion, BLOCK_WORK_SIZE, HEADER_WORK_SIZE},
     config::{MAX_TXS_PER_BLOCK, TIPS_LIMIT},
-    crypto::{elgamal::CompressedPublicKey, hash, pow_hash, Hash, Hashable, HASH_SIZE},
+    crypto::{
+        elgamal::CompressedPublicKey, hash, pow_hash, Hash, Hashable, HASH_SIZE, SIGNATURE_SIZE,
+    },
     immutable::Immutable,
     serializer::{Reader, ReaderError, Serializer, Writer},
     time::TimestampMillis,
@@ -375,8 +377,8 @@ impl Serializer for BlockHeader {
         let version_size = 1;
 
         let vrf_size = if self.vrf.is_some() {
-            // 1 byte flag + public_key + output + proof
-            1 + VRF_PUBLIC_KEY_SIZE + VRF_OUTPUT_SIZE + VRF_PROOF_SIZE
+            // 1 byte flag + public_key + output + proof + binding_signature
+            1 + VRF_PUBLIC_KEY_SIZE + VRF_OUTPUT_SIZE + VRF_PROOF_SIZE + SIGNATURE_SIZE
         } else {
             1 // flag only (0 = no VRF)
         };
@@ -477,6 +479,86 @@ mod tests {
         assert_eq!(parsed_vrf.output, vrf.output);
         assert_eq!(parsed_vrf.proof, vrf.proof);
         assert_eq!(parsed_vrf.binding_signature, vrf.binding_signature);
+    }
+
+    /// VRF-003: Test that block hash is unchanged when VRF data is set
+    ///
+    /// This test verifies that the block hash (used for VRF signing) excludes
+    /// VRF fields, preventing circular dependency in VRF computation.
+    #[test]
+    fn test_block_hash_excludes_vrf_fields() {
+        let mut tips = IndexSet::new();
+        tips.insert(Hash::zero());
+
+        let miner = KeyPair::new().get_public_key().compress();
+        let header_without_vrf = BlockHeader::new(
+            BlockVersion::Nobunaga,
+            1,
+            1,
+            tips.clone(),
+            [0u8; 32],
+            miner.clone(),
+            IndexSet::new(),
+        );
+
+        let mut header_with_vrf = BlockHeader::new(
+            BlockVersion::Nobunaga,
+            1,
+            1,
+            tips,
+            [0u8; 32],
+            miner,
+            IndexSet::new(),
+        );
+
+        // Set VRF data on one header
+        let vrf = BlockVrfData::new([1u8; 32], [2u8; 32], [3u8; 64], [4u8; 64]);
+        header_with_vrf.set_vrf_data(Some(vrf));
+
+        // The block hash must be identical regardless of VRF data
+        // This is critical for VRF signing: block_hash is input to VRF
+        assert_eq!(
+            header_without_vrf.hash(),
+            header_with_vrf.hash(),
+            "Block hash must be unchanged when VRF data is set (VRF-003)"
+        );
+    }
+
+    /// Test that BlockHeader::size() matches actual serialized size with VRF
+    #[test]
+    fn test_block_header_size_with_vrf() {
+        let mut tips = IndexSet::new();
+        tips.insert(Hash::zero());
+
+        let miner = KeyPair::new().get_public_key().compress();
+        let mut header = BlockHeader::new(
+            BlockVersion::Nobunaga,
+            1,
+            1,
+            tips,
+            [0u8; 32],
+            miner,
+            IndexSet::new(),
+        );
+
+        // Test without VRF
+        let serialized_no_vrf = header.to_bytes();
+        assert_eq!(
+            serialized_no_vrf.len(),
+            header.size(),
+            "size() must match serialized length without VRF"
+        );
+
+        // Test with VRF
+        let vrf = BlockVrfData::new([1u8; 32], [2u8; 32], [3u8; 64], [4u8; 64]);
+        header.set_vrf_data(Some(vrf));
+
+        let serialized_with_vrf = header.to_bytes();
+        assert_eq!(
+            serialized_with_vrf.len(),
+            header.size(),
+            "size() must match serialized length with VRF (including binding_signature)"
+        );
     }
 
     // ============================================================================
