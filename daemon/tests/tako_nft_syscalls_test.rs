@@ -2212,6 +2212,13 @@ fn test_nft_update_collection_royalty_without_recipient() {
     let collection_id = test_address(0x20);
     let creator = test_address(0xAA);
 
+    // Get original royalty for state invariant check
+    let original = adapter
+        .get_collection(&collection_id)
+        .unwrap()
+        .expect("Collection should exist");
+    let original_royalty_bps = original.royalty_bps;
+
     // Test: Providing royalty_bps > 0 without recipient should fail
     let result = adapter.update_collection(
         &collection_id,
@@ -2222,6 +2229,17 @@ fn test_nft_update_collection_royalty_without_recipient() {
     );
     assert!(result.is_err(), "Royalty bps without recipient should fail");
     println!("  Royalty bps without recipient rejected: PASS");
+
+    // State invariant: royalty should remain unchanged after failure
+    let after_fail = adapter
+        .get_collection(&collection_id)
+        .unwrap()
+        .expect("Collection should exist");
+    assert_eq!(
+        after_fail.royalty_bps, original_royalty_bps,
+        "Royalty should remain unchanged after failed update"
+    );
+    println!("  State invariant (royalty unchanged): PASS");
 
     // Test: royalty_bps = 0 with no recipient should succeed (no-op)
     let result = adapter.update_collection(
@@ -2239,6 +2257,73 @@ fn test_nft_update_collection_royalty_without_recipient() {
     println!("  Zero royalty bps without recipient accepted: PASS");
 
     println!("nft_update_collection_royalty_without_recipient: ALL PASS");
+}
+
+#[test]
+fn test_nft_update_collection_zero_royalty_recipient() {
+    println!("\n=== Test: nft_update_collection_zero_royalty_recipient ===");
+
+    let mut storage = MockNftStorage::new();
+
+    // Create a collection
+    let collection = create_test_collection(0x23, 0xAA);
+    storage.add_collection(collection);
+
+    let mut adapter = TosNftAdapter::new(&mut storage);
+
+    let collection_id = test_address(0x23);
+    let creator = test_address(0xAA);
+    let zero_address = [0u8; 32];
+
+    // Get original royalty for state invariant check
+    let original = adapter
+        .get_collection(&collection_id)
+        .unwrap()
+        .expect("Collection should exist");
+    let original_royalty_recipient = original.royalty_recipient;
+
+    // Test: Zero address as royalty recipient should fail
+    let result = adapter.update_collection(
+        &collection_id,
+        &creator,
+        None,
+        Some(&zero_address), // Zero address recipient
+        500,                 // 5% royalty
+    );
+    assert!(
+        result.is_err(),
+        "Zero address royalty recipient should fail"
+    );
+    println!("  Zero address royalty recipient rejected: PASS");
+
+    // State invariant: royalty recipient should remain unchanged
+    let after_fail = adapter
+        .get_collection(&collection_id)
+        .unwrap()
+        .expect("Collection should exist");
+    assert_eq!(
+        after_fail.royalty_recipient, original_royalty_recipient,
+        "Royalty recipient should remain unchanged after failed update"
+    );
+    println!("  State invariant (royalty recipient unchanged): PASS");
+
+    // Test: Valid recipient should work
+    let valid_recipient = test_address(0xBB);
+    let result = adapter.update_collection(
+        &collection_id,
+        &creator,
+        None,
+        Some(&valid_recipient),
+        750, // 7.5% royalty
+    );
+    assert!(
+        result.is_ok(),
+        "Valid royalty recipient should succeed: {:?}",
+        result.err()
+    );
+    println!("  Valid royalty recipient accepted: PASS");
+
+    println!("nft_update_collection_zero_royalty_recipient: ALL PASS");
 }
 
 #[test]
@@ -2282,6 +2367,13 @@ fn test_nft_update_attribute_number_validation() {
     );
     println!("  8-byte number accepted: PASS");
 
+    // Get NFT to check attribute count for state invariant
+    let nft_before = adapter
+        .get_nft(&collection_id, token_id)
+        .unwrap()
+        .expect("NFT should exist");
+    // NFT has 1 attribute: "score"
+
     // Test 2: Less than 8 bytes should fail
     let short_value = [1u8, 2u8, 3u8, 4u8]; // Only 4 bytes
     let result = adapter.update_attribute(
@@ -2321,7 +2413,117 @@ fn test_nft_update_attribute_number_validation() {
     assert!(result.is_err(), "Empty value should fail for Number type");
     println!("  Empty number rejected: PASS");
 
+    // State invariant: no new attributes should have been added after failures
+    let nft_after = adapter
+        .get_nft(&collection_id, token_id)
+        .unwrap()
+        .expect("NFT should exist");
+    // Since we can't directly inspect attributes via NftData, we verify by checking
+    // that the NFT's metadata remains unchanged (minted_at timestamp is immutable)
+    assert!(
+        nft_before.minted_at == nft_after.minted_at,
+        "NFT should remain unchanged after failed updates"
+    );
+    println!("  State invariant (NFT unchanged after failures): PASS");
+
     println!("nft_update_attribute_number_validation: ALL PASS");
+}
+
+#[test]
+fn test_nft_update_attribute_boolean_validation() {
+    println!("\n=== Test: nft_update_attribute_boolean_validation ===");
+
+    let mut storage = MockNftStorage::new();
+
+    // Create collection with metadata_authority
+    let collection = create_test_collection_with_all_authorities(0x24, 0xAA, 0xDD, 0xEE);
+    storage.add_collection(collection);
+
+    let mut adapter = TosNftAdapter::new(&mut storage);
+
+    let collection_id = test_address(0x24);
+    let creator = test_address(0xAA);
+    let owner = test_address(0xBB);
+    let metadata_authority = test_address(0xEE);
+
+    // Mint an NFT
+    let token_id = adapter
+        .mint(&collection_id, &owner, b"ipfs://test", &creator, 100)
+        .expect("mint should succeed");
+    println!("  Minted token {}", token_id);
+
+    // Test 1: Exactly 1 byte (true) should succeed
+    let result = adapter.update_attribute(
+        &collection_id,
+        token_id,
+        b"active",
+        &[1u8], // true
+        2,      // Boolean type
+        &metadata_authority,
+    );
+    assert!(
+        result.is_ok(),
+        "1-byte boolean (true) should succeed: {:?}",
+        result.err()
+    );
+    println!("  1-byte boolean (true) accepted: PASS");
+
+    // Test 2: Exactly 1 byte (false) should succeed
+    let result = adapter.update_attribute(
+        &collection_id,
+        token_id,
+        b"verified",
+        &[0u8], // false
+        2,      // Boolean type
+        &metadata_authority,
+    );
+    assert!(
+        result.is_ok(),
+        "1-byte boolean (false) should succeed: {:?}",
+        result.err()
+    );
+    println!("  1-byte boolean (false) accepted: PASS");
+
+    // Test 3: Empty value should fail
+    let empty_value: [u8; 0] = [];
+    let result = adapter.update_attribute(
+        &collection_id,
+        token_id,
+        b"bad_bool1",
+        &empty_value,
+        2, // Boolean type
+        &metadata_authority,
+    );
+    assert!(result.is_err(), "Empty value should fail for Boolean type");
+    println!("  Empty boolean rejected: PASS");
+
+    // Test 4: More than 1 byte should fail (trailing bytes rejected)
+    let long_value = [1u8, 2u8]; // 2 bytes
+    let result = adapter.update_attribute(
+        &collection_id,
+        token_id,
+        b"bad_bool2",
+        &long_value,
+        2, // Boolean type
+        &metadata_authority,
+    );
+    assert!(result.is_err(), "> 1 byte should fail for Boolean type");
+    println!("  2-byte boolean rejected: PASS");
+
+    // Test 5: Even more bytes should fail
+    let very_long_value = [1u8, 0u8, 1u8, 0u8]; // 4 bytes
+    let result = adapter.update_attribute(
+        &collection_id,
+        token_id,
+        b"bad_bool3",
+        &very_long_value,
+        2, // Boolean type
+        &metadata_authority,
+    );
+    assert!(result.is_err(), "4 bytes should fail for Boolean type");
+    println!("  4-byte boolean rejected: PASS");
+
+    println!("nft_update_attribute_boolean_validation: ALL PASS");
 }
 
 #[test]

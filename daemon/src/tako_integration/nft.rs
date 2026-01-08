@@ -852,6 +852,14 @@ impl<'a, S: NftStorage> TakoNftProvider for TosNftAdapter<'a, S> {
         }
 
         if let Some(recipient_bytes) = new_royalty_recipient {
+            // Validate: recipient cannot be zero address
+            if recipient_bytes == &[0u8; 32] {
+                return Err(EbpfError::SyscallError(Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "Cannot set royalty recipient to zero address",
+                ))));
+            }
+
             let recipient_pk = Self::bytes_to_pubkey(recipient_bytes)?;
 
             // Validate royalty_bps
@@ -994,11 +1002,11 @@ impl<'a, S: NftStorage> TakoNftProvider for TosNftAdapter<'a, S> {
                 tos_common::nft::AttributeValue::Number(num)
             }
             2 => {
-                // Boolean
-                if value.is_empty() {
+                // Boolean - must be exactly 1 byte
+                if value.len() != 1 {
                     return Err(EbpfError::SyscallError(Box::new(std::io::Error::new(
                         std::io::ErrorKind::InvalidInput,
-                        "Boolean attribute requires at least 1 byte",
+                        "Boolean attribute requires exactly 1 byte",
                     ))));
                 }
                 tos_common::nft::AttributeValue::Boolean(value[0] != 0)
