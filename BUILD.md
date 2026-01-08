@@ -10,7 +10,6 @@ The TOS Network project contains the following binary programs:
 - **tos_miner** - Mining program
 - **tos_wallet** - Wallet program
 - **tos_genesis** - Genesis block generator
-- **tos_ai_miner** - AI mining program
 
 ## Build Scripts
 

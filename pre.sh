@@ -107,17 +107,16 @@ else
     exit 1
 fi
 
-echo "Checking miner binaries..."
+echo "Checking miner binary..."
 if cargo clippy \
-    --package tos_miner \
-    --package tos_ai_miner -- \
+    --package tos_miner -- \
     -D clippy::unwrap_used \
     -D clippy::expect_used \
     -D clippy::panic \
     -D warnings 2>&1; then
-    print_success "Security Clippy (miners)"
+    print_success "Security Clippy (miner)"
 else
-    print_error "Security Clippy (miners)"
+    print_error "Security Clippy (miner)"
     exit 1
 fi
 

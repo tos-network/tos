@@ -295,8 +295,8 @@ jobs:
             -D clippy::disallowed_methods \
             -D warnings
           echo ""
-          echo "Checking production binaries (miner, ai_miner)..."
-          cargo clippy --package tos_miner --package tos_ai_miner -- \
+          echo "Checking production binaries (miner)..."
+          cargo clippy --package tos_miner -- \
             -D clippy::unwrap_used \
             -D clippy::expect_used \
             -D clippy::panic \
@@ -376,7 +376,7 @@ jobs:
           echo "Checking production crates for warnings..."
           echo ""
           echo "Excluded from strict mode:"
-          echo "  - test crates (ai_miner, testing-integration)"
+          echo "  - test crates (testing-integration)"
           echo "  - benches, examples, tests"
           echo ""
           RUSTFLAGS="-D warnings" cargo build \

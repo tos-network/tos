@@ -7,7 +7,6 @@ members = [
     "miner",
     "daemon",
     "genesis",
-    "ai_miner",
     "testing-framework"
     ]
 

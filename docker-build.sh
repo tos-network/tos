@@ -20,7 +20,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Available apps
-AVAILABLE_APPS=("tos_daemon" "tos_miner" "tos_wallet" "tos_genesis" "tos_ai_miner")
+AVAILABLE_APPS=("tos_daemon" "tos_miner" "tos_wallet" "tos_genesis")
 
 # Help function
 show_help() {

@@ -48,30 +48,6 @@ services:
     profiles:
       - miner
 
-  # TOS Network AI Miner
-  tos-ai-miner:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        app: tos_ai_miner
-        commit_hash: ${TOS_COMMIT_HASH:-latest}
-    container_name: tos-ai-miner
-    restart: unless-stopped
-    depends_on:
-      - tos-daemon
-    environment:
-      - RUST_LOG=${RUST_LOG:-info}
-      - TOS_DAEMON_URL=http://tos-daemon:8080
-      - TOS_AI_MINER_ADDRESS=${TOS_AI_MINER_ADDRESS}
-      - TOS_AI_MODEL_PATH=${TOS_AI_MODEL_PATH:-/models}
-    volumes:
-      - tos-ai-models:/models
-    networks:
-      - tos-network
-    profiles:
-      - ai-miner
-
   # TOS Network Wallet (for testing/management)
   tos-wallet:
     build:
@@ -97,8 +73,6 @@ volumes:
   tos-config:
     driver: local
   tos-wallet-data:
-    driver: local
-  tos-ai-models:
     driver: local
 
 networks:
