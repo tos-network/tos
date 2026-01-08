@@ -24,7 +24,6 @@ use super::{
     MAX_TRANSFER_COUNT,
 };
 use crate::account::FreezeDuration;
-use crate::ai_mining::AIMiningPayload;
 use crate::{
     config::{
         BURN_PER_CONTRACT, MAX_GAS_USAGE_PER_TX, MIN_SHIELD_TOS_AMOUNT, TOS_ASSET, UNO_ASSET,
@@ -128,7 +127,6 @@ pub enum TransactionTypeBuilder {
     InvokeContract(InvokeContractBuilder),
     DeployContract(DeployContractBuilder),
     Energy(EnergyBuilder),
-    AIMining(AIMiningPayload),
     BindReferrer(BindReferrerPayload),
     BatchReferralReward(BatchReferralRewardPayload),
 }
@@ -358,10 +356,6 @@ impl TransactionBuilder {
 
                 // Payload size
                 size += energy_payload.size();
-            }
-            TransactionTypeBuilder::AIMining(payload) => {
-                // AI Mining payload size
-                size += payload.size();
             }
             TransactionTypeBuilder::BindReferrer(payload) => {
                 // BindReferrer payload size
@@ -667,34 +661,6 @@ impl TransactionBuilder {
             TransactionTypeBuilder::Energy(payload) => {
                 if *asset == TOS_ASSET {
                     cost = cost.checked_add(payload.amount)?;
-                }
-            }
-            TransactionTypeBuilder::AIMining(payload) => {
-                // AI Mining operations may cost TOS for registration fees, stakes, rewards, etc.
-                if *asset == TOS_ASSET {
-                    match payload {
-                        crate::ai_mining::AIMiningPayload::RegisterMiner {
-                            registration_fee,
-                            ..
-                        } => {
-                            cost = cost.checked_add(*registration_fee)?;
-                        }
-                        crate::ai_mining::AIMiningPayload::SubmitAnswer {
-                            stake_amount, ..
-                        } => {
-                            cost = cost.checked_add(*stake_amount)?;
-                            // Add answer content gas cost
-                            cost = cost.checked_add(payload.calculate_content_gas_cost())?;
-                        }
-                        crate::ai_mining::AIMiningPayload::PublishTask {
-                            reward_amount, ..
-                        } => {
-                            cost = cost.checked_add(*reward_amount)?;
-                            // Add description gas cost
-                            cost = cost.checked_add(payload.calculate_description_gas_cost())?;
-                        }
-                        _ => {}
-                    }
                 }
             }
             // BindReferrer has no asset cost, only gas fee
@@ -1011,9 +977,6 @@ impl TransactionBuilder {
                     }
                 };
                 TransactionType::Energy(energy_payload)
-            }
-            TransactionTypeBuilder::AIMining(ref payload) => {
-                TransactionType::AIMining(payload.clone())
             }
             TransactionTypeBuilder::BindReferrer(ref payload) => {
                 TransactionType::BindReferrer(payload.clone())
@@ -1812,18 +1775,6 @@ impl TransactionTypeBuilder {
                 consumed.insert(&TOS_ASSET);
                 consumed.extend(payload.deposits.keys());
             }
-            TransactionTypeBuilder::AIMining(
-                crate::ai_mining::AIMiningPayload::RegisterMiner { .. }
-                | crate::ai_mining::AIMiningPayload::SubmitAnswer { .. }
-                | crate::ai_mining::AIMiningPayload::PublishTask { .. },
-            ) => {
-                // AI Mining operations consume TOS asset for fees
-                consumed.insert(&TOS_ASSET);
-            }
-            TransactionTypeBuilder::AIMining(_) => {
-                // Other AI mining payloads still need TOS for fees
-                consumed.insert(&TOS_ASSET);
-            }
             _ => {
                 // Default: use TOS_ASSET for fees
                 consumed.insert(&TOS_ASSET);
@@ -1857,16 +1808,6 @@ impl TransactionTypeBuilder {
                 for transfer in transfers {
                     used_keys.insert(transfer.destination.get_public_key());
                 }
-            }
-            TransactionTypeBuilder::AIMining(
-                crate::ai_mining::AIMiningPayload::RegisterMiner { miner_address, .. },
-            ) => {
-                // Add the miner address to used keys
-                used_keys.insert(miner_address);
-            }
-            TransactionTypeBuilder::AIMining(_) => {
-                // Other AI Mining operations don't have explicit destination addresses
-                // They operate on the sender's address implicitly
             }
             _ => {}
         }

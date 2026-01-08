@@ -15,7 +15,6 @@ use std::{
 };
 use tos_common::{
     account::{BalanceType, EnergyResource, Nonce, VersionedNonce},
-    ai_mining::AIMiningState,
     asset::VersionedAssetData,
     block::{Block, BlockVersion, TopoHeight},
     contract::{
@@ -415,17 +414,6 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for Applicable
         self.inner
             .storage
             .set_energy_resource(&account, self.inner.topoheight, &energy_resource)
-            .await
-    }
-
-    async fn get_ai_mining_state(&mut self) -> Result<Option<AIMiningState>, BlockchainError> {
-        self.inner.storage.get_ai_mining_state().await
-    }
-
-    async fn set_ai_mining_state(&mut self, state: &AIMiningState) -> Result<(), BlockchainError> {
-        self.inner
-            .storage
-            .set_ai_mining_state(self.inner.topoheight, state)
             .await
     }
 

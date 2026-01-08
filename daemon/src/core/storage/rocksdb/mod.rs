@@ -22,7 +22,6 @@ use rocksdb::{
 use serde::{Deserialize, Serialize};
 use strum::IntoEnumIterator;
 use tos_common::{
-    ai_mining::AIMiningState,
     block::{BlockHeader, TopoHeight},
     crypto::Hash,
     immutable::Immutable,
@@ -704,96 +703,6 @@ impl Storage for RocksStorage {
 }
 
 // EnergyProvider implementation is now in providers/energy.rs
-
-#[async_trait]
-impl crate::core::storage::AIMiningProvider for RocksStorage {
-    async fn get_ai_mining_state(&self) -> Result<Option<AIMiningState>, BlockchainError> {
-        trace!("get ai mining state");
-
-        // Get the latest topoheight that has AI mining state
-        let key = "AI_MINING_STATE_TOPOHEIGHT".as_bytes().to_vec();
-        let topoheight =
-            self.load_optional_from_disk::<Vec<u8>, u64>(Column::AIMiningState, &key)?;
-
-        match topoheight {
-            Some(topoheight) => {
-                // Get the AI mining state at that topoheight
-                let state = self.load_optional_from_disk::<Vec<u8>, AIMiningState>(
-                    Column::VersionedAIMiningStates,
-                    &topoheight.to_be_bytes().to_vec(),
-                )?;
-                if log::log_enabled!(log::Level::Trace) {
-                    trace!(
-                        "Found AI mining state at topoheight {}: {:?}",
-                        topoheight,
-                        state.is_some()
-                    );
-                }
-                Ok(state)
-            }
-            None => {
-                trace!("No AI mining state found");
-                Ok(None)
-            }
-        }
-    }
-
-    async fn set_ai_mining_state(
-        &mut self,
-        topoheight: TopoHeight,
-        state: &AIMiningState,
-    ) -> Result<(), BlockchainError> {
-        if log::log_enabled!(log::Level::Trace) {
-            trace!("set ai mining state at topoheight {}", topoheight);
-        }
-
-        // Store the versioned state
-        self.insert_into_disk(
-            Column::VersionedAIMiningStates,
-            &topoheight.to_be_bytes().to_vec(),
-            state,
-        )?;
-
-        // Update the latest topoheight pointer
-        let key = "AI_MINING_STATE_TOPOHEIGHT".as_bytes().to_vec();
-        self.insert_into_disk(Column::AIMiningState, &key, &topoheight)?;
-
-        Ok(())
-    }
-
-    async fn has_ai_mining_state_at_topoheight(
-        &self,
-        topoheight: TopoHeight,
-    ) -> Result<bool, BlockchainError> {
-        if log::log_enabled!(log::Level::Trace) {
-            trace!(
-                "check if AI mining state exists at topoheight {}",
-                topoheight
-            );
-        }
-        let cf = cf_handle!(self.db, Column::VersionedAIMiningStates);
-        let exists = self
-            .db
-            .get_cf(&cf, &topoheight.to_be_bytes())
-            .with_context(|| "Failed to check AI mining state existence")?
-            .is_some();
-        Ok(exists)
-    }
-
-    async fn get_ai_mining_state_at_topoheight(
-        &self,
-        topoheight: TopoHeight,
-    ) -> Result<Option<AIMiningState>, BlockchainError> {
-        if log::log_enabled!(log::Level::Trace) {
-            trace!("get AI mining state at topoheight {}", topoheight);
-        }
-        let state = self.load_optional_from_disk::<Vec<u8>, AIMiningState>(
-            Column::VersionedAIMiningStates,
-            &topoheight.to_be_bytes().to_vec(),
-        )?;
-        Ok(state)
-    }
-}
 
 #[cfg(test)]
 mod tests {

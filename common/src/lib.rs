@@ -14,9 +14,6 @@ pub mod crypto;
 pub mod serializer;
 pub mod transaction;
 
-// AI Mining module
-pub mod ai_mining;
-
 // Native Referral System module
 pub mod referral;
 

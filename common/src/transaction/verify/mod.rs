@@ -111,7 +111,6 @@ impl Transaction {
                     | TransactionType::InvokeContract(_)
                     | TransactionType::DeployContract(_)
                     | TransactionType::Energy(_)
-                    | TransactionType::AIMining(_)
                     | TransactionType::BindReferrer(_)
                     | TransactionType::BatchReferralReward(_)
                     // KYC transaction types
@@ -592,9 +591,6 @@ impl Transaction {
             TransactionType::Energy(payload) => {
                 self.verify_energy_payload(payload, state).await?;
             }
-            TransactionType::AIMining(_) => {
-                // AI Mining transactions don't require special verification beyond basic checks for now
-            }
             TransactionType::BindReferrer(payload) => {
                 // Validate extra_data size to prevent mempool/storage bloat
                 // BindReferrer has extra_data field but was missing size validation
@@ -878,33 +874,6 @@ impl Transaction {
                     }
                     EnergyPayload::WithdrawUnfrozen => {
                         // Withdraw doesn't spend - it releases pending funds to balance
-                    }
-                }
-            }
-            TransactionType::AIMining(payload) => {
-                // Enforce AIMining fee/stake/reward spending on-chain
-                use crate::ai_mining::AIMiningPayload;
-                match payload {
-                    AIMiningPayload::RegisterMiner { registration_fee, .. } => {
-                        let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
-                        *current = current
-                            .checked_add(*registration_fee)
-                            .ok_or(VerificationError::Overflow)?;
-                    }
-                    AIMiningPayload::SubmitAnswer { stake_amount, .. } => {
-                        let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
-                        *current = current
-                            .checked_add(*stake_amount)
-                            .ok_or(VerificationError::Overflow)?;
-                    }
-                    AIMiningPayload::PublishTask { reward_amount, .. } => {
-                        let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
-                        *current = current
-                            .checked_add(*reward_amount)
-                            .ok_or(VerificationError::Overflow)?;
-                    }
-                    AIMiningPayload::ValidateAnswer { .. } => {
-                        // ValidateAnswer does not spend TOS directly
                     }
                 }
             }
@@ -1881,9 +1850,6 @@ impl Transaction {
             TransactionType::Energy(payload) => {
                 self.verify_energy_payload(payload, state).await?;
             }
-            TransactionType::AIMining(_) => {
-                // AI Mining transactions don't require special verification beyond basic checks for now
-            }
             TransactionType::BindReferrer(payload) => {
                 // Validate extra_data size to prevent mempool/storage bloat
                 if let Some(extra_data) = payload.get_extra_data() {
@@ -2227,14 +2193,6 @@ impl Transaction {
                     );
                 }
             }
-            TransactionType::AIMining(payload) => {
-                if log::log_enabled!(log::Level::Debug) {
-                    debug!(
-                        "AI Mining transaction verification - payload: {:?}, fee: {}, nonce: {}",
-                        payload, self.fee, self.nonce
-                    );
-                }
-            }
             TransactionType::BindReferrer(payload) => {
                 if log::log_enabled!(log::Level::Debug) {
                     debug!(
@@ -2372,33 +2330,6 @@ impl Transaction {
                     }
                     EnergyPayload::WithdrawUnfrozen => {
                         // Withdraw doesn't spend - it releases pending funds to balance
-                    }
-                }
-            }
-            TransactionType::AIMining(payload) => {
-                // Enforce AIMining fee/stake/reward spending on-chain
-                use crate::ai_mining::AIMiningPayload;
-                match payload {
-                    AIMiningPayload::RegisterMiner { registration_fee, .. } => {
-                        let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
-                        *current = current
-                            .checked_add(*registration_fee)
-                            .ok_or(VerificationError::Overflow)?;
-                    }
-                    AIMiningPayload::SubmitAnswer { stake_amount, .. } => {
-                        let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
-                        *current = current
-                            .checked_add(*stake_amount)
-                            .ok_or(VerificationError::Overflow)?;
-                    }
-                    AIMiningPayload::PublishTask { reward_amount, .. } => {
-                        let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
-                        *current = current
-                            .checked_add(*reward_amount)
-                            .ok_or(VerificationError::Overflow)?;
-                    }
-                    AIMiningPayload::ValidateAnswer { .. } => {
-                        // ValidateAnswer does not spend TOS directly
                     }
                 }
             }
@@ -2785,33 +2716,6 @@ impl Transaction {
                     }
                     EnergyPayload::WithdrawUnfrozen => {
                         // Withdraw doesn't spend - it releases pending funds to balance
-                    }
-                }
-            }
-            TransactionType::AIMining(payload) => {
-                // Enforce AIMining fee/stake/reward spending on-chain
-                use crate::ai_mining::AIMiningPayload;
-                match payload {
-                    AIMiningPayload::RegisterMiner { registration_fee, .. } => {
-                        let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
-                        *current = current
-                            .checked_add(*registration_fee)
-                            .ok_or(VerificationError::Overflow)?;
-                    }
-                    AIMiningPayload::SubmitAnswer { stake_amount, .. } => {
-                        let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
-                        *current = current
-                            .checked_add(*stake_amount)
-                            .ok_or(VerificationError::Overflow)?;
-                    }
-                    AIMiningPayload::PublishTask { reward_amount, .. } => {
-                        let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
-                        *current = current
-                            .checked_add(*reward_amount)
-                            .ok_or(VerificationError::Overflow)?;
-                    }
-                    AIMiningPayload::ValidateAnswer { .. } => {
-                        // ValidateAnswer does not spend TOS directly
                     }
                 }
             }
@@ -3486,58 +3390,6 @@ impl Transaction {
                             )));
                         }
                     }
-                }
-            }
-            TransactionType::AIMining(payload) => {
-                // Handle AI Mining operations with full validation
-                use crate::ai_mining::AIMiningValidator;
-
-                // Get or create AI mining state
-                let mut ai_mining_state = state
-                    .get_ai_mining_state()
-                    .await
-                    .map_err(VerificationError::State)?
-                    .unwrap_or_default();
-
-                // Create validator with current context
-                let block_height = state.get_block().get_height();
-                let timestamp = state.get_block().get_timestamp();
-                let source = self.source.clone();
-
-                let result = {
-                    let mut validator = AIMiningValidator::new(
-                        &mut ai_mining_state,
-                        block_height,
-                        timestamp,
-                        source,
-                    );
-
-                    // Validate and apply the AI mining operation
-                    validator.validate_and_apply(payload).map_err(|e| {
-                        VerificationError::AnyError(anyhow::anyhow!(
-                            "AI Mining validation failed: {e}"
-                        ))
-                    })?;
-
-                    // Update tasks and process completions
-                    validator.update_tasks().map_err(|e| {
-                        VerificationError::AnyError(anyhow::anyhow!(
-                            "AI Mining task update failed: {e}"
-                        ))
-                    })?;
-
-                    validator.get_validation_summary()
-                };
-
-                // Save updated state back to blockchain
-                state
-                    .set_ai_mining_state(&ai_mining_state)
-                    .await
-                    .map_err(VerificationError::State)?;
-
-                if log::log_enabled!(log::Level::Debug) {
-                    debug!("AI Mining operation processed - payload: {:?}, miners: {}, active_tasks: {}, completed_tasks: {}",
-                           payload, result.total_miners, result.active_tasks, result.completed_tasks);
                 }
             }
             TransactionType::BindReferrer(payload) => {
@@ -4582,33 +4434,6 @@ impl Transaction {
                     }
                     EnergyPayload::WithdrawUnfrozen => {
                         // Withdraw doesn't spend - it releases pending funds to balance
-                    }
-                }
-            }
-            TransactionType::AIMining(payload) => {
-                // Enforce AIMining fee/stake/reward spending on-chain
-                use crate::ai_mining::AIMiningPayload;
-                match payload {
-                    AIMiningPayload::RegisterMiner { registration_fee, .. } => {
-                        let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
-                        *current = current
-                            .checked_add(*registration_fee)
-                            .ok_or(VerificationError::Overflow)?;
-                    }
-                    AIMiningPayload::SubmitAnswer { stake_amount, .. } => {
-                        let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
-                        *current = current
-                            .checked_add(*stake_amount)
-                            .ok_or(VerificationError::Overflow)?;
-                    }
-                    AIMiningPayload::PublishTask { reward_amount, .. } => {
-                        let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
-                        *current = current
-                            .checked_add(*reward_amount)
-                            .ok_or(VerificationError::Overflow)?;
-                    }
-                    AIMiningPayload::ValidateAnswer { .. } => {
-                        // ValidateAnswer does not spend TOS directly
                     }
                 }
             }

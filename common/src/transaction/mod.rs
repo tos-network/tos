@@ -3,7 +3,6 @@ use tos_crypto::merlin::Transcript;
 
 use crate::{
     account::Nonce,
-    ai_mining::AIMiningPayload,
     crypto::{
         elgamal::CompressedPublicKey, proofs::RangeProof, Hash, Hashable, ProtocolTranscript,
         Signature,
@@ -55,7 +54,6 @@ pub enum TransactionType {
     InvokeContract(InvokeContractPayload),
     DeployContract(DeployContractPayload),
     Energy(EnergyPayload),
-    AIMining(AIMiningPayload),
     BindReferrer(BindReferrerPayload),
     BatchReferralReward(BatchReferralRewardPayload),
     // KYC transaction types (native KYC infrastructure)
@@ -368,7 +366,7 @@ impl Transaction {
                     }
                 }
             }
-            // Energy, MultiSig, and AIMining don't have explicit assets
+            // Energy and MultiSig don't have explicit assets
             _ => {}
         }
 
@@ -504,10 +502,7 @@ impl Serializer for TransactionType {
                 writer.write_u8(5);
                 payload.write(writer);
             }
-            TransactionType::AIMining(payload) => {
-                writer.write_u8(6);
-                payload.write(writer);
-            }
+            // Note: Type ID 6 was previously used for AIMining (removed)
             TransactionType::BindReferrer(payload) => {
                 writer.write_u8(7);
                 payload.write(writer);
@@ -602,7 +597,8 @@ impl Serializer for TransactionType {
             3 => TransactionType::InvokeContract(InvokeContractPayload::read(reader)?),
             4 => TransactionType::DeployContract(DeployContractPayload::read(reader)?),
             5 => TransactionType::Energy(EnergyPayload::read(reader)?),
-            6 => TransactionType::AIMining(AIMiningPayload::read(reader)?),
+            // Note: Type ID 6 was previously used for AIMining (removed)
+            6 => return Err(ReaderError::InvalidValue), // Reserved for backwards compatibility
             7 => TransactionType::BindReferrer(BindReferrerPayload::read(reader)?),
             8 => TransactionType::BatchReferralReward(BatchReferralRewardPayload::read(reader)?),
             // KYC transaction types (9-16)
@@ -670,7 +666,6 @@ impl Serializer for TransactionType {
             TransactionType::InvokeContract(payload) => payload.size(),
             TransactionType::DeployContract(module) => module.size(),
             TransactionType::Energy(payload) => payload.size(),
-            TransactionType::AIMining(payload) => payload.size(),
             TransactionType::BindReferrer(payload) => payload.size(),
             TransactionType::BatchReferralReward(payload) => payload.size(),
             // KYC transaction types

@@ -228,7 +228,6 @@ async fn maybe_send_callback(
     }
 }
 use tos_common::{
-    ai_mining::{AIMiningStatistics, AIMiningTask, TaskStatus},
     api::{daemon::*, RPCContractOutput, RPCTransaction, SplitAddressParams, SplitAddressResult},
     asset::RPCAssetData,
     async_handler,
@@ -847,36 +846,6 @@ pub fn register_methods<S: Storage>(
 
     // Energy management
     handler.register_method("get_energy", async_handler!(get_energy::<S>));
-
-    // AI Mining management
-    handler.register_method(
-        "get_ai_mining_state",
-        async_handler!(get_ai_mining_state::<S>),
-    );
-    handler.register_method(
-        "get_ai_mining_state_at_topoheight",
-        async_handler!(get_ai_mining_state_at_topoheight::<S>),
-    );
-    handler.register_method(
-        "has_ai_mining_state_at_topoheight",
-        async_handler!(has_ai_mining_state_at_topoheight::<S>),
-    );
-    handler.register_method(
-        "get_ai_mining_statistics",
-        async_handler!(get_ai_mining_statistics::<S>),
-    );
-    handler.register_method(
-        "get_ai_mining_task",
-        async_handler!(get_ai_mining_task::<S>),
-    );
-    handler.register_method(
-        "get_ai_mining_miner",
-        async_handler!(get_ai_mining_miner::<S>),
-    );
-    handler.register_method(
-        "get_ai_mining_active_tasks",
-        async_handler!(get_ai_mining_active_tasks::<S>),
-    );
 
     // QR Code Payment methods
     handler.register_method(
@@ -2443,10 +2412,6 @@ async fn get_account_history<S: Storage>(
                         }
                     }
                 }
-                TransactionType::AIMining(_) => {
-                    // AI Mining transactions don't affect account history for now
-                    // This could be extended to track AI mining activities
-                }
                 TransactionType::BindReferrer(payload) => {
                     if is_sender {
                         history.push(AccountHistoryEntry {
@@ -2464,7 +2429,7 @@ async fn get_account_history<S: Storage>(
                 TransactionType::BatchReferralReward(_) => {
                     // BatchReferralReward transactions are tracked by the referral system
                     // History entries for individual upline rewards would require additional storage
-                    // For now, similar to AIMining, we don't add to account history
+                    // For now, we don't add to account history
                 }
                 // KYC transaction types
                 TransactionType::SetKyc(_)
@@ -3318,155 +3283,6 @@ async fn get_energy<S: Storage>(context: &Context, body: Value) -> Result<Value,
     };
 
     Ok(result)
-}
-
-// Get the current AI mining state
-async fn get_ai_mining_state<S: Storage>(
-    context: &Context,
-    body: Value,
-) -> Result<Value, InternalRpcError> {
-    require_no_params(body)?;
-    let blockchain: &Arc<Blockchain<S>> = context.get()?;
-    let storage = blockchain.get_storage().read().await;
-    let state = storage.get_ai_mining_state().await?;
-    Ok(json!(state))
-}
-
-// Get AI mining state at a specific topoheight
-async fn get_ai_mining_state_at_topoheight<S: Storage>(
-    context: &Context,
-    body: Value,
-) -> Result<Value, InternalRpcError> {
-    #[derive(serde::Deserialize)]
-    struct Params {
-        topoheight: u64,
-    }
-
-    let params: Params = parse_params(body)?;
-    let blockchain: &Arc<Blockchain<S>> = context.get()?;
-    let storage = blockchain.get_storage().read().await;
-    let state = storage
-        .get_ai_mining_state_at_topoheight(params.topoheight)
-        .await?;
-    Ok(json!(state))
-}
-
-// Check if AI mining state exists at a specific topoheight
-async fn has_ai_mining_state_at_topoheight<S: Storage>(
-    context: &Context,
-    body: Value,
-) -> Result<Value, InternalRpcError> {
-    #[derive(serde::Deserialize)]
-    struct Params {
-        topoheight: u64,
-    }
-
-    let params: Params = parse_params(body)?;
-    let blockchain: &Arc<Blockchain<S>> = context.get()?;
-    let storage = blockchain.get_storage().read().await;
-    let has_state = storage
-        .has_ai_mining_state_at_topoheight(params.topoheight)
-        .await?;
-    Ok(json!(has_state))
-}
-
-// Get only AI mining statistics
-async fn get_ai_mining_statistics<S: Storage>(
-    context: &Context,
-    body: Value,
-) -> Result<Value, InternalRpcError> {
-    require_no_params(body)?;
-    let blockchain: &Arc<Blockchain<S>> = context.get()?;
-    let storage = blockchain.get_storage().read().await;
-    let state = storage.get_ai_mining_state().await?;
-    match state {
-        Some(ai_state) => Ok(json!(ai_state.statistics)),
-        None => {
-            // Return default empty statistics when no AI mining activity yet
-            Ok(json!(AIMiningStatistics::default()))
-        }
-    }
-}
-
-// Get a specific AI mining task by ID
-async fn get_ai_mining_task<S: Storage>(
-    context: &Context,
-    body: Value,
-) -> Result<Value, InternalRpcError> {
-    #[derive(serde::Deserialize)]
-    struct Params {
-        task_id: Hash,
-    }
-
-    let params: Params = parse_params(body)?;
-    let blockchain: &Arc<Blockchain<S>> = context.get()?;
-    let storage = blockchain.get_storage().read().await;
-    let state = storage.get_ai_mining_state().await?;
-
-    match state {
-        Some(ai_state) => match ai_state.tasks.get(&params.task_id) {
-            Some(task) => Ok(json!(task)),
-            None => Err(InternalRpcError::InvalidRequestStr("Task not found")),
-        },
-        None => Err(InternalRpcError::InvalidRequestStr(
-            "AI mining state not initialized",
-        )),
-    }
-}
-
-// Get a specific miner's information by address
-async fn get_ai_mining_miner<S: Storage>(
-    context: &Context,
-    body: Value,
-) -> Result<Value, InternalRpcError> {
-    #[derive(serde::Deserialize)]
-    struct Params {
-        address: CompressedPublicKey,
-    }
-
-    let params: Params = parse_params(body)?;
-    let blockchain: &Arc<Blockchain<S>> = context.get()?;
-    let storage = blockchain.get_storage().read().await;
-    let state = storage.get_ai_mining_state().await?;
-
-    match state {
-        Some(ai_state) => match ai_state.miners.get(&params.address) {
-            Some(miner) => Ok(json!(miner)),
-            None => Err(InternalRpcError::InvalidRequestStr("Miner not found")),
-        },
-        None => Err(InternalRpcError::InvalidRequestStr(
-            "AI mining state not initialized",
-        )),
-    }
-}
-
-// Get all active AI mining tasks
-async fn get_ai_mining_active_tasks<S: Storage>(
-    context: &Context,
-    body: Value,
-) -> Result<Value, InternalRpcError> {
-    require_no_params(body)?;
-    let blockchain: &Arc<Blockchain<S>> = context.get()?;
-    let storage = blockchain.get_storage().read().await;
-    let state = storage.get_ai_mining_state().await?;
-
-    match state {
-        Some(ai_state) => {
-            let active_tasks: std::collections::HashMap<&Hash, &AIMiningTask> = ai_state
-                .tasks
-                .iter()
-                .filter(|(_, task)| matches!(task.status, TaskStatus::Active))
-                .collect();
-
-            Ok(json!(active_tasks))
-        }
-        None => {
-            // Return empty map when no AI mining activity yet
-            let empty: std::collections::HashMap<Hash, AIMiningTask> =
-                std::collections::HashMap::new();
-            Ok(json!(empty))
-        }
-    }
 }
 
 // Get contract address from a DeployContract transaction

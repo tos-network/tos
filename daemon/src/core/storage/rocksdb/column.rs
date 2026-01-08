@@ -112,13 +112,6 @@ pub enum Column {
     // {topoheight}_{account_address} => {energy_resource}
     VersionedEnergyResources,
 
-    // AI mining state pointer
-    // AI_MINING_STATE_TOPOHEIGHT => {topoheight}
-    AIMiningState,
-    // Versioned AI mining states
-    // {topoheight} => {ai_mining_state}
-    VersionedAIMiningStates,
-
     // Contract events storage for LOG0-LOG4 syscalls
     // {contract_id}{topoheight}{log_index} => {StoredContractEvent}
     ContractEvents,
@@ -207,8 +200,7 @@ impl Column {
             | VersionedContractsBalances
             | VersionedContractsData
             | PrefixedRegistrations
-            | VersionedEnergyResources
-            | VersionedAIMiningStates => Some(PREFIX_TOPOHEIGHT_LEN),
+            | VersionedEnergyResources => Some(PREFIX_TOPOHEIGHT_LEN),
 
             UnoBalances => Some(PREFIX_ID_LEN),
 

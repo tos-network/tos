@@ -418,14 +418,6 @@ pub enum EntryType {
         // constructor invoke
         invoke: Option<DeployInvoke>,
     },
-    AIMining {
-        // Transaction hash for reference
-        hash: Hash,
-        // AI mining transaction payload
-        payload: crate::ai_mining::AIMiningPayload,
-        // Whether this is an outgoing transaction
-        outgoing: bool,
-    },
 }
 
 // This struct is used to represent a transaction entry like in wallet

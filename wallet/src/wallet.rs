@@ -11,7 +11,6 @@ use std::{
     },
 };
 use tos_common::{
-    ai_mining::AIMiningPayload,
     api::{
         wallet::{BalanceChanged, NotifyEvent, TransactionEntry},
         DataElement,
@@ -1325,65 +1324,6 @@ impl Wallet {
                         str_deposits.join("|"),
                         format_tos(*fee),
                         nonce
-                    )
-                    .context("Error while writing csv line")?;
-                }
-                EntryData::AIMining {
-                    hash: _,
-                    payload,
-                    outgoing,
-                } => {
-                    let (tx_type, details) = match payload {
-                        AIMiningPayload::PublishTask {
-                            task_id,
-                            reward_amount,
-                            difficulty,
-                            deadline: _,
-                            description: _,
-                        } => (
-                            "PublishTask",
-                            format!(
-                                "Task:{} Reward:{} Difficulty:{:?}",
-                                task_id,
-                                format_tos(*reward_amount),
-                                difficulty
-                            ),
-                        ),
-                        AIMiningPayload::SubmitAnswer {
-                            task_id,
-                            answer_hash: _,
-                            stake_amount,
-                            answer_content: _,
-                        } => (
-                            "SubmitAnswer",
-                            format!("Task:{} Stake:{}", task_id, format_tos(*stake_amount)),
-                        ),
-                        AIMiningPayload::ValidateAnswer {
-                            task_id,
-                            answer_id: _,
-                            validation_score,
-                        } => (
-                            "ValidateAnswer",
-                            format!("Task:{} Score:{}", task_id, validation_score),
-                        ),
-                        AIMiningPayload::RegisterMiner {
-                            miner_address: _,
-                            registration_fee,
-                        } => (
-                            "RegisterMiner",
-                            format!("Fee:{}", format_tos(*registration_fee)),
-                        ),
-                    };
-                    let direction = if *outgoing { "Outgoing" } else { "Incoming" };
-                    writeln!(
-                        w,
-                        "{},{},{},AIMining-{},{},{},TOS,-,-",
-                        datetime_from_timestamp(tx.get_timestamp())?,
-                        tx.get_topoheight(),
-                        tx.get_hash(),
-                        tx_type,
-                        direction,
-                        details
                     )
                     .context("Error while writing csv line")?;
                 }

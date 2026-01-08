@@ -1,5 +1,4 @@
 mod account;
-mod ai_mining;
 mod asset;
 mod balance;
 mod block;
@@ -28,7 +27,6 @@ mod uno_balance;
 mod versioned;
 
 pub use account::*;
-pub use ai_mining::*;
 pub use asset::*;
 pub use balance::*;
 pub use block::*;

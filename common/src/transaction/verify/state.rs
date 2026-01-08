@@ -237,15 +237,6 @@ pub trait BlockchainApplyState<'a, P: ContractProvider, E>:
         energy_resource: crate::account::EnergyResource,
     ) -> Result<(), E>;
 
-    /// Get the AI mining state
-    async fn get_ai_mining_state(&mut self) -> Result<Option<crate::ai_mining::AIMiningState>, E>;
-
-    /// Set the AI mining state
-    async fn set_ai_mining_state(
-        &mut self,
-        state: &crate::ai_mining::AIMiningState,
-    ) -> Result<(), E>;
-
     /// Get the contract executor for executing contracts
     /// This returns an Arc to the executor implementation (TOS Kernel(TAKO), legacy VM, etc.)
     /// that will be used to execute contract bytecode.
