@@ -16,7 +16,9 @@
 // - storage: Storage key prefixes and helpers (to be implemented)
 
 mod error;
+mod storage;
 mod types;
 
 pub use error::*;
+pub use storage::*;
 pub use types::*;
