@@ -2327,6 +2327,62 @@ fn test_nft_update_collection_zero_royalty_recipient() {
 }
 
 #[test]
+fn test_nft_update_collection_max_royalty_bps() {
+    println!("\n=== Test: nft_update_collection_max_royalty_bps ===");
+
+    let mut storage = MockNftStorage::new();
+
+    // Create a collection
+    let collection = create_test_collection(0x28, 0xAA);
+    storage.add_collection(collection);
+
+    let mut adapter = TosNftAdapter::new(&mut storage);
+
+    let collection_id = test_address(0x28);
+    let creator = test_address(0xAA);
+    let recipient = test_address(0xBB);
+
+    // Test 1: MAX_ROYALTY_BASIS_POINTS (5000 = 50%) should succeed
+    let result = adapter.update_collection(
+        &collection_id,
+        &creator,
+        None,
+        Some(&recipient),
+        5000, // 50% - at the limit
+    );
+    assert!(
+        result.is_ok(),
+        "Royalty at max (5000) should succeed: {:?}",
+        result.err()
+    );
+    println!("  Royalty at 5000 (50%) accepted: PASS");
+
+    // Test 2: 5001 should fail (over limit)
+    let result = adapter.update_collection(
+        &collection_id,
+        &creator,
+        None,
+        Some(&recipient),
+        5001, // 50.01% - over limit
+    );
+    assert!(result.is_err(), "Royalty over 5000 should fail");
+    println!("  Royalty at 5001 rejected: PASS");
+
+    // Test 3: 10000 (100%) should also fail
+    let result = adapter.update_collection(
+        &collection_id,
+        &creator,
+        None,
+        Some(&recipient),
+        10000, // 100% - way over limit
+    );
+    assert!(result.is_err(), "Royalty at 10000 should fail");
+    println!("  Royalty at 10000 rejected: PASS");
+
+    println!("nft_update_collection_max_royalty_bps: ALL PASS");
+}
+
+#[test]
 fn test_nft_update_attribute_number_validation() {
     println!("\n=== Test: nft_update_attribute_number_validation ===");
 

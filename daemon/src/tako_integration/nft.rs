@@ -14,7 +14,7 @@ use tos_common::nft::operations::{
 use tos_common::nft::{
     MintAuthority, Nft, NftCollection, NftError, NftResult, MAX_ATTRIBUTES_COUNT,
     MAX_ATTRIBUTE_KEY_LENGTH, MAX_ATTRIBUTE_STRING_LENGTH, MAX_BASE_URI_LENGTH,
-    MAX_METADATA_URI_LENGTH,
+    MAX_METADATA_URI_LENGTH, MAX_ROYALTY_BASIS_POINTS,
 };
 use tos_common::serializer::Serializer;
 // TAKO's NftProvider trait (aliased to avoid conflict)
@@ -889,11 +889,15 @@ impl<'a, S: NftStorage> TakoNftProvider for TosNftAdapter<'a, S> {
                 ))));
             }
 
-            // Validate royalty_bps
-            if new_royalty_bps > 10000 {
+            // Validate royalty_bps (max 5000 = 50%)
+            if new_royalty_bps > MAX_ROYALTY_BASIS_POINTS {
                 return Err(EbpfError::SyscallError(Box::new(std::io::Error::new(
                     std::io::ErrorKind::InvalidInput,
-                    "Royalty basis points exceeds 10000 (100%)",
+                    format!(
+                        "Royalty basis points exceeds maximum {} ({}%)",
+                        MAX_ROYALTY_BASIS_POINTS,
+                        MAX_ROYALTY_BASIS_POINTS / 100
+                    ),
                 ))));
             }
 
