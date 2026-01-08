@@ -2,9 +2,11 @@
 //!
 //! Tests the NFT syscalls through the TosNftAdapter with a mock NFT storage.
 //!
-//! Syscalls tested (17 total):
+//! Syscalls tested (21 total):
 //! - tos_nft_create_collection
 //! - tos_nft_collection_exists
+//! - tos_nft_update_collection
+//! - tos_nft_transfer_collection_ownership
 //! - tos_nft_mint
 //! - tos_nft_batch_mint
 //! - tos_nft_burn
@@ -20,6 +22,8 @@
 //! - tos_nft_set_approval_for_all
 //! - tos_nft_is_approved_for_all
 //! - tos_nft_set_minting_paused
+//! - tos_nft_update_attribute
+//! - tos_nft_remove_attribute
 
 #![allow(clippy::disallowed_methods)]
 
@@ -1601,6 +1605,595 @@ fn test_nft_set_token_uri() {
 }
 
 // ============================================================================
+// Test 12: Update Collection
+// ============================================================================
+
+#[test]
+fn test_nft_update_collection() {
+    println!("\n=== Test: nft_update_collection ===");
+
+    let mut storage = MockNftStorage::new();
+
+    // Create a collection
+    let collection = create_test_collection(0x10, 0xAA);
+    storage.add_collection(collection);
+
+    let mut adapter = TosNftAdapter::new(&mut storage);
+
+    let collection_id = test_address(0x10);
+    let creator = test_address(0xAA);
+    let non_creator = test_address(0xBB);
+    let new_royalty_recipient = test_address(0xCC);
+
+    // Get original collection data
+    let original = adapter
+        .get_collection(&collection_id)
+        .unwrap()
+        .expect("Collection should exist");
+    println!(
+        "  Original base_uri: {}",
+        String::from_utf8_lossy(&original.base_uri)
+    );
+    println!("  Original royalty_bps: {}", original.royalty_bps);
+
+    // Test 1: Update base_uri only (as creator)
+    let new_base_uri = b"https://new-api.example.com/v2/";
+    let result = adapter.update_collection(
+        &collection_id,
+        &creator,
+        Some(new_base_uri),
+        None, // No royalty update
+        0,
+    );
+    assert!(
+        result.is_ok(),
+        "Update collection base_uri should succeed: {:?}",
+        result.err()
+    );
+    println!("  Update base_uri: PASS");
+
+    // Verify base_uri updated
+    let updated = adapter
+        .get_collection(&collection_id)
+        .unwrap()
+        .expect("Collection should exist");
+    assert_eq!(
+        updated.base_uri,
+        new_base_uri.to_vec(),
+        "Base URI should be updated"
+    );
+    println!(
+        "  Verified new base_uri: {}",
+        String::from_utf8_lossy(&updated.base_uri)
+    );
+
+    // Test 2: Update royalty only (as creator)
+    let result = adapter.update_collection(
+        &collection_id,
+        &creator,
+        None, // No base_uri update
+        Some(&new_royalty_recipient),
+        750, // 7.5%
+    );
+    assert!(
+        result.is_ok(),
+        "Update collection royalty should succeed: {:?}",
+        result.err()
+    );
+    println!("  Update royalty: PASS");
+
+    // Verify royalty updated
+    let updated = adapter
+        .get_collection(&collection_id)
+        .unwrap()
+        .expect("Collection should exist");
+    assert_eq!(updated.royalty_bps, 750, "Royalty BPS should be updated");
+    println!("  Verified new royalty_bps: {}", updated.royalty_bps);
+
+    // Test 3: Update both base_uri and royalty
+    let final_uri = b"https://final-api.example.com/";
+    let result = adapter.update_collection(
+        &collection_id,
+        &creator,
+        Some(final_uri),
+        Some(&creator), // Set royalty back to creator
+        500,            // 5%
+    );
+    assert!(
+        result.is_ok(),
+        "Update collection both fields should succeed: {:?}",
+        result.err()
+    );
+    println!("  Update both fields: PASS");
+
+    // Test 4: Non-creator should fail
+    let result = adapter.update_collection(
+        &collection_id,
+        &non_creator,
+        Some(b"https://hacked.com/"),
+        None,
+        0,
+    );
+    assert!(result.is_err(), "Non-creator should not be able to update");
+    println!("  Non-creator update rejected: PASS");
+
+    // Test 5: Invalid royalty_bps (> 10000) should fail
+    let result = adapter.update_collection(
+        &collection_id,
+        &creator,
+        None,
+        Some(&new_royalty_recipient),
+        10001, // > 100%
+    );
+    assert!(result.is_err(), "Royalty > 10000 should fail");
+    println!("  Invalid royalty rejected: PASS");
+
+    // Test 6: Non-existent collection should fail
+    let fake_collection = test_address(0xFF);
+    let result = adapter.update_collection(&fake_collection, &creator, Some(b"uri"), None, 0);
+    assert!(result.is_err(), "Non-existent collection should fail");
+    println!("  Non-existent collection rejected: PASS");
+
+    println!("nft_update_collection: ALL PASS");
+}
+
+// ============================================================================
+// Test 13: Transfer Collection Ownership
+// ============================================================================
+
+#[test]
+fn test_nft_transfer_collection_ownership() {
+    println!("\n=== Test: nft_transfer_collection_ownership ===");
+
+    let mut storage = MockNftStorage::new();
+
+    // Create a collection
+    let collection = create_test_collection(0x11, 0xAA);
+    storage.add_collection(collection);
+
+    let mut adapter = TosNftAdapter::new(&mut storage);
+
+    let collection_id = test_address(0x11);
+    let original_creator = test_address(0xAA);
+    let new_owner = test_address(0xBB);
+    let random_user = test_address(0xCC);
+
+    // Verify original creator
+    let original = adapter
+        .get_collection(&collection_id)
+        .unwrap()
+        .expect("Collection should exist");
+    println!("  Original creator: {:02x?}...", &original.creator[0..4]);
+
+    // Test 1: Transfer ownership as current creator
+    let result =
+        adapter.transfer_collection_ownership(&collection_id, &original_creator, &new_owner);
+    assert!(
+        result.is_ok(),
+        "Transfer ownership should succeed: {:?}",
+        result.err()
+    );
+    println!("  Transfer ownership: PASS");
+
+    // Verify new owner
+    let updated = adapter
+        .get_collection(&collection_id)
+        .unwrap()
+        .expect("Collection should exist");
+    assert_eq!(updated.creator, new_owner, "Creator should be new owner");
+    println!("  Verified new creator: {:02x?}...", &updated.creator[0..4]);
+
+    // Test 2: Original creator can no longer transfer
+    let result =
+        adapter.transfer_collection_ownership(&collection_id, &original_creator, &random_user);
+    assert!(
+        result.is_err(),
+        "Original creator should no longer be able to transfer"
+    );
+    println!("  Original creator transfer rejected: PASS");
+
+    // Test 3: New owner can transfer
+    let result = adapter.transfer_collection_ownership(&collection_id, &new_owner, &random_user);
+    assert!(
+        result.is_ok(),
+        "New owner should be able to transfer: {:?}",
+        result.err()
+    );
+    println!("  New owner transfer: PASS");
+
+    // Verify ownership transferred again
+    let final_state = adapter
+        .get_collection(&collection_id)
+        .unwrap()
+        .expect("Collection should exist");
+    assert_eq!(
+        final_state.creator, random_user,
+        "Creator should be random_user now"
+    );
+    println!("  Final creator: {:02x?}...", &final_state.creator[0..4]);
+
+    // Test 4: Random user trying to transfer should fail
+    let fake_caller = test_address(0xDD);
+    let result =
+        adapter.transfer_collection_ownership(&collection_id, &fake_caller, &original_creator);
+    assert!(
+        result.is_err(),
+        "Non-creator should not be able to transfer"
+    );
+    println!("  Non-creator transfer rejected: PASS");
+
+    // Test 5: Non-existent collection should fail
+    let fake_collection = test_address(0xFF);
+    let result =
+        adapter.transfer_collection_ownership(&fake_collection, &random_user, &original_creator);
+    assert!(result.is_err(), "Non-existent collection should fail");
+    println!("  Non-existent collection rejected: PASS");
+
+    println!("nft_transfer_collection_ownership: ALL PASS");
+}
+
+// ============================================================================
+// Test 14: Update Attribute
+// ============================================================================
+
+/// Create a test collection with metadata_authority
+fn create_test_collection_with_all_authorities(
+    id_byte: u8,
+    creator_byte: u8,
+    freeze_authority_byte: u8,
+    metadata_authority_byte: u8,
+) -> NftCollection {
+    NftCollection {
+        id: test_hash(id_byte),
+        creator: test_pubkey(creator_byte),
+        name: "Full Authority Collection".to_string(),
+        symbol: "FULL".to_string(),
+        base_uri: "https://example.com/".to_string(),
+        max_supply: Some(1000),
+        total_supply: 0,
+        next_token_id: 1,
+        royalty: Royalty {
+            recipient: test_pubkey(creator_byte),
+            basis_points: 500,
+        },
+        mint_authority: MintAuthority::Public {
+            price: 0,
+            payment_recipient: test_pubkey(creator_byte),
+            max_per_address: 10,
+        },
+        freeze_authority: Some(test_pubkey(freeze_authority_byte)),
+        metadata_authority: Some(test_pubkey(metadata_authority_byte)),
+        is_paused: false,
+        created_at: 100,
+    }
+}
+
+#[test]
+fn test_nft_update_attribute() {
+    println!("\n=== Test: nft_update_attribute ===");
+
+    let mut storage = MockNftStorage::new();
+
+    // Create collection with metadata_authority
+    let collection = create_test_collection_with_all_authorities(0x12, 0xAA, 0xDD, 0xEE);
+    storage.add_collection(collection);
+
+    let mut adapter = TosNftAdapter::new(&mut storage);
+
+    let collection_id = test_address(0x12);
+    let creator = test_address(0xAA);
+    let owner = test_address(0xBB);
+    let metadata_authority = test_address(0xEE);
+    let random_user = test_address(0xCC);
+
+    // Mint an NFT
+    let token_id = adapter
+        .mint(&collection_id, &owner, b"ipfs://test", &creator, 100)
+        .expect("mint should succeed");
+    println!("  Minted token {}", token_id);
+
+    // Test 1: Add string attribute
+    let result = adapter.update_attribute(
+        &collection_id,
+        token_id,
+        b"rarity",
+        b"legendary",
+        0, // String type
+        &metadata_authority,
+    );
+    assert!(
+        result.is_ok(),
+        "Add string attribute should succeed: {:?}",
+        result.err()
+    );
+    println!("  Add string attribute 'rarity': PASS");
+
+    // Test 2: Add number attribute
+    let power_value = 100i64.to_le_bytes();
+    let result = adapter.update_attribute(
+        &collection_id,
+        token_id,
+        b"power",
+        &power_value,
+        1, // Number type
+        &metadata_authority,
+    );
+    assert!(
+        result.is_ok(),
+        "Add number attribute should succeed: {:?}",
+        result.err()
+    );
+    println!("  Add number attribute 'power': PASS");
+
+    // Test 3: Add boolean attribute
+    let result = adapter.update_attribute(
+        &collection_id,
+        token_id,
+        b"tradeable",
+        &[1u8], // true
+        2,      // Boolean type
+        &metadata_authority,
+    );
+    assert!(
+        result.is_ok(),
+        "Add boolean attribute should succeed: {:?}",
+        result.err()
+    );
+    println!("  Add boolean attribute 'tradeable': PASS");
+
+    // Test 4: Update existing attribute (change rarity to "common")
+    let result = adapter.update_attribute(
+        &collection_id,
+        token_id,
+        b"rarity",
+        b"common",
+        0, // String type
+        &metadata_authority,
+    );
+    assert!(
+        result.is_ok(),
+        "Update existing attribute should succeed: {:?}",
+        result.err()
+    );
+    println!("  Update existing attribute 'rarity': PASS");
+
+    // Test 5: Non-metadata_authority should fail
+    let result = adapter.update_attribute(
+        &collection_id,
+        token_id,
+        b"hacked",
+        b"value",
+        0,
+        &random_user,
+    );
+    assert!(
+        result.is_err(),
+        "Non-metadata_authority should not be able to update"
+    );
+    println!("  Non-authority update rejected: PASS");
+
+    // Test 6: Owner should fail (owner != metadata_authority)
+    let result = adapter.update_attribute(&collection_id, token_id, b"test", b"value", 0, &owner);
+    assert!(
+        result.is_err(),
+        "Owner should not be able to update (not metadata_authority)"
+    );
+    println!("  Owner update rejected: PASS");
+
+    // Test 7: Array type should fail (not supported via syscall)
+    let result = adapter.update_attribute(
+        &collection_id,
+        token_id,
+        b"array_attr",
+        b"data",
+        3, // Array type
+        &metadata_authority,
+    );
+    assert!(result.is_err(), "Array type should not be supported");
+    println!("  Array type rejected: PASS");
+
+    // Test 8: Invalid value type should fail
+    let result = adapter.update_attribute(
+        &collection_id,
+        token_id,
+        b"bad_type",
+        b"value",
+        99, // Invalid type
+        &metadata_authority,
+    );
+    assert!(result.is_err(), "Invalid value type should fail");
+    println!("  Invalid value type rejected: PASS");
+
+    // Test 9: Non-existent token should fail
+    let result = adapter.update_attribute(
+        &collection_id,
+        999,
+        b"key",
+        b"value",
+        0,
+        &metadata_authority,
+    );
+    assert!(result.is_err(), "Non-existent token should fail");
+    println!("  Non-existent token rejected: PASS");
+
+    println!("nft_update_attribute: ALL PASS");
+}
+
+// ============================================================================
+// Test 15: Remove Attribute
+// ============================================================================
+
+#[test]
+fn test_nft_remove_attribute() {
+    println!("\n=== Test: nft_remove_attribute ===");
+
+    let mut storage = MockNftStorage::new();
+
+    // Create collection with metadata_authority
+    let collection = create_test_collection_with_all_authorities(0x13, 0xAA, 0xDD, 0xEE);
+    storage.add_collection(collection);
+
+    let mut adapter = TosNftAdapter::new(&mut storage);
+
+    let collection_id = test_address(0x13);
+    let creator = test_address(0xAA);
+    let owner = test_address(0xBB);
+    let metadata_authority = test_address(0xEE);
+    let random_user = test_address(0xCC);
+
+    // Mint an NFT
+    let token_id = adapter
+        .mint(&collection_id, &owner, b"ipfs://test", &creator, 100)
+        .expect("mint should succeed");
+    println!("  Minted token {}", token_id);
+
+    // Add some attributes first
+    adapter
+        .update_attribute(
+            &collection_id,
+            token_id,
+            b"rarity",
+            b"epic",
+            0,
+            &metadata_authority,
+        )
+        .expect("add rarity should succeed");
+    adapter
+        .update_attribute(
+            &collection_id,
+            token_id,
+            b"level",
+            &10i64.to_le_bytes(),
+            1,
+            &metadata_authority,
+        )
+        .expect("add level should succeed");
+    adapter
+        .update_attribute(
+            &collection_id,
+            token_id,
+            b"equipped",
+            &[1u8],
+            2,
+            &metadata_authority,
+        )
+        .expect("add equipped should succeed");
+    println!("  Added 3 attributes: rarity, level, equipped");
+
+    // Test 1: Remove attribute as metadata_authority
+    let result = adapter.remove_attribute(&collection_id, token_id, b"rarity", &metadata_authority);
+    assert!(
+        result.is_ok(),
+        "Remove attribute should succeed: {:?}",
+        result.err()
+    );
+    println!("  Remove 'rarity' attribute: PASS");
+
+    // Test 2: Try to remove same attribute again (should fail - not found)
+    let result = adapter.remove_attribute(&collection_id, token_id, b"rarity", &metadata_authority);
+    assert!(result.is_err(), "Remove non-existent attribute should fail");
+    println!("  Remove already removed attribute rejected: PASS");
+
+    // Test 3: Remove another attribute
+    let result = adapter.remove_attribute(&collection_id, token_id, b"level", &metadata_authority);
+    assert!(
+        result.is_ok(),
+        "Remove second attribute should succeed: {:?}",
+        result.err()
+    );
+    println!("  Remove 'level' attribute: PASS");
+
+    // Test 4: Non-metadata_authority should fail
+    let result = adapter.remove_attribute(&collection_id, token_id, b"equipped", &random_user);
+    assert!(
+        result.is_err(),
+        "Non-metadata_authority should not be able to remove"
+    );
+    println!("  Non-authority remove rejected: PASS");
+
+    // Test 5: Owner should fail (owner != metadata_authority)
+    let result = adapter.remove_attribute(&collection_id, token_id, b"equipped", &owner);
+    assert!(
+        result.is_err(),
+        "Owner should not be able to remove (not metadata_authority)"
+    );
+    println!("  Owner remove rejected: PASS");
+
+    // Test 6: Remove the last remaining attribute
+    let result =
+        adapter.remove_attribute(&collection_id, token_id, b"equipped", &metadata_authority);
+    assert!(
+        result.is_ok(),
+        "Remove last attribute should succeed: {:?}",
+        result.err()
+    );
+    println!("  Remove 'equipped' attribute: PASS");
+
+    // Test 7: Non-existent key should fail
+    let result = adapter.remove_attribute(
+        &collection_id,
+        token_id,
+        b"does_not_exist",
+        &metadata_authority,
+    );
+    assert!(result.is_err(), "Non-existent key should fail");
+    println!("  Non-existent key rejected: PASS");
+
+    // Test 8: Non-existent token should fail
+    let result = adapter.remove_attribute(&collection_id, 999, b"key", &metadata_authority);
+    assert!(result.is_err(), "Non-existent token should fail");
+    println!("  Non-existent token rejected: PASS");
+
+    println!("nft_remove_attribute: ALL PASS");
+}
+
+// ============================================================================
+// Test 16: Immutable Collection Attributes
+// ============================================================================
+
+#[test]
+fn test_nft_immutable_collection_attributes() {
+    println!("\n=== Test: nft_immutable_collection_attributes ===");
+
+    let mut storage = MockNftStorage::new();
+
+    // Create collection WITHOUT metadata_authority (immutable attributes)
+    let collection = create_test_collection(0x14, 0xAA);
+    storage.add_collection(collection);
+
+    let mut adapter = TosNftAdapter::new(&mut storage);
+
+    let collection_id = test_address(0x14);
+    let creator = test_address(0xAA);
+    let owner = test_address(0xBB);
+
+    // Mint an NFT
+    let token_id = adapter
+        .mint(&collection_id, &owner, b"ipfs://test", &creator, 100)
+        .expect("mint should succeed");
+    println!("  Minted token {} in immutable collection", token_id);
+
+    // Test 1: Update attribute should fail (no metadata_authority)
+    let result =
+        adapter.update_attribute(&collection_id, token_id, b"rarity", b"epic", 0, &creator);
+    assert!(
+        result.is_err(),
+        "Update should fail in immutable collection"
+    );
+    println!("  Update attribute in immutable collection rejected: PASS");
+
+    // Test 2: Remove attribute should also fail
+    let result = adapter.remove_attribute(&collection_id, token_id, b"rarity", &creator);
+    assert!(
+        result.is_err(),
+        "Remove should fail in immutable collection"
+    );
+    println!("  Remove attribute in immutable collection rejected: PASS");
+
+    println!("nft_immutable_collection_attributes: ALL PASS");
+}
+
+// ============================================================================
 // Summary Test
 // ============================================================================
 
@@ -1611,17 +2204,23 @@ fn test_nft_syscalls_summary() {
     println!("  TAKO NFT Syscalls Integration Test Summary");
     println!("============================================================");
     println!();
-    println!("NFT Syscalls Tested:");
+    println!("NFT Syscalls Tested (21 total):");
     println!("  Collection Operations:");
-    println!("    - tos_nft_collection_exists   (500 CU)");
-    println!("    - tos_nft_set_minting_paused  (2000 CU)");
-    println!("    - tos_nft_get_total_supply    (500 CU)");
-    println!("    - tos_nft_get_mint_count      (500 CU)");
+    println!("    - tos_nft_collection_exists            (500 CU)");
+    println!("    - tos_nft_create_collection            (5000 CU)");
+    println!("    - tos_nft_set_minting_paused           (2000 CU)");
+    println!("    - tos_nft_get_total_supply             (500 CU)");
+    println!("    - tos_nft_get_mint_count               (500 CU)");
+    println!("    - tos_nft_update_collection            (2000 CU + URI bytes)");
+    println!("    - tos_nft_transfer_collection_ownership (2000 CU)");
     println!();
     println!("  Token Operations:");
     println!("    - tos_nft_mint                (2000 CU + URI bytes)");
+    println!("    - tos_nft_batch_mint          (2000 CU + per-item cost)");
     println!("    - tos_nft_burn                (2000 CU)");
+    println!("    - tos_nft_batch_burn          (2000 CU + per-item cost)");
     println!("    - tos_nft_transfer            (2000 CU)");
+    println!("    - tos_nft_batch_transfer      (2000 CU + per-item cost)");
     println!();
     println!("  Query Operations:");
     println!("    - tos_nft_exists              (500 CU)");
@@ -1644,6 +2243,8 @@ fn test_nft_syscalls_summary() {
     println!();
     println!("  Metadata Operations:");
     println!("    - tos_nft_set_token_uri       (2000 CU + URI bytes)");
+    println!("    - tos_nft_update_attribute    (2000 CU + key/value bytes)");
+    println!("    - tos_nft_remove_attribute    (2000 CU + key bytes)");
     println!();
     println!("Architecture:");
     println!("  Smart Contract -> TAKO Syscall -> TosNftAdapter -> NftStorage");
