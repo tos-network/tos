@@ -2,13 +2,14 @@
 //!
 //! Tests the NFT syscalls through the TosNftAdapter with a mock NFT storage.
 //!
-//! Syscalls tested (15 total):
+//! Syscalls tested (16 total):
 //! - tos_nft_create_collection
 //! - tos_nft_collection_exists
 //! - tos_nft_mint
 //! - tos_nft_batch_mint
 //! - tos_nft_burn
 //! - tos_nft_transfer
+//! - tos_nft_batch_transfer
 //! - tos_nft_exists
 //! - tos_nft_owner_of
 //! - tos_nft_balance_of
@@ -513,6 +514,115 @@ fn test_nft_batch_mint() {
     println!("  Mismatched counts error: PASS");
 
     println!("nft_batch_mint: ALL PASS");
+}
+
+// ============================================================================
+// Test 2b: Batch Transfer NFTs
+// ============================================================================
+
+#[test]
+fn test_nft_batch_transfer() {
+    println!("\n=== Test: nft_batch_transfer ===");
+
+    let mut storage = MockNftStorage::new();
+
+    // Add a test collection with public minting
+    let collection = create_test_collection(0x03, 0xDD);
+    storage.add_collection(collection);
+
+    let mut adapter = TosNftAdapter::new(&mut storage);
+
+    let collection_id = test_address(0x03);
+    let creator = test_address(0xDD);
+    let owner = test_address(0xEE);
+
+    // Mint 3 NFTs to owner
+    let token_id1 = adapter
+        .mint(&collection_id, &owner, b"uri1", &creator, 100)
+        .expect("mint 1 should succeed");
+    let token_id2 = adapter
+        .mint(&collection_id, &owner, b"uri2", &creator, 100)
+        .expect("mint 2 should succeed");
+    let token_id3 = adapter
+        .mint(&collection_id, &owner, b"uri3", &creator, 100)
+        .expect("mint 3 should succeed");
+    println!(
+        "  Minted tokens: {}, {}, {}",
+        token_id1, token_id2, token_id3
+    );
+
+    // Verify owner has 3 NFTs
+    let balance = adapter.balance_of(&collection_id, &owner).unwrap();
+    assert_eq!(balance, 3, "Owner should have 3 NFTs");
+    println!("  Owner balance before: {}", balance);
+
+    // Prepare batch transfer: send each token to a different recipient
+    let recipient1 = test_address(0xF1);
+    let recipient2 = test_address(0xF2);
+    let recipient3 = test_address(0xF3);
+
+    let transfers: [([u8; 32], u64, [u8; 32]); 3] = [
+        (collection_id, token_id1, recipient1),
+        (collection_id, token_id2, recipient2),
+        (collection_id, token_id3, recipient3),
+    ];
+
+    // Batch transfer
+    let result = adapter.batch_transfer(&transfers, &owner);
+    assert!(
+        result.is_ok(),
+        "batch_transfer should succeed: {:?}",
+        result.err()
+    );
+    println!("  Batch transfer 3 NFTs: PASS");
+
+    // Verify owner has 0 NFTs
+    let balance = adapter.balance_of(&collection_id, &owner).unwrap();
+    assert_eq!(balance, 0, "Owner should have 0 NFTs after transfer");
+    println!("  Owner balance after: {}", balance);
+
+    // Verify each recipient owns their NFT
+    let recipients = [
+        (recipient1, token_id1),
+        (recipient2, token_id2),
+        (recipient3, token_id3),
+    ];
+    for (i, (recipient, token_id)) in recipients.iter().enumerate() {
+        let owner_result = adapter.owner_of(&collection_id, *token_id);
+        assert!(
+            owner_result.is_ok(),
+            "owner_of should succeed for token {}",
+            i
+        );
+        assert_eq!(
+            owner_result.unwrap(),
+            Some(*recipient),
+            "Recipient {} should own token {}",
+            i,
+            token_id
+        );
+
+        let balance = adapter.balance_of(&collection_id, recipient);
+        assert!(balance.is_ok(), "balance_of should succeed");
+        assert_eq!(balance.unwrap(), 1, "Each recipient should have balance 1");
+    }
+    println!("  Ownership verification: PASS");
+
+    // Test error case: empty batch
+    let empty_transfers: [([u8; 32], u64, [u8; 32]); 0] = [];
+    let result = adapter.batch_transfer(&empty_transfers, &owner);
+    assert!(result.is_err(), "Empty batch should fail");
+    println!("  Empty batch error: PASS");
+
+    // Test error case: not owner
+    let fake_owner = test_address(0x99);
+    let transfers_not_owned: [([u8; 32], u64, [u8; 32]); 1] =
+        [(collection_id, token_id1, test_address(0x88))];
+    let result = adapter.batch_transfer(&transfers_not_owned, &fake_owner);
+    assert!(result.is_err(), "Transfer by non-owner should fail");
+    println!("  Non-owner transfer error: PASS");
+
+    println!("nft_batch_transfer: ALL PASS");
 }
 
 // ============================================================================

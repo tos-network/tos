@@ -372,6 +372,54 @@ impl<'a, S: NftStorage> TakoNftProvider for TosNftAdapter<'a, S> {
             .map_err(Self::convert_error)
     }
 
+    fn batch_transfer(
+        &mut self,
+        transfers: &[([u8; 32], u64, [u8; 32])],
+        caller: &[u8; 32],
+    ) -> Result<(), EbpfError> {
+        // Validate inputs
+        if transfers.is_empty() {
+            return Err(EbpfError::SyscallError(Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "Empty transfers list",
+            ))));
+        }
+
+        const MAX_BATCH_SIZE: usize = 100;
+        if transfers.len() > MAX_BATCH_SIZE {
+            return Err(EbpfError::SyscallError(Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!(
+                    "Batch size {} exceeds maximum {}",
+                    transfers.len(),
+                    MAX_BATCH_SIZE
+                ),
+            ))));
+        }
+
+        let caller_pk = Self::bytes_to_pubkey(caller)?;
+        let ctx = RuntimeContext::new(caller_pk, 0);
+
+        for (i, (collection, token_id, to)) in transfers.iter().enumerate() {
+            let collection_hash = Self::bytes_to_hash(collection);
+            let to_pk = Self::bytes_to_pubkey(to).map_err(|e| {
+                EbpfError::SyscallError(Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("Invalid recipient public key at index {}: {}", i, e),
+                )))
+            })?;
+
+            transfer(self.storage, &ctx, &collection_hash, *token_id, &to_pk).map_err(|e| {
+                EbpfError::SyscallError(Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!("Transfer failed at index {}: {}", i, e),
+                )))
+            })?;
+        }
+
+        Ok(())
+    }
+
     fn get_nft(&self, collection: &[u8; 32], token_id: u64) -> Result<Option<NftData>, EbpfError> {
         let hash = Self::bytes_to_hash(collection);
         let nft_opt = self.storage.get_nft(&hash, token_id);
