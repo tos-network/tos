@@ -803,6 +803,293 @@ impl<'a, S: NftStorage> TakoNftProvider for TosNftAdapter<'a, S> {
         // 5. Save the updated NFT
         self.storage.set_nft(&nft).map_err(Self::convert_error)
     }
+
+    fn update_collection(
+        &mut self,
+        collection: &[u8; 32],
+        caller: &[u8; 32],
+        new_base_uri: Option<&[u8]>,
+        new_royalty_recipient: Option<&[u8; 32]>,
+        new_royalty_bps: u16,
+    ) -> Result<(), EbpfError> {
+        let hash = Self::bytes_to_hash(collection);
+        let caller_pk = Self::bytes_to_pubkey(caller)?;
+
+        // 1. Get the collection
+        let mut nft_collection = self.storage.get_collection(&hash).ok_or_else(|| {
+            EbpfError::SyscallError(Box::new(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "Collection not found",
+            )))
+        })?;
+
+        // 2. Check if caller is the creator
+        if caller_pk != nft_collection.creator {
+            return Err(EbpfError::SyscallError(Box::new(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "Caller is not the collection creator",
+            ))));
+        }
+
+        // 3. Update base_uri if provided
+        if let Some(uri_bytes) = new_base_uri {
+            let new_uri = String::from_utf8(uri_bytes.to_vec()).map_err(|_| {
+                EbpfError::SyscallError(Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "Invalid UTF-8 in base_uri",
+                )))
+            })?;
+            nft_collection.base_uri = new_uri;
+        }
+
+        // 4. Update royalty if provided
+        if let Some(recipient_bytes) = new_royalty_recipient {
+            let recipient_pk = Self::bytes_to_pubkey(recipient_bytes)?;
+
+            // Validate royalty_bps
+            if new_royalty_bps > 10000 {
+                return Err(EbpfError::SyscallError(Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "Royalty basis points exceeds 10000 (100%)",
+                ))));
+            }
+
+            nft_collection.royalty = tos_common::nft::Royalty {
+                recipient: recipient_pk,
+                basis_points: new_royalty_bps,
+            };
+        }
+
+        // 5. Save the updated collection
+        self.storage
+            .set_collection(&nft_collection)
+            .map_err(Self::convert_error)
+    }
+
+    fn transfer_collection_ownership(
+        &mut self,
+        collection: &[u8; 32],
+        caller: &[u8; 32],
+        new_owner: &[u8; 32],
+    ) -> Result<(), EbpfError> {
+        let hash = Self::bytes_to_hash(collection);
+        let caller_pk = Self::bytes_to_pubkey(caller)?;
+        let new_owner_pk = Self::bytes_to_pubkey(new_owner)?;
+
+        // 1. Get the collection
+        let mut nft_collection = self.storage.get_collection(&hash).ok_or_else(|| {
+            EbpfError::SyscallError(Box::new(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "Collection not found",
+            )))
+        })?;
+
+        // 2. Check if caller is the current creator
+        if caller_pk != nft_collection.creator {
+            return Err(EbpfError::SyscallError(Box::new(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "Caller is not the collection creator",
+            ))));
+        }
+
+        // 3. Transfer ownership
+        nft_collection.creator = new_owner_pk;
+
+        // 4. Save the updated collection
+        self.storage
+            .set_collection(&nft_collection)
+            .map_err(Self::convert_error)
+    }
+
+    fn update_attribute(
+        &mut self,
+        collection: &[u8; 32],
+        token_id: u64,
+        key: &[u8],
+        value: &[u8],
+        value_type: u8,
+        caller: &[u8; 32],
+    ) -> Result<(), EbpfError> {
+        let hash = Self::bytes_to_hash(collection);
+        let caller_pk = Self::bytes_to_pubkey(caller)?;
+
+        // 1. Get the collection and check metadata_authority
+        let nft_collection = self.storage.get_collection(&hash).ok_or_else(|| {
+            EbpfError::SyscallError(Box::new(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "Collection not found",
+            )))
+        })?;
+
+        // 2. Check if caller is metadata_authority
+        let metadata_authority = nft_collection.metadata_authority.as_ref().ok_or_else(|| {
+            EbpfError::SyscallError(Box::new(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "Collection has no metadata_authority (immutable attributes)",
+            )))
+        })?;
+
+        if caller_pk != *metadata_authority {
+            return Err(EbpfError::SyscallError(Box::new(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "Caller is not metadata_authority",
+            ))));
+        }
+
+        // 3. Get the NFT
+        let mut nft = self.storage.get_nft(&hash, token_id).ok_or_else(|| {
+            EbpfError::SyscallError(Box::new(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "Token not found",
+            )))
+        })?;
+
+        // 4. Parse the key
+        let key_str = String::from_utf8(key.to_vec()).map_err(|_| {
+            EbpfError::SyscallError(Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Invalid UTF-8 in attribute key",
+            )))
+        })?;
+
+        // 5. Parse the value based on value_type
+        let attr_value = match value_type {
+            0 => {
+                // String
+                let s = String::from_utf8(value.to_vec()).map_err(|_| {
+                    EbpfError::SyscallError(Box::new(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "Invalid UTF-8 in attribute value",
+                    )))
+                })?;
+                tos_common::nft::AttributeValue::String(s)
+            }
+            1 => {
+                // Number (i64 as 8 bytes LE)
+                if value.len() < 8 {
+                    return Err(EbpfError::SyscallError(Box::new(std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "Number attribute requires 8 bytes",
+                    ))));
+                }
+                let num = i64::from_le_bytes([
+                    value[0], value[1], value[2], value[3], value[4], value[5], value[6], value[7],
+                ]);
+                tos_common::nft::AttributeValue::Number(num)
+            }
+            2 => {
+                // Boolean
+                if value.is_empty() {
+                    return Err(EbpfError::SyscallError(Box::new(std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "Boolean attribute requires at least 1 byte",
+                    ))));
+                }
+                tos_common::nft::AttributeValue::Boolean(value[0] != 0)
+            }
+            3 => {
+                // Array - not supported via syscall (would require recursive parsing)
+                return Err(EbpfError::SyscallError(Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "Array attributes are not supported via syscall",
+                ))));
+            }
+            _ => {
+                return Err(EbpfError::SyscallError(Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "Unknown attribute value type",
+                ))));
+            }
+        };
+
+        // 6. Update or add the attribute
+        let mut found = false;
+        for (k, v) in nft.attributes.iter_mut() {
+            if k == &key_str {
+                *v = attr_value.clone();
+                found = true;
+                break;
+            }
+        }
+        if !found {
+            // Check max attributes limit (e.g., 64)
+            const MAX_ATTRIBUTES: usize = 64;
+            if nft.attributes.len() >= MAX_ATTRIBUTES {
+                return Err(EbpfError::SyscallError(Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "Maximum attributes limit reached",
+                ))));
+            }
+            nft.attributes.push((key_str, attr_value));
+        }
+
+        // 7. Save the updated NFT
+        self.storage.set_nft(&nft).map_err(Self::convert_error)
+    }
+
+    fn remove_attribute(
+        &mut self,
+        collection: &[u8; 32],
+        token_id: u64,
+        key: &[u8],
+        caller: &[u8; 32],
+    ) -> Result<(), EbpfError> {
+        let hash = Self::bytes_to_hash(collection);
+        let caller_pk = Self::bytes_to_pubkey(caller)?;
+
+        // 1. Get the collection and check metadata_authority
+        let nft_collection = self.storage.get_collection(&hash).ok_or_else(|| {
+            EbpfError::SyscallError(Box::new(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "Collection not found",
+            )))
+        })?;
+
+        // 2. Check if caller is metadata_authority
+        let metadata_authority = nft_collection.metadata_authority.as_ref().ok_or_else(|| {
+            EbpfError::SyscallError(Box::new(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "Collection has no metadata_authority (immutable attributes)",
+            )))
+        })?;
+
+        if caller_pk != *metadata_authority {
+            return Err(EbpfError::SyscallError(Box::new(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "Caller is not metadata_authority",
+            ))));
+        }
+
+        // 3. Get the NFT
+        let mut nft = self.storage.get_nft(&hash, token_id).ok_or_else(|| {
+            EbpfError::SyscallError(Box::new(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "Token not found",
+            )))
+        })?;
+
+        // 4. Parse the key
+        let key_str = String::from_utf8(key.to_vec()).map_err(|_| {
+            EbpfError::SyscallError(Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Invalid UTF-8 in attribute key",
+            )))
+        })?;
+
+        // 5. Find and remove the attribute
+        let original_len = nft.attributes.len();
+        nft.attributes.retain(|(k, _)| k != &key_str);
+
+        if nft.attributes.len() == original_len {
+            return Err(EbpfError::SyscallError(Box::new(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "Attribute key not found",
+            ))));
+        }
+
+        // 6. Save the updated NFT
+        self.storage.set_nft(&nft).map_err(Self::convert_error)
+    }
 }
 
 /// No-operation NFT storage - used as placeholder when no NFT storage is available
