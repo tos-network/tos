@@ -1,0 +1,95 @@
+# Finality Conformance Specifications
+# Tests for block finality rules
+
+---
+spec:
+  name: consensus_finality_confirmation_depth
+  version: "1.0"
+  category: consensus
+  subcategory: finality
+  description: "Block considered final after confirmation depth"
+  priority: P0
+
+preconditions:
+  - chain_height: 100
+  - target_block: 90
+  - confirmation_depth: 6
+
+action:
+  type: check_finality
+  block_height: 90
+
+expected:
+  status: success
+  is_final: true
+  confirmations: 10
+
+---
+spec:
+  name: consensus_finality_not_reached
+  version: "1.0"
+  category: consensus
+  subcategory: finality
+  description: "Block not final before confirmation depth"
+  priority: P0
+
+preconditions:
+  - chain_height: 100
+  - target_block: 98
+  - confirmation_depth: 6
+
+action:
+  type: check_finality
+  block_height: 98
+
+expected:
+  status: success
+  is_final: false
+  confirmations: 2
+
+---
+spec:
+  name: consensus_finality_reorg_protection
+  version: "1.0"
+  category: consensus
+  subcategory: finality
+  description: "Final blocks cannot be reorganized"
+  priority: P0
+
+preconditions:
+  - chain_height: 100
+  - final_block: 90
+  - competing_chain:
+      height: 105
+      fork_point: 85  # Before finality
+
+action:
+  type: chain_reorg
+  competing_chain: "competing_chain"
+
+expected:
+  status: reject
+  error: "cannot_reorg_past_finality"
+  final_block_unchanged: true
+
+---
+spec:
+  name: consensus_finality_checkpoint
+  version: "1.0"
+  category: consensus
+  subcategory: finality
+  description: "Checkpoint blocks are immediately final"
+  priority: P1
+
+preconditions:
+  - checkpoint_block: 50000
+  - chain_height: 50010
+
+action:
+  type: check_finality
+  block_height: 50000
+
+expected:
+  status: success
+  is_final: true
+  finality_type: "checkpoint"

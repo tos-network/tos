@@ -1,0 +1,259 @@
+# RPC Methods Conformance Specifications
+# Tests for JSON-RPC API methods
+
+---
+spec:
+  name: rpc_eth_blockNumber
+  version: "1.0"
+  category: api
+  subcategory: rpc
+  description: "Returns the current block number"
+  priority: P0
+
+preconditions:
+  - chain_height: 12345
+
+action:
+  type: rpc_call
+  method: eth_blockNumber
+  params: []
+
+expected:
+  status: success
+  result: "0x3039"  # 12345 in hex
+  result_type: quantity
+
+---
+spec:
+  name: rpc_eth_getBalance
+  version: "1.0"
+  category: api
+  subcategory: rpc
+  description: "Returns account balance"
+  priority: P0
+
+preconditions:
+  - account:
+      address: "0x1234567890123456789012345678901234567890"
+      balance: 1000000000000000000  # 1 TOS
+
+action:
+  type: rpc_call
+  method: eth_getBalance
+  params:
+    - "0x1234567890123456789012345678901234567890"
+    - "latest"
+
+expected:
+  status: success
+  result: "0xde0b6b3a7640000"  # 1e18 in hex
+  result_type: quantity
+
+---
+spec:
+  name: rpc_eth_getTransactionCount
+  version: "1.0"
+  category: api
+  subcategory: rpc
+  description: "Returns account nonce"
+  priority: P0
+
+preconditions:
+  - account:
+      address: "0x1234567890123456789012345678901234567890"
+      nonce: 42
+
+action:
+  type: rpc_call
+  method: eth_getTransactionCount
+  params:
+    - "0x1234567890123456789012345678901234567890"
+    - "latest"
+
+expected:
+  status: success
+  result: "0x2a"  # 42 in hex
+
+---
+spec:
+  name: rpc_eth_sendRawTransaction
+  version: "1.0"
+  category: api
+  subcategory: rpc
+  description: "Submits signed transaction"
+  priority: P0
+
+preconditions:
+  - signed_transaction: "0xf86c..."
+
+action:
+  type: rpc_call
+  method: eth_sendRawTransaction
+  params:
+    - "signed_transaction"
+
+expected:
+  status: success
+  result_type: transaction_hash
+
+---
+spec:
+  name: rpc_eth_getTransactionReceipt
+  version: "1.0"
+  category: api
+  subcategory: rpc
+  description: "Returns transaction receipt"
+  priority: P0
+
+preconditions:
+  - transaction:
+      hash: "0xabc123..."
+      status: success
+      gas_used: 21000
+      block_number: 1000
+
+action:
+  type: rpc_call
+  method: eth_getTransactionReceipt
+  params:
+    - "0xabc123..."
+
+expected:
+  status: success
+  result:
+    transactionHash: "0xabc123..."
+    status: "0x1"
+    gasUsed: "0x5208"
+    blockNumber: "0x3e8"
+
+---
+spec:
+  name: rpc_eth_call
+  version: "1.0"
+  category: api
+  subcategory: rpc
+  description: "Executes call without creating transaction"
+  priority: P0
+
+preconditions:
+  - contract:
+      address: "0x1234567890123456789012345678901234567890"
+      method: "balanceOf"
+      returns: 1000
+
+action:
+  type: rpc_call
+  method: eth_call
+  params:
+    - to: "0x1234567890123456789012345678901234567890"
+      data: "0x70a08231..."  # balanceOf selector
+    - "latest"
+
+expected:
+  status: success
+  result_type: bytes
+
+---
+spec:
+  name: rpc_eth_estimateGas
+  version: "1.0"
+  category: api
+  subcategory: rpc
+  description: "Estimates gas for transaction"
+  priority: P0
+
+preconditions:
+  - from: "0xabc..."
+  - to: "0x123..."
+
+action:
+  type: rpc_call
+  method: eth_estimateGas
+  params:
+    - from: "0xabc..."
+      to: "0x123..."
+      value: "0x1"
+
+expected:
+  status: success
+  result: ">= 0x5208"  # At least 21000
+
+---
+spec:
+  name: rpc_eth_getBlockByNumber
+  version: "1.0"
+  category: api
+  subcategory: rpc
+  description: "Returns block by number"
+  priority: P0
+
+preconditions:
+  - block:
+      number: 100
+      hash: "0xblock..."
+      transactions_count: 5
+
+action:
+  type: rpc_call
+  method: eth_getBlockByNumber
+  params:
+    - "0x64"  # 100
+    - false   # no tx details
+
+expected:
+  status: success
+  result:
+    number: "0x64"
+    hash: "0xblock..."
+    transactions: "array_of_hashes"
+
+---
+spec:
+  name: rpc_eth_getLogs
+  version: "1.0"
+  category: api
+  subcategory: rpc
+  description: "Returns logs matching filter"
+  priority: P1
+
+preconditions:
+  - logs:
+      - address: "0xcontract..."
+        topics: ["0xtopic1..."]
+        block: 100
+      - address: "0xcontract..."
+        topics: ["0xtopic1..."]
+        block: 101
+
+action:
+  type: rpc_call
+  method: eth_getLogs
+  params:
+    - fromBlock: "0x64"
+      toBlock: "0x65"
+      address: "0xcontract..."
+
+expected:
+  status: success
+  result_count: 2
+
+---
+spec:
+  name: rpc_eth_chainId
+  version: "1.0"
+  category: api
+  subcategory: rpc
+  description: "Returns chain ID"
+  priority: P0
+
+preconditions:
+  - chain_id: 1
+
+action:
+  type: rpc_call
+  method: eth_chainId
+  params: []
+
+expected:
+  status: success
+  result: "0x1"

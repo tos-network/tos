@@ -1,0 +1,59 @@
+# TOS-TCK Conformance Spec: Get Balance Syscall
+# Tests the sol_get_balance syscall behavior
+
+spec:
+  name: syscall_balance_get
+  version: "1.0"
+  category: syscalls
+  subcategory: balance
+
+description: |
+  Verifies that sol_get_balance correctly returns account balances.
+  The syscall should return the current balance in atomic units.
+
+preconditions:
+  - account: "alice"
+    balance: 1000000000  # 1000 TOS (assuming 6 decimals)
+  - account: "bob"
+    balance: 500000000   # 500 TOS
+
+action:
+  type: syscall
+  name: sol_get_balance
+  args:
+    - "alice"
+
+expected:
+  status: success
+  return_value: 1000000000
+  gas_used: "<= 2500"
+
+postconditions:
+  - account: "alice"
+    balance: 1000000000  # Balance unchanged by read operation
+
+---
+# Test case: Get balance of empty account
+spec:
+  name: syscall_balance_get_empty
+  version: "1.0"
+  category: syscalls
+  subcategory: balance
+
+description: |
+  Verifies that getting balance of non-existent account returns 0.
+
+preconditions: []
+
+action:
+  type: syscall
+  name: sol_get_balance
+  args:
+    - "nonexistent_account"
+
+expected:
+  status: success
+  return_value: 0
+  gas_used: "<= 2500"
+
+postconditions: []

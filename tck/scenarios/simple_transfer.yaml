@@ -1,0 +1,38 @@
+# Simple Transfer Scenario
+# Tests basic transfer functionality between two accounts
+
+name: "Simple Transfer"
+description: "Basic transfer between two accounts with balance verification"
+
+genesis:
+  accounts:
+    - name: "alice"
+      balance: "1000000000000"  # 1000 TOS (in base units)
+
+steps:
+  # Step 1: Transfer from alice to bob
+  - action: "transfer"
+    from: "alice"
+    to: "bob"
+    amount: "100000000000"  # 100 TOS
+    fee: "50"
+    expect:
+      status: "success"
+
+  # Step 2: Mine block to confirm transaction
+  - action: "mine_block"
+
+  # Step 3: Verify alice's balance (1000 - 100 - 0.00000005 fee = 899.99999995)
+  - action: "assert_balance"
+    account: "alice"
+    eq: "899999999950"
+
+  # Step 4: Verify bob received the funds
+  - action: "assert_balance"
+    account: "bob"
+    eq: "100000000000"
+
+  # Step 5: Verify alice's nonce incremented
+  - action: "assert_nonce"
+    account: "alice"
+    eq: 1

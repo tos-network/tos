@@ -1341,6 +1341,32 @@ dependencies = [
 
 [[package]]
 name = "criterion"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f2b12d017a929603d80db1831cd3a24082f8137ce19c69e6447f54f5fc8d692f"
+dependencies = [
+ "anes",
+ "cast",
+ "ciborium",
+ "clap",
+ "criterion-plot",
+ "is-terminal",
+ "itertools 0.10.5",
+ "num-traits",
+ "once_cell",
+ "oorandom",
+ "plotters",
+ "rayon",
+ "regex",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "tinytemplate",
+ "walkdir",
+]
+
+[[package]]
+name = "criterion"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3bf7af66b0989381bd0be551bd7cc91912a655a58c6918420c9527b1fd8b4679"
@@ -2737,6 +2763,17 @@ checksum = "4f867b9d1d896b67beb18518eda36fdb77a32ea590de864f1325b294a6d14397"
 dependencies = [
  "memchr",
  "serde",
+]
+
+[[package]]
+name = "is-terminal"
+version = "0.4.17"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
+dependencies = [
+ "hermit-abi",
+ "libc",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -5318,18 +5355,22 @@ dependencies = [
 ]
 
 [[package]]
-name = "tos-testing-framework"
-version = "0.1.12"
+name = "tos-tck"
+version = "1.0.0"
 dependencies = [
  "anyhow",
+ "arbitrary",
  "async-trait",
  "chrono",
+ "criterion 0.5.1",
  "env_logger",
  "futures",
+ "hex",
  "log",
  "parking_lot 0.12.4",
  "proptest",
  "rand 0.8.5",
+ "regex-lite",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -5343,6 +5384,7 @@ dependencies = [
  "tos_common",
  "tos_daemon",
  "tracing",
+ "walkdir",
 ]
 
 [[package]]
@@ -5377,7 +5419,7 @@ dependencies = [
  "chrono",
  "clap",
  "console-subscriber",
- "criterion",
+ "criterion 0.6.0",
  "crossterm",
  "fern",
  "futures",
@@ -5432,7 +5474,7 @@ dependencies = [
  "bytes",
  "chacha20poly1305",
  "clap",
- "criterion",
+ "criterion 0.6.0",
  "dashmap",
  "ed25519-dalek",
  "env_logger",
@@ -5476,7 +5518,7 @@ dependencies = [
  "tos-program-runtime",
  "tos-syscalls",
  "tos-tbpf",
- "tos-testing-framework",
+ "tos-tck",
  "tos_common",
  "x25519-dalek",
  "xxhash-rust",

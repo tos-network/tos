@@ -1,0 +1,222 @@
+name: TCK Fuzzing (Nightly)
+
+# Run fuzzing nightly and on manual trigger
+on:
+  schedule:
+    # Run at 2 AM UTC every day
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      fuzz_duration:
+        description: 'Fuzzing duration in seconds'
+        required: false
+        default: '300'
+      fuzz_target:
+        description: 'Specific fuzz target (or "all")'
+        required: false
+        default: 'all'
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  FUZZ_DURATION: ${{ github.event.inputs.fuzz_duration || '300' }}
+
+jobs:
+  # ==========================================================================
+  # Fuzzing Jobs
+  # ==========================================================================
+  fuzz-transaction:
+    name: Fuzz Transaction Parser
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: github.event.inputs.fuzz_target == 'all' || github.event.inputs.fuzz_target == 'fuzz_transaction' || github.event_name == 'schedule'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust nightly
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz
+
+      - name: Run transaction fuzzer
+        run: |
+          echo "=========================================="
+          echo "Fuzzing Transaction Parser"
+          echo "Duration: ${FUZZ_DURATION}s"
+          echo "=========================================="
+          cd tck/fuzz
+          timeout ${FUZZ_DURATION}s cargo +nightly fuzz run fuzz_transaction -- -max_total_time=${FUZZ_DURATION} || true
+
+      - name: Check for crashes
+        run: |
+          if [ -d "tck/fuzz/artifacts/fuzz_transaction" ]; then
+            echo "Crashes found!"
+            ls -la tck/fuzz/artifacts/fuzz_transaction/
+            exit 1
+          else
+            echo "No crashes found"
+          fi
+
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-transaction-crashes
+          path: tck/fuzz/artifacts/fuzz_transaction/
+          retention-days: 30
+
+  fuzz-block-header:
+    name: Fuzz Block Header Parser
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: github.event.inputs.fuzz_target == 'all' || github.event.inputs.fuzz_target == 'fuzz_block_header' || github.event_name == 'schedule'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust nightly
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz
+
+      - name: Run block header fuzzer
+        run: |
+          echo "=========================================="
+          echo "Fuzzing Block Header Parser"
+          echo "Duration: ${FUZZ_DURATION}s"
+          echo "=========================================="
+          cd tck/fuzz
+          timeout ${FUZZ_DURATION}s cargo +nightly fuzz run fuzz_block_header -- -max_total_time=${FUZZ_DURATION} || true
+
+      - name: Check for crashes
+        run: |
+          if [ -d "tck/fuzz/artifacts/fuzz_block_header" ]; then
+            echo "Crashes found!"
+            exit 1
+          fi
+
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-block-header-crashes
+          path: tck/fuzz/artifacts/fuzz_block_header/
+          retention-days: 30
+
+  fuzz-rpc-json:
+    name: Fuzz RPC JSON Parser
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: github.event.inputs.fuzz_target == 'all' || github.event.inputs.fuzz_target == 'fuzz_rpc_json' || github.event_name == 'schedule'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust nightly
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz
+
+      - name: Run RPC JSON fuzzer
+        run: |
+          echo "=========================================="
+          echo "Fuzzing RPC JSON Parser"
+          echo "Duration: ${FUZZ_DURATION}s"
+          echo "=========================================="
+          cd tck/fuzz
+          timeout ${FUZZ_DURATION}s cargo +nightly fuzz run fuzz_rpc_json -- -max_total_time=${FUZZ_DURATION} || true
+
+      - name: Check for crashes
+        run: |
+          if [ -d "tck/fuzz/artifacts/fuzz_rpc_json" ]; then
+            echo "Crashes found!"
+            exit 1
+          fi
+
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-rpc-crashes
+          path: tck/fuzz/artifacts/fuzz_rpc_json/
+          retention-days: 30
+
+  fuzz-address:
+    name: Fuzz Address Parser
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: github.event.inputs.fuzz_target == 'all' || github.event.inputs.fuzz_target == 'fuzz_address' || github.event_name == 'schedule'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust nightly
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz
+
+      - name: Run address fuzzer
+        run: |
+          echo "=========================================="
+          echo "Fuzzing Address Parser"
+          echo "Duration: ${FUZZ_DURATION}s"
+          echo "=========================================="
+          cd tck/fuzz
+          timeout ${FUZZ_DURATION}s cargo +nightly fuzz run fuzz_address -- -max_total_time=${FUZZ_DURATION} || true
+
+      - name: Check for crashes
+        run: |
+          if [ -d "tck/fuzz/artifacts/fuzz_address" ]; then
+            echo "Crashes found!"
+            exit 1
+          fi
+
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-address-crashes
+          path: tck/fuzz/artifacts/fuzz_address/
+          retention-days: 30
+
+  # ==========================================================================
+  # Summary Job
+  # ==========================================================================
+  fuzzing-summary:
+    name: Fuzzing Summary
+    runs-on: ubuntu-latest
+    needs: [fuzz-transaction, fuzz-block-header, fuzz-rpc-json, fuzz-address]
+    if: always()
+
+    steps:
+      - name: Generate summary
+        run: |
+          echo "=========================================="
+          echo "Fuzzing Summary"
+          echo "=========================================="
+          echo ""
+          echo "Transaction Fuzzer: ${{ needs.fuzz-transaction.result }}"
+          echo "Block Header Fuzzer: ${{ needs.fuzz-block-header.result }}"
+          echo "RPC JSON Fuzzer: ${{ needs.fuzz-rpc-json.result }}"
+          echo "Address Fuzzer: ${{ needs.fuzz-address.result }}"
+          echo ""
+
+          if [ "${{ needs.fuzz-transaction.result }}" == "failure" ] || \
+             [ "${{ needs.fuzz-block-header.result }}" == "failure" ] || \
+             [ "${{ needs.fuzz-rpc-json.result }}" == "failure" ] || \
+             [ "${{ needs.fuzz-address.result }}" == "failure" ]; then
+            echo "CRITICAL: Crashes found during fuzzing!"
+            echo "Please investigate the crash artifacts."
+            exit 1
+          else
+            echo "All fuzzing targets completed without crashes."
+          fi

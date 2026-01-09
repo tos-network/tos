@@ -1,0 +1,163 @@
+# TOS-TCK Conformance Spec: Event Syscalls
+# Tests LOG0-LOG4 event emission syscalls
+
+spec:
+  name: syscall_event_log0
+  version: "1.0"
+  category: syscalls
+  subcategory: events
+
+description: |
+  Verifies LOG0 event emission (no indexed topics).
+  Should emit event with data only.
+
+preconditions:
+  - account: "contract_a"
+    balance: 1000000000
+
+action:
+  type: syscall
+  name: log0
+  args:
+    - data: "0x48656c6c6f20576f726c64"  # "Hello World" in hex
+
+expected:
+  status: success
+  gas_used: "<= 375"  # Base cost + memory expansion
+
+postconditions: []
+
+---
+spec:
+  name: syscall_event_log1
+  version: "1.0"
+  category: syscalls
+  subcategory: events
+
+description: |
+  Verifies LOG1 event emission (1 indexed topic).
+  Common pattern for Transfer events.
+
+preconditions: []
+
+action:
+  type: syscall
+  name: log1
+  args:
+    - topic0: "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"  # Transfer signature
+    - data: "0x0000000000000000000000000000000000000000000000000000000000000064"  # amount = 100
+
+expected:
+  status: success
+  gas_used: "<= 750"
+
+postconditions: []
+
+---
+spec:
+  name: syscall_event_log2
+  version: "1.0"
+  category: syscalls
+  subcategory: events
+
+description: |
+  Verifies LOG2 event emission (2 indexed topics).
+  Common pattern for Approval events.
+
+preconditions: []
+
+action:
+  type: syscall
+  name: log2
+  args:
+    - topic0: "0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925"  # Approval signature
+    - topic1: "0x000000000000000000000000alice_address_here_padded_to_32_bytes"  # owner
+    - data: "0x0000000000000000000000000000000000000000000000000000000000000064"  # amount
+
+expected:
+  status: success
+  gas_used: "<= 1125"
+
+postconditions: []
+
+---
+spec:
+  name: syscall_event_log3
+  version: "1.0"
+  category: syscalls
+  subcategory: events
+
+description: |
+  Verifies LOG3 event emission (3 indexed topics).
+  Standard ERC-20 Transfer event format.
+
+preconditions: []
+
+action:
+  type: syscall
+  name: log3
+  args:
+    - topic0: "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"  # Transfer
+    - topic1: "0x000000000000000000000000alice_padded_address_32_bytes_here"  # from
+    - topic2: "0x000000000000000000000000bob_padded_address_32_bytes_here__"  # to
+    - data: "0x0000000000000000000000000000000000000000000000000000000000000064"  # amount
+
+expected:
+  status: success
+  gas_used: "<= 1500"
+
+postconditions: []
+
+---
+spec:
+  name: syscall_event_log4
+  version: "1.0"
+  category: syscalls
+  subcategory: events
+
+description: |
+  Verifies LOG4 event emission (4 indexed topics).
+  Maximum indexed topics allowed.
+
+preconditions: []
+
+action:
+  type: syscall
+  name: log4
+  args:
+    - topic0: "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
+    - topic1: "0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef12345678"
+    - topic2: "0x1111111111111111111111111111111111111111111111111111111111111111"
+    - topic3: "0x2222222222222222222222222222222222222222222222222222222222222222"
+    - data: "0x"  # Empty data
+
+expected:
+  status: success
+  gas_used: "<= 1875"
+
+postconditions: []
+
+---
+spec:
+  name: syscall_event_log_large_data
+  version: "1.0"
+  category: syscalls
+  subcategory: events
+
+description: |
+  Verifies event emission with large data payload.
+  Gas should scale with data size.
+
+preconditions: []
+
+action:
+  type: syscall
+  name: log0
+  args:
+    - data: "0x000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f"  # 128 bytes
+
+expected:
+  status: success
+  gas_used: "<= 1500"  # Base + 8 gas per byte
+
+postconditions: []

@@ -1,0 +1,130 @@
+# TOS-TCK Conformance Spec: Transfer Balance Syscall
+# Tests the sol_transfer syscall behavior
+
+spec:
+  name: syscall_balance_transfer_basic
+  version: "1.0"
+  category: syscalls
+  subcategory: balance
+
+description: |
+  Verifies basic token transfer between accounts.
+  Transfer should debit sender and credit receiver atomically.
+
+preconditions:
+  - account: "alice"
+    balance: 1000000000
+    nonce: 0
+  - account: "bob"
+    balance: 500000000
+
+action:
+  type: transfer
+  from: "alice"
+  to: "bob"
+  amount: 100000000  # 100 TOS
+
+expected:
+  status: success
+  gas_used: "<= 21000"
+
+postconditions:
+  - account: "alice"
+    balance: 900000000   # 1000 - 100
+    nonce: 1
+  - account: "bob"
+    balance: 600000000   # 500 + 100
+
+---
+# Test case: Transfer with insufficient balance
+spec:
+  name: syscall_balance_transfer_insufficient
+  version: "1.0"
+  category: syscalls
+  subcategory: balance
+
+description: |
+  Verifies that transfer fails when sender has insufficient balance.
+  No state changes should occur on failure.
+
+preconditions:
+  - account: "alice"
+    balance: 100000000
+    nonce: 0
+  - account: "bob"
+    balance: 0
+
+action:
+  type: transfer
+  from: "alice"
+  to: "bob"
+  amount: 200000000  # More than alice has
+
+expected:
+  status: error
+  error_code: "INSUFFICIENT_BALANCE"
+
+postconditions:
+  - account: "alice"
+    balance: 100000000  # Unchanged
+    nonce: 0            # Unchanged
+  - account: "bob"
+    balance: 0          # Unchanged
+
+---
+# Test case: Transfer zero amount
+spec:
+  name: syscall_balance_transfer_zero
+  version: "1.0"
+  category: syscalls
+  subcategory: balance
+
+description: |
+  Verifies that zero-amount transfers are rejected.
+
+preconditions:
+  - account: "alice"
+    balance: 1000000000
+
+action:
+  type: transfer
+  from: "alice"
+  to: "bob"
+  amount: 0
+
+expected:
+  status: error
+  error_code: "INVALID_AMOUNT"
+
+postconditions:
+  - account: "alice"
+    balance: 1000000000  # Unchanged
+
+---
+# Test case: Self-transfer
+spec:
+  name: syscall_balance_transfer_self
+  version: "1.0"
+  category: syscalls
+  subcategory: balance
+
+description: |
+  Verifies that self-transfers are rejected (sender == receiver).
+
+preconditions:
+  - account: "alice"
+    balance: 1000000000
+
+action:
+  type: transfer
+  from: "alice"
+  to: "alice"
+  amount: 100000000
+
+expected:
+  status: error
+  error_code: "SELF_TRANSFER"
+
+postconditions:
+  - account: "alice"
+    balance: 1000000000  # Unchanged

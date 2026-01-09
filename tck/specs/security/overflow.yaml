@@ -1,0 +1,86 @@
+# TOS-TCK Conformance Spec: Overflow Protection
+# Tests integer overflow/underflow prevention
+
+spec:
+  name: security_overflow_add
+  version: "1.0"
+  category: security
+  subcategory: arithmetic
+
+description: |
+  Verifies that addition overflow is prevented.
+  MAX_U64 + 1 should fail, not wrap.
+
+preconditions:
+  - account: "contract_a"
+    balance: 18446744073709551615  # u64::MAX
+
+action:
+  type: syscall
+  name: checked_add
+  args:
+    - a: 18446744073709551615
+    - b: 1
+
+expected:
+  status: error
+  error_code: "OVERFLOW"
+
+postconditions:
+  - account: "contract_a"
+    balance: 18446744073709551615  # Unchanged
+
+---
+spec:
+  name: security_underflow_sub
+  version: "1.0"
+  category: security
+  subcategory: arithmetic
+
+description: |
+  Verifies that subtraction underflow is prevented.
+  0 - 1 should fail, not wrap to MAX.
+
+preconditions:
+  - account: "contract_a"
+    balance: 0
+
+action:
+  type: transfer
+  from: "contract_a"
+  to: "contract_b"
+  amount: 1
+
+expected:
+  status: error
+  error_code: "INSUFFICIENT_BALANCE"
+
+postconditions:
+  - account: "contract_a"
+    balance: 0  # Unchanged, not MAX
+
+---
+spec:
+  name: security_overflow_mul
+  version: "1.0"
+  category: security
+  subcategory: arithmetic
+
+description: |
+  Verifies that multiplication overflow is prevented.
+  Large values should fail safely.
+
+preconditions: []
+
+action:
+  type: syscall
+  name: checked_mul
+  args:
+    - a: 18446744073709551615
+    - b: 2
+
+expected:
+  status: error
+  error_code: "OVERFLOW"
+
+postconditions: []

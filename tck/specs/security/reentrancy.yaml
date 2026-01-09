@@ -1,0 +1,116 @@
+# Reentrancy Security Conformance Specifications
+# Tests for reentrancy attack prevention
+
+---
+spec:
+  name: security_reentrancy_basic_attack
+  version: "1.0"
+  category: security
+  subcategory: reentrancy
+  description: "Basic reentrancy attack is prevented"
+  priority: P0
+
+preconditions:
+  - victim_contract:
+      address: "0xvictim..."
+      balance: 10000
+      has_reentrancy_guard: false
+  - attacker_contract:
+      address: "0xattacker..."
+      balance: 100
+      has_callback: true
+
+action:
+  type: attack_simulation
+  attack_type: reentrancy
+  target: "0xvictim..."
+  method: "withdraw"
+  callback_method: "withdraw"
+
+expected:
+  status: attack_detected
+  victim_balance_lost: "> 100"
+  security_alert: "reentrancy_vulnerability"
+
+---
+spec:
+  name: security_reentrancy_guard_protection
+  version: "1.0"
+  category: security
+  subcategory: reentrancy
+  description: "Reentrancy guard prevents attack"
+  priority: P0
+
+preconditions:
+  - protected_contract:
+      address: "0xprotected..."
+      balance: 10000
+      has_reentrancy_guard: true
+  - attacker_contract:
+      address: "0xattacker..."
+
+action:
+  type: attack_simulation
+  attack_type: reentrancy
+  target: "0xprotected..."
+  method: "withdraw"
+  callback_method: "withdraw"
+
+expected:
+  status: attack_prevented
+  error: "ReentrancyGuard"
+  victim_balance: 10000  # Unchanged
+
+---
+spec:
+  name: security_reentrancy_cross_function
+  version: "1.0"
+  category: security
+  subcategory: reentrancy
+  description: "Cross-function reentrancy detection"
+  priority: P1
+
+preconditions:
+  - vulnerable_contract:
+      address: "0xvuln..."
+      balance: 10000
+      function_a: "withdraw"
+      function_b: "transfer"
+      shared_state: true
+
+action:
+  type: attack_simulation
+  attack_type: cross_function_reentrancy
+  target: "0xvuln..."
+  entry_method: "withdraw"
+  callback_method: "transfer"
+
+expected:
+  status: attack_detected
+  security_alert: "cross_function_reentrancy"
+
+---
+spec:
+  name: security_reentrancy_checks_effects_interactions
+  version: "1.0"
+  category: security
+  subcategory: reentrancy
+  description: "CEI pattern prevents reentrancy"
+  priority: P0
+
+preconditions:
+  - cei_contract:
+      address: "0xcei..."
+      balance: 10000
+      pattern: "checks_effects_interactions"
+
+action:
+  type: attack_simulation
+  attack_type: reentrancy
+  target: "0xcei..."
+  method: "withdraw"
+
+expected:
+  status: attack_prevented
+  reason: "state_updated_before_call"
+  balance_correct: true

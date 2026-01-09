@@ -1,0 +1,243 @@
+# TOS-TCK Conformance Spec: Call Syscalls
+# Tests contract call operations
+
+spec:
+  name: syscall_call_basic
+  version: "1.0"
+  category: syscalls
+  subcategory: call
+
+description: |
+  Verifies basic CALL to another contract.
+  Should transfer value and execute code.
+
+preconditions:
+  - account: "contract_a"
+    balance: 1000000000
+  - account: "contract_b"
+    balance: 0
+
+action:
+  type: call
+  contract: "contract_b"
+  function: "receive"
+  args: []
+
+expected:
+  status: success
+  gas_used: "<= 25000"
+
+postconditions: []
+
+---
+spec:
+  name: syscall_call_with_value
+  version: "1.0"
+  category: syscalls
+  subcategory: call
+
+description: |
+  Verifies CALL with value transfer.
+  Should debit caller and credit callee.
+
+preconditions:
+  - account: "contract_a"
+    balance: 1000000000
+  - account: "contract_b"
+    balance: 0
+
+action:
+  type: syscall
+  name: call
+  args:
+    - target: "contract_b"
+    - value: 100000000
+    - data: "0x"
+
+expected:
+  status: success
+  gas_used: "<= 30000"
+
+postconditions:
+  - account: "contract_a"
+    balance: 900000000
+  - account: "contract_b"
+    balance: 100000000
+
+---
+spec:
+  name: syscall_call_revert
+  version: "1.0"
+  category: syscalls
+  subcategory: call
+
+description: |
+  Verifies CALL handles revert correctly.
+  State changes in callee should be rolled back.
+
+preconditions:
+  - account: "contract_a"
+    balance: 1000000000
+  - account: "reverting_contract"
+
+action:
+  type: syscall
+  name: call
+  args:
+    - target: "reverting_contract"
+    - value: 0
+    - data: "0xrevert_selector"
+
+expected:
+  status: revert
+  gas_used: "<= 25000"
+
+postconditions:
+  - account: "contract_a"
+    balance: 1000000000  # Unchanged
+
+---
+spec:
+  name: syscall_staticcall_basic
+  version: "1.0"
+  category: syscalls
+  subcategory: call
+
+description: |
+  Verifies STATICCALL for read-only calls.
+  Should fail if callee attempts state modification.
+
+preconditions:
+  - account: "contract_a"
+  - account: "view_contract"
+    storage:
+      "0x01": "0x42"
+
+action:
+  type: syscall
+  name: staticcall
+  args:
+    - target: "view_contract"
+    - data: "0xget_value_selector"
+
+expected:
+  status: success
+  return_value: "0x42"
+  gas_used: "<= 5000"
+
+postconditions: []
+
+---
+spec:
+  name: syscall_staticcall_write_fails
+  version: "1.0"
+  category: syscalls
+  subcategory: call
+
+description: |
+  Verifies STATICCALL prevents state writes.
+  Any SSTORE in callee should cause revert.
+
+preconditions: []
+
+action:
+  type: syscall
+  name: staticcall
+  args:
+    - target: "writing_contract"
+    - data: "0xset_value_selector"
+
+expected:
+  status: revert
+  error_code: "STATIC_CALL_VIOLATION"
+
+postconditions: []
+
+---
+spec:
+  name: syscall_delegatecall_basic
+  version: "1.0"
+  category: syscalls
+  subcategory: call
+
+description: |
+  Verifies DELEGATECALL executes code in caller's context.
+  Storage writes affect caller, not callee.
+
+preconditions:
+  - account: "contract_a"
+    storage: {}
+  - account: "library_contract"
+
+action:
+  type: syscall
+  name: delegatecall
+  args:
+    - target: "library_contract"
+    - data: "0xset_slot_zero_selector"
+
+expected:
+  status: success
+  gas_used: "<= 10000"
+
+postconditions:
+  - account: "contract_a"
+    storage:
+      "0x00": "!= 0x00"  # Modified by delegatecall
+
+---
+spec:
+  name: syscall_call_depth_limit
+  version: "1.0"
+  category: syscalls
+  subcategory: call
+
+description: |
+  Verifies call depth limit (1024).
+  Deep recursion should fail, not crash.
+
+preconditions:
+  - account: "recursive_contract"
+
+action:
+  type: syscall
+  name: call
+  args:
+    - target: "recursive_contract"
+    - data: "0xrecurse_1024_times"
+
+expected:
+  status: error
+  error_code: "CALL_DEPTH_EXCEEDED"
+
+postconditions: []
+
+---
+spec:
+  name: syscall_call_reentrancy
+  version: "1.0"
+  category: syscalls
+  subcategory: call
+
+description: |
+  Verifies reentrancy is possible but state is consistent.
+  Contract should handle reentrant calls correctly.
+
+preconditions:
+  - account: "vulnerable_contract"
+    balance: 1000000000
+  - account: "attacker_contract"
+    balance: 0
+
+action:
+  type: syscall
+  name: call
+  args:
+    - target: "attacker_contract"
+    - data: "0xattack_selector"
+
+expected:
+  status: success
+
+postconditions:
+  - assertion: "total_balance_conserved"

@@ -1,0 +1,139 @@
+# Access Control Security Conformance Specifications
+# Tests for access control and authorization
+
+---
+spec:
+  name: security_access_owner_only
+  version: "1.0"
+  category: security
+  subcategory: access_control
+  description: "Owner-only functions reject non-owners"
+  priority: P0
+
+preconditions:
+  - contract:
+      address: "0xcontract..."
+      owner: "alice"
+  - caller: "bob"
+
+action:
+  type: call
+  to: "0xcontract..."
+  method: "setFee"
+  modifier: "onlyOwner"
+  from: "bob"
+
+expected:
+  status: revert
+  error: "Ownable: caller is not the owner"
+
+---
+spec:
+  name: security_access_owner_success
+  version: "1.0"
+  category: security
+  subcategory: access_control
+  description: "Owner can call owner-only functions"
+  priority: P0
+
+preconditions:
+  - contract:
+      address: "0xcontract..."
+      owner: "alice"
+  - caller: "alice"
+
+action:
+  type: call
+  to: "0xcontract..."
+  method: "setFee"
+  modifier: "onlyOwner"
+  from: "alice"
+  params:
+    newFee: 100
+
+expected:
+  status: success
+
+---
+spec:
+  name: security_access_role_based
+  version: "1.0"
+  category: security
+  subcategory: access_control
+  description: "Role-based access control works correctly"
+  priority: P0
+
+preconditions:
+  - contract:
+      address: "0xcontract..."
+      roles:
+        ADMIN_ROLE: ["alice"]
+        MINTER_ROLE: ["bob"]
+  - caller: "bob"
+
+action:
+  type: call
+  to: "0xcontract..."
+  method: "mint"
+  required_role: "MINTER_ROLE"
+  from: "bob"
+
+expected:
+  status: success
+
+---
+spec:
+  name: security_access_role_denied
+  version: "1.0"
+  category: security
+  subcategory: access_control
+  description: "Missing role causes revert"
+  priority: P0
+
+preconditions:
+  - contract:
+      address: "0xcontract..."
+      roles:
+        MINTER_ROLE: ["bob"]
+  - caller: "charlie"
+
+action:
+  type: call
+  to: "0xcontract..."
+  method: "mint"
+  required_role: "MINTER_ROLE"
+  from: "charlie"
+
+expected:
+  status: revert
+  error: "AccessControl: account missing role"
+
+---
+spec:
+  name: security_access_multi_sig
+  version: "1.0"
+  category: security
+  subcategory: access_control
+  description: "Multi-signature requirement enforced"
+  priority: P1
+
+preconditions:
+  - multisig:
+      address: "0xmultisig..."
+      threshold: 2
+      signers: ["alice", "bob", "charlie"]
+  - transaction:
+      to: "0xtarget..."
+      value: 1000
+      approvals: ["alice"]  # Only 1 approval
+
+action:
+  type: execute_multisig
+  multisig: "0xmultisig..."
+  tx_id: 1
+
+expected:
+  status: revert
+  error: "not_enough_approvals"
+  required: 2
+  current: 1

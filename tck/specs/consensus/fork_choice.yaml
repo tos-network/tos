@@ -1,0 +1,138 @@
+# Fork Choice Conformance Specifications
+# Tests for fork choice rules and chain selection
+
+---
+spec:
+  name: consensus_fork_choice_longest_chain
+  version: "1.0"
+  category: consensus
+  subcategory: fork_choice
+  description: "Select chain with most work (longest valid chain)"
+  priority: P0
+
+preconditions:
+  - chain_a:
+      height: 100
+      cumulative_difficulty: 1000000
+  - chain_b:
+      height: 95
+      cumulative_difficulty: 900000
+
+action:
+  type: fork_choice
+  chains: ["chain_a", "chain_b"]
+
+expected:
+  status: success
+  selected: "chain_a"
+  reason: "highest_cumulative_difficulty"
+
+---
+spec:
+  name: consensus_fork_choice_same_height_more_work
+  version: "1.0"
+  category: consensus
+  subcategory: fork_choice
+  description: "Select chain with more work at same height"
+  priority: P0
+
+preconditions:
+  - chain_a:
+      height: 100
+      cumulative_difficulty: 1000000
+  - chain_b:
+      height: 100
+      cumulative_difficulty: 1100000
+
+action:
+  type: fork_choice
+  chains: ["chain_a", "chain_b"]
+
+expected:
+  status: success
+  selected: "chain_b"
+  reason: "highest_cumulative_difficulty"
+
+---
+spec:
+  name: consensus_fork_choice_tie_breaker
+  version: "1.0"
+  category: consensus
+  subcategory: fork_choice
+  description: "Tie-break by block hash when difficulty equal"
+  priority: P1
+
+preconditions:
+  - chain_a:
+      height: 100
+      cumulative_difficulty: 1000000
+      tip_hash: "0xabc..."
+  - chain_b:
+      height: 100
+      cumulative_difficulty: 1000000
+      tip_hash: "0x123..."
+
+action:
+  type: fork_choice
+  chains: ["chain_a", "chain_b"]
+
+expected:
+  status: success
+  selected: "chain_b"  # Lower hash wins
+  reason: "lower_hash_tiebreaker"
+
+---
+spec:
+  name: consensus_fork_choice_invalid_chain
+  version: "1.0"
+  category: consensus
+  subcategory: fork_choice
+  description: "Invalid chain is never selected"
+  priority: P0
+
+preconditions:
+  - chain_a:
+      height: 100
+      cumulative_difficulty: 1000000
+      valid: true
+  - chain_b:
+      height: 150
+      cumulative_difficulty: 2000000
+      valid: false
+      invalid_reason: "bad_merkle_root"
+
+action:
+  type: fork_choice
+  chains: ["chain_a", "chain_b"]
+
+expected:
+  status: success
+  selected: "chain_a"
+  reason: "only_valid_chain"
+
+---
+spec:
+  name: consensus_fork_choice_reorg_threshold
+  version: "1.0"
+  category: consensus
+  subcategory: fork_choice
+  description: "Deep reorg requires significant work advantage"
+  priority: P1
+
+preconditions:
+  - current_chain:
+      height: 100
+      cumulative_difficulty: 1000000
+  - competing_chain:
+      height: 105
+      cumulative_difficulty: 1010000  # Only 1% more work
+      fork_point: 50  # 50 block deep reorg
+
+action:
+  type: fork_choice
+  chains: ["current_chain", "competing_chain"]
+  reorg_depth_threshold: 20
+
+expected:
+  status: reject
+  reason: "insufficient_work_for_deep_reorg"

@@ -7,7 +7,7 @@ members = [
     "miner",
     "daemon",
     "genesis",
-    "testing-framework"
+    "tck",
     ]
 
 [workspace.dependencies]

@@ -1,0 +1,150 @@
+# TOS-TCK Conformance Spec: Storage Syscalls
+# Tests sload and sstore syscall behavior
+
+spec:
+  name: syscall_storage_sstore_basic
+  version: "1.0"
+  category: syscalls
+  subcategory: storage
+
+description: |
+  Verifies basic storage write operation.
+  SSTORE should persist a 32-byte value at the given key.
+
+preconditions:
+  - account: "contract_a"
+    storage: {}
+
+action:
+  type: syscall
+  name: sstore
+  args:
+    - key: "0x0000000000000000000000000000000000000000000000000000000000000001"
+    - value: "0x000000000000000000000000000000000000000000000000000000000000002a"
+
+expected:
+  status: success
+  gas_used: "<= 20000"
+
+postconditions:
+  - account: "contract_a"
+    storage:
+      "0x0000000000000000000000000000000000000000000000000000000000000001": "0x000000000000000000000000000000000000000000000000000000000000002a"
+
+---
+# Test case: Storage read
+spec:
+  name: syscall_storage_sload_basic
+  version: "1.0"
+  category: syscalls
+  subcategory: storage
+
+description: |
+  Verifies basic storage read operation.
+  SLOAD should return the stored value or zero if not set.
+
+preconditions:
+  - account: "contract_a"
+    storage:
+      "0x0000000000000000000000000000000000000000000000000000000000000001": "0x000000000000000000000000000000000000000000000000000000000000002a"
+
+action:
+  type: syscall
+  name: sload
+  args:
+    - key: "0x0000000000000000000000000000000000000000000000000000000000000001"
+
+expected:
+  status: success
+  return_value: "0x000000000000000000000000000000000000000000000000000000000000002a"
+  gas_used: "<= 2100"
+
+postconditions: []
+
+---
+# Test case: Read uninitialized storage
+spec:
+  name: syscall_storage_sload_uninitialized
+  version: "1.0"
+  category: syscalls
+  subcategory: storage
+
+description: |
+  Verifies that reading uninitialized storage returns zero.
+
+preconditions:
+  - account: "contract_a"
+    storage: {}
+
+action:
+  type: syscall
+  name: sload
+  args:
+    - key: "0x0000000000000000000000000000000000000000000000000000000000000099"
+
+expected:
+  status: success
+  return_value: "0x0000000000000000000000000000000000000000000000000000000000000000"
+  gas_used: "<= 2100"
+
+postconditions: []
+
+---
+# Test case: Clear storage (set to zero)
+spec:
+  name: syscall_storage_sstore_clear
+  version: "1.0"
+  category: syscalls
+  subcategory: storage
+
+description: |
+  Verifies clearing storage by setting value to zero.
+  Should receive gas refund for clearing storage.
+
+preconditions:
+  - account: "contract_a"
+    storage:
+      "0x0000000000000000000000000000000000000000000000000000000000000001": "0x000000000000000000000000000000000000000000000000000000000000002a"
+
+action:
+  type: syscall
+  name: sstore
+  args:
+    - key: "0x0000000000000000000000000000000000000000000000000000000000000001"
+    - value: "0x0000000000000000000000000000000000000000000000000000000000000000"
+
+expected:
+  status: success
+  gas_used: "<= 5000"  # Reduced cost for clearing
+
+postconditions:
+  - account: "contract_a"
+    storage:
+      "0x0000000000000000000000000000000000000000000000000000000000000001": "0x0000000000000000000000000000000000000000000000000000000000000000"
+
+---
+# Test case: Transient storage (EIP-1153)
+spec:
+  name: syscall_storage_tstore_basic
+  version: "1.0"
+  category: syscalls
+  subcategory: storage
+
+description: |
+  Verifies transient storage write operation (EIP-1153).
+  TSTORE values persist only within the transaction.
+
+preconditions: []
+
+action:
+  type: syscall
+  name: tstore
+  args:
+    - key: "0x0000000000000000000000000000000000000000000000000000000000000001"
+    - value: "0x00000000000000000000000000000000000000000000000000000000000000ff"
+
+expected:
+  status: success
+  gas_used: "<= 100"
+
+postconditions: []

@@ -1,0 +1,254 @@
+name: TCK - Technology Compatibility Kit
+
+# Run TCK tests on push to main and on all PRs
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+    branches: [main, master, develop]
+  # Allow manual trigger
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # ==========================================================================
+  # Conformance Tests
+  # ==========================================================================
+  conformance:
+    name: Conformance Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-tck-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-tck-
+
+      - name: Run conformance tests
+        run: |
+          echo "=========================================="
+          echo "Running TCK Conformance Tests"
+          echo "=========================================="
+          cargo test -p tos-tck --features conformance --release
+
+      - name: Generate conformance report
+        run: |
+          echo "=========================================="
+          echo "Generating Conformance Report"
+          echo "=========================================="
+          # Run conformance runner and output JSON report
+          cargo test -p tos-tck conformance --release -- --nocapture 2>&1 | tee conformance-output.txt || true
+
+      - name: Upload conformance report
+        uses: actions/upload-artifact@v4
+        with:
+          name: conformance-report
+          path: conformance-output.txt
+          retention-days: 30
+
+  # ==========================================================================
+  # TCK Unit Tests
+  # ==========================================================================
+  tck-tests:
+    name: TCK Unit Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-tck-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-tck-
+
+      - name: Run TCK unit tests
+        run: |
+          echo "=========================================="
+          echo "Running TCK Unit Tests"
+          echo "=========================================="
+          cargo test -p tos-tck --lib
+
+      - name: Run TCK integration tests
+        run: |
+          echo "=========================================="
+          echo "Running TCK Integration Tests"
+          echo "=========================================="
+          cargo test -p tos-tck --tests --release
+
+  # ==========================================================================
+  # Formal Verification (Kani) - Weekly
+  # ==========================================================================
+  formal-verification:
+    name: Formal Verification (Kani)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    # Only run on main branch pushes or manual trigger
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Install Kani
+        run: |
+          echo "=========================================="
+          echo "Installing Kani Verifier"
+          echo "=========================================="
+          cargo install --locked kani-verifier
+          cargo kani setup
+
+      - name: Run Kani proofs
+        run: |
+          echo "=========================================="
+          echo "Running Formal Verification with Kani"
+          echo "=========================================="
+          cd tck
+          cargo kani --tests 2>&1 | tee kani-output.txt || true
+
+      - name: Upload Kani report
+        uses: actions/upload-artifact@v4
+        with:
+          name: kani-verification-report
+          path: tck/kani-output.txt
+          retention-days: 30
+
+  # ==========================================================================
+  # Property-Based Tests
+  # ==========================================================================
+  property-tests:
+    name: Property-Based Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-tck-proptest-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-tck-
+
+      - name: Run property-based tests
+        run: |
+          echo "=========================================="
+          echo "Running Property-Based Tests"
+          echo "=========================================="
+          cargo test -p tos-tck --features tier4 --release -- property
+
+  # ==========================================================================
+  # TCK Lint Check
+  # ==========================================================================
+  tck-lint:
+    name: TCK Lint Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-tck-lint-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-tck-
+
+      - name: Run clippy on TCK
+        run: |
+          echo "=========================================="
+          echo "Running Clippy on TCK"
+          echo "=========================================="
+          cargo clippy -p tos-tck --all-features -- -D warnings
+
+  # ==========================================================================
+  # Coverage Report
+  # ==========================================================================
+  coverage:
+    name: Code Coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-tarpaulin
+        run: |
+          cargo install cargo-tarpaulin
+
+      - name: Generate coverage report
+        run: |
+          echo "=========================================="
+          echo "Generating Code Coverage Report"
+          echo "=========================================="
+          # Use --lib to avoid OOM during linking of large integration tests
+          # Also use --jobs 1 to reduce memory pressure
+          cargo tarpaulin -p tos-tck --lib --out Xml --output-dir coverage/ --jobs 1
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: coverage/cobertura.xml
+          flags: tck
+          name: tck-coverage
+          fail_ci_if_error: false
+
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage/
+          retention-days: 30
