@@ -197,8 +197,9 @@ impl ScenarioExecutor {
         // Now get daemon reference (immutable borrow)
         let daemon = self.daemon.as_ref().context("Daemon not initialized")?;
 
-        // Get nonce
-        let nonce = daemon.get_nonce(&from_addr).await? + 1;
+        // Get nonce (use saturating_add to prevent overflow at u64::MAX)
+        let current_nonce = daemon.get_nonce(&from_addr).await?;
+        let nonce = current_nonce.saturating_add(1);
 
         // Create transaction
         let tx = TestTransaction {

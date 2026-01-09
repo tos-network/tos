@@ -319,7 +319,23 @@ pub fn format_tos(nano_tos: u64) -> String {
 /// ```
 pub fn parse_tos(tos_str: &str) -> Result<u64> {
     let tos: f64 = tos_str.parse()?;
-    Ok((tos * 1_000_000_000.0) as u64)
+
+    // Validate the value is non-negative and within u64 range
+    if tos < 0.0 {
+        anyhow::bail!("TOS amount cannot be negative: {}", tos_str);
+    }
+
+    let nano_tos = tos * 1_000_000_000.0;
+
+    // Check for overflow (f64 can represent values larger than u64::MAX)
+    if nano_tos > u64::MAX as f64 {
+        anyhow::bail!(
+            "TOS amount too large: {} would overflow u64 as nanoTOS",
+            tos_str
+        );
+    }
+
+    Ok(nano_tos as u64)
 }
 
 /// Simplified test environment setup for doc-tests
