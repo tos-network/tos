@@ -321,30 +321,34 @@ impl TestBlockchain {
 
         // Process each transaction
         for tx in &transactions {
+            // Calculate total deduction with overflow protection
+            let total_deduction = tx.amount.saturating_add(tx.fee);
+
             // Deduct from sender
             if let Some(sender) = accounts.get_mut(&tx.sender) {
-                sender.balance = sender.balance.saturating_sub(tx.amount + tx.fee);
-                sender.nonce += 1;
+                sender.balance = sender.balance.saturating_sub(total_deduction);
+                sender.nonce = sender.nonce.saturating_add(1);
             }
 
-            // Add to recipient (create if doesn't exist)
+            // Add to recipient (create if doesn't exist) with overflow protection
             accounts
                 .entry(tx.recipient.clone())
                 .or_insert_with(|| AccountState {
                     balance: 0,
                     nonce: 0,
                 })
-                .balance += tx.amount;
+                .balance = accounts
+                .get(&tx.recipient)
+                .map(|a| a.balance.saturating_add(tx.amount))
+                .unwrap_or(tx.amount);
 
-            // Update counters
-            counters.balances_total = counters
-                .balances_total
-                .saturating_sub((tx.amount + tx.fee) as u128);
-            counters.balances_total += tx.amount as u128; // Re-add transferred amount to recipient
+            // Update counters: only deduct fee from total (transfer is balance-neutral)
+            counters.balances_total = counters.balances_total.saturating_sub(tx.fee as u128);
 
             // Split fee (example: 50% burned, 50% to miner)
-            counters.fees_burned += tx.fee / 2;
-            counters.fees_miner += tx.fee / 2;
+            // Handle odd fees: burned gets remainder
+            counters.fees_miner = counters.fees_miner.saturating_add(tx.fee / 2);
+            counters.fees_burned = counters.fees_burned.saturating_add(tx.fee - tx.fee / 2);
         }
 
         // Calculate block reward (example: 50 TOS per block)
@@ -490,30 +494,34 @@ impl TestBlockchain {
 
         // Process each transaction in the block
         for tx in &block.transactions {
+            // Calculate total deduction with overflow protection
+            let total_deduction = tx.amount.saturating_add(tx.fee);
+
             // Deduct from sender
             if let Some(sender) = accounts.get_mut(&tx.sender) {
-                sender.balance = sender.balance.saturating_sub(tx.amount + tx.fee);
-                sender.nonce += 1;
+                sender.balance = sender.balance.saturating_sub(total_deduction);
+                sender.nonce = sender.nonce.saturating_add(1);
             }
 
-            // Add to recipient (create if doesn't exist)
+            // Add to recipient (create if doesn't exist) with overflow protection
             accounts
                 .entry(tx.recipient.clone())
                 .or_insert_with(|| AccountState {
                     balance: 0,
                     nonce: 0,
                 })
-                .balance += tx.amount;
+                .balance = accounts
+                .get(&tx.recipient)
+                .map(|a| a.balance.saturating_add(tx.amount))
+                .unwrap_or(tx.amount);
 
-            // Update counters
-            counters.balances_total = counters
-                .balances_total
-                .saturating_sub((tx.amount + tx.fee) as u128);
-            counters.balances_total += tx.amount as u128; // Re-add transferred amount to recipient
+            // Update counters: only deduct fee from total (transfer is balance-neutral)
+            counters.balances_total = counters.balances_total.saturating_sub(tx.fee as u128);
 
             // Split fee (example: 50% burned, 50% to miner)
-            counters.fees_burned += tx.fee / 2;
-            counters.fees_miner += tx.fee / 2;
+            // Handle odd fees: burned gets remainder
+            counters.fees_miner = counters.fees_miner.saturating_add(tx.fee / 2);
+            counters.fees_burned = counters.fees_burned.saturating_add(tx.fee - tx.fee / 2);
         }
 
         // Apply block reward
@@ -1853,8 +1861,10 @@ mod tests {
         blockchain.mine_block().await.unwrap();
 
         let counters = blockchain.read_counters().await.unwrap();
-        assert_eq!(counters.fees_burned, 0); // 1/2 = 0 due to integer division
-        assert_eq!(counters.fees_miner, 0);
+        // Fee splitting: miner gets fee/2, burned gets remainder (fee - fee/2)
+        // For fee=1: miner=0, burned=1 (no fee units lost)
+        assert_eq!(counters.fees_burned, 1); // 1 - 1/2 = 1 - 0 = 1
+        assert_eq!(counters.fees_miner, 0); // 1/2 = 0
     }
 
     #[tokio::test]
@@ -1878,8 +1888,10 @@ mod tests {
         blockchain.mine_block().await.unwrap();
 
         let counters = blockchain.read_counters().await.unwrap();
-        assert_eq!(counters.fees_burned, 50); // 101/2 = 50
-        assert_eq!(counters.fees_miner, 50);
+        // Fee splitting: miner gets fee/2, burned gets remainder (fee - fee/2)
+        // For fee=101: miner=50, burned=51 (no fee units lost)
+        assert_eq!(counters.fees_burned, 51); // 101 - 101/2 = 101 - 50 = 51
+        assert_eq!(counters.fees_miner, 50); // 101/2 = 50
     }
 
     // --- Overflow/Underflow Tests ---

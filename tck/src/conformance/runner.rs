@@ -222,28 +222,12 @@ impl ConformanceRunner {
                 }
                 if let Some(storage) = &condition.storage {
                     for (key, value) in storage {
-                        let key_bytes =
-                            hex::decode(key.trim_start_matches("0x")).unwrap_or_else(|e| {
-                                if log::log_enabled!(log::Level::Warn) {
-                                    log::warn!(
-                                        "Invalid hex key '{}' in storage, using raw bytes: {}",
-                                        key,
-                                        e
-                                    );
-                                }
-                                key.as_bytes().to_vec()
-                            });
+                        let key_bytes = hex::decode(key.trim_start_matches("0x"))
+                            .with_context(|| format!("Invalid hex key in storage: '{}'", key))?;
                         let value_bytes = hex::decode(value.trim_start_matches("0x"))
-                            .unwrap_or_else(|e| {
-                                if log::log_enabled!(log::Level::Warn) {
-                                    log::warn!(
-                                        "Invalid hex value '{}' in storage, using raw bytes: {}",
-                                        value,
-                                        e
-                                    );
-                                }
-                                value.as_bytes().to_vec()
-                            });
+                            .with_context(|| {
+                                format!("Invalid hex value in storage: '{}'", value)
+                            })?;
                         account.storage.insert(hex::encode(&key_bytes), value_bytes);
                     }
                 }
@@ -456,16 +440,8 @@ impl ConformanceRunner {
                     .ok_or_else(|| anyhow::anyhow!("storage_write requires value argument"))?;
 
                 let account_state = ctx.accounts.entry(account.clone()).or_default();
-                let value_bytes = hex::decode(value.trim_start_matches("0x")).unwrap_or_else(|e| {
-                    if log::log_enabled!(log::Level::Warn) {
-                        log::warn!(
-                            "Invalid hex value '{}' in storage_write, using raw bytes: {}",
-                            value,
-                            e
-                        );
-                    }
-                    value.as_bytes().to_vec()
-                });
+                let value_bytes = hex::decode(value.trim_start_matches("0x"))
+                    .with_context(|| format!("Invalid hex value in storage_write: '{}'", value))?;
                 account_state.storage.insert(key.clone(), value_bytes);
 
                 Ok(ExecutionResult {
@@ -685,7 +661,8 @@ impl ConformanceRunner {
 
     fn evaluate_balance_assertion(&self, ctx: &TestContext, assertion: &str) -> Result<()> {
         // Parse: balance(account) == 100
-        let re_pattern = r"balance\((\w+)\)\s*(==|>=|<=|>|<)\s*(\d+)";
+        // Use anchors to ensure we match the entire assertion
+        let re_pattern = r"^balance\((\w+)\)\s*(==|>=|<=|>|<)\s*(\d+)$";
         let re = regex_lite::Regex::new(re_pattern).context("Invalid regex pattern")?;
 
         if let Some(captures) = re.captures(assertion) {
@@ -724,7 +701,8 @@ impl ConformanceRunner {
     }
 
     fn evaluate_nonce_assertion(&self, ctx: &TestContext, assertion: &str) -> Result<()> {
-        let re_pattern = r"nonce\((\w+)\)\s*(==|>=|<=|>|<)\s*(\d+)";
+        // Use anchors to ensure we match the entire assertion
+        let re_pattern = r"^nonce\((\w+)\)\s*(==|>=|<=|>|<)\s*(\d+)$";
         let re = regex_lite::Regex::new(re_pattern).context("Invalid regex pattern")?;
 
         if let Some(captures) = re.captures(assertion) {
@@ -764,7 +742,8 @@ impl ConformanceRunner {
 
     fn evaluate_storage_assertion(&self, ctx: &TestContext, assertion: &str) -> Result<()> {
         // Parse: storage(account, key) == value
-        let re_pattern = r"storage\((\w+),\s*([^)]+)\)\s*(==)\s*(.+)";
+        // Use anchors to ensure we match the entire assertion
+        let re_pattern = r"^storage\((\w+),\s*([^)]+)\)\s*(==)\s*(.+)$";
         let re = regex_lite::Regex::new(re_pattern).context("Invalid regex pattern")?;
 
         if let Some(captures) = re.captures(assertion) {

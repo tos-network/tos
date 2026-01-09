@@ -4,11 +4,33 @@
 //! complex setup. Since this is a testing framework, these helpers are always
 //! available.
 //!
-//! Design philosophy:
+//! # Design Philosophy
+//!
 //! - Fast: In-memory storage, minimal initialization
 //! - Simple: Clear APIs for documentation examples
 //! - Complete: Support Tier 1 and Tier 2 examples
 //! - Isolated: Each test gets fresh state
+//!
+//! # Error Handling in Examples
+//!
+//! Doc-test examples in this module use `.expect()` or `.unwrap()` for brevity.
+//! This is intentional because:
+//!
+//! 1. Doc-tests should be concise and focus on API usage
+//! 2. Test failures are visible as panics
+//! 3. This is a testing framework, not production code
+//!
+//! **For production code**, always use proper error handling:
+//!
+//! ```rust,ignore
+//! // Production code should use ? or match
+//! let blockchain = MinimalBlockchain::new().await?;
+//! // or
+//! let blockchain = match MinimalBlockchain::new().await {
+//!     Ok(bc) => bc,
+//!     Err(e) => return Err(handle_error(e)),
+//! };
+//! ```
 
 use crate::orchestrator::{Clock, PausedClock, SystemClock};
 use crate::tier1_component::{TestBlockchain, TestBlockchainBuilder};
@@ -32,8 +54,8 @@ pub use tokio::time::Duration;
 /// ```rust
 /// # use tos_tck::doc_test_helpers::MinimalBlockchain;
 /// # tokio_test::block_on(async {
-/// let blockchain = MinimalBlockchain::new().await.unwrap();
-/// let tip_height = blockchain.get_tip_height().await.unwrap();
+/// let blockchain = MinimalBlockchain::new().await.expect("failed to create blockchain");
+/// let tip_height = blockchain.get_tip_height().await.expect("failed to get tip height");
 /// assert_eq!(tip_height, 0);
 /// # });
 /// ```
@@ -49,7 +71,7 @@ impl MinimalBlockchain {
     /// ```rust
     /// # use tos_tck::doc_test_helpers::MinimalBlockchain;
     /// # tokio_test::block_on(async {
-    /// let blockchain = MinimalBlockchain::new().await.unwrap();
+    /// let blockchain = MinimalBlockchain::new().await.expect("blockchain creation failed");
     /// # });
     /// ```
     pub async fn new() -> Result<Self> {
@@ -71,7 +93,9 @@ impl MinimalBlockchain {
     /// ```rust
     /// # use tos_tck::doc_test_helpers::MinimalBlockchain;
     /// # tokio_test::block_on(async {
-    /// let (blockchain, clock) = MinimalBlockchain::with_paused_time().await.unwrap();
+    /// let (blockchain, clock) = MinimalBlockchain::with_paused_time()
+    ///     .await
+    ///     .expect("paused blockchain creation failed");
     /// # });
     /// ```
     pub async fn with_paused_time() -> Result<(Self, Arc<PausedClock>)> {
@@ -105,7 +129,7 @@ impl MinimalBlockchain {
 /// ```rust
 /// # use tos_tck::doc_test_helpers::create_minimal_blockchain;
 /// # tokio_test::block_on(async {
-/// let blockchain = create_minimal_blockchain().await.unwrap();
+/// let blockchain = create_minimal_blockchain().await.expect("blockchain creation failed");
 /// # });
 /// ```
 pub async fn create_minimal_blockchain() -> Result<MinimalBlockchain> {
@@ -290,7 +314,7 @@ pub fn format_tos(nano_tos: u64) -> String {
 /// ```rust
 /// use tos_tck::doc_test_helpers::parse_tos;
 ///
-/// let amount = parse_tos("1234.5").unwrap();
+/// let amount = parse_tos("1234.5").expect("failed to parse TOS amount");
 /// assert_eq!(amount, 1_234_500_000_000u64);
 /// ```
 pub fn parse_tos(tos_str: &str) -> Result<u64> {
@@ -310,7 +334,7 @@ pub fn parse_tos(tos_str: &str) -> Result<u64> {
 /// ```rust
 /// # use tos_tck::doc_test_helpers::DocTestEnv;
 /// # tokio_test::block_on(async {
-/// let env = DocTestEnv::new().await.unwrap();
+/// let env = DocTestEnv::new().await.expect("test env creation failed");
 /// let alice = env.get_test_address(1);
 /// # });
 /// ```
@@ -372,7 +396,7 @@ impl DocTestEnv {
 ///             counter.load(Ordering::SeqCst) >= 5
 ///         }
 ///     }
-/// ).await.unwrap();
+/// ).await.expect("condition did not become true within timeout");
 /// assert!(counter.load(Ordering::SeqCst) >= 5);
 /// # });
 /// ```
@@ -412,7 +436,7 @@ where
 ///
 /// let expected = 1000u64;
 /// let actual = 1005u64;
-/// assert_approx_eq(expected, actual, 10).unwrap();
+/// assert_approx_eq(expected, actual, 10).expect("values should be approximately equal");
 /// ```
 pub fn assert_approx_eq(expected: u64, actual: u64, tolerance: u64) -> Result<()> {
     let diff = actual.abs_diff(expected);

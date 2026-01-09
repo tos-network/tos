@@ -109,7 +109,7 @@ impl TestEnv {
     /// Deploy a contract with initial balance
     pub fn deploy_contract_with_balance(&mut self, name: &str, balance: u64) -> Address {
         let address = self.compute_deploy_address(name);
-        let bytecode = get_bytecode(name);
+        let bytecode = get_bytecode_or_default(name);
 
         self.contracts.insert(
             address.clone(),
@@ -359,18 +359,66 @@ pub fn compute_create2_address(sender: &Address, salt: [u8; 32], init_code: &[u8
     Address(addr)
 }
 
+/// Known bytecode contract names
+pub const KNOWN_BYTECODE_NAMES: &[&str] = &[
+    "target_contract",
+    "caller_contract",
+    "storage_contract",
+    "event_contract",
+    "erc20",
+    "factory",
+    "proxy",
+    "different_bytecode",
+];
+
 /// Get sample bytecode for a named contract
-pub fn get_bytecode(name: &str) -> Vec<u8> {
+///
+/// Returns `None` for unknown contract names. Use `get_bytecode_or_default`
+/// if you want fallback behavior.
+///
+/// # Known Contract Names
+///
+/// - `target_contract` - Simple return contract
+/// - `caller_contract` - Simple return contract
+/// - `storage_contract` - SSTORE/SLOAD contract
+/// - `event_contract` - LOG0 contract
+/// - `erc20` - Simple return (placeholder)
+/// - `factory` - CREATE contract
+/// - `proxy` - DELEGATECALL contract
+/// - `different_bytecode` - Alternative return contract
+pub fn get_bytecode(name: &str) -> Option<Vec<u8>> {
     match name {
-        "target_contract" => vec![0x60, 0x00, 0x60, 0x00, 0xF3], // PUSH 0, PUSH 0, RETURN
-        "caller_contract" => vec![0x60, 0x00, 0x60, 0x00, 0xF3],
-        "storage_contract" => vec![0x60, 0x00, 0x55, 0x60, 0x00, 0x54, 0xF3], // SSTORE, SLOAD
-        "event_contract" => vec![0x60, 0x00, 0xA0],                           // LOG0
-        "erc20" => vec![0x60, 0x00, 0x60, 0x00, 0xF3],
-        "factory" => vec![0x60, 0x00, 0xF0], // CREATE
-        "proxy" => vec![0x60, 0x00, 0xF4],   // DELEGATECALL
-        "different_bytecode" => vec![0x60, 0x01, 0x60, 0x00, 0xF3],
-        _ => vec![0x60, 0x00, 0x60, 0x00, 0xF3], // Default: simple return
+        "target_contract" => Some(vec![0x60, 0x00, 0x60, 0x00, 0xF3]), // PUSH 0, PUSH 0, RETURN
+        "caller_contract" => Some(vec![0x60, 0x00, 0x60, 0x00, 0xF3]),
+        "storage_contract" => Some(vec![0x60, 0x00, 0x55, 0x60, 0x00, 0x54, 0xF3]), // SSTORE, SLOAD
+        "event_contract" => Some(vec![0x60, 0x00, 0xA0]),                           // LOG0
+        "erc20" => Some(vec![0x60, 0x00, 0x60, 0x00, 0xF3]),
+        "factory" => Some(vec![0x60, 0x00, 0xF0]), // CREATE
+        "proxy" => Some(vec![0x60, 0x00, 0xF4]),   // DELEGATECALL
+        "different_bytecode" => Some(vec![0x60, 0x01, 0x60, 0x00, 0xF3]),
+        _ => None,
+    }
+}
+
+/// Get sample bytecode for a named contract, with default fallback
+///
+/// Returns default bytecode (simple return) for unknown contract names.
+/// Logs a warning when falling back to default.
+///
+/// Use `get_bytecode` if you want explicit error handling for unknown names.
+pub fn get_bytecode_or_default(name: &str) -> Vec<u8> {
+    match get_bytecode(name) {
+        Some(bytecode) => bytecode,
+        None => {
+            if log::log_enabled!(log::Level::Warn) {
+                log::warn!(
+                    "Unknown bytecode name '{}', using default. Known names: {:?}",
+                    name,
+                    KNOWN_BYTECODE_NAMES
+                );
+            }
+            vec![0x60, 0x00, 0x60, 0x00, 0xF3] // Default: simple return
+        }
     }
 }
 
@@ -466,19 +514,67 @@ pub fn encode_u256(value: u64) -> [u8; 32] {
 }
 
 /// Decode u256 to u64 (truncating)
-pub fn decode_u256(data: &[u8]) -> u64 {
+///
+/// Returns None if data is less than 8 bytes.
+/// For backwards compatibility, use `decode_u256_or_zero` if you need
+/// the old behavior of returning 0 for short data.
+pub fn decode_u256(data: &[u8]) -> Option<u64> {
     if data.len() < 8 {
-        return 0;
+        return None;
     }
     let start = data.len().saturating_sub(8);
-    let bytes: [u8; 8] = data[start..].try_into().unwrap_or([0u8; 8]);
-    u64::from_be_bytes(bytes)
+    // Safe: we already verified data.len() >= 8, but use ok()? for clippy compliance
+    let bytes: [u8; 8] = data[start..].try_into().ok()?;
+    Some(u64::from_be_bytes(bytes))
 }
 
-/// Measure gas (placeholder - returns estimated gas)
+/// Decode u256 to u64, returning 0 for invalid/short data
+///
+/// This is a convenience wrapper that returns 0 instead of None
+/// for cases where a default value is acceptable.
+pub fn decode_u256_or_zero(data: &[u8]) -> u64 {
+    decode_u256(data).unwrap_or(0)
+}
+
+/// Measure gas consumption for a function execution
+///
+/// # Implementation Note
+///
+/// This is a **simplified approximation** for testing purposes.
+/// It measures wall-clock execution time and converts to estimated gas units.
+///
+/// **Limitations:**
+/// - Not actual EVM gas metering
+/// - Results vary by CPU speed and system load
+/// - Only useful for relative comparisons within the same test run
+///
+/// For precise gas measurement, use the actual VM executor.
+///
+/// # Returns
+///
+/// Estimated gas units based on execution time:
+/// - Base cost: 21000 (like ETH transaction base)
+/// - Additional: ~1 gas per microsecond of execution
 pub fn measure_gas<F: FnOnce()>(f: F) -> u64 {
+    let start = std::time::Instant::now();
     f();
-    21000 // Base gas cost
+    let elapsed = start.elapsed();
+
+    // Base gas (21000) + time-based estimate (1 gas per microsecond)
+    let time_gas = elapsed.as_micros() as u64;
+    21000u64.saturating_add(time_gas)
+}
+
+/// Measure gas with a custom base cost
+///
+/// Allows specifying a different base gas cost for different operation types.
+pub fn measure_gas_with_base<F: FnOnce()>(f: F, base_gas: u64) -> u64 {
+    let start = std::time::Instant::now();
+    f();
+    let elapsed = start.elapsed();
+
+    let time_gas = elapsed.as_micros() as u64;
+    base_gas.saturating_add(time_gas)
 }
 
 #[cfg(test)]
@@ -514,8 +610,14 @@ mod tests {
     fn test_encode_decode_u256() {
         let value = 12345u64;
         let encoded = encode_u256(value);
-        let decoded = decode_u256(&encoded);
+        let decoded = decode_u256(&encoded).expect("should decode 32-byte data");
         assert_eq!(value, decoded);
+
+        // Test short data returns None
+        assert!(decode_u256(&[1, 2, 3]).is_none());
+
+        // Test decode_u256_or_zero returns 0 for short data
+        assert_eq!(decode_u256_or_zero(&[1, 2, 3]), 0);
     }
 
     #[test]

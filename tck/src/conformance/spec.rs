@@ -24,6 +24,13 @@ const MAX_SPEC_NAME_LENGTH: usize = 256;
 /// Maximum length for account names
 const MAX_ACCOUNT_NAME_LENGTH: usize = 128;
 
+/// Maximum length for assertion expressions
+const MAX_ASSERTION_LENGTH: usize = 1024;
+
+/// Maximum number of operators in an assertion expression
+/// This prevents overly complex expressions that could cause performance issues
+const MAX_ASSERTION_OPERATORS: usize = 20;
+
 /// Maximum number of preconditions/postconditions
 const MAX_CONDITIONS: usize = 100;
 
@@ -145,6 +152,92 @@ fn validate_condition(cond: &Condition, context: &str) -> Result<()> {
                 context,
                 balance,
                 MAX_BALANCE
+            );
+        }
+    }
+
+    // Validate assertion expression if present
+    if let Some(assertion) = &cond.assertion {
+        validate_assertion(assertion, context)?;
+    }
+
+    Ok(())
+}
+
+/// Validate an assertion expression for safety and complexity bounds
+fn validate_assertion(assertion: &str, context: &str) -> Result<()> {
+    // Check assertion length
+    if assertion.len() > MAX_ASSERTION_LENGTH {
+        anyhow::bail!(
+            "{}: assertion exceeds maximum length of {} characters (got {})",
+            context,
+            MAX_ASSERTION_LENGTH,
+            assertion.len()
+        );
+    }
+
+    // Check for empty assertion
+    if assertion.trim().is_empty() {
+        anyhow::bail!("{}: assertion cannot be empty", context);
+    }
+
+    // Count operators to limit expression complexity
+    // Common assertion operators: ==, !=, >=, <=, >, <, &&, ||
+    let operator_patterns = ["==", "!=", ">=", "<=", "&&", "||"];
+    let mut operator_count = 0;
+
+    for pattern in operator_patterns {
+        operator_count += assertion.matches(pattern).count();
+    }
+
+    // Also count single-char operators that weren't part of doubles
+    // We need to be careful not to double-count >= as > and =
+    let assertion_no_doubles = assertion
+        .replace("==", "")
+        .replace("!=", "")
+        .replace(">=", "")
+        .replace("<=", "")
+        .replace("&&", "")
+        .replace("||", "");
+
+    operator_count += assertion_no_doubles.matches('>').count();
+    operator_count += assertion_no_doubles.matches('<').count();
+
+    if operator_count > MAX_ASSERTION_OPERATORS {
+        anyhow::bail!(
+            "{}: assertion has too many operators ({}, max {}). Consider splitting into multiple conditions",
+            context,
+            operator_count,
+            MAX_ASSERTION_OPERATORS
+        );
+    }
+
+    // Check for balanced parentheses
+    let open_parens = assertion.matches('(').count();
+    let close_parens = assertion.matches(')').count();
+    if open_parens != close_parens {
+        anyhow::bail!(
+            "{}: assertion has unbalanced parentheses ({} open, {} close)",
+            context,
+            open_parens,
+            close_parens
+        );
+    }
+
+    // Check for common injection patterns (basic sanitization)
+    let dangerous_patterns = [
+        "$(", // command substitution
+        "`",  // backtick command substitution
+        "{{", // template injection
+        "}}",
+    ];
+
+    for pattern in dangerous_patterns {
+        if assertion.contains(pattern) {
+            anyhow::bail!(
+                "{}: assertion contains potentially dangerous pattern '{}'",
+                context,
+                pattern
             );
         }
     }
