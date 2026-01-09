@@ -341,16 +341,15 @@ impl TestBlockchain {
             }
 
             // Add to recipient (create if doesn't exist) with overflow protection
-            accounts
-                .entry(tx.recipient.clone())
-                .or_insert_with(|| AccountState {
-                    balance: 0,
-                    nonce: 0,
-                })
-                .balance = accounts
-                .get(&tx.recipient)
-                .map(|a| a.balance.saturating_add(tx.amount))
-                .unwrap_or(tx.amount);
+            // Use entry API properly to avoid TOCTOU - get mutable ref and update in place
+            let recipient_account =
+                accounts
+                    .entry(tx.recipient.clone())
+                    .or_insert_with(|| AccountState {
+                        balance: 0,
+                        nonce: 0,
+                    });
+            recipient_account.balance = recipient_account.balance.saturating_add(tx.amount);
 
             // Update counters: only deduct fee from total (transfer is balance-neutral)
             counters.balances_total = counters.balances_total.saturating_sub(tx.fee as u128);
@@ -521,16 +520,15 @@ impl TestBlockchain {
             }
 
             // Add to recipient (create if doesn't exist) with overflow protection
-            accounts
-                .entry(tx.recipient.clone())
-                .or_insert_with(|| AccountState {
-                    balance: 0,
-                    nonce: 0,
-                })
-                .balance = accounts
-                .get(&tx.recipient)
-                .map(|a| a.balance.saturating_add(tx.amount))
-                .unwrap_or(tx.amount);
+            // Use entry API properly to avoid TOCTOU - get mutable ref and update in place
+            let recipient_account =
+                accounts
+                    .entry(tx.recipient.clone())
+                    .or_insert_with(|| AccountState {
+                        balance: 0,
+                        nonce: 0,
+                    });
+            recipient_account.balance = recipient_account.balance.saturating_add(tx.amount);
 
             // Update counters: only deduct fee from total (transfer is balance-neutral)
             counters.balances_total = counters.balances_total.saturating_sub(tx.fee as u128);

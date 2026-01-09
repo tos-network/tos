@@ -110,7 +110,12 @@ pub async fn wait_all_tips_equal<N: NodeRpc>(
                 .collect();
 
             // Check if all tip sets are equal
-            if tip_sets.windows(2).all(|w| w[0] == w[1]) {
+            // Note: windows(2).all() returns true for 0 or 1 elements (vacuous truth)
+            // We need at least 2 nodes to meaningfully compare tips
+            if tip_sets.len() >= 2 && tip_sets.windows(2).all(|w| w[0] == w[1]) {
+                return Ok(());
+            } else if tip_sets.len() == 1 {
+                // Single node case - trivially converged
                 return Ok(());
             }
 

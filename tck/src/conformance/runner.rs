@@ -221,7 +221,26 @@ impl ConformanceRunner {
                     account.nonce = nonce;
                 }
                 if let Some(storage) = &condition.storage {
+                    // Maximum hex string length to prevent DoS via memory exhaustion
+                    const MAX_HEX_LENGTH: usize = 4096;
+
                     for (key, value) in storage {
+                        // Validate lengths before decoding
+                        if key.len() > MAX_HEX_LENGTH {
+                            anyhow::bail!(
+                                "Storage key hex too long: {} chars (max {})",
+                                key.len(),
+                                MAX_HEX_LENGTH
+                            );
+                        }
+                        if value.len() > MAX_HEX_LENGTH {
+                            anyhow::bail!(
+                                "Storage value hex too long: {} chars (max {})",
+                                value.len(),
+                                MAX_HEX_LENGTH
+                            );
+                        }
+
                         let key_bytes = hex::decode(key.trim_start_matches("0x"))
                             .with_context(|| format!("Invalid hex key in storage: '{}'", key))?;
                         let value_bytes = hex::decode(value.trim_start_matches("0x"))
@@ -325,6 +344,10 @@ impl ConformanceRunner {
         // Hash the entire input to generate a unique address
         let hash = tos_common::crypto::hash(&hasher_input);
         let hash_bytes = hash.to_bytes();
+        // Validate hash length before slicing (should always be 32 bytes, but defensive check)
+        if hash_bytes.len() < 32 {
+            anyhow::bail!("Invalid hash length: expected 32, got {}", hash_bytes.len());
+        }
         // Use last 20 bytes of hash as address (similar to Ethereum CREATE)
         let address = format!("0x{}", hex::encode(&hash_bytes[12..32]));
 
@@ -872,8 +895,8 @@ impl TestReport {
             name: name.to_string(),
             category: format!("{:?}", category),
             status: result.status,
-            // Saturate to u64::MAX instead of wrapping on overflow
-            duration_ms: result.duration.as_millis().min(u64::MAX as u128) as u64,
+            // Convert duration to u64 milliseconds with saturation on overflow
+            duration_ms: u64::try_from(result.duration.as_millis()).unwrap_or(u64::MAX),
             error: result.error,
         });
     }
