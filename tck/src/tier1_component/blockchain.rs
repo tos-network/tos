@@ -270,9 +270,19 @@ impl TestBlockchain {
         }
 
         // Validate nonce (must be next expected nonce)
-        let pending_count = mempool.iter().filter(|t| t.sender == tx.sender).count() as u64;
+        let pending_count: u64 = mempool
+            .iter()
+            .filter(|t| t.sender == tx.sender)
+            .count()
+            .try_into()
+            .unwrap_or(u64::MAX);
 
-        let expected_nonce = sender_state.nonce + 1 + pending_count;
+        let expected_nonce = sender_state
+            .nonce
+            .checked_add(1)
+            .and_then(|n| n.checked_add(pending_count))
+            .context("Nonce calculation overflow")?;
+
         if tx.nonce != expected_nonce {
             anyhow::bail!(
                 "Invalid nonce: expected {}, got {}",
@@ -353,12 +363,19 @@ impl TestBlockchain {
 
         // Calculate block reward (example: 50 TOS per block)
         const BLOCK_REWARD: u64 = 50_000_000_000; // 50 TOS in nanoTOS
-        counters.rewards_emitted += BLOCK_REWARD;
-        counters.supply += BLOCK_REWARD as u128;
+        counters.rewards_emitted = counters.rewards_emitted.saturating_add(BLOCK_REWARD);
+        counters.supply = counters.supply.saturating_add(BLOCK_REWARD as u128);
 
-        // Create new block
-        let new_height = self.tip_height.load(Ordering::SeqCst) + 1;
-        let new_topoheight = self.topoheight.load(Ordering::SeqCst) + 1;
+        // Create new block (with overflow protection)
+        let current_height = self.tip_height.load(Ordering::SeqCst);
+        let current_topoheight = self.topoheight.load(Ordering::SeqCst);
+
+        let new_height = current_height
+            .checked_add(1)
+            .context("Block height overflow - chain too long")?;
+        let new_topoheight = current_topoheight
+            .checked_add(1)
+            .context("Topoheight overflow - chain too long")?;
         let block_hash = Self::compute_block_hash(new_height, &transactions);
 
         // Get selected parent (previous tip)
@@ -524,9 +541,9 @@ impl TestBlockchain {
             counters.fees_burned = counters.fees_burned.saturating_add(tx.fee - tx.fee / 2);
         }
 
-        // Apply block reward
-        counters.rewards_emitted += block.reward;
-        counters.supply += block.reward as u128;
+        // Apply block reward (with overflow protection)
+        counters.rewards_emitted = counters.rewards_emitted.saturating_add(block.reward);
+        counters.supply = counters.supply.saturating_add(block.reward as u128);
 
         // Update blockchain state
         blocks.push(block.clone());

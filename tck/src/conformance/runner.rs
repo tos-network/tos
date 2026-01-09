@@ -652,11 +652,11 @@ impl ConformanceRunner {
             return self.evaluate_storage_assertion(ctx, assertion);
         }
 
-        // Unknown assertion type - log warning and pass
-        if log::log_enabled!(log::Level::Warn) {
-            log::warn!("Unknown assertion type, skipping: {}", assertion);
-        }
-        Ok(())
+        // Unknown assertion type - fail the test
+        anyhow::bail!(
+            "Unknown assertion type: '{}'. Supported: balance(account), nonce(account), storage(account, key)",
+            assertion
+        )
     }
 
     fn evaluate_balance_assertion(&self, ctx: &TestContext, assertion: &str) -> Result<()> {
@@ -695,9 +695,14 @@ impl ConformanceRunner {
                     actual
                 );
             }
+            return Ok(());
         }
 
-        Ok(())
+        // Regex didn't match - invalid assertion format
+        anyhow::bail!(
+            "Invalid balance assertion format: '{}'. Expected: balance(account) <op> <value>",
+            assertion
+        )
     }
 
     fn evaluate_nonce_assertion(&self, ctx: &TestContext, assertion: &str) -> Result<()> {
@@ -735,9 +740,14 @@ impl ConformanceRunner {
                     actual
                 );
             }
+            return Ok(());
         }
 
-        Ok(())
+        // Regex didn't match - invalid assertion format
+        anyhow::bail!(
+            "Invalid nonce assertion format: '{}'. Expected: nonce(account) <op> <value>",
+            assertion
+        )
     }
 
     fn evaluate_storage_assertion(&self, ctx: &TestContext, assertion: &str) -> Result<()> {
@@ -767,9 +777,14 @@ impl ConformanceRunner {
                     actual
                 );
             }
+            return Ok(());
         }
 
-        Ok(())
+        // Regex didn't match - invalid assertion format
+        anyhow::bail!(
+            "Invalid storage assertion format: '{}'. Expected: storage(account, key) == value",
+            assertion
+        )
     }
 }
 

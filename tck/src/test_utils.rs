@@ -435,7 +435,9 @@ pub fn keccak256(data: &[u8]) -> [u8; 32] {
 
 /// Encode a function call with selector and arguments
 pub fn encode_function_call(selector: [u8; 4], args: &[[u8; 32]]) -> Vec<u8> {
-    let mut data = Vec::with_capacity(4 + args.len() * 32);
+    // Use saturating_mul to prevent overflow in capacity calculation
+    let capacity = 4usize.saturating_add(args.len().saturating_mul(32));
+    let mut data = Vec::with_capacity(capacity);
     data.extend_from_slice(&selector);
     for arg in args {
         data.extend_from_slice(arg);
