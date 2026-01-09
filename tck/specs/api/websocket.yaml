@@ -1,0 +1,126 @@
+# WebSocket API Conformance Specifications
+# Tests for WebSocket subscription methods
+
+---
+spec:
+  name: ws_newHeads_subscription
+  version: "1.0"
+  category: api
+  subcategory: websocket
+  description: "Subscribe to new block headers"
+  priority: P0
+
+preconditions:
+  - websocket_connected: true
+
+action:
+  type: ws_subscribe
+  method: eth_subscribe
+  params:
+    - "newHeads"
+
+expected:
+  status: success
+  subscription_id: "not_null"
+  message_format:
+    contains:
+      - "number"
+      - "hash"
+      - "parentHash"
+      - "timestamp"
+
+---
+spec:
+  name: ws_newPendingTransactions_subscription
+  version: "1.0"
+  category: api
+  subcategory: websocket
+  description: "Subscribe to pending transactions"
+  priority: P1
+
+preconditions:
+  - websocket_connected: true
+
+action:
+  type: ws_subscribe
+  method: eth_subscribe
+  params:
+    - "newPendingTransactions"
+
+expected:
+  status: success
+  subscription_id: "not_null"
+  notification_type: "transaction_hash"
+
+---
+spec:
+  name: ws_logs_subscription
+  version: "1.0"
+  category: api
+  subcategory: websocket
+  description: "Subscribe to contract logs"
+  priority: P0
+
+preconditions:
+  - websocket_connected: true
+  - contract_address: "0x1234..."
+
+action:
+  type: ws_subscribe
+  method: eth_subscribe
+  params:
+    - "logs"
+    - address: "0x1234..."
+      topics: []
+
+expected:
+  status: success
+  subscription_id: "not_null"
+
+---
+spec:
+  name: ws_unsubscribe
+  version: "1.0"
+  category: api
+  subcategory: websocket
+  description: "Unsubscribe from subscription"
+  priority: P0
+
+preconditions:
+  - websocket_connected: true
+  - active_subscription: "0xsub123"
+
+action:
+  type: ws_call
+  method: eth_unsubscribe
+  params:
+    - "0xsub123"
+
+expected:
+  status: success
+  result: true
+
+postconditions:
+  - subscription_active: false
+
+---
+spec:
+  name: ws_connection_keepalive
+  version: "1.0"
+  category: api
+  subcategory: websocket
+  description: "WebSocket connection stays alive with ping/pong"
+  priority: P1
+
+preconditions:
+  - websocket_connected: true
+  - idle_timeout: 60
+
+action:
+  type: ws_ping
+  interval: 30
+
+expected:
+  status: success
+  connection: "alive"
+  pong_received: true

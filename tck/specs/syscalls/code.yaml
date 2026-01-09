@@ -1,0 +1,234 @@
+# Code Syscall Conformance Specifications
+# Tests for code operations: CODESIZE, CODECOPY, EXTCODESIZE, EXTCODECOPY, EXTCODEHASH
+
+---
+spec:
+  name: syscall_codesize_basic
+  version: "1.0"
+  category: syscalls
+  subcategory: code
+  description: "Get size of executing contract code"
+  priority: P0
+
+preconditions:
+  - contract:
+      code_size: 100
+
+action:
+  type: syscall
+  name: codesize
+
+expected:
+  status: success
+  result: 100
+  gas_used: 2
+
+---
+spec:
+  name: syscall_codecopy_basic
+  version: "1.0"
+  category: syscalls
+  subcategory: code
+  description: "Copy executing contract code to memory"
+  priority: P0
+
+preconditions:
+  - contract:
+      code: "0x6080604052..."
+  - memory: empty
+
+action:
+  type: syscall
+  name: codecopy
+  params:
+    dest_offset: 0
+    code_offset: 0
+    length: 32
+
+expected:
+  status: success
+  gas_used: "<= 9"  # 3 + 3 * ceil(32/32)
+
+postconditions:
+  - memory:
+      offset: 0
+      matches_code: true
+
+---
+spec:
+  name: syscall_codecopy_beyond_code
+  version: "1.0"
+  category: syscalls
+  subcategory: code
+  description: "CODECOPY beyond code size pads with zeros"
+  priority: P1
+
+preconditions:
+  - contract:
+      code_size: 10
+  - memory: empty
+
+action:
+  type: syscall
+  name: codecopy
+  params:
+    dest_offset: 0
+    code_offset: 0
+    length: 32
+
+expected:
+  status: success
+
+postconditions:
+  - memory:
+      offset: 10
+      length: 22
+      value: "zeros"
+
+---
+spec:
+  name: syscall_extcodesize_basic
+  version: "1.0"
+  category: syscalls
+  subcategory: code
+  description: "Get external contract code size"
+  priority: P0
+
+preconditions:
+  - external_contract:
+      address: "0x1234567890123456789012345678901234567890"
+      code_size: 500
+
+action:
+  type: syscall
+  name: extcodesize
+  params:
+    address: "0x1234567890123456789012345678901234567890"
+
+expected:
+  status: success
+  result: 500
+  gas_used: "<= 2600"  # Warm/cold access
+
+---
+spec:
+  name: syscall_extcodesize_eoa
+  version: "1.0"
+  category: syscalls
+  subcategory: code
+  description: "EXTCODESIZE of EOA returns 0"
+  priority: P1
+
+preconditions:
+  - eoa:
+      address: "0xabcdef0123456789abcdef0123456789abcdef01"
+
+action:
+  type: syscall
+  name: extcodesize
+  params:
+    address: "0xabcdef0123456789abcdef0123456789abcdef01"
+
+expected:
+  status: success
+  result: 0
+
+---
+spec:
+  name: syscall_extcodecopy_basic
+  version: "1.0"
+  category: syscalls
+  subcategory: code
+  description: "Copy external contract code to memory"
+  priority: P0
+
+preconditions:
+  - external_contract:
+      address: "0x1234567890123456789012345678901234567890"
+      code: "0x6080604052..."
+  - memory: empty
+
+action:
+  type: syscall
+  name: extcodecopy
+  params:
+    address: "0x1234567890123456789012345678901234567890"
+    dest_offset: 0
+    code_offset: 0
+    length: 32
+
+expected:
+  status: success
+  gas_used: "<= 2609"  # 2600 + 3 * ceil(32/32)
+
+---
+spec:
+  name: syscall_extcodehash_basic
+  version: "1.0"
+  category: syscalls
+  subcategory: code
+  description: "Get keccak256 hash of external contract code"
+  priority: P0
+
+preconditions:
+  - external_contract:
+      address: "0x1234567890123456789012345678901234567890"
+      code: "0x6080604052"
+
+action:
+  type: syscall
+  name: extcodehash
+  params:
+    address: "0x1234567890123456789012345678901234567890"
+
+expected:
+  status: success
+  result_type: hash
+  gas_used: "<= 2600"
+
+---
+spec:
+  name: syscall_extcodehash_eoa
+  version: "1.0"
+  category: syscalls
+  subcategory: code
+  description: "EXTCODEHASH of EOA with balance"
+  priority: P1
+
+preconditions:
+  - eoa:
+      address: "0xabcdef0123456789abcdef0123456789abcdef01"
+      balance: 1000
+
+action:
+  type: syscall
+  name: extcodehash
+  params:
+    address: "0xabcdef0123456789abcdef0123456789abcdef01"
+
+expected:
+  status: success
+  result: "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"  # keccak256("")
+
+---
+spec:
+  name: syscall_extcodehash_empty_account
+  version: "1.0"
+  category: syscalls
+  subcategory: code
+  description: "EXTCODEHASH of non-existent account"
+  priority: P1
+
+preconditions:
+  - account_exists: false
+  - address: "0x0000000000000000000000000000000000000001"
+
+action:
+  type: syscall
+  name: extcodehash
+  params:
+    address: "0x0000000000000000000000000000000000000001"
+
+expected:
+  status: success
+  result: "0x0000000000000000000000000000000000000000000000000000000000000000"

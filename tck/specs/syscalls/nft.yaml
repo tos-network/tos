@@ -1,0 +1,359 @@
+# NFT Syscall Conformance Specifications
+# Tests for NFT operations: mint, transfer, burn, approve, metadata
+
+---
+spec:
+  name: syscall_nft_mint_basic
+  version: "1.0"
+  category: syscalls
+  subcategory: nft
+  description: "Mint a new NFT token"
+  priority: P0
+
+preconditions:
+  - caller:
+      address: "alice"
+      is_contract_owner: true
+  - nft_collection:
+      address: "nft_contract"
+      total_supply: 0
+
+action:
+  type: syscall
+  name: nft_mint
+  params:
+    to: "bob"
+    token_id: 1
+    uri: "ipfs://QmTest123"
+
+expected:
+  status: success
+  gas_used: "<= 50000"
+
+postconditions:
+  - nft:
+      token_id: 1
+      owner: "bob"
+      uri: "ipfs://QmTest123"
+  - collection:
+      total_supply: 1
+
+---
+spec:
+  name: syscall_nft_mint_unauthorized
+  version: "1.0"
+  category: syscalls
+  subcategory: nft
+  description: "Unauthorized mint attempt fails"
+  priority: P0
+
+preconditions:
+  - caller:
+      address: "alice"
+      is_contract_owner: false
+
+action:
+  type: syscall
+  name: nft_mint
+  params:
+    to: "bob"
+    token_id: 1
+    uri: "ipfs://QmTest123"
+
+expected:
+  status: revert
+  error: "Unauthorized"
+
+---
+spec:
+  name: syscall_nft_transfer_basic
+  version: "1.0"
+  category: syscalls
+  subcategory: nft
+  description: "Transfer NFT to another address"
+  priority: P0
+
+preconditions:
+  - caller:
+      address: "alice"
+  - nft:
+      token_id: 1
+      owner: "alice"
+
+action:
+  type: syscall
+  name: nft_transfer
+  params:
+    from: "alice"
+    to: "bob"
+    token_id: 1
+
+expected:
+  status: success
+  gas_used: "<= 30000"
+
+postconditions:
+  - nft:
+      token_id: 1
+      owner: "bob"
+
+---
+spec:
+  name: syscall_nft_transfer_not_owner
+  version: "1.0"
+  category: syscalls
+  subcategory: nft
+  description: "Transfer by non-owner fails"
+  priority: P0
+
+preconditions:
+  - caller:
+      address: "charlie"
+  - nft:
+      token_id: 1
+      owner: "alice"
+
+action:
+  type: syscall
+  name: nft_transfer
+  params:
+    from: "alice"
+    to: "bob"
+    token_id: 1
+
+expected:
+  status: revert
+  error: "NotOwnerOrApproved"
+
+---
+spec:
+  name: syscall_nft_approve_basic
+  version: "1.0"
+  category: syscalls
+  subcategory: nft
+  description: "Approve address for NFT transfer"
+  priority: P0
+
+preconditions:
+  - caller:
+      address: "alice"
+  - nft:
+      token_id: 1
+      owner: "alice"
+
+action:
+  type: syscall
+  name: nft_approve
+  params:
+    approved: "bob"
+    token_id: 1
+
+expected:
+  status: success
+  gas_used: "<= 25000"
+
+postconditions:
+  - nft:
+      token_id: 1
+      approved: "bob"
+
+---
+spec:
+  name: syscall_nft_transfer_by_approved
+  version: "1.0"
+  category: syscalls
+  subcategory: nft
+  description: "Transfer by approved address succeeds"
+  priority: P1
+
+preconditions:
+  - caller:
+      address: "bob"
+  - nft:
+      token_id: 1
+      owner: "alice"
+      approved: "bob"
+
+action:
+  type: syscall
+  name: nft_transfer
+  params:
+    from: "alice"
+    to: "charlie"
+    token_id: 1
+
+expected:
+  status: success
+
+postconditions:
+  - nft:
+      token_id: 1
+      owner: "charlie"
+      approved: null  # Approval cleared after transfer
+
+---
+spec:
+  name: syscall_nft_burn_basic
+  version: "1.0"
+  category: syscalls
+  subcategory: nft
+  description: "Burn NFT token"
+  priority: P0
+
+preconditions:
+  - caller:
+      address: "alice"
+  - nft:
+      token_id: 1
+      owner: "alice"
+  - collection:
+      total_supply: 5
+
+action:
+  type: syscall
+  name: nft_burn
+  params:
+    token_id: 1
+
+expected:
+  status: success
+  gas_used: "<= 20000"
+
+postconditions:
+  - nft:
+      token_id: 1
+      exists: false
+  - collection:
+      total_supply: 4
+
+---
+spec:
+  name: syscall_nft_get_owner
+  version: "1.0"
+  category: syscalls
+  subcategory: nft
+  description: "Get NFT owner address"
+  priority: P0
+
+preconditions:
+  - nft:
+      token_id: 1
+      owner: "alice"
+
+action:
+  type: syscall
+  name: nft_owner_of
+  params:
+    token_id: 1
+
+expected:
+  status: success
+  result: "alice"
+  gas_used: "<= 3000"
+
+---
+spec:
+  name: syscall_nft_get_uri
+  version: "1.0"
+  category: syscalls
+  subcategory: nft
+  description: "Get NFT token URI"
+  priority: P1
+
+preconditions:
+  - nft:
+      token_id: 1
+      uri: "ipfs://QmTest123"
+
+action:
+  type: syscall
+  name: nft_token_uri
+  params:
+    token_id: 1
+
+expected:
+  status: success
+  result: "ipfs://QmTest123"
+  gas_used: "<= 5000"
+
+---
+spec:
+  name: syscall_nft_balance_of
+  version: "1.0"
+  category: syscalls
+  subcategory: nft
+  description: "Get NFT balance for address"
+  priority: P1
+
+preconditions:
+  - account:
+      address: "alice"
+      nft_count: 3
+
+action:
+  type: syscall
+  name: nft_balance_of
+  params:
+    owner: "alice"
+
+expected:
+  status: success
+  result: 3
+  gas_used: "<= 3000"
+
+---
+spec:
+  name: syscall_nft_set_approval_for_all
+  version: "1.0"
+  category: syscalls
+  subcategory: nft
+  description: "Set operator approval for all tokens"
+  priority: P1
+
+preconditions:
+  - caller:
+      address: "alice"
+
+action:
+  type: syscall
+  name: nft_set_approval_for_all
+  params:
+    operator: "bob"
+    approved: true
+
+expected:
+  status: success
+  gas_used: "<= 25000"
+
+postconditions:
+  - approval:
+      owner: "alice"
+      operator: "bob"
+      approved: true
+
+---
+spec:
+  name: syscall_nft_is_approved_for_all
+  version: "1.0"
+  category: syscalls
+  subcategory: nft
+  description: "Check operator approval status"
+  priority: P1
+
+preconditions:
+  - approval:
+      owner: "alice"
+      operator: "bob"
+      approved: true
+
+action:
+  type: syscall
+  name: nft_is_approved_for_all
+  params:
+    owner: "alice"
+    operator: "bob"
+
+expected:
+  status: success
+  result: true
+  gas_used: "<= 3000"

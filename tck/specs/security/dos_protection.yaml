@@ -1,0 +1,130 @@
+# DoS Protection Conformance Specifications
+# Tests for denial-of-service attack prevention
+
+---
+spec:
+  name: security_dos_gas_limit
+  version: "1.0"
+  category: security
+  subcategory: dos_protection
+  description: "Block gas limit prevents infinite loops"
+  priority: P0
+
+preconditions:
+  - block_gas_limit: 30000000
+  - malicious_contract:
+      has_infinite_loop: true
+
+action:
+  type: call
+  to: "malicious_contract"
+  method: "infiniteLoop"
+  gas: 30000000
+
+expected:
+  status: out_of_gas
+  block_finalized: true
+  network_operational: true
+
+---
+spec:
+  name: security_dos_array_length
+  version: "1.0"
+  category: security
+  subcategory: dos_protection
+  description: "Array length limit prevents unbounded iteration"
+  priority: P0
+
+preconditions:
+  - contract:
+      address: "0xcontract..."
+      array_limit: 1000
+  - attacker_input:
+      array_size: 10000
+
+action:
+  type: call
+  to: "0xcontract..."
+  method: "processArray"
+  params:
+    data: "attacker_input"
+
+expected:
+  status: revert
+  error: "array_too_large"
+
+---
+spec:
+  name: security_dos_recursive_call_depth
+  version: "1.0"
+  category: security
+  subcategory: dos_protection
+  description: "Call depth limit prevents stack overflow"
+  priority: P0
+
+preconditions:
+  - max_call_depth: 1024
+  - recursive_contract:
+      recursion_depth: 2000
+
+action:
+  type: call
+  to: "recursive_contract"
+  method: "recurse"
+  params:
+    depth: 2000
+
+expected:
+  status: failure
+  error: "call_depth_exceeded"
+  actual_depth: 1024
+
+---
+spec:
+  name: security_dos_rate_limiting
+  version: "1.0"
+  category: security
+  subcategory: dos_protection
+  description: "RPC rate limiting prevents abuse"
+  priority: P1
+
+preconditions:
+  - rate_limit: 100  # requests per second
+  - client_ip: "1.2.3.4"
+
+action:
+  type: rpc_flood
+  method: "eth_call"
+  count: 200
+  duration: 1  # second
+
+expected:
+  status: partial_success
+  successful_requests: "<= 100"
+  rate_limited_requests: ">= 100"
+  error_code: 429
+
+---
+spec:
+  name: security_dos_memory_exhaustion
+  version: "1.0"
+  category: security
+  subcategory: dos_protection
+  description: "Memory allocation limits prevent exhaustion"
+  priority: P0
+
+preconditions:
+  - max_memory_per_call: 10485760  # 10MB
+  - malicious_call:
+      memory_request: 100000000  # 100MB
+
+action:
+  type: call
+  to: "malicious_contract"
+  method: "allocateMemory"
+  params:
+    size: 100000000
+
+expected:
+  status: out_of_gas
+  memory_allocated: "<= 10485760"

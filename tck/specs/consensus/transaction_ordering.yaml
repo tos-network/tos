@@ -1,0 +1,127 @@
+# Transaction Ordering Conformance Specifications
+# Tests for transaction ordering rules in block assembly
+
+---
+spec:
+  name: consensus_tx_ordering_by_nonce
+  version: "1.0"
+  category: consensus
+  subcategory: transaction_ordering
+  description: "Transactions from same sender ordered by nonce"
+  priority: P0
+
+preconditions:
+  - sender: "alice"
+  - transactions:
+      - tx1: { nonce: 2, gas_price: 100 }
+      - tx2: { nonce: 0, gas_price: 100 }
+      - tx3: { nonce: 1, gas_price: 100 }
+
+action:
+  type: block_assembly
+  include_transactions: ["tx1", "tx2", "tx3"]
+
+expected:
+  status: success
+  execution_order: ["tx2", "tx3", "tx1"]
+
+---
+spec:
+  name: consensus_tx_ordering_by_gas_price
+  version: "1.0"
+  category: consensus
+  subcategory: transaction_ordering
+  description: "Transactions from different senders ordered by gas price"
+  priority: P0
+
+preconditions:
+  - transactions:
+      - tx1: { sender: "alice", nonce: 0, gas_price: 100 }
+      - tx2: { sender: "bob", nonce: 0, gas_price: 200 }
+      - tx3: { sender: "charlie", nonce: 0, gas_price: 150 }
+
+action:
+  type: block_assembly
+  include_transactions: ["tx1", "tx2", "tx3"]
+
+expected:
+  status: success
+  execution_order: ["tx2", "tx3", "tx1"]
+
+---
+spec:
+  name: consensus_tx_ordering_nonce_gap
+  version: "1.0"
+  category: consensus
+  subcategory: transaction_ordering
+  description: "Transaction with nonce gap is deferred"
+  priority: P0
+
+preconditions:
+  - sender: "alice"
+  - account_nonce: 0
+  - transactions:
+      - tx1: { nonce: 0, gas_price: 100 }
+      - tx2: { nonce: 2, gas_price: 200 }  # Gap: nonce 1 missing
+
+action:
+  type: block_assembly
+  include_transactions: ["tx1", "tx2"]
+
+expected:
+  status: success
+  included: ["tx1"]
+  deferred: ["tx2"]
+
+---
+spec:
+  name: consensus_tx_ordering_insufficient_balance
+  version: "1.0"
+  category: consensus
+  subcategory: transaction_ordering
+  description: "Transaction with insufficient balance is skipped"
+  priority: P0
+
+preconditions:
+  - sender: "alice"
+  - balance: 1000
+  - transactions:
+      - tx1: { nonce: 0, value: 500, gas: 21000, gas_price: 10 }
+      - tx2: { nonce: 1, value: 500, gas: 21000, gas_price: 10 }
+      - tx3: { nonce: 2, value: 500, gas: 21000, gas_price: 10 }
+
+action:
+  type: block_assembly
+  include_transactions: ["tx1", "tx2", "tx3"]
+
+expected:
+  status: success
+  included: ["tx1"]
+  skipped_reason:
+    tx2: "insufficient_balance"
+    tx3: "nonce_depends_on_skipped"
+
+---
+spec:
+  name: consensus_tx_ordering_gas_limit
+  version: "1.0"
+  category: consensus
+  subcategory: transaction_ordering
+  description: "Block gas limit respected in transaction ordering"
+  priority: P0
+
+preconditions:
+  - block_gas_limit: 100000
+  - transactions:
+      - tx1: { sender: "alice", gas: 60000, gas_price: 100 }
+      - tx2: { sender: "bob", gas: 60000, gas_price: 90 }
+      - tx3: { sender: "charlie", gas: 30000, gas_price: 80 }
+
+action:
+  type: block_assembly
+  include_transactions: ["tx1", "tx2", "tx3"]
+
+expected:
+  status: success
+  included: ["tx1", "tx3"]  # tx2 doesn't fit
+  total_gas_used: "<= 100000"

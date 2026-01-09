@@ -1,0 +1,254 @@
+# Crypto Syscall Conformance Specifications
+# Tests for cryptographic operations: SHA3, ECDSA, signature verification
+
+---
+spec:
+  name: syscall_sha3_basic
+  version: "1.0"
+  category: syscalls
+  subcategory: crypto
+  description: "SHA3-256 hash of input data"
+  priority: P0
+
+preconditions:
+  - input_data: "0x48656c6c6f" # "Hello"
+
+action:
+  type: syscall
+  name: sha3
+  params:
+    offset: 0
+    size: 5
+
+expected:
+  status: success
+  result: "0x06b3dfaec148fb1bb2b066f10ec285e7c9bf402ab32aa78a5d38e34566810cd2"
+  gas_used: "<= 36"
+
+postconditions:
+  - memory_unchanged: true
+
+---
+spec:
+  name: syscall_sha3_empty
+  version: "1.0"
+  category: syscalls
+  subcategory: crypto
+  description: "SHA3-256 hash of empty input"
+  priority: P0
+
+preconditions:
+  - input_data: ""
+
+action:
+  type: syscall
+  name: sha3
+  params:
+    offset: 0
+    size: 0
+
+expected:
+  status: success
+  result: "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"
+  gas_used: "<= 30"
+
+---
+spec:
+  name: syscall_sha3_large_input
+  version: "1.0"
+  category: syscalls
+  subcategory: crypto
+  description: "SHA3-256 hash of large input (1KB)"
+  priority: P1
+
+preconditions:
+  - input_size: 1024
+  - input_pattern: "0xAB"
+
+action:
+  type: syscall
+  name: sha3
+  params:
+    offset: 0
+    size: 1024
+
+expected:
+  status: success
+  gas_used: "<= 42"  # 30 + 6 * (1024/32)
+
+---
+spec:
+  name: syscall_ecrecover_valid
+  version: "1.0"
+  category: syscalls
+  subcategory: crypto
+  description: "Recover address from valid ECDSA signature"
+  priority: P0
+
+preconditions:
+  - message_hash: "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
+  - v: 28
+  - r: "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
+  - s: "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
+
+action:
+  type: syscall
+  name: ecrecover
+  params:
+    hash: "message_hash"
+    v: "v"
+    r: "r"
+    s: "s"
+
+expected:
+  status: success
+  result_type: address
+  gas_used: "<= 3000"
+
+---
+spec:
+  name: syscall_ecrecover_invalid_v
+  version: "1.0"
+  category: syscalls
+  subcategory: crypto
+  description: "ECRECOVER with invalid v value"
+  priority: P1
+
+preconditions:
+  - message_hash: "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
+  - v: 30  # Invalid: should be 27 or 28
+  - r: "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
+  - s: "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
+
+action:
+  type: syscall
+  name: ecrecover
+  params:
+    hash: "message_hash"
+    v: "v"
+    r: "r"
+    s: "s"
+
+expected:
+  status: success
+  result: "0x0000000000000000000000000000000000000000000000000000000000000000"
+  gas_used: "<= 3000"
+
+---
+spec:
+  name: syscall_ecrecover_zero_signature
+  version: "1.0"
+  category: syscalls
+  subcategory: crypto
+  description: "ECRECOVER with zero r and s"
+  priority: P2
+
+preconditions:
+  - message_hash: "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
+  - v: 27
+  - r: "0x0000000000000000000000000000000000000000000000000000000000000000"
+  - s: "0x0000000000000000000000000000000000000000000000000000000000000000"
+
+action:
+  type: syscall
+  name: ecrecover
+  params:
+    hash: "message_hash"
+    v: "v"
+    r: "r"
+    s: "s"
+
+expected:
+  status: success
+  result: "0x0000000000000000000000000000000000000000000000000000000000000000"
+
+---
+spec:
+  name: syscall_identity_precompile
+  version: "1.0"
+  category: syscalls
+  subcategory: crypto
+  description: "Identity precompile returns input unchanged"
+  priority: P1
+
+preconditions:
+  - input_data: "0x1234567890abcdef"
+
+action:
+  type: call
+  address: "0x0000000000000000000000000000000000000004"
+  data: "input_data"
+
+expected:
+  status: success
+  return_data: "0x1234567890abcdef"
+  gas_used: "<= 18"
+
+---
+spec:
+  name: syscall_modexp_small
+  version: "1.0"
+  category: syscalls
+  subcategory: crypto
+  description: "MODEXP precompile with small inputs"
+  priority: P2
+
+preconditions:
+  - base: 2
+  - exponent: 10
+  - modulus: 1000
+
+action:
+  type: call
+  address: "0x0000000000000000000000000000000000000005"
+  data: "encoded(base, exponent, modulus)"
+
+expected:
+  status: success
+  result: 24  # 2^10 mod 1000 = 1024 mod 1000 = 24
+
+---
+spec:
+  name: syscall_bn256_add
+  version: "1.0"
+  category: syscalls
+  subcategory: crypto
+  description: "BN256 elliptic curve point addition"
+  priority: P2
+
+preconditions:
+  - point1: "generator"
+  - point2: "generator"
+
+action:
+  type: call
+  address: "0x0000000000000000000000000000000000000006"
+  data: "encoded(point1, point2)"
+
+expected:
+  status: success
+  result_type: bn256_point
+  gas_used: "<= 500"
+
+---
+spec:
+  name: syscall_bn256_mul
+  version: "1.0"
+  category: syscalls
+  subcategory: crypto
+  description: "BN256 elliptic curve scalar multiplication"
+  priority: P2
+
+preconditions:
+  - point: "generator"
+  - scalar: 2
+
+action:
+  type: call
+  address: "0x0000000000000000000000000000000000000007"
+  data: "encoded(point, scalar)"
+
+expected:
+  status: success
+  result_type: bn256_point
+  gas_used: "<= 40000"
