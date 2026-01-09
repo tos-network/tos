@@ -14,7 +14,7 @@ use tos_common::crypto::Hash;
 /// # Example
 ///
 /// ```rust,ignore
-/// use tos_testing_framework::tier1_component::TestBlockchainBuilder;
+/// use tos_tck::tier1_component::TestBlockchainBuilder;
 ///
 /// let blockchain = TestBlockchainBuilder::new()
 ///     .with_clock(clock)
@@ -48,7 +48,7 @@ impl TestBlockchainBuilder {
     /// # Example
     ///
     /// ```rust,ignore
-    /// use tos_testing_framework::orchestrator::PausedClock;
+    /// use tos_tck::orchestrator::PausedClock;
     ///
     /// let clock = Arc::new(PausedClock::new());
     /// let builder = TestBlockchainBuilder::new()

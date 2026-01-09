@@ -10,7 +10,7 @@
 // Tests demonstrating reentrancy attack prevention following OpenZeppelin pattern
 
 use tos_common::crypto::{Hash, KeyPair};
-use tos_testing_framework::utilities::{
+use tos_tck::utilities::{
     create_contract_test_storage, execute_test_contract, execute_test_contract_with_input,
 };
 

@@ -10,9 +10,7 @@
 
 use tos_common::crypto::{Hash, KeyPair};
 use tos_common::serializer::Serializer;
-use tos_testing_framework::utilities::{
-    create_contract_test_storage, execute_test_contract_with_input,
-};
+use tos_tck::utilities::{create_contract_test_storage, execute_test_contract_with_input};
 
 #[allow(dead_code)]
 const OP_INITIALIZE: u8 = 0x00;

@@ -35,7 +35,7 @@ use rand::{rngs::StdRng, Rng, RngCore, SeedableRng};
 /// ## Basic Usage
 ///
 /// ```rust
-/// use tos_testing_framework::orchestrator::rng::TestRng;
+/// use tos_tck::orchestrator::rng::TestRng;
 ///
 /// fn test_with_rng() {
 ///     let rng = TestRng::new_from_env_or_random();
@@ -69,7 +69,7 @@ use rand::{rngs::StdRng, Rng, RngCore, SeedableRng};
 /// ## Deterministic Seed (For Debugging)
 ///
 /// ```rust
-/// use tos_testing_framework::orchestrator::rng::TestRng;
+/// use tos_tck::orchestrator::rng::TestRng;
 ///
 /// fn test_with_fixed_seed() {
 ///     let rng = TestRng::with_seed(0x1234567890abcdef);
@@ -84,7 +84,7 @@ use rand::{rngs::StdRng, Rng, RngCore, SeedableRng};
 ///
 /// ```rust
 /// use std::sync::Arc;
-/// use tos_testing_framework::orchestrator::rng::TestRng;
+/// use tos_tck::orchestrator::rng::TestRng;
 ///
 /// #[tokio::test]
 /// async fn test_concurrent_random() {
@@ -119,7 +119,7 @@ impl TestRng {
     /// # Examples
     ///
     /// ```rust
-    /// use tos_testing_framework::orchestrator::rng::TestRng;
+    /// use tos_tck::orchestrator::rng::TestRng;
     ///
     /// let rng = TestRng::with_seed(42);
     /// let value: u64 = rng.gen();
@@ -153,7 +153,7 @@ impl TestRng {
     /// # Examples
     ///
     /// ```rust
-    /// use tos_testing_framework::orchestrator::rng::TestRng;
+    /// use tos_tck::orchestrator::rng::TestRng;
     ///
     /// fn test_example() {
     ///     let rng = TestRng::new_from_env_or_random();
@@ -200,7 +200,7 @@ impl TestRng {
     /// # Examples
     ///
     /// ```rust
-    /// use tos_testing_framework::orchestrator::rng::TestRng;
+    /// use tos_tck::orchestrator::rng::TestRng;
     ///
     /// fn test_with_seed_logging() {
     ///     let rng = TestRng::new_from_env_or_random();
@@ -229,7 +229,7 @@ impl TestRng {
     /// # Examples
     ///
     /// ```rust
-    /// use tos_testing_framework::orchestrator::rng::TestRng;
+    /// use tos_tck::orchestrator::rng::TestRng;
     ///
     /// let rng = TestRng::with_seed(42);
     ///
@@ -250,7 +250,7 @@ impl TestRng {
     /// # Examples
     ///
     /// ```rust
-    /// use tos_testing_framework::orchestrator::rng::TestRng;
+    /// use tos_tck::orchestrator::rng::TestRng;
     ///
     /// let rng = TestRng::with_seed(42);
     ///
@@ -275,7 +275,7 @@ impl TestRng {
     /// # Examples
     ///
     /// ```rust
-    /// use tos_testing_framework::orchestrator::rng::TestRng;
+    /// use tos_tck::orchestrator::rng::TestRng;
     ///
     /// let rng = TestRng::with_seed(42);
     ///
@@ -295,7 +295,7 @@ impl TestRng {
     /// # Examples
     ///
     /// ```rust
-    /// use tos_testing_framework::orchestrator::rng::TestRng;
+    /// use tos_tck::orchestrator::rng::TestRng;
     ///
     /// let rng = TestRng::with_seed(42);
     ///
@@ -315,7 +315,7 @@ impl TestRng {
     /// # Examples
     ///
     /// ```rust
-    /// use tos_testing_framework::orchestrator::rng::TestRng;
+    /// use tos_tck::orchestrator::rng::TestRng;
     ///
     /// let rng = TestRng::with_seed(42);
     ///

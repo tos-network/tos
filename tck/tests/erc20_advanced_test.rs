@@ -17,7 +17,7 @@
 // These tests validate complex token operations and multi-party interactions
 
 use tos_common::crypto::{Hash, KeyPair};
-use tos_testing_framework::utilities::{create_contract_test_storage, execute_test_contract};
+use tos_tck::utilities::{create_contract_test_storage, execute_test_contract};
 
 /// Test ERC20 approve and transferFrom mechanism
 ///

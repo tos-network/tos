@@ -14,7 +14,7 @@
 //!
 //! ```rust,ignore
 //! use proptest::prelude::*;
-//! use tos_testing_framework::tier2_integration::strategies::*;
+//! use tos_tck::tier2_integration::strategies::*;
 //!
 //! proptest! {
 //!     #[test]

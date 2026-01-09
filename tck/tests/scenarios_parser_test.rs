@@ -6,7 +6,7 @@
 //!
 //! Tests parser functionality independently of TestBlockchain
 
-use tos_testing_framework::scenarios::parse_scenario;
+use tos_tck::scenarios::parse_scenario;
 
 #[test]
 fn test_parse_simple_scenario() {

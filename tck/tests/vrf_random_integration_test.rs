@@ -18,7 +18,7 @@ use tos_daemon::{
     vrf::{VrfData, VrfKeyManager, VrfOutput, VrfProof, VrfPublicKey},
 };
 use tos_kernel::ValueCell;
-use tos_testing_framework::utilities::create_contract_test_storage;
+use tos_tck::utilities::create_contract_test_storage;
 
 fn keypair_to_hash(keypair: &KeyPair) -> Hash {
     Hash::new(*keypair.get_public_key().compress().as_bytes())

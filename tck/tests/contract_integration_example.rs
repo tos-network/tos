@@ -10,9 +10,7 @@
 // with real RocksDB storage, showing the recommended approach for end-to-end contract testing.
 
 use tos_common::crypto::{Hash, KeyPair};
-use tos_testing_framework::utilities::{
-    contract_exists, create_contract_test_storage, execute_test_contract,
-};
+use tos_tck::utilities::{contract_exists, create_contract_test_storage, execute_test_contract};
 
 /// Test executing a simple "hello world" contract
 ///

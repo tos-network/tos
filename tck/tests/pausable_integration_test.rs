@@ -17,9 +17,7 @@
 
 use tos_common::crypto::{Hash, KeyPair};
 use tos_common::serializer::Serializer;
-use tos_testing_framework::utilities::{
-    create_contract_test_storage, execute_test_contract_with_input,
-};
+use tos_tck::utilities::{create_contract_test_storage, execute_test_contract_with_input};
 
 // Instruction opcodes
 #[allow(dead_code)]

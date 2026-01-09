@@ -365,26 +365,9 @@ fn test_indexed_event_parameters() {
 // Helper Functions
 // =============================================================================
 
-fn compute_contract_address(deployer: &Address, nonce: u64) -> Address {
-    unimplemented!()
-}
-
-fn compute_create2_address(factory: &Address, salt: [u8; 32], bytecode: &[u8]) -> Address {
-    unimplemented!()
-}
-
-fn get_bytecode(name: &str) -> Vec<u8> {
-    unimplemented!()
-}
-
-fn pad_address(addr: Address) -> [u8; 32] {
-    let mut result = [0u8; 32];
-    result[12..32].copy_from_slice(addr.as_bytes());
-    result
-}
-
-fn encode_u256(value: u64) -> Vec<u8> {
-    let mut result = vec![0u8; 32];
-    result[24..32].copy_from_slice(&value.to_be_bytes());
-    result
-}
+// All helper functions are imported from tos_tck::test_utils::*
+// - compute_contract_address(deployer, nonce) -> Address
+// - compute_create2_address(factory, salt, bytecode) -> Address
+// - get_bytecode(name) -> Vec<u8>
+// - pad_address(addr) -> [u8; 32]
+// - encode_u256(value) -> [u8; 32]

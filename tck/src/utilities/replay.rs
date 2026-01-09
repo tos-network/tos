@@ -22,7 +22,7 @@ use std::path::Path;
 /// # Examples
 ///
 /// ```rust,ignore
-/// use tos_testing_framework::utilities::replay::load_artifact;
+/// use tos_tck::utilities::replay::load_artifact;
 ///
 /// #[tokio::test]
 /// async fn test_replay_from_artifact() -> Result<()> {
@@ -44,7 +44,7 @@ pub async fn load_artifact(filepath: impl AsRef<Path>) -> Result<TestArtifact> {
 /// # Examples
 ///
 /// ```rust,ignore
-/// use tos_testing_framework::utilities::replay::{load_artifact, print_artifact_summary};
+/// use tos_tck::utilities::replay::{load_artifact, print_artifact_summary};
 ///
 /// #[tokio::test]
 /// async fn test_inspect_artifact() -> Result<()> {
@@ -157,7 +157,7 @@ pub fn print_artifact_summary(artifact: &TestArtifact) {
 /// # Examples
 ///
 /// ```rust,ignore
-/// use tos_testing_framework::utilities::replay::{load_artifact, get_replay_command};
+/// use tos_tck::utilities::replay::{load_artifact, get_replay_command};
 ///
 /// #[tokio::test]
 /// async fn test_get_replay_cmd() -> Result<()> {
@@ -185,7 +185,7 @@ pub fn get_replay_command(artifact: &TestArtifact) -> String {
 /// # Examples
 ///
 /// ```rust,ignore
-/// use tos_testing_framework::utilities::replay::{load_artifact, validate_artifact};
+/// use tos_tck::utilities::replay::{load_artifact, validate_artifact};
 ///
 /// #[tokio::test]
 /// async fn test_validate() -> Result<()> {

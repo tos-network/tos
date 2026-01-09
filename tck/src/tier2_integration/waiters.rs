@@ -32,7 +32,7 @@ use tokio::time::{sleep, timeout, Duration};
 /// # Example
 ///
 /// ```ignore
-/// use tos_testing_framework::tier2_integration::waiters::*;
+/// use tos_tck::tier2_integration::waiters::*;
 /// use tokio::time::Duration;
 ///
 /// // Wait for node to reach height 100, with 10 second timeout

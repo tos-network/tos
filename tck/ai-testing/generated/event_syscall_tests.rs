@@ -297,30 +297,10 @@ fn test_logs_reverted_on_failure() {
 // Helper Functions
 // =============================================================================
 
-fn keccak256(data: &[u8]) -> [u8; 32] {
-    unimplemented!("Use actual keccak256")
-}
-
-fn encode_transfer_data(from: Address, to: Address, amount: u64) -> Vec<u8> {
-    unimplemented!()
-}
-
-fn encode_transfer_data_partial(to: Address, amount: u64) -> Vec<u8> {
-    unimplemented!()
-}
-
-fn pad_address(addr: Address) -> [u8; 32] {
-    let mut result = [0u8; 32];
-    result[12..32].copy_from_slice(addr.as_bytes());
-    result
-}
-
-fn encode_u256(value: u64) -> Vec<u8> {
-    let mut result = vec![0u8; 32];
-    result[24..32].copy_from_slice(&value.to_be_bytes());
-    result
-}
-
-fn measure_gas<F: FnOnce()>(f: F) -> u64 {
-    unimplemented!()
-}
+// All helper functions are imported from tos_tck::test_utils::*
+// - keccak256(data) -> [u8; 32]
+// - encode_transfer_data(from, to, amount) -> Vec<u8>
+// - encode_transfer_data_partial(to, amount) -> Vec<u8>
+// - pad_address(addr) -> [u8; 32]
+// - encode_u256(value) -> [u8; 32]
+// - measure_gas(closure) -> u64

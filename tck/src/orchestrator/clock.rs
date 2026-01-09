@@ -23,7 +23,7 @@ use tokio::time::{self, Duration, Instant};
 /// ```rust
 /// use std::sync::Arc;
 /// use tokio::time::Duration;
-/// use tos_testing_framework::orchestrator::clock::{Clock, SystemClock};
+/// use tos_tck::orchestrator::clock::{Clock, SystemClock};
 ///
 /// #[tokio::main]
 /// async fn main() {
@@ -40,7 +40,7 @@ use tokio::time::{self, Duration, Instant};
 /// ```rust
 /// use std::sync::Arc;
 /// use tokio::time::Duration;
-/// use tos_testing_framework::orchestrator::clock::{Clock, PausedClock};
+/// use tos_tck::orchestrator::clock::{Clock, PausedClock};
 ///
 /// #[tokio::test(start_paused = true)]
 /// async fn test_with_paused_time() {
@@ -81,7 +81,7 @@ pub trait Clock: Send + Sync {
 /// ```rust
 /// use std::sync::Arc;
 /// use tokio::time::Duration;
-/// use tos_testing_framework::orchestrator::clock::{Clock, SystemClock};
+/// use tos_tck::orchestrator::clock::{Clock, SystemClock};
 ///
 /// async fn production_code(clock: Arc<dyn Clock>) {
 ///     let start = clock.now();
@@ -127,7 +127,7 @@ impl Clock for SystemClock {
 /// ```rust
 /// use std::sync::Arc;
 /// use tokio::time::Duration;
-/// use tos_testing_framework::orchestrator::clock::{Clock, PausedClock};
+/// use tos_tck::orchestrator::clock::{Clock, PausedClock};
 ///
 /// #[tokio::test(start_paused = true)]
 /// async fn test_timeout_logic() {
@@ -152,7 +152,7 @@ impl Clock for SystemClock {
 /// ```rust
 /// use std::sync::Arc;
 /// use tokio::time::Duration;
-/// use tos_testing_framework::orchestrator::clock::{Clock, PausedClock};
+/// use tos_tck::orchestrator::clock::{Clock, PausedClock};
 ///
 /// #[tokio::test(start_paused = true)]
 /// async fn test_block_timestamp_validation() {
@@ -215,7 +215,7 @@ impl PausedClock {
     /// ```rust
     /// use std::sync::Arc;
     /// use tokio::time::Duration;
-    /// use tos_testing_framework::orchestrator::clock::{Clock, PausedClock};
+    /// use tos_tck::orchestrator::clock::{Clock, PausedClock};
     ///
     /// #[tokio::test(start_paused = true)]
     /// async fn test_time_advancement() {
@@ -234,7 +234,7 @@ impl PausedClock {
     /// ```rust
     /// use std::sync::Arc;
     /// use tokio::time::Duration;
-    /// use tos_testing_framework::orchestrator::clock::{Clock, PausedClock};
+    /// use tos_tck::orchestrator::clock::{Clock, PausedClock};
     ///
     /// #[tokio::test(start_paused = true)]
     /// async fn test_concurrent_timeouts() {

@@ -30,7 +30,7 @@ use tempfile::TempDir;
 /// # Example
 ///
 /// ```ignore
-/// use tos_testing_framework::utilities::create_temp_rocksdb;
+/// use tos_tck::utilities::create_temp_rocksdb;
 ///
 /// #[tokio::test]
 /// async fn test_blockchain_storage() {
@@ -140,7 +140,7 @@ impl Drop for TempRocksDB {
 /// # Example
 ///
 /// ```ignore
-/// use tos_testing_framework::utilities::create_temp_rocksdb;
+/// use tos_tck::utilities::create_temp_rocksdb;
 ///
 /// let temp_db = create_temp_rocksdb()?;
 /// let blockchain = Blockchain::new(temp_db.path()).await?;
@@ -166,7 +166,7 @@ pub fn create_temp_rocksdb() -> Result<TempRocksDB> {
 /// # Example
 ///
 /// ```ignore
-/// use tos_testing_framework::utilities::create_temp_dir;
+/// use tos_tck::utilities::create_temp_dir;
 ///
 /// let temp_dir = create_temp_dir("test_logs_")?;
 /// let log_file = temp_dir.path().join("test.log");

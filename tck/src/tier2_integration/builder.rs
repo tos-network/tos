@@ -12,7 +12,7 @@ use tos_common::crypto::Hash;
 /// # Example
 ///
 /// ```rust,ignore
-/// use tos_testing_framework::tier2_integration::TestDaemonBuilder;
+/// use tos_tck::tier2_integration::TestDaemonBuilder;
 ///
 /// let daemon = TestDaemonBuilder::new()
 ///     .with_clock(clock)
@@ -57,7 +57,7 @@ impl TestDaemonBuilder {
     /// # Example
     ///
     /// ```rust,ignore
-    /// use tos_testing_framework::orchestrator::PausedClock;
+    /// use tos_tck::orchestrator::PausedClock;
     ///
     /// let clock = Arc::new(PausedClock::new());
     /// let builder = TestDaemonBuilder::new()

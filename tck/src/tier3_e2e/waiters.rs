@@ -33,7 +33,7 @@ use tokio::time::{sleep, timeout, Duration};
 /// # Example
 ///
 /// ```ignore
-/// use tos_testing_framework::tier3_e2e::waiters::*;
+/// use tos_tck::tier3_e2e::waiters::*;
 /// use tokio::time::Duration;
 ///
 /// // Create a 5-node network
@@ -151,7 +151,7 @@ pub async fn wait_all_tips_equal<N: NodeRpc>(
 /// # Example
 ///
 /// ```ignore
-/// use tos_testing_framework::tier3_e2e::waiters::*;
+/// use tos_tck::tier3_e2e::waiters::*;
 /// use tokio::time::Duration;
 ///
 /// // Wait for all nodes to reach the same height

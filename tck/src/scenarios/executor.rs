@@ -6,7 +6,7 @@
 //! # Example
 //!
 //! ```rust,ignore
-//! use tos_testing_framework::scenarios::{ScenarioExecutor, parse_scenario};
+//! use tos_tck::scenarios::{ScenarioExecutor, parse_scenario};
 //!
 //! let yaml = r#"
 //! name: "Simple Transfer"

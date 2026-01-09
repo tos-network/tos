@@ -45,7 +45,7 @@ use super::{create_test_rocksdb_storage, setup_account_rocksdb};
 /// # Example
 ///
 /// ```ignore
-/// use tos_testing_framework::utilities::execute_test_contract;
+/// use tos_tck::utilities::execute_test_contract;
 /// use tos_common::crypto::Hash;
 ///
 /// #[tokio::test]
@@ -194,7 +194,7 @@ pub async fn execute_test_contract_with_input(
 /// # Example
 ///
 /// ```ignore
-/// use tos_testing_framework::utilities::create_contract_test_storage;
+/// use tos_tck::utilities::create_contract_test_storage;
 ///
 /// let account = KeyPair::new();
 /// let storage = create_contract_test_storage(&account, 1000 * COIN_VALUE).await.unwrap();
@@ -226,7 +226,7 @@ pub async fn create_contract_test_storage(
 /// # Example
 ///
 /// ```ignore
-/// use tos_testing_framework::utilities::get_contract_storage;
+/// use tos_tck::utilities::get_contract_storage;
 ///
 /// let count = get_contract_storage(&storage, contract_hash, b"count", 10)
 ///     .await

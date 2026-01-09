@@ -24,7 +24,7 @@
 //! # Usage
 //!
 //! ```rust,ignore
-//! use tos_testing_framework::tier4_chaos::*;
+//! use tos_tck::tier4_chaos::*;
 //!
 //! #[test]
 //! fn test_my_chaos_scenario() {

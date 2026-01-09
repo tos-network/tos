@@ -21,7 +21,7 @@
 // end-to-end Ownable functionality in the TOS blockchain environment.
 
 use tos_common::crypto::{Hash, KeyPair};
-use tos_testing_framework::utilities::{create_contract_test_storage, execute_test_contract};
+use tos_tck::utilities::{create_contract_test_storage, execute_test_contract};
 
 // Instruction opcodes (from ownable contract)
 #[allow(dead_code)]

@@ -31,7 +31,7 @@ use std::sync::Arc;
 /// ## Tier 1: Component Tests (In-Process)
 ///
 /// ```rust
-/// use tos_testing_framework::orchestrator::DeterministicTestEnv;
+/// use tos_tck::orchestrator::DeterministicTestEnv;
 /// use tokio::time::Duration;
 ///
 /// #[tokio::test(start_paused = true)]
@@ -53,7 +53,7 @@ use std::sync::Arc;
 /// ## Tier 2: Integration Tests (Single Node)
 ///
 /// ```rust
-/// use tos_testing_framework::orchestrator::DeterministicTestEnv;
+/// use tos_tck::orchestrator::DeterministicTestEnv;
 ///
 /// #[tokio::test(start_paused = true)]
 /// async fn test_daemon_timeout() {
@@ -76,7 +76,7 @@ use std::sync::Arc;
 /// ## Tier 3: E2E Tests (Multi-Node)
 ///
 /// ```rust
-/// use tos_testing_framework::orchestrator::DeterministicTestEnv;
+/// use tos_tck::orchestrator::DeterministicTestEnv;
 ///
 /// #[tokio::test(start_paused = true)]
 /// async fn test_network_consensus() {
@@ -98,7 +98,7 @@ use std::sync::Arc;
 /// ## Error Handling and Replay
 ///
 /// ```rust
-/// use tos_testing_framework::orchestrator::DeterministicTestEnv;
+/// use tos_tck::orchestrator::DeterministicTestEnv;
 ///
 /// #[tokio::test(start_paused = true)]
 /// async fn test_with_error_handling() {
@@ -144,7 +144,7 @@ impl DeterministicTestEnv {
     /// ## Basic Usage
     ///
     /// ```rust
-    /// use tos_testing_framework::orchestrator::DeterministicTestEnv;
+    /// use tos_tck::orchestrator::DeterministicTestEnv;
     /// use tokio::time::Duration;
     ///
     /// #[tokio::test(start_paused = true)]
@@ -188,7 +188,7 @@ impl DeterministicTestEnv {
     /// # Examples
     ///
     /// ```rust
-    /// use tos_testing_framework::orchestrator::DeterministicTestEnv;
+    /// use tos_tck::orchestrator::DeterministicTestEnv;
     ///
     /// #[tokio::test(start_paused = true)]
     /// async fn test_with_specific_seed() {
@@ -245,7 +245,7 @@ impl DeterministicTestEnv {
     /// # Examples
     ///
     /// ```rust
-    /// use tos_testing_framework::orchestrator::DeterministicTestEnv;
+    /// use tos_tck::orchestrator::DeterministicTestEnv;
     /// use tokio::time::Duration;
     ///
     /// #[tokio::test(start_paused = true)]
@@ -273,7 +273,7 @@ impl DeterministicTestEnv {
     /// # Examples
     ///
     /// ```rust
-    /// use tos_testing_framework::orchestrator::DeterministicTestEnv;
+    /// use tos_tck::orchestrator::DeterministicTestEnv;
     ///
     /// fn test_seed_logging() {
     ///     let env = DeterministicTestEnv::new_time_paused();
@@ -292,7 +292,7 @@ impl DeterministicTestEnv {
     /// # Examples
     ///
     /// ```rust
-    /// use tos_testing_framework::orchestrator::DeterministicTestEnv;
+    /// use tos_tck::orchestrator::DeterministicTestEnv;
     ///
     /// #[tokio::test(start_paused = true)]
     /// async fn test_with_failure_handling() {

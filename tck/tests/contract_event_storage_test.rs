@@ -17,7 +17,7 @@ use tos_common::crypto::Hash;
 use tos_daemon::core::storage::{
     ContractEventProvider, EventFilter, StoredContractEvent, MAX_EVENTS_PER_QUERY,
 };
-use tos_testing_framework::utilities::create_test_rocksdb_storage;
+use tos_tck::utilities::create_test_rocksdb_storage;
 
 /// Test StoredContractEvent creation and field access
 #[tokio::test]

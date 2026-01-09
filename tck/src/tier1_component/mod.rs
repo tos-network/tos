@@ -13,7 +13,7 @@
 //! ## Example
 //!
 //! ```rust,ignore
-//! use tos_testing_framework::prelude::*;
+//! use tos_tck::prelude::*;
 //!
 //! #[tokio::test(start_paused = true)]
 //! async fn test_balance_transfer() {

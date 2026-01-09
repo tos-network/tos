@@ -120,7 +120,7 @@ pub struct LogEntry {
 /// # Examples
 ///
 /// ```rust,ignore
-/// use tos_testing_framework::utilities::artifacts::ArtifactCollector;
+/// use tos_tck::utilities::artifacts::ArtifactCollector;
 ///
 /// #[tokio::test]
 /// async fn test_with_artifacts() -> Result<()> {
@@ -160,7 +160,7 @@ impl ArtifactCollector {
     /// # Examples
     ///
     /// ```rust
-    /// use tos_testing_framework::utilities::artifacts::ArtifactCollector;
+    /// use tos_tck::utilities::artifacts::ArtifactCollector;
     ///
     /// let collector = ArtifactCollector::new("test_consensus_convergence");
     /// ```
@@ -186,8 +186,8 @@ impl ArtifactCollector {
     /// # Examples
     ///
     /// ```rust
-    /// use tos_testing_framework::utilities::artifacts::ArtifactCollector;
-    /// use tos_testing_framework::orchestrator::rng::TestRng;
+    /// use tos_tck::utilities::artifacts::ArtifactCollector;
+    /// use tos_tck::orchestrator::rng::TestRng;
     ///
     /// let rng = TestRng::new_from_env_or_random();
     /// let mut collector = ArtifactCollector::new("test_name");
@@ -202,7 +202,7 @@ impl ArtifactCollector {
     /// # Examples
     ///
     /// ```rust
-    /// use tos_testing_framework::utilities::artifacts::ArtifactCollector;
+    /// use tos_tck::utilities::artifacts::ArtifactCollector;
     ///
     /// let mut collector = ArtifactCollector::new("test_name");
     /// collector.set_failure_reason("Height mismatch: expected 5, got 3".to_string());
@@ -216,7 +216,7 @@ impl ArtifactCollector {
     /// # Examples
     ///
     /// ```rust
-    /// use tos_testing_framework::utilities::artifacts::{ArtifactCollector, TopologySnapshot};
+    /// use tos_tck::utilities::artifacts::{ArtifactCollector, TopologySnapshot};
     /// use std::collections::HashMap;
     ///
     /// let mut collector = ArtifactCollector::new("test_name");
@@ -242,7 +242,7 @@ impl ArtifactCollector {
     /// # Examples
     ///
     /// ```rust
-    /// use tos_testing_framework::utilities::artifacts::{ArtifactCollector, BlockchainStateSnapshot};
+    /// use tos_tck::utilities::artifacts::{ArtifactCollector, BlockchainStateSnapshot};
     /// use std::collections::HashMap;
     ///
     /// let mut collector = ArtifactCollector::new("test_name");
@@ -268,7 +268,7 @@ impl ArtifactCollector {
     /// # Examples
     ///
     /// ```rust
-    /// use tos_testing_framework::utilities::artifacts::{ArtifactCollector, TransactionRecord};
+    /// use tos_tck::utilities::artifacts::{ArtifactCollector, TransactionRecord};
     ///
     /// let mut collector = ArtifactCollector::new("test_name");
     ///
@@ -293,7 +293,7 @@ impl ArtifactCollector {
     /// # Examples
     ///
     /// ```rust
-    /// use tos_testing_framework::utilities::artifacts::ArtifactCollector;
+    /// use tos_tck::utilities::artifacts::ArtifactCollector;
     ///
     /// let mut collector = ArtifactCollector::new("test_name");
     /// collector.capture_log("ERROR", "Block validation failed");
@@ -323,7 +323,7 @@ impl ArtifactCollector {
     /// # Examples
     ///
     /// ```rust,ignore
-    /// use tos_testing_framework::utilities::artifacts::ArtifactCollector;
+    /// use tos_tck::utilities::artifacts::ArtifactCollector;
     ///
     /// #[tokio::test]
     /// async fn test_example() -> Result<()> {
@@ -336,7 +336,9 @@ impl ArtifactCollector {
     /// ```
     pub async fn save(&mut self, output_dir: impl AsRef<Path>) -> Result<PathBuf> {
         // Update duration
-        self.metadata.duration_ms = self.start_time.elapsed().as_millis() as u64;
+        // Saturate to u64::MAX instead of wrapping on overflow
+        self.metadata.duration_ms =
+            self.start_time.elapsed().as_millis().min(u64::MAX as u128) as u64;
 
         // Create artifact
         let artifact = TestArtifact {
@@ -385,7 +387,7 @@ impl ArtifactCollector {
     /// # Examples
     ///
     /// ```rust,ignore
-    /// use tos_testing_framework::utilities::artifacts::ArtifactCollector;
+    /// use tos_tck::utilities::artifacts::ArtifactCollector;
     ///
     /// #[tokio::test]
     /// async fn test_replay() -> Result<()> {

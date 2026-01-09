@@ -8,7 +8,7 @@
 //! This smoke test ensures the framework compiles and basic
 //! functionality is accessible.
 
-use tos_testing_framework::prelude::*;
+use tos_tck::prelude::*;
 
 #[tokio::test]
 async fn test_framework_basic_imports() {
@@ -33,7 +33,7 @@ fn test_rng_seed_creation() {
 #[test]
 fn test_framework_version() {
     // Verify version constants are accessible and non-empty
-    use tos_testing_framework::{FRAMEWORK_VERSION, VERSION};
+    use tos_tck::{FRAMEWORK_VERSION, VERSION};
 
     assert!(!VERSION.is_empty(), "VERSION should not be empty");
     assert!(

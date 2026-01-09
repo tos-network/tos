@@ -94,7 +94,7 @@ pub const PRUNING_DEPTH: u64 = 200;
 /// # Example
 ///
 /// ```rust,ignore
-/// use tos_testing_framework::tier1_component::TestBlockchainBuilder;
+/// use tos_tck::tier1_component::TestBlockchainBuilder;
 ///
 /// let blockchain = TestBlockchainBuilder::new()
 ///     .with_clock(clock)

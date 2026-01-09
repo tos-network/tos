@@ -12,11 +12,11 @@
 
 use anyhow::Result;
 use std::collections::HashMap;
-use tos_testing_framework::orchestrator::rng::TestRng;
-use tos_testing_framework::utilities::artifacts::{
+use tos_tck::orchestrator::rng::TestRng;
+use tos_tck::utilities::artifacts::{
     ArtifactCollector, BlockchainStateSnapshot, Partition, TopologySnapshot, TransactionRecord,
 };
-use tos_testing_framework::utilities::{load_artifact, print_artifact_summary, validate_artifact};
+use tos_tck::utilities::{load_artifact, print_artifact_summary, validate_artifact};
 
 /// Example: Collect artifacts from a multi-node network failure
 ///

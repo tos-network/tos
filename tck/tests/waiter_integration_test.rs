@@ -12,9 +12,9 @@ use tokio::sync::Mutex;
 use tokio::time::{sleep, Duration};
 
 // Import our waiter implementations directly
-use tos_testing_framework::tier2_integration::waiters::wait_for_block;
-use tos_testing_framework::tier2_integration::{Hash, NodeRpc};
-use tos_testing_framework::tier3_e2e::waiters::{wait_all_heights_equal, wait_all_tips_equal};
+use tos_tck::tier2_integration::waiters::wait_for_block;
+use tos_tck::tier2_integration::{Hash, NodeRpc};
+use tos_tck::tier3_e2e::waiters::{wait_all_heights_equal, wait_all_tips_equal};
 
 // Mock node implementation
 struct TestNode {

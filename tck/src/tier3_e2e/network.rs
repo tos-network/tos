@@ -22,7 +22,7 @@
 //! # Example
 //!
 //! ```rust,ignore
-//! use tos_testing_framework::tier3_e2e::LocalTosNetworkBuilder;
+//! use tos_tck::tier3_e2e::LocalTosNetworkBuilder;
 //! use tokio::time::Duration;
 //!
 //! #[tokio::test]

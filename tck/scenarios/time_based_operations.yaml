@@ -1,0 +1,74 @@
+# Time-Based Operations Scenario
+# Tests time-sensitive operations with clock advancement
+
+name: "Time-Based Operations"
+description: "Operations that involve time advancement and delays"
+
+genesis:
+  accounts:
+    - name: "alice"
+      balance: "50000000000"  # 50 TOS
+    - name: "bob"
+      balance: "50000000000"  # 50 TOS
+
+steps:
+  # Initial transfer
+  - action: "transfer"
+    from: "alice"
+    to: "bob"
+    amount: "5000000000"  # 5 TOS
+    fee: "100"
+    expect:
+      status: "success"
+
+  - action: "mine_block"
+
+  # Advance time by 1 hour
+  - action: "advance_time"
+    seconds: 3600
+
+  # Transfer after time delay
+  - action: "transfer"
+    from: "bob"
+    to: "alice"
+    amount: "2000000000"  # 2 TOS
+    fee: "100"
+    expect:
+      status: "success"
+
+  - action: "mine_block"
+
+  # Advance time by 24 hours
+  - action: "advance_time"
+    seconds: 86400
+
+  # Another transfer after long delay
+  - action: "transfer"
+    from: "alice"
+    to: "bob"
+    amount: "1000000000"  # 1 TOS
+    fee: "100"
+    expect:
+      status: "success"
+
+  - action: "mine_block"
+
+  # Verify balances
+  # alice: 50 - 5 + 2 - 1 - fees = 45999999800
+  - action: "assert_balance"
+    account: "alice"
+    eq: "45999999800"
+
+  # bob: 50 + 5 - 2 + 1 - fees = 53999999900
+  - action: "assert_balance"
+    account: "bob"
+    eq: "53999999900"
+
+  # Verify nonces
+  - action: "assert_nonce"
+    account: "alice"
+    eq: 2
+
+  - action: "assert_nonce"
+    account: "bob"
+    eq: 1

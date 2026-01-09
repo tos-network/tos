@@ -2,15 +2,14 @@
 //!
 //! Import everything you need with:
 //! ```rust,ignore
-//! use tos_testing_framework::prelude::*;
+//! use tos_tck::prelude::*;
 //! ```
 
 // Re-export orchestrator types
 pub use crate::orchestrator::{Clock, DeterministicTestEnv, PausedClock, SystemClock, TestRng};
 
 // Re-export Tier 1 component testing
-// TODO: Re-enable when Agent A's blockchain.rs compilation errors are fixed
-// pub use crate::tier1_component::{TestBlockchain, TestBlockchainBuilder};
+pub use crate::tier1_component::{TestBlockchain, TestBlockchainBuilder};
 
 // Re-export Tier 2 integration testing
 // TODO: Uncomment when TestDaemon is implemented

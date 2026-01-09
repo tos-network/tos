@@ -46,7 +46,7 @@ use super::TempRocksDB;
 /// # Example
 ///
 /// ```ignore
-/// use tos_testing_framework::utilities::create_test_rocksdb_storage;
+/// use tos_tck::utilities::create_test_rocksdb_storage;
 ///
 /// #[tokio::test]
 /// async fn test_with_rocksdb() {
@@ -121,7 +121,7 @@ pub async fn create_test_rocksdb_storage() -> Arc<RwLock<RocksStorage>> {
 /// # Example
 ///
 /// ```ignore
-/// use tos_testing_framework::utilities::{
+/// use tos_tck::utilities::{
 ///     create_test_rocksdb_storage,
 ///     setup_account_rocksdb,
 /// };
@@ -187,7 +187,7 @@ pub async fn setup_account_rocksdb(
 /// # Example
 ///
 /// ```ignore
-/// use tos_testing_framework::utilities::create_test_storage_with_funded_accounts;
+/// use tos_tck::utilities::create_test_storage_with_funded_accounts;
 /// use tos_common::config::COIN_VALUE;
 ///
 /// #[tokio::test]

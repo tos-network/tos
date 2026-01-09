@@ -10,8 +10,8 @@
 use anyhow::Result;
 use std::sync::Arc;
 use tos_common::crypto::Hash;
-use tos_testing_framework::orchestrator::SystemClock;
-use tos_testing_framework::tier1_component::{TestBlock, TestBlockchainBuilder, PRUNING_DEPTH};
+use tos_tck::orchestrator::SystemClock;
+use tos_tck::tier1_component::{TestBlock, TestBlockchainBuilder, PRUNING_DEPTH};
 
 /// Helper to create a test pubkey from an ID
 fn create_test_pubkey(id: u8) -> Hash {

@@ -1,0 +1,81 @@
+# High Frequency Trading Scenario
+# Simulates rapid back-and-forth transfers between traders
+
+name: "High Frequency Trading"
+description: "Multiple rapid transfers simulating HFT activity"
+
+genesis:
+  accounts:
+    - name: "trader_a"
+      balance: "100000000000"  # 100 TOS
+    - name: "trader_b"
+      balance: "100000000000"  # 100 TOS
+
+steps:
+  # Round 1: trader_a -> trader_b
+  - action: "transfer"
+    from: "trader_a"
+    to: "trader_b"
+    amount: "10000000000"  # 10 TOS
+    fee: "50"
+
+  - action: "mine_block"
+
+  # Round 2: trader_b -> trader_a
+  - action: "transfer"
+    from: "trader_b"
+    to: "trader_a"
+    amount: "15000000000"  # 15 TOS
+    fee: "50"
+
+  - action: "mine_block"
+
+  # Round 3: trader_a -> trader_b
+  - action: "transfer"
+    from: "trader_a"
+    to: "trader_b"
+    amount: "8000000000"  # 8 TOS
+    fee: "50"
+
+  - action: "mine_block"
+
+  # Round 4: trader_b -> trader_a
+  - action: "transfer"
+    from: "trader_b"
+    to: "trader_a"
+    amount: "5000000000"  # 5 TOS
+    fee: "50"
+
+  - action: "mine_block"
+
+  # Round 5: trader_a -> trader_b
+  - action: "transfer"
+    from: "trader_a"
+    to: "trader_b"
+    amount: "12000000000"  # 12 TOS
+    fee: "50"
+
+  - action: "mine_block"
+
+  # Verify balances are within expected range
+  # Net flow: trader_a sent 10-15+8-5+12 = 10 TOS net to trader_b
+  # trader_a: 100 - 10 + 15 - 8 + 5 - 12 - fees = ~90 TOS
+  # trader_b: 100 + 10 - 15 + 8 - 5 + 12 - fees = ~110 TOS
+  - action: "assert_balance"
+    account: "trader_a"
+    compare:
+      gte: "89999999500"
+
+  - action: "assert_balance"
+    account: "trader_b"
+    compare:
+      gte: "109999999500"
+
+  # Verify nonces incremented correctly
+  - action: "assert_nonce"
+    account: "trader_a"
+    eq: 3
+
+  - action: "assert_nonce"
+    account: "trader_b"
+    eq: 2

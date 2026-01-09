@@ -92,6 +92,9 @@ pub mod prelude;
 /// Doc-test helpers (always available since this is a testing framework)
 pub mod doc_test_helpers;
 
+/// Test utilities for AI-generated tests (TestEnv, helpers)
+pub mod test_utils;
+
 // =============================================================================
 // TCK-Specific Modules (New)
 // =============================================================================
@@ -149,11 +152,14 @@ pub use formal::{InvariantViolation, VerifiableProperty};
 // Version Information
 // =============================================================================
 
-/// TCK version
+/// TCK version from Cargo.toml
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Framework version descriptor
 pub const TCK_VERSION: &str = "TOS-TCK V1.0";
+
+/// Framework version (alias for backward compatibility)
+pub const FRAMEWORK_VERSION: &str = TCK_VERSION;
 
 /// Previous framework version (for compatibility reference)
 pub const LEGACY_FRAMEWORK_VERSION: &str = "TOS Testing Framework V3.0";

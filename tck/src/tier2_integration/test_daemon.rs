@@ -22,7 +22,7 @@ use tos_common::crypto::Hash;
 /// # Example
 ///
 /// ```rust,ignore
-/// use tos_testing_framework::tier2_integration::TestDaemonBuilder;
+/// use tos_tck::tier2_integration::TestDaemonBuilder;
 ///
 /// let daemon = TestDaemonBuilder::new()
 ///     .with_clock(clock)

@@ -71,15 +71,19 @@ fn increment_nonce(current: u64) -> Option<u64> {
 // Hash/Merkle Tree Proofs
 // =============================================================================
 
-/// Simple Merkle node (for proof purposes)
+/// Compute Merkle parent hash from two child hashes
+///
+/// Uses blake3 for cryptographic hashing. The parent is computed as:
+/// `hash(left || right)` where `||` is concatenation.
 #[allow(dead_code)]
 fn merkle_parent(left: [u8; 32], right: [u8; 32]) -> [u8; 32] {
-    // Simplified hash - in reality would use SHA3
-    let mut result = [0u8; 32];
-    for i in 0..32 {
-        result[i] = left[i] ^ right[i];
-    }
-    result
+    // Concatenate left and right children
+    let mut combined = [0u8; 64];
+    combined[..32].copy_from_slice(&left);
+    combined[32..].copy_from_slice(&right);
+
+    // Use blake3 for cryptographic hashing
+    tos_common::crypto::hash(&combined).to_bytes()
 }
 
 // =============================================================================
@@ -268,24 +272,32 @@ mod kani_proofs {
         kani::assert(parent1 == parent2, "Merkle parent must be deterministic");
     }
 
-    /// Proof: Merkle parent changes if either child changes
+    /// Proof: Merkle parent with different inputs produces different outputs
+    ///
+    /// Note: This proof verifies structural correctness. For bounded verification,
+    /// we check specific cases rather than exhaustive collision resistance
+    /// (which would require astronomical state space).
     #[kani::proof]
-    fn verify_merkle_collision_resistance() {
-        let left1: [u8; 32] = kani::any();
-        let right1: [u8; 32] = kani::any();
-        let left2: [u8; 32] = kani::any();
-        let right2: [u8; 32] = kani::any();
+    #[kani::unwind(2)]
+    fn verify_merkle_input_sensitivity() {
+        let left: [u8; 32] = kani::any();
+        let right: [u8; 32] = kani::any();
 
-        // If inputs differ, output should (usually) differ
-        // This is a simplified check - real hash would have stronger guarantees
-        if left1 != left2 || right1 != right2 {
-            let parent1 = merkle_parent(left1, right1);
-            let parent2 = merkle_parent(left2, right2);
+        // Compute parent hash
+        let parent = merkle_parent(left, right);
 
-            // XOR-based "hash" has collisions, but real hash wouldn't
-            // This proof shows the structure is correct
-            // Real implementation would use cryptographic hash
-        }
+        // Verify that flipping a single bit in left changes the output
+        let mut left_flipped = left;
+        left_flipped[0] ^= 1; // Flip one bit
+
+        let parent_with_flipped = merkle_parent(left_flipped, right);
+
+        // With a cryptographic hash (blake3), different inputs produce different outputs
+        // (except with negligible probability for collisions)
+        kani::assert(
+            parent != parent_with_flipped,
+            "Different inputs should produce different merkle parent hashes",
+        );
     }
 
     // =========================================================================

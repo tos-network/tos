@@ -30,7 +30,7 @@ pub use tokio::time::Duration;
 /// # Example
 ///
 /// ```rust
-/// # use tos_testing_framework::doc_test_helpers::MinimalBlockchain;
+/// # use tos_tck::doc_test_helpers::MinimalBlockchain;
 /// # tokio_test::block_on(async {
 /// let blockchain = MinimalBlockchain::new().await.unwrap();
 /// let tip_height = blockchain.get_tip_height().await.unwrap();
@@ -47,7 +47,7 @@ impl MinimalBlockchain {
     /// # Example
     ///
     /// ```rust
-    /// # use tos_testing_framework::doc_test_helpers::MinimalBlockchain;
+    /// # use tos_tck::doc_test_helpers::MinimalBlockchain;
     /// # tokio_test::block_on(async {
     /// let blockchain = MinimalBlockchain::new().await.unwrap();
     /// # });
@@ -69,7 +69,7 @@ impl MinimalBlockchain {
     /// # Example
     ///
     /// ```rust
-    /// # use tos_testing_framework::doc_test_helpers::MinimalBlockchain;
+    /// # use tos_tck::doc_test_helpers::MinimalBlockchain;
     /// # tokio_test::block_on(async {
     /// let (blockchain, clock) = MinimalBlockchain::with_paused_time().await.unwrap();
     /// # });
@@ -103,7 +103,7 @@ impl MinimalBlockchain {
 /// # Example
 ///
 /// ```rust
-/// # use tos_testing_framework::doc_test_helpers::create_minimal_blockchain;
+/// # use tos_tck::doc_test_helpers::create_minimal_blockchain;
 /// # tokio_test::block_on(async {
 /// let blockchain = create_minimal_blockchain().await.unwrap();
 /// # });
@@ -120,7 +120,7 @@ pub async fn create_minimal_blockchain() -> Result<MinimalBlockchain> {
 /// # Example
 ///
 /// ```rust
-/// use tos_testing_framework::doc_test_helpers::run_doc_test_async;
+/// use tos_tck::doc_test_helpers::run_doc_test_async;
 ///
 /// run_doc_test_async(|| async {
 ///     // Your async code here
@@ -155,7 +155,7 @@ where
 /// # Example
 ///
 /// ```rust
-/// use tos_testing_framework::doc_test_helpers::create_test_address;
+/// use tos_tck::doc_test_helpers::create_test_address;
 ///
 /// let alice = create_test_address(1);
 /// let bob = create_test_address(2);
@@ -172,7 +172,7 @@ pub fn create_test_address(account_id: u8) -> Hash {
 /// # Example
 ///
 /// ```rust
-/// use tos_testing_framework::doc_test_helpers::create_test_pubkey;
+/// use tos_tck::doc_test_helpers::create_test_pubkey;
 ///
 /// let alice = create_test_pubkey(1);
 /// ```
@@ -187,7 +187,7 @@ pub fn create_test_pubkey(account_id: u8) -> Hash {
 /// # Example
 ///
 /// ```rust
-/// use tos_testing_framework::doc_test_helpers::create_test_tx_hash;
+/// use tos_tck::doc_test_helpers::create_test_tx_hash;
 ///
 /// let tx1 = create_test_tx_hash(1);
 /// let tx2 = create_test_tx_hash(2);
@@ -206,7 +206,7 @@ pub fn create_test_tx_hash(tx_id: u64) -> Hash {
 /// # Example
 ///
 /// ```rust
-/// use tos_testing_framework::doc_test_helpers::create_test_block_hash;
+/// use tos_tck::doc_test_helpers::create_test_block_hash;
 ///
 /// let block1 = create_test_block_hash(1);
 /// let block2 = create_test_block_hash(2);
@@ -227,7 +227,7 @@ pub fn create_test_block_hash(height: u64) -> Hash {
 /// # Example
 ///
 /// ```rust
-/// use tos_testing_framework::doc_test_helpers::MockRpcClient;
+/// use tos_tck::doc_test_helpers::MockRpcClient;
 ///
 /// let client = MockRpcClient::new();
 /// ```
@@ -270,7 +270,7 @@ impl Default for MockRpcClient {
 /// # Example
 ///
 /// ```rust
-/// use tos_testing_framework::doc_test_helpers::format_tos;
+/// use tos_tck::doc_test_helpers::format_tos;
 ///
 /// let amount = 1_234_567_890_000u64; // 1234.56789 TOS
 /// let formatted = format_tos(amount);
@@ -288,7 +288,7 @@ pub fn format_tos(nano_tos: u64) -> String {
 /// # Example
 ///
 /// ```rust
-/// use tos_testing_framework::doc_test_helpers::parse_tos;
+/// use tos_tck::doc_test_helpers::parse_tos;
 ///
 /// let amount = parse_tos("1234.5").unwrap();
 /// assert_eq!(amount, 1_234_500_000_000u64);
@@ -308,7 +308,7 @@ pub fn parse_tos(tos_str: &str) -> Result<u64> {
 /// # Example
 ///
 /// ```rust
-/// # use tos_testing_framework::doc_test_helpers::DocTestEnv;
+/// # use tos_tck::doc_test_helpers::DocTestEnv;
 /// # tokio_test::block_on(async {
 /// let env = DocTestEnv::new().await.unwrap();
 /// let alice = env.get_test_address(1);
@@ -354,7 +354,7 @@ impl DocTestEnv {
 /// # Example
 ///
 /// ```rust
-/// use tos_testing_framework::doc_test_helpers::wait_for;
+/// use tos_tck::doc_test_helpers::wait_for;
 /// use tokio::time::Duration;
 /// use std::sync::atomic::{AtomicU32, Ordering};
 /// use std::sync::Arc;
@@ -408,7 +408,7 @@ where
 /// # Example
 ///
 /// ```rust
-/// use tos_testing_framework::doc_test_helpers::assert_approx_eq;
+/// use tos_tck::doc_test_helpers::assert_approx_eq;
 ///
 /// let expected = 1000u64;
 /// let actual = 1005u64;
@@ -435,7 +435,7 @@ pub fn assert_approx_eq(expected: u64, actual: u64, tolerance: u64) -> Result<()
 /// # Example
 ///
 /// ```rust
-/// use tos_testing_framework::doc_test_helpers::create_test_scenario;
+/// use tos_tck::doc_test_helpers::create_test_scenario;
 ///
 /// let scenario = create_test_scenario("simple_transfer");
 /// assert_eq!(scenario.name, "simple_transfer");

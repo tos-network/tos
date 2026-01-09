@@ -1,0 +1,109 @@
+# Stress Test Scenario
+# Tests system stability with many transactions
+
+name: "Stress Test (10 Transactions)"
+description: "Multiple transactions to stress test the system"
+
+genesis:
+  accounts:
+    - name: "sender"
+      balance: "1000000000000"  # 1000 TOS
+    - name: "receiver"
+      balance: "0"
+
+steps:
+  # Transaction 1
+  - action: "transfer"
+    from: "sender"
+    to: "receiver"
+    amount: "1000000000"  # 1 TOS
+    fee: "100"
+  - action: "mine_block"
+
+  # Transaction 2
+  - action: "transfer"
+    from: "sender"
+    to: "receiver"
+    amount: "1000000000"
+    fee: "100"
+  - action: "mine_block"
+
+  # Transaction 3
+  - action: "transfer"
+    from: "sender"
+    to: "receiver"
+    amount: "1000000000"
+    fee: "100"
+  - action: "mine_block"
+
+  # Transaction 4
+  - action: "transfer"
+    from: "sender"
+    to: "receiver"
+    amount: "1000000000"
+    fee: "100"
+  - action: "mine_block"
+
+  # Transaction 5
+  - action: "transfer"
+    from: "sender"
+    to: "receiver"
+    amount: "1000000000"
+    fee: "100"
+  - action: "mine_block"
+
+  # Transaction 6
+  - action: "transfer"
+    from: "sender"
+    to: "receiver"
+    amount: "1000000000"
+    fee: "100"
+  - action: "mine_block"
+
+  # Transaction 7
+  - action: "transfer"
+    from: "sender"
+    to: "receiver"
+    amount: "1000000000"
+    fee: "100"
+  - action: "mine_block"
+
+  # Transaction 8
+  - action: "transfer"
+    from: "sender"
+    to: "receiver"
+    amount: "1000000000"
+    fee: "100"
+  - action: "mine_block"
+
+  # Transaction 9
+  - action: "transfer"
+    from: "sender"
+    to: "receiver"
+    amount: "1000000000"
+    fee: "100"
+  - action: "mine_block"
+
+  # Transaction 10
+  - action: "transfer"
+    from: "sender"
+    to: "receiver"
+    amount: "1000000000"
+    fee: "100"
+  - action: "mine_block"
+
+  # Verify balances
+  # sender: 1000 - (10 * 1) - (10 * 0.0000001) = 990 - 0.000001 = 989999999000
+  - action: "assert_balance"
+    account: "sender"
+    eq: "989999999000"
+
+  # receiver: 10 * 1 = 10 TOS = 10000000000
+  - action: "assert_balance"
+    account: "receiver"
+    eq: "10000000000"
+
+  # Verify nonce
+  - action: "assert_nonce"
+    account: "sender"
+    eq: 10
