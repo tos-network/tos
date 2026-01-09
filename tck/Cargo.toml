@@ -1,0 +1,79 @@
+[package]
+name = "tos-tck"
+version = "1.0.0"
+edition = "2021"
+authors = ["TOS Network Team"]
+description = "TOS Technology Compatibility Kit - Comprehensive Testing Framework"
+license = "MIT"
+documentation = "https://docs.tos.network/tck"
+repository = "https://github.com/tos-network/tos"
+
+[lib]
+doctest = false
+
+[dependencies]
+# Async runtime
+tokio = { version = "1.35", features = ["full", "test-util"] }
+futures = "0.3"
+async-trait = "0.1"
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+
+# Utilities
+rand = "0.8"
+parking_lot = "0.12"
+tempfile = "3.8"
+chrono = { version = "0.4", features = ["serde"] }
+textwrap = "0.16"
+
+# Logging
+tracing = "0.1"
+log = "0.4"
+
+# Encoding
+hex = "0.4"
+
+# File system
+walkdir = "2.4"
+
+# Property-based testing
+proptest = "1.4"
+arbitrary = { version = "1.3", features = ["derive"] }
+
+# TOS dependencies
+tos_common = { path = "../common" }
+tos_daemon = { path = "../daemon" }
+
+# TAKO dependencies for contract testing
+tos-kernel = { package = "tos-kernel", git = "https://github.com/tos-network/tako", rev = "9b55d72" }
+tos-syscalls = { package = "tos-syscalls", git = "https://github.com/tos-network/tako", rev = "9b55d72" }
+
+[dev-dependencies]
+proptest = "1.4"
+tokio-test = "0.4"
+env_logger = "0.11"
+criterion = "0.5"
+
+[features]
+default = ["tier1", "tier2"]
+tier1 = []                    # Component tests (TestBlockchain)
+tier2 = []                    # Integration tests (TestDaemon)
+tier3 = []                    # E2E tests (LocalNetwork)
+tier4 = []                    # Chaos & property tests
+chaos = ["tier4"]             # Alias for tier4
+conformance = []              # Conformance test runner
+fuzz = []                     # Fuzzing support
+formal = []                   # Formal verification support
+full = ["tier1", "tier2", "tier3", "tier4", "conformance"]
+
+# Benchmarks (to be added)
+# [[bench]]
+# name = "blockchain_bench"
+# harness = false
