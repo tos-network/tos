@@ -220,7 +220,10 @@ impl SyscallFuzzer {
                 // balance_transfer: expects address (20) + amount (8)
                 if args.len() >= 28 {
                     let _address = &args[..20];
-                    let _amount = u64::from_be_bytes(args[20..28].try_into().unwrap_or([0u8; 8]));
+                    // Safe: we already checked args.len() >= 28
+                    if let Ok(amount_bytes) = args[20..28].try_into() {
+                        let _amount = u64::from_be_bytes(amount_bytes);
+                    }
                 }
             }
             // Storage syscalls (0x10-0x1F)

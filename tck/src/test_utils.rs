@@ -147,7 +147,7 @@ impl TestEnv {
     /// Call a contract
     pub fn call_contract(
         &mut self,
-        _caller: &Address,
+        caller: &Address,
         target: &Address,
         input: Vec<u8>,
         value: u64,
@@ -163,14 +163,36 @@ impl TestEnv {
             };
         }
 
-        // Simulate successful call
-        let gas_used = gas_limit.min(21000 + input.len() as u64 * 16);
+        // Calculate gas with overflow protection
+        let input_gas = (input.len() as u64).saturating_mul(16);
+        let base_gas = 21000u64.saturating_add(input_gas);
+        let gas_used = gas_limit.min(base_gas);
 
         // If value transfer, update balances
         if value > 0 {
+            // Check caller has sufficient balance
+            let caller_balance = self.get_balance(caller);
+            if caller_balance < value {
+                return CallResult {
+                    success: false,
+                    return_data: vec![],
+                    gas_used,
+                    reverted: true,
+                };
+            }
+
+            // Deduct from caller
+            self.balances
+                .insert(caller.clone(), caller_balance.saturating_sub(value));
+
+            // Add to target contract
             if let Some(contract) = self.contracts.get_mut(target) {
                 contract.balance = contract.balance.saturating_add(value);
             }
+            // Update balances map for target
+            let target_balance = self.get_balance(target);
+            self.balances
+                .insert(target.clone(), target_balance.saturating_add(value));
         }
 
         CallResult {

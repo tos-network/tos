@@ -222,10 +222,28 @@ impl ConformanceRunner {
                 }
                 if let Some(storage) = &condition.storage {
                     for (key, value) in storage {
-                        let key_bytes = hex::decode(key.trim_start_matches("0x"))
-                            .unwrap_or_else(|_| key.as_bytes().to_vec());
+                        let key_bytes =
+                            hex::decode(key.trim_start_matches("0x")).unwrap_or_else(|e| {
+                                if log::log_enabled!(log::Level::Warn) {
+                                    log::warn!(
+                                        "Invalid hex key '{}' in storage, using raw bytes: {}",
+                                        key,
+                                        e
+                                    );
+                                }
+                                key.as_bytes().to_vec()
+                            });
                         let value_bytes = hex::decode(value.trim_start_matches("0x"))
-                            .unwrap_or_else(|_| value.as_bytes().to_vec());
+                            .unwrap_or_else(|e| {
+                                if log::log_enabled!(log::Level::Warn) {
+                                    log::warn!(
+                                        "Invalid hex value '{}' in storage, using raw bytes: {}",
+                                        value,
+                                        e
+                                    );
+                                }
+                                value.as_bytes().to_vec()
+                            });
                         account.storage.insert(hex::encode(&key_bytes), value_bytes);
                     }
                 }
@@ -315,15 +333,16 @@ impl ConformanceRunner {
         let code_bytes =
             hex::decode(code.trim_start_matches("0x")).context("Invalid contract code hex")?;
 
-        // Generate contract address (simplified - use hash of code + args)
+        // Generate contract address using hash of code + args to avoid collisions
         let mut hasher_input = code_bytes.clone();
         for arg in args {
             hasher_input.extend(arg.as_bytes());
         }
-        let address = format!(
-            "0x{}",
-            hex::encode(&hasher_input[..20.min(hasher_input.len())])
-        );
+        // Hash the entire input to generate a unique address
+        let hash = tos_common::crypto::hash(&hasher_input);
+        let hash_bytes = hash.to_bytes();
+        // Use last 20 bytes of hash as address (similar to Ethereum CREATE)
+        let address = format!("0x{}", hex::encode(&hash_bytes[12..32]));
 
         // Store contract
         ctx.contracts.insert(
@@ -437,8 +456,16 @@ impl ConformanceRunner {
                     .ok_or_else(|| anyhow::anyhow!("storage_write requires value argument"))?;
 
                 let account_state = ctx.accounts.entry(account.clone()).or_default();
-                let value_bytes = hex::decode(value.trim_start_matches("0x"))
-                    .unwrap_or_else(|_| value.as_bytes().to_vec());
+                let value_bytes = hex::decode(value.trim_start_matches("0x")).unwrap_or_else(|e| {
+                    if log::log_enabled!(log::Level::Warn) {
+                        log::warn!(
+                            "Invalid hex value '{}' in storage_write, using raw bytes: {}",
+                            value,
+                            e
+                        );
+                    }
+                    value.as_bytes().to_vec()
+                });
                 account_state.storage.insert(key.clone(), value_bytes);
 
                 Ok(ExecutionResult {
