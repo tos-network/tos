@@ -234,7 +234,9 @@ jobs:
           echo "=========================================="
           echo "Generating Code Coverage Report"
           echo "=========================================="
-          cargo tarpaulin -p tos-tck --out Xml --output-dir coverage/
+          # Use --lib to avoid OOM during linking of large integration tests
+          # Also use --jobs 1 to reduce memory pressure
+          cargo tarpaulin -p tos-tck --lib --out Xml --output-dir coverage/ --jobs 1
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
