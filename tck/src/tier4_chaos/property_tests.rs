@@ -131,7 +131,11 @@ mod tests {
                 let final_balance = blockchain.get_balance(&alice).await
                     .map_err(|e| TestCaseError::fail(e.to_string()))?;
 
-                let expected = initial_balance - total_amount - total_fee;
+                // Use checked arithmetic to prevent underflow
+                let expected = initial_balance
+                    .checked_sub(total_amount)
+                    .and_then(|b| b.checked_sub(total_fee))
+                    .ok_or_else(|| TestCaseError::fail("Balance underflow in test"))?;
                 prop_assert_eq!(final_balance, expected,
                     "Final balance mismatch: expected {}, got {}",
                     expected, final_balance);

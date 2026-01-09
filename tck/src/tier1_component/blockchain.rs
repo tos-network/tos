@@ -156,7 +156,8 @@ impl TestBlockchain {
 
         for (pubkey, balance) in funded_accounts {
             accounts.insert(pubkey, AccountState { balance, nonce: 0 });
-            total_balance += balance as u128;
+            // Use saturating_add to prevent overflow in genesis with many accounts
+            total_balance = total_balance.saturating_add(balance as u128);
         }
 
         // Initialize counters

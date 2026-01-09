@@ -94,7 +94,8 @@ mod tests {
 
         async fn advance_height(&self, increment: u64) {
             let mut height = self.height.lock().await;
-            *height += increment;
+            // Use saturating_add to prevent overflow
+            *height = height.saturating_add(increment);
         }
     }
 

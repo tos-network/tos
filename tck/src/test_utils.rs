@@ -128,7 +128,8 @@ impl TestEnv {
     /// Deploy a contract with specific bytecode
     pub fn deploy_contract_with_code(&mut self, bytecode: Vec<u8>) -> Address {
         let nonce = self.nonces.entry(Address::zero()).or_insert(0);
-        *nonce += 1;
+        // Use saturating_add to prevent overflow
+        *nonce = nonce.saturating_add(1);
 
         let address = compute_contract_address(&Address::zero(), *nonce);
 
@@ -283,8 +284,9 @@ impl TestEnv {
 
     /// Advance block number
     pub fn mine_block(&mut self) {
-        self.block_number += 1;
-        self.timestamp += 12; // ~12 second block time
+        // Use saturating_add to prevent overflow in long-running tests
+        self.block_number = self.block_number.saturating_add(1);
+        self.timestamp = self.timestamp.saturating_add(12); // ~12 second block time
     }
 
     /// Get current timestamp
@@ -308,7 +310,8 @@ impl TestEnv {
     /// Compute deployment address from name
     fn compute_deploy_address(&mut self, name: &str) -> Address {
         let nonce = self.nonces.entry(Address::zero()).or_insert(0);
-        *nonce += 1;
+        // Use saturating_add to prevent overflow
+        *nonce = nonce.saturating_add(1);
 
         // Simple deterministic address from name and nonce
         let mut bytes = [0u8; 20];
