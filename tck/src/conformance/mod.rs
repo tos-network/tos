@@ -114,9 +114,10 @@ pub enum Action {
 }
 
 /// Expected outcome
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct Expected {
     /// Expected status
+    #[serde(default)]
     pub status: ExpectedStatus,
     /// Expected error code (if status is error)
     pub error_code: Option<String>,
@@ -127,10 +128,11 @@ pub struct Expected {
 }
 
 /// Expected status
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ExpectedStatus {
-    /// Operation succeeded
+    /// Operation succeeded (default)
+    #[default]
     Success,
     /// Operation failed with error
     Error,
