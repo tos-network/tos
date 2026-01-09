@@ -5387,34 +5387,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tos-testing-framework"
-version = "0.1.12"
-dependencies = [
- "anyhow",
- "async-trait",
- "chrono",
- "env_logger",
- "futures",
- "log",
- "parking_lot 0.12.4",
- "proptest",
- "rand 0.8.5",
- "serde",
- "serde_json",
- "serde_yaml",
- "tempfile",
- "textwrap",
- "thiserror 1.0.69",
- "tokio",
- "tokio-test",
- "tos-kernel",
- "tos-syscalls",
- "tos_common",
- "tos_daemon",
- "tracing",
-]
-
-[[package]]
 name = "tos-types"
 version = "0.1.0"
 source = "git+https://github.com/tos-network/tako?rev=9b55d72#9b55d72b24d325a09a33061ceef20e8f43efd618"
@@ -5546,7 +5518,6 @@ dependencies = [
  "tos-syscalls",
  "tos-tbpf",
  "tos-tck",
- "tos-testing-framework",
  "tos_common",
  "x25519-dalek",
  "xxhash-rust",
