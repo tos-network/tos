@@ -1,8 +1,12 @@
 //! Conformance test runner
+//!
+//! Executes YAML-based conformance specifications and generates reports.
+//! Supports multiple output formats: JSON, JUnit XML, and human-readable.
 
 use super::*;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
@@ -188,6 +192,98 @@ impl TestReport {
     pub fn all_passed(&self) -> bool {
         self.failed == 0
     }
+
+    /// Convert to JUnit XML format
+    pub fn to_junit_xml(&self) -> String {
+        let mut xml = String::new();
+        xml.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+        xml.push_str(&format!(
+            "<testsuite name=\"TOS-TCK Conformance\" tests=\"{}\" failures=\"{}\" errors=\"0\" skipped=\"{}\" time=\"{:.3}\">\n",
+            self.total,
+            self.failed,
+            self.skipped,
+            self.duration.as_secs_f64()
+        ));
+
+        for result in &self.results {
+            xml.push_str(&format!(
+                "  <testcase classname=\"{}\" name=\"{}\" time=\"{:.3}\"",
+                result.category,
+                result.name,
+                result.duration_ms as f64 / 1000.0
+            ));
+
+            match result.status {
+                TestStatus::Pass => {
+                    xml.push_str(" />\n");
+                }
+                TestStatus::Fail | TestStatus::Error => {
+                    xml.push_str(">\n");
+                    if let Some(error) = &result.error {
+                        xml.push_str(&format!(
+                            "    <failure message=\"Test failed\">{}</failure>\n",
+                            escape_xml(error)
+                        ));
+                    }
+                    xml.push_str("  </testcase>\n");
+                }
+                TestStatus::Skip => {
+                    xml.push_str(">\n");
+                    xml.push_str("    <skipped />\n");
+                    xml.push_str("  </testcase>\n");
+                }
+            }
+        }
+
+        xml.push_str("</testsuite>\n");
+        xml
+    }
+
+    /// Get results by category
+    pub fn by_category(&self) -> HashMap<String, Vec<&TestResultEntry>> {
+        let mut map: HashMap<String, Vec<&TestResultEntry>> = HashMap::new();
+        for result in &self.results {
+            map.entry(result.category.clone()).or_default().push(result);
+        }
+        map
+    }
+
+    /// Print human-readable summary
+    pub fn print_summary(&self) {
+        println!("\n=== TOS-TCK Conformance Test Report ===\n");
+        println!(
+            "Total: {} | Passed: {} | Failed: {} | Skipped: {}",
+            self.total, self.passed, self.failed, self.skipped
+        );
+        println!("Duration: {:.2}s\n", self.duration.as_secs_f64());
+
+        if self.failed > 0 {
+            println!("Failed tests:");
+            for result in &self.results {
+                if matches!(result.status, TestStatus::Fail | TestStatus::Error) {
+                    println!("  - {} ({})", result.name, result.category);
+                    if let Some(error) = &result.error {
+                        println!("    Error: {}", error);
+                    }
+                }
+            }
+            println!();
+        }
+
+        println!(
+            "Result: {}",
+            if self.all_passed() { "PASS" } else { "FAIL" }
+        );
+    }
+}
+
+/// Escape XML special characters
+fn escape_xml(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
 }
 
 impl Default for TestReport {

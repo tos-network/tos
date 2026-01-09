@@ -1,0 +1,61 @@
+[package]
+name = "tos-tck-fuzz"
+version = "0.0.0"
+authors = ["TOS Network Team"]
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+arbitrary = { version = "1.3", features = ["derive"] }
+
+# TOS dependencies for fuzzing
+tos_common = { path = "../../common" }
+
+[dependencies.tos-tck]
+path = ".."
+
+# Prevent this from interfering with workspaces
+[workspace]
+members = ["."]
+
+[profile.release]
+debug = 1
+
+[[bin]]
+name = "fuzz_transaction"
+path = "fuzz_targets/fuzz_transaction.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_block_header"
+path = "fuzz_targets/fuzz_block_header.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_rpc_json"
+path = "fuzz_targets/fuzz_rpc_json.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_address"
+path = "fuzz_targets/fuzz_address.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_signature"
+path = "fuzz_targets/fuzz_signature.rs"
+test = false
+doc = false
+bench = false

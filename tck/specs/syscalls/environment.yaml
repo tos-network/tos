@@ -1,0 +1,226 @@
+# TOS-TCK Conformance Spec: Environment Syscalls
+# Tests block and transaction context syscalls
+
+spec:
+  name: syscall_env_block_number
+  version: "1.0"
+  category: syscalls
+  subcategory: environment
+
+description: |
+  Verifies sol_get_block_number returns current block height.
+
+preconditions: []
+
+action:
+  type: syscall
+  name: sol_get_block_number
+  args: []
+
+expected:
+  status: success
+  return_value: ">= 0"
+  gas_used: "<= 2"
+
+postconditions: []
+
+---
+spec:
+  name: syscall_env_timestamp
+  version: "1.0"
+  category: syscalls
+  subcategory: environment
+
+description: |
+  Verifies sol_get_block_timestamp returns block timestamp.
+  Timestamp should be in Unix seconds.
+
+preconditions: []
+
+action:
+  type: syscall
+  name: sol_get_block_timestamp
+  args: []
+
+expected:
+  status: success
+  return_value: ">= 1700000000"  # After Nov 2023
+  gas_used: "<= 2"
+
+postconditions: []
+
+---
+spec:
+  name: syscall_env_caller
+  version: "1.0"
+  category: syscalls
+  subcategory: environment
+
+description: |
+  Verifies sol_get_caller returns transaction sender address.
+
+preconditions:
+  - account: "alice"
+    balance: 1000000000
+
+action:
+  type: syscall
+  name: sol_get_caller
+  args: []
+
+expected:
+  status: success
+  return_value: "alice"  # Should match sender
+  gas_used: "<= 2"
+
+postconditions: []
+
+---
+spec:
+  name: syscall_env_address
+  version: "1.0"
+  category: syscalls
+  subcategory: environment
+
+description: |
+  Verifies sol_get_address returns current contract address.
+
+preconditions:
+  - account: "contract_a"
+
+action:
+  type: syscall
+  name: sol_get_address
+  args: []
+
+expected:
+  status: success
+  return_value: "contract_a"
+  gas_used: "<= 2"
+
+postconditions: []
+
+---
+spec:
+  name: syscall_env_origin
+  version: "1.0"
+  category: syscalls
+  subcategory: environment
+
+description: |
+  Verifies sol_get_origin returns original transaction sender.
+  Should be same as caller for direct calls.
+
+preconditions:
+  - account: "alice"
+
+action:
+  type: syscall
+  name: sol_get_origin
+  args: []
+
+expected:
+  status: success
+  return_value: "alice"
+  gas_used: "<= 2"
+
+postconditions: []
+
+---
+spec:
+  name: syscall_env_gas_remaining
+  version: "1.0"
+  category: syscalls
+  subcategory: environment
+
+description: |
+  Verifies sol_get_gas_remaining returns available gas.
+
+preconditions: []
+
+action:
+  type: syscall
+  name: sol_get_gas_remaining
+  args: []
+
+expected:
+  status: success
+  return_value: "> 0"
+  gas_used: "<= 2"
+
+postconditions: []
+
+---
+spec:
+  name: syscall_env_chain_id
+  version: "1.0"
+  category: syscalls
+  subcategory: environment
+
+description: |
+  Verifies sol_get_chain_id returns network chain ID.
+
+preconditions: []
+
+action:
+  type: syscall
+  name: sol_get_chain_id
+  args: []
+
+expected:
+  status: success
+  return_value: "> 0"  # Chain ID should be positive
+  gas_used: "<= 2"
+
+postconditions: []
+
+---
+spec:
+  name: syscall_env_block_hash
+  version: "1.0"
+  category: syscalls
+  subcategory: environment
+
+description: |
+  Verifies sol_get_block_hash returns hash for recent block.
+  Only last 256 blocks are accessible.
+
+preconditions: []
+
+action:
+  type: syscall
+  name: sol_get_block_hash
+  args:
+    - block_number: 0  # Genesis block
+
+expected:
+  status: success
+  return_value: "!= 0x0000000000000000000000000000000000000000000000000000000000000000"
+  gas_used: "<= 20"
+
+postconditions: []
+
+---
+spec:
+  name: syscall_env_block_hash_too_old
+  version: "1.0"
+  category: syscalls
+  subcategory: environment
+
+description: |
+  Verifies sol_get_block_hash returns zero for blocks > 256 ago.
+
+preconditions: []
+
+action:
+  type: syscall
+  name: sol_get_block_hash
+  args:
+    - block_number: -1000  # Very old block (relative)
+
+expected:
+  status: success
+  return_value: "0x0000000000000000000000000000000000000000000000000000000000000000"
+  gas_used: "<= 20"
+
+postconditions: []

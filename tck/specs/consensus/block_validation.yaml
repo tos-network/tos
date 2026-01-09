@@ -1,0 +1,176 @@
+# TOS-TCK Conformance Spec: Block Validation
+# Tests block validation rules
+
+spec:
+  name: consensus_block_valid
+  version: "1.0"
+  category: consensus
+  subcategory: block
+
+description: |
+  Verifies that a valid block is accepted.
+  All fields must be properly formatted and signed.
+
+preconditions:
+  - block_height: 100
+  - previous_hash: "valid_hash"
+
+action:
+  type: syscall
+  name: validate_block
+  args:
+    - header:
+        height: 101
+        previous_hash: "valid_hash"
+        timestamp: 1700000000
+        merkle_root: "valid_merkle"
+    - transactions: []
+
+expected:
+  status: success
+
+postconditions: []
+
+---
+spec:
+  name: consensus_block_invalid_height
+  version: "1.0"
+  category: consensus
+  subcategory: block
+
+description: |
+  Verifies that block with wrong height is rejected.
+
+preconditions:
+  - block_height: 100
+
+action:
+  type: syscall
+  name: validate_block
+  args:
+    - header:
+        height: 99  # Should be 101
+        previous_hash: "valid_hash"
+
+expected:
+  status: error
+  error_code: "INVALID_BLOCK_HEIGHT"
+
+postconditions: []
+
+---
+spec:
+  name: consensus_block_invalid_timestamp
+  version: "1.0"
+  category: consensus
+  subcategory: block
+
+description: |
+  Verifies that block with future timestamp is rejected.
+  Timestamp should not be more than 15 seconds in future.
+
+preconditions:
+  - current_time: 1700000000
+
+action:
+  type: syscall
+  name: validate_block
+  args:
+    - header:
+        height: 101
+        timestamp: 1700001000  # 1000 seconds in future
+
+expected:
+  status: error
+  error_code: "FUTURE_TIMESTAMP"
+
+postconditions: []
+
+---
+spec:
+  name: consensus_block_invalid_parent
+  version: "1.0"
+  category: consensus
+  subcategory: block
+
+description: |
+  Verifies that block with wrong parent hash is rejected.
+
+preconditions:
+  - block_height: 100
+  - previous_hash: "correct_hash"
+
+action:
+  type: syscall
+  name: validate_block
+  args:
+    - header:
+        height: 101
+        previous_hash: "wrong_hash"
+
+expected:
+  status: error
+  error_code: "INVALID_PARENT_HASH"
+
+postconditions: []
+
+---
+spec:
+  name: consensus_transaction_ordering
+  version: "1.0"
+  category: consensus
+  subcategory: block
+
+description: |
+  Verifies that transactions in block are executed in order.
+  Nonces must be sequential.
+
+preconditions:
+  - account: "alice"
+    nonce: 0
+
+action:
+  type: syscall
+  name: execute_block
+  args:
+    - transactions:
+        - from: "alice"
+          nonce: 0
+        - from: "alice"
+          nonce: 1
+        - from: "alice"
+          nonce: 2
+
+expected:
+  status: success
+
+postconditions:
+  - account: "alice"
+    nonce: 3
+
+---
+spec:
+  name: consensus_nonce_gap_rejected
+  version: "1.0"
+  category: consensus
+  subcategory: block
+
+description: |
+  Verifies that nonce gaps are rejected.
+
+preconditions:
+  - account: "alice"
+    nonce: 0
+
+action:
+  type: syscall
+  name: validate_transaction
+  args:
+    - from: "alice"
+      nonce: 2  # Gap: should be 0
+
+expected:
+  status: error
+  error_code: "NONCE_TOO_HIGH"
+
+postconditions: []

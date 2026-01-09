@@ -25,8 +25,10 @@
 //! ```
 
 mod invariants;
+mod proofs;
 
 pub use invariants::*;
+// proofs module contains Kani harnesses, no public exports needed
 
 /// Formal verification configuration
 #[derive(Debug, Clone)]
