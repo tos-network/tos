@@ -276,7 +276,7 @@ impl TestBlockchain {
             .filter(|t| t.sender == tx.sender)
             .count()
             .try_into()
-            .unwrap_or(u64::MAX);
+            .context("Too many pending transactions for sender - mempool overflow")?;
 
         let expected_nonce = sender_state
             .nonce
@@ -514,11 +514,22 @@ impl TestBlockchain {
             // Calculate total deduction with overflow protection
             let total_deduction = tx.amount.saturating_add(tx.fee);
 
-            // Deduct from sender
-            if let Some(sender) = accounts.get_mut(&tx.sender) {
-                sender.balance = sender.balance.saturating_sub(total_deduction);
-                sender.nonce = sender.nonce.saturating_add(1);
+            // Deduct from sender with balance validation
+            let sender = accounts.get_mut(&tx.sender).ok_or_else(|| {
+                anyhow::anyhow!("Sender account not found in apply_block: {}", tx.sender)
+            })?;
+
+            // Validate sender has sufficient balance (block should have been validated already)
+            if sender.balance < total_deduction {
+                anyhow::bail!(
+                    "Transaction would cause balance underflow in apply_block: need {}, have {}",
+                    total_deduction,
+                    sender.balance
+                );
             }
+
+            sender.balance = sender.balance.saturating_sub(total_deduction);
+            sender.nonce = sender.nonce.saturating_add(1);
 
             // Add to recipient (create if doesn't exist) with overflow protection
             // Use entry API properly to avoid TOCTOU - get mutable ref and update in place
@@ -3126,12 +3137,22 @@ mod tests {
             selected_parent: genesis_hash,
         };
 
-        // Note: Current implementation doesn't validate transactions in receive_block
-        // This test documents current behavior
-        blockchain.receive_block(block).await.unwrap();
+        // Block with invalid transaction should be rejected
+        let result = blockchain.receive_block(block).await;
+        assert!(
+            result.is_err(),
+            "Block with invalid transaction should be rejected"
+        );
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("balance underflow"),
+            "Error should mention balance underflow"
+        );
 
-        // Balance will underflow to 0 due to saturating_sub
-        assert_eq!(blockchain.get_balance(&alice).await.unwrap(), 0);
+        // Balance should remain unchanged after rejected block
+        assert_eq!(blockchain.get_balance(&alice).await.unwrap(), 1000);
     }
 
     #[tokio::test]
