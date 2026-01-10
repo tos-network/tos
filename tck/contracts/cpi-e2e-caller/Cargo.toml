@@ -1,0 +1,11 @@
+[package]
+name = "cpi-e2e-caller"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+tako-sdk = { workspace = true, default-features = false }
+
+[lib]
+crate-type = ["cdylib"]

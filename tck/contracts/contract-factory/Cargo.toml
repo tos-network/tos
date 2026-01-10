@@ -1,0 +1,17 @@
+[package]
+name = "contract-factory"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# No dependencies for the contract itself - keeps it lightweight
+
+[lib]
+crate-type = ["cdylib"]
+
+[profile.release]
+opt-level = "z"     # Optimize for size
+lto = true          # Enable Link Time Optimization
+codegen-units = 1   # Better optimization
+panic = "abort"     # Smaller binary
+strip = true        # Strip symbols

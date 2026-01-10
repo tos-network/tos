@@ -1,0 +1,15 @@
+[package]
+name = "reentrancy_guard"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tako-sdk.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1

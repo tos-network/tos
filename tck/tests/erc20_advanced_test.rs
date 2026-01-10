@@ -34,7 +34,7 @@ async fn test_erc20_approve_and_transfer_from() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("fixtures/token.so");
     let contract_hash = Hash::zero();
 
     // Step 1: Mint tokens to owner
@@ -67,7 +67,7 @@ async fn test_erc20_burn() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("fixtures/token.so");
     let contract_hash = Hash::zero();
 
     // Execute mint operation
@@ -97,7 +97,7 @@ async fn test_erc20_mint_with_access_control() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("fixtures/token.so");
     let contract_hash = Hash::zero();
 
     // Authorized mint (owner)
@@ -123,7 +123,7 @@ async fn test_erc20_allowance_overflow_protection() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("fixtures/token.so");
     let contract_hash = Hash::zero();
 
     // Note: Test contract should use saturating_add to prevent overflow
@@ -152,7 +152,7 @@ async fn test_erc20_self_transfer() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("fixtures/token.so");
     let contract_hash = Hash::zero();
 
     // Execute self-transfer
@@ -178,7 +178,7 @@ async fn test_erc20_batch_operations() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("fixtures/token.so");
     let contract_hash = Hash::zero();
 
     // Simulate batch: mint + transfer + approve
@@ -204,7 +204,7 @@ async fn test_erc20_state_rollback_on_error() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("fixtures/token.so");
     let contract_hash = Hash::zero();
 
     // Execute operation that should fail (e.g., insufficient balance)
@@ -232,7 +232,7 @@ async fn test_erc20_large_balance_operations() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("fixtures/token.so");
     let contract_hash = Hash::zero();
 
     // Test with large amounts (contract should handle gracefully)
@@ -261,7 +261,7 @@ async fn test_erc20_gas_estimation() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("fixtures/token.so");
     let contract_hash = Hash::zero();
 
     // Execute same operation 3 times
@@ -309,7 +309,7 @@ async fn test_erc20_event_logging() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("fixtures/token.so");
     let contract_hash = Hash::zero();
 
     // Execute operations and verify logs are emitted

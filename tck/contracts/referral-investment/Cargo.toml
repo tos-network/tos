@@ -1,0 +1,17 @@
+[package]
+name = "referral-investment"
+version = "0.1.0"
+edition = "2021"
+description = "3-level profit sharing contract using TAKO referral syscalls"
+
+[dependencies]
+tako-sdk.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"

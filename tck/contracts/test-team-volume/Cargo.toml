@@ -1,0 +1,17 @@
+[package]
+name = "test-team-volume"
+version = "0.1.0"
+edition = "2021"
+description = "Test contract for team volume syscalls"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+tako-sdk.workspace = true
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"

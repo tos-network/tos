@@ -1,0 +1,14 @@
+[package]
+name = "pausable"
+version = "0.1.0"
+edition = "2021"
+authors = ["TOS Network Contributors"]
+description = "OpenZeppelin-style Pausable contract implementation for TOS blockchain"
+license = "MIT"
+
+[dependencies]
+tako-sdk.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+

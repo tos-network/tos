@@ -127,7 +127,7 @@ async fn test_erc20_openzeppelin_initialization() {
 
     // For now, use the existing token.so as a placeholder
     // TODO: Replace with actual erc20_openzeppelin.so when Agent 1 completes it
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("fixtures/token.so");
     let contract_hash = Hash::zero();
 
     // Create initialization instruction
@@ -180,7 +180,7 @@ async fn test_erc20_openzeppelin_query_functions() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("fixtures/token.so");
     let contract_hash = Hash::zero();
 
     // Initialize token
@@ -217,7 +217,7 @@ async fn test_erc20_openzeppelin_balance_of() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("fixtures/token.so");
     let contract_hash = Hash::zero();
 
     // Initialize and mint tokens
@@ -255,7 +255,7 @@ async fn test_erc20_openzeppelin_transfer_success() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("fixtures/token.so");
     let contract_hash = Hash::zero();
 
     // Initialize with 1000 tokens
@@ -307,7 +307,7 @@ async fn test_erc20_openzeppelin_transfer_insufficient_balance() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("fixtures/token.so");
     let contract_hash = Hash::zero();
 
     // Initialize with 100 tokens (current token.so mints 100 per call)
@@ -351,7 +351,7 @@ async fn test_erc20_openzeppelin_transfer_zero_amount() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("fixtures/token.so");
     let contract_hash = Hash::zero();
 
     let result = execute_test_contract(bytecode, &storage, 1, &contract_hash)
@@ -387,7 +387,7 @@ async fn test_erc20_openzeppelin_approve() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("fixtures/token.so");
     let contract_hash = Hash::zero();
 
     // Initialize
@@ -434,7 +434,7 @@ async fn test_erc20_openzeppelin_transfer_from_success() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("fixtures/token.so");
     let contract_hash = Hash::zero();
 
     // Initialize
@@ -473,7 +473,7 @@ async fn test_erc20_openzeppelin_transfer_from_insufficient_allowance() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("fixtures/token.so");
     let contract_hash = Hash::zero();
 
     let result = execute_test_contract(bytecode, &storage, 1, &contract_hash)
@@ -512,7 +512,7 @@ async fn test_erc20_openzeppelin_mint_access_control() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("fixtures/token.so");
     let contract_hash = Hash::zero();
 
     // Initialize (owner becomes contract owner)
@@ -556,7 +556,7 @@ async fn test_erc20_openzeppelin_burn() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("fixtures/token.so");
     let contract_hash = Hash::zero();
 
     // Initialize with 1000 tokens
@@ -598,7 +598,7 @@ async fn test_erc20_openzeppelin_burn_insufficient_balance() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("fixtures/token.so");
     let contract_hash = Hash::zero();
 
     let result = execute_test_contract(bytecode, &storage, 1, &contract_hash)
@@ -634,7 +634,7 @@ async fn test_erc20_openzeppelin_storage_persistence() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("fixtures/token.so");
     let contract_hash = Hash::zero();
 
     // Execute at multiple topoheights
@@ -682,7 +682,7 @@ async fn test_erc20_openzeppelin_multiple_transfers() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("fixtures/token.so");
     let contract_hash = Hash::zero();
 
     let mut total_compute_units = 0u64;
@@ -725,7 +725,7 @@ async fn test_erc20_openzeppelin_allowance_query() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("fixtures/token.so");
     let contract_hash = Hash::zero();
 
     let result = execute_test_contract(bytecode, &storage, 1, &contract_hash)
@@ -767,7 +767,7 @@ async fn test_erc20_openzeppelin_compute_units() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("fixtures/token.so");
     let contract_hash = Hash::zero();
 
     // Measure initialization
@@ -824,7 +824,7 @@ async fn test_erc20_openzeppelin_invalid_recipient() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("fixtures/token.so");
     let contract_hash = Hash::zero();
 
     let result = execute_test_contract(bytecode, &storage, 1, &contract_hash)
@@ -862,7 +862,7 @@ async fn test_erc20_openzeppelin_approve_revoke() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("fixtures/token.so");
     let contract_hash = Hash::zero();
 
     let result = execute_test_contract(bytecode, &storage, 1, &contract_hash)
@@ -899,7 +899,7 @@ async fn test_erc20_openzeppelin_return_data() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("fixtures/token.so");
     let contract_hash = Hash::zero();
 
     let result = execute_test_contract(bytecode, &storage, 1, &contract_hash)
@@ -936,7 +936,7 @@ async fn test_erc20_openzeppelin_self_transfer() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("fixtures/token.so");
     let contract_hash = Hash::zero();
 
     let result = execute_test_contract(bytecode, &storage, 1, &contract_hash)

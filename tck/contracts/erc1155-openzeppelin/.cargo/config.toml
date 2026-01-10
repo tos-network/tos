@@ -1,0 +1,5 @@
+[build]
+target = "tbpfv3-tos-tos"
+
+[target.tbpfv3-tos-tos]
+linker = "rust-lld"

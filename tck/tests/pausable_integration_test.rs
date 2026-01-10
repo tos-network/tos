@@ -46,7 +46,7 @@ async fn test_pausable_initialization() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/pausable.so");
+    let bytecode = include_bytes!("fixtures/pausable.so");
     let contract_hash = Hash::zero();
 
     // Initialize with owner
@@ -81,7 +81,7 @@ async fn test_pausable_pause_success() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/pausable.so");
+    let bytecode = include_bytes!("fixtures/pausable.so");
     let contract_hash = Hash::zero();
 
     // Convert owner public key to Hash for tx_sender
@@ -129,7 +129,7 @@ async fn test_pausable_unpause_success() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/pausable.so");
+    let bytecode = include_bytes!("fixtures/pausable.so");
     let contract_hash = Hash::zero();
 
     // Convert owner public key to Hash for tx_sender
@@ -189,7 +189,7 @@ async fn test_pausable_query_paused_state() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/pausable.so");
+    let bytecode = include_bytes!("fixtures/pausable.so");
     let contract_hash = Hash::zero();
 
     // Convert owner public key to Hash for tx_sender
@@ -238,7 +238,7 @@ async fn test_pausable_pause_unauthorized() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/pausable.so");
+    let bytecode = include_bytes!("fixtures/pausable.so");
     let contract_hash = Hash::zero();
 
     // Convert public keys to Hash for tx_sender
@@ -291,7 +291,7 @@ async fn test_pausable_double_pause() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/pausable.so");
+    let bytecode = include_bytes!("fixtures/pausable.so");
     let contract_hash = Hash::zero();
 
     // Convert owner public key to Hash for tx_sender
@@ -351,7 +351,7 @@ async fn test_pausable_unpause_without_pause() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/pausable.so");
+    let bytecode = include_bytes!("fixtures/pausable.so");
     let contract_hash = Hash::zero();
 
     // Convert owner public key to Hash for tx_sender
@@ -398,7 +398,7 @@ async fn test_pausable_multiple_cycles() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/pausable.so");
+    let bytecode = include_bytes!("fixtures/pausable.so");
     let contract_hash = Hash::zero();
 
     // Convert owner public key to Hash for tx_sender
@@ -437,7 +437,7 @@ async fn test_pausable_query_owner() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/pausable.so");
+    let bytecode = include_bytes!("fixtures/pausable.so");
     let contract_hash = Hash::zero();
 
     // Convert owner public key to Hash for tx_sender
@@ -484,7 +484,7 @@ async fn test_pausable_compute_units() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/pausable.so");
+    let bytecode = include_bytes!("fixtures/pausable.so");
     let contract_hash = Hash::zero();
 
     // Convert owner public key to Hash for tx_sender

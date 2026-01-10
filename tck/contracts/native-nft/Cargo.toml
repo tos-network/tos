@@ -1,0 +1,17 @@
+[package]
+name = "native-nft"
+version = "0.1.0"
+edition = "2021"
+description = "Example contract demonstrating native NFT syscalls"
+
+[dependencies]
+tako-sdk.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"

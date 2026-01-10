@@ -27,7 +27,7 @@ async fn test_hello_world_contract() {
         .unwrap();
 
     // Load contract bytecode from fixture
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/hello_world.so");
+    let bytecode = include_bytes!("fixtures/hello_world.so");
 
     // Execute contract at topoheight 1
     let contract_hash = Hash::zero(); // For testing, any hash works with execute_simple
@@ -77,7 +77,7 @@ async fn test_contract_compute_units() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/hello_world.so");
+    let bytecode = include_bytes!("fixtures/hello_world.so");
     let contract_hash = Hash::zero();
 
     // Execute contract
@@ -112,7 +112,7 @@ async fn test_contract_execution_at_different_topoheights() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/hello_world.so");
+    let bytecode = include_bytes!("fixtures/hello_world.so");
     let contract_hash = Hash::zero();
 
     // Execute at different topoheights

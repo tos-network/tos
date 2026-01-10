@@ -1,0 +1,20 @@
+[package]
+name = "usdt-tether"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+tako-sdk.workspace = true
+tako-macros.workspace = true
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+overflow-checks = true
+
+[profile.release.package."*"]
+opt-level = 3

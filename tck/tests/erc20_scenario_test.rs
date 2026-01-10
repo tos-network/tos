@@ -32,7 +32,7 @@ async fn test_erc20_token_sale_scenario() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("fixtures/token.so");
     let contract_hash = Hash::zero();
 
     // Round 1: Initial deployment and token minting
@@ -87,7 +87,7 @@ async fn test_erc20_staking_rewards_scenario() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("fixtures/token.so");
     let contract_hash = Hash::zero();
 
     // Block 1: Mint initial tokens
@@ -136,7 +136,7 @@ async fn test_erc20_vesting_schedule_scenario() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("fixtures/token.so");
     let contract_hash = Hash::zero();
 
     // Vesting schedule:
@@ -192,7 +192,7 @@ async fn test_erc20_multisig_wallet_scenario() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("fixtures/token.so");
     let contract_hash = Hash::zero();
 
     // Step 1: Initialize multi-sig wallet
@@ -246,7 +246,7 @@ async fn test_erc20_dex_swap_scenario() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("fixtures/token.so");
     let contract_hash = Hash::zero();
 
     // Step 1: Add liquidity (1000 TokenA + 2000 TokenB)
@@ -300,7 +300,7 @@ async fn test_erc20_airdrop_scenario() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("fixtures/token.so");
     let contract_hash = Hash::zero();
 
     // Simulate airdrop in batches (10 recipients per batch)
@@ -351,7 +351,7 @@ async fn test_erc20_governance_voting_scenario() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("fixtures/token.so");
     let contract_hash = Hash::zero();
 
     // Step 1: Create proposal

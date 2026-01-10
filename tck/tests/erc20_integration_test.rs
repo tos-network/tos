@@ -37,7 +37,7 @@ async fn test_erc20_deployment_and_initial_supply() {
 
     // Load ERC20 contract bytecode
     // Assumes contract mints 1000 tokens to deployer on deployment
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("fixtures/token.so");
     let contract_hash = Hash::zero();
 
     // Execute deployment (topoheight 1)
@@ -77,7 +77,7 @@ async fn test_erc20_transfer() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("fixtures/token.so");
     let contract_hash = Hash::zero();
 
     // First call: Mint tokens to sender (100 tokens)
@@ -112,7 +112,7 @@ async fn test_erc20_insufficient_balance() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("fixtures/token.so");
     let contract_hash = Hash::zero();
 
     // Execute contract that attempts transfer without sufficient balance
@@ -148,7 +148,7 @@ async fn test_erc20_multiple_transfers() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("fixtures/token.so");
     let contract_hash = Hash::zero();
 
     // Execute contract 5 times (each mints 100, transfers 10)
@@ -197,7 +197,7 @@ async fn test_erc20_compute_units() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("fixtures/token.so");
     let contract_hash = Hash::zero();
 
     let result = execute_test_contract(bytecode, &storage, 1, &contract_hash)
@@ -236,7 +236,7 @@ async fn test_erc20_zero_amount_transfer() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("fixtures/token.so");
     let contract_hash = Hash::zero();
 
     // Note: This test assumes the contract allows zero-amount transfers
@@ -266,7 +266,7 @@ async fn test_erc20_storage_persistence() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("fixtures/token.so");
     let contract_hash = Hash::zero();
 
     // Execute at topoheight 1
@@ -304,7 +304,7 @@ async fn test_erc20_sequential_operations() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/token.so");
+    let bytecode = include_bytes!("fixtures/token.so");
     let contract_hash = Hash::zero();
 
     // Sequence of operations:

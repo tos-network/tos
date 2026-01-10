@@ -1,0 +1,19 @@
+[package]
+name = "pausable-ownable-erc20"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tako-sdk.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+
+[profile.dev]
+panic = "abort"

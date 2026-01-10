@@ -1,0 +1,72 @@
+[workspace]
+resolver = "2"
+members = [
+    "access-control",
+    "access-control-erc1155",
+    "amm-dex",
+    "contract-factory",
+    "counter",
+    "cpi-callee",
+    "cpi-caller",
+    "cpi-e2e-callee",
+    "cpi-e2e-caller",
+    "cpi-test-callee",
+    "cpi-test-caller",
+    "crypto_advanced",
+    "defi-showcase/aave-v3-pool",
+    "defi-showcase/uniswap-v2-factory",
+    "defi-showcase/uniswap-v3-pool",
+    "defi-showcase/usdc-circle",
+    "defi-showcase/usdt-tether",
+    "environment_info",
+    "erc1155-multi-token",
+    "erc1155-openzeppelin",
+    "erc20-openzeppelin",
+    "erc20-snapshot",
+    "erc721-nft",
+    "erc721-openzeppelin",
+    "factory-pattern",
+    "governance",
+    "hello-world",
+    "multisig-wallet",
+    "native-nft",
+    "ownable",
+    "pausable",
+    "pausable-ownable-erc20",
+    "payment-splitter",
+    "privacy_defi",
+    "proxy_contract",
+    "reentrancy_guard",
+    "reentrancy-guard",
+    "referral-investment",
+    "sdk-demo",
+    "simple-v3-test",
+    "staking-contract",
+    "test-balance-transfer",
+    "test-code-ops",
+    "test-environment",
+    "test-events",
+    "test-referral",
+    "test-team-volume",
+    "test-transient-storage",
+    "timelock",
+    "timelock-controller",
+    "token",
+    "u128-test",
+    "vesting-access-control-token",
+    "vesting-wallet",
+    "vrf-random",
+]
+
+[workspace.dependencies]
+tako-sdk = { git = "https://github.com/tos-network/tako", rev = "3a980a7" }
+tako-macros = { git = "https://github.com/tos-network/tako", rev = "3a980a7" }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+
+[profile.dev]
+panic = "abort"

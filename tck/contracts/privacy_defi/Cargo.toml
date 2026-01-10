@@ -1,0 +1,16 @@
+[package]
+name = "privacy-defi"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# This would be the TAKO SDK in a real contract
+# For now, we demonstrate the syscall interface
+
+[lib]
+crate-type = ["cdylib"]
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1

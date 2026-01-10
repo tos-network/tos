@@ -64,7 +64,7 @@ async fn test_access_control_initialization() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/access_control.so");
+    let bytecode = include_bytes!("fixtures/access_control.so");
     let contract_hash = Hash::zero();
     let deployer_address = Hash::new(*deployer.get_public_key().compress().as_bytes());
 
@@ -95,7 +95,7 @@ async fn test_access_control_grant_role_success() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/access_control.so");
+    let bytecode = include_bytes!("fixtures/access_control.so");
     let contract_hash = Hash::zero();
     let admin_address = Hash::new(*admin.get_public_key().compress().as_bytes());
 
@@ -145,7 +145,7 @@ async fn test_access_control_grant_role_unauthorized() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/access_control.so");
+    let bytecode = include_bytes!("fixtures/access_control.so");
     let contract_hash = Hash::zero();
     let admin_address = Hash::new(*admin.get_public_key().compress().as_bytes());
     let non_admin_address = Hash::new(*non_admin.get_public_key().compress().as_bytes());
@@ -197,7 +197,7 @@ async fn test_access_control_revoke_role_success() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/access_control.so");
+    let bytecode = include_bytes!("fixtures/access_control.so");
     let contract_hash = Hash::zero();
     let admin_address = Hash::new(*admin.get_public_key().compress().as_bytes());
 
@@ -260,7 +260,7 @@ async fn test_access_control_renounce_role_success() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/access_control.so");
+    let bytecode = include_bytes!("fixtures/access_control.so");
     let contract_hash = Hash::zero();
     let admin_address = Hash::new(*admin.get_public_key().compress().as_bytes());
     let user_address = Hash::new(*user.get_public_key().compress().as_bytes());
@@ -323,7 +323,7 @@ async fn test_access_control_has_role_query() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/access_control.so");
+    let bytecode = include_bytes!("fixtures/access_control.so");
     let contract_hash = Hash::zero();
     let admin_address = Hash::new(*admin.get_public_key().compress().as_bytes());
 
@@ -370,7 +370,7 @@ async fn test_access_control_set_role_admin() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/access_control.so");
+    let bytecode = include_bytes!("fixtures/access_control.so");
     let contract_hash = Hash::zero();
     let admin_address = Hash::new(*admin.get_public_key().compress().as_bytes());
 
@@ -417,7 +417,7 @@ async fn test_access_control_get_role_admin() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/access_control.so");
+    let bytecode = include_bytes!("fixtures/access_control.so");
     let contract_hash = Hash::zero();
     let admin_address = Hash::new(*admin.get_public_key().compress().as_bytes());
 
@@ -466,7 +466,7 @@ async fn test_access_control_role_hierarchy() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/access_control.so");
+    let bytecode = include_bytes!("fixtures/access_control.so");
     let contract_hash = Hash::zero();
     let admin_address = Hash::new(*admin.get_public_key().compress().as_bytes());
 
@@ -503,7 +503,7 @@ async fn test_access_control_default_admin_role() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/access_control.so");
+    let bytecode = include_bytes!("fixtures/access_control.so");
     let contract_hash = Hash::zero();
     let deployer_address = Hash::new(*deployer.get_public_key().compress().as_bytes());
 
@@ -537,7 +537,7 @@ async fn test_access_control_multiple_roles() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/access_control.so");
+    let bytecode = include_bytes!("fixtures/access_control.so");
     let contract_hash = Hash::zero();
     let admin_address = Hash::new(*admin.get_public_key().compress().as_bytes());
 
@@ -571,7 +571,7 @@ async fn test_access_control_compute_units() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/access_control.so");
+    let bytecode = include_bytes!("fixtures/access_control.so");
     let contract_hash = Hash::zero();
     let admin_address = Hash::new(*admin.get_public_key().compress().as_bytes());
 

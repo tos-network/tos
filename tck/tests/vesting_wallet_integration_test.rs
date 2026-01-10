@@ -66,7 +66,7 @@ async fn test_vesting_wallet_initialization() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/vesting_wallet.so");
+    let bytecode = include_bytes!("fixtures/vesting_wallet.so");
     let contract_hash = Hash::zero();
 
     // Convert deployer public key to Hash for tx_sender
@@ -111,7 +111,7 @@ async fn test_vesting_wallet_query_beneficiary() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/vesting_wallet.so");
+    let bytecode = include_bytes!("fixtures/vesting_wallet.so");
     let contract_hash = Hash::zero();
 
     // Convert deployer public key to Hash for tx_sender
@@ -164,7 +164,7 @@ async fn test_vesting_wallet_query_start() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/vesting_wallet.so");
+    let bytecode = include_bytes!("fixtures/vesting_wallet.so");
     let contract_hash = Hash::zero();
 
     // Convert deployer public key to Hash for tx_sender
@@ -217,7 +217,7 @@ async fn test_vesting_wallet_query_duration() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/vesting_wallet.so");
+    let bytecode = include_bytes!("fixtures/vesting_wallet.so");
     let contract_hash = Hash::zero();
 
     // Convert deployer public key to Hash for tx_sender
@@ -271,7 +271,7 @@ async fn test_vesting_wallet_release_success() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/vesting_wallet.so");
+    let bytecode = include_bytes!("fixtures/vesting_wallet.so");
     let contract_hash = Hash::zero();
 
     // Convert keypairs to Hash for tx_sender
@@ -329,7 +329,7 @@ async fn test_vesting_wallet_release_unauthorized() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/vesting_wallet.so");
+    let bytecode = include_bytes!("fixtures/vesting_wallet.so");
     let contract_hash = Hash::zero();
 
     // Convert deployer public key to Hash for tx_sender
@@ -382,7 +382,7 @@ async fn test_vesting_wallet_query_released() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/vesting_wallet.so");
+    let bytecode = include_bytes!("fixtures/vesting_wallet.so");
     let contract_hash = Hash::zero();
 
     // Convert deployer public key to Hash for tx_sender
@@ -435,7 +435,7 @@ async fn test_vesting_wallet_query_releasable() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/vesting_wallet.so");
+    let bytecode = include_bytes!("fixtures/vesting_wallet.so");
     let contract_hash = Hash::zero();
 
     // Convert deployer public key to Hash for tx_sender
@@ -490,7 +490,7 @@ async fn test_vesting_wallet_query_vested_amount() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/vesting_wallet.so");
+    let bytecode = include_bytes!("fixtures/vesting_wallet.so");
     let contract_hash = Hash::zero();
 
     // Convert deployer public key to Hash for tx_sender
@@ -545,7 +545,7 @@ async fn test_vesting_wallet_linear_vesting() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/vesting_wallet.so");
+    let bytecode = include_bytes!("fixtures/vesting_wallet.so");
     let contract_hash = Hash::zero();
 
     // Convert deployer public key to Hash for tx_sender
@@ -647,7 +647,7 @@ async fn test_vesting_wallet_zero_duration() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/vesting_wallet.so");
+    let bytecode = include_bytes!("fixtures/vesting_wallet.so");
     let contract_hash = Hash::zero();
 
     // Convert deployer public key to Hash for tx_sender
@@ -687,7 +687,7 @@ async fn test_vesting_wallet_zero_beneficiary() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/vesting_wallet.so");
+    let bytecode = include_bytes!("fixtures/vesting_wallet.so");
     let contract_hash = Hash::zero();
 
     // Convert deployer public key to Hash for tx_sender
@@ -726,7 +726,7 @@ async fn test_vesting_wallet_storage_persistence() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/vesting_wallet.so");
+    let bytecode = include_bytes!("fixtures/vesting_wallet.so");
     let contract_hash = Hash::zero();
 
     // Convert deployer public key to Hash for tx_sender
@@ -788,7 +788,7 @@ async fn test_vesting_wallet_compute_units() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/vesting_wallet.so");
+    let bytecode = include_bytes!("fixtures/vesting_wallet.so");
     let contract_hash = Hash::zero();
 
     // Convert deployer public key to Hash for tx_sender

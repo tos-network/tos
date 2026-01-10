@@ -1,6 +1,6 @@
 [package]
 name = "tos_daemon"
-version = "0.1.12"
+version = "0.1.13"
 edition = "2021"
 authors = ["TOS Network Team <info@tos.network>"]
 license = "BSD-3-Clause"
@@ -15,12 +15,12 @@ autobenches = false
 tos_common = { path = "../common", features = ["prompt", "clap", "rpc-server", "tokio"] }
 
 # TOS Kernel - TOS Kernel(TAKO) runtime
-tos-kernel = { package = "tos-kernel", git = "https://github.com/tos-network/tako", rev = "d2eb759" }
-tos-program-runtime = { package = "tos-program-runtime", git = "https://github.com/tos-network/tako", rev = "d2eb759" }
-tos-syscalls = { package = "tos-syscalls", git = "https://github.com/tos-network/tako", rev = "d2eb759" }
-tako-sdk = { package = "tako-sdk", git = "https://github.com/tos-network/tako", rev = "d2eb759" }
+tos-kernel = { package = "tos-kernel", git = "https://github.com/tos-network/tako", rev = "3a980a7" }
+tos-program-runtime = { package = "tos-program-runtime", git = "https://github.com/tos-network/tako", rev = "3a980a7" }
+tos-syscalls = { package = "tos-syscalls", git = "https://github.com/tos-network/tako", rev = "3a980a7" }
+tako-sdk = { package = "tako-sdk", git = "https://github.com/tos-network/tako", rev = "3a980a7" }
 tos-tbpf = { git = "https://github.com/tos-network/tbpf", rev = "03bc48b", features = ["jit"] }
-tos-environment = { package = "tos-environment", git = "https://github.com/tos-network/tako", rev = "d2eb759" }
+tos-environment = { package = "tos-environment", git = "https://github.com/tos-network/tako", rev = "3a980a7" }
 
 # TOS Crypto - VRF support for block producers
 tos-crypto = { git = "https://github.com/tos-network/tos-crypto", rev = "abb56b0", features = ["vrf"] }

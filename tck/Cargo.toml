@@ -1,6 +1,6 @@
 [package]
 name = "tos-tck"
-version = "1.0.0"
+version = "0.1.13"
 edition = "2021"
 authors = ["TOS Network Team"]
 description = "TOS Technology Compatibility Kit - Comprehensive Testing Framework"
@@ -55,8 +55,19 @@ tos_common = { path = "../common" }
 tos_daemon = { path = "../daemon" }
 
 # TAKO dependencies for contract testing
-tos-kernel = { package = "tos-kernel", git = "https://github.com/tos-network/tako", rev = "d2eb759" }
-tos-syscalls = { package = "tos-syscalls", git = "https://github.com/tos-network/tako", rev = "d2eb759" }
+tos-kernel = { package = "tos-kernel", git = "https://github.com/tos-network/tako", rev = "3a980a7" }
+tos-syscalls = { package = "tos-syscalls", git = "https://github.com/tos-network/tako", rev = "3a980a7" }
+tos-program-runtime = { package = "tos-program-runtime", git = "https://github.com/tos-network/tako", rev = "3a980a7" }
+tos-environment = { package = "tos-environment", git = "https://github.com/tos-network/tako", rev = "3a980a7" }
+tos-tbpf = { git = "https://github.com/tos-network/tbpf", rev = "03bc48b", features = ["jit"] }
+tos-crypto = { git = "https://github.com/tos-network/tos-crypto", rev = "abb56b0", features = ["uno", "vrf"] }
+
+# Serialization for tests
+bincode = "1.3"
+
+# Additional test dependencies
+tempdir = "0.3"
+indexmap = "2.0"
 
 [dev-dependencies]
 proptest = "1.4"

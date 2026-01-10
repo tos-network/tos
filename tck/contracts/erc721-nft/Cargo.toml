@@ -1,0 +1,10 @@
+[package]
+name = "erc721-nft"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tako-sdk.workspace = true
+
+[lib]
+crate-type = ["cdylib", "lib"]

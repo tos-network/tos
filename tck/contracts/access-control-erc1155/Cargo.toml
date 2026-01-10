@@ -1,0 +1,23 @@
+[package]
+name = "access-control-erc1155"
+version = "0.1.0"
+edition = "2021"
+authors = ["TOS Network"]
+description = "ERC1155 multi-token contract with AccessControl and ReentrancyGuard"
+license = "MIT"
+
+[dependencies]
+tako-sdk.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[profile.dev]
+panic = "abort"

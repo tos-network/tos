@@ -39,7 +39,7 @@ async fn test_reentrancy_guard_normal_withdrawal() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/reentrancy_guard.so");
+    let bytecode = include_bytes!("fixtures/reentrancy_guard.so");
     let contract_hash = Hash::zero();
     let tx_sender = Hash::zero(); // Sender address
 
@@ -89,7 +89,7 @@ async fn test_reentrancy_guard_blocks_reentrant_call() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/reentrancy_guard.so");
+    let bytecode = include_bytes!("fixtures/reentrancy_guard.so");
     let contract_hash = Hash::zero();
     let _tx_sender = Hash::zero();
 
@@ -115,7 +115,7 @@ async fn test_reentrancy_guard_sequential_calls() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/reentrancy_guard.so");
+    let bytecode = include_bytes!("fixtures/reentrancy_guard.so");
     let contract_hash = Hash::zero();
     let _tx_sender = Hash::zero();
 
@@ -140,7 +140,7 @@ async fn test_reentrancy_guard_state_management() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/reentrancy_guard.so");
+    let bytecode = include_bytes!("fixtures/reentrancy_guard.so");
     let contract_hash = Hash::zero();
     let _tx_sender = Hash::zero();
 
@@ -170,7 +170,7 @@ async fn test_reentrancy_guard_query_during_lock() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/reentrancy_guard.so");
+    let bytecode = include_bytes!("fixtures/reentrancy_guard.so");
     let contract_hash = Hash::zero();
     let tx_sender = Hash::zero();
 
@@ -202,7 +202,7 @@ async fn test_reentrancy_guard_nested_prevention() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/reentrancy_guard.so");
+    let bytecode = include_bytes!("fixtures/reentrancy_guard.so");
     let contract_hash = Hash::zero();
     let _tx_sender = Hash::zero();
 
@@ -227,7 +227,7 @@ async fn test_reentrancy_guard_compute_units() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/reentrancy_guard.so");
+    let bytecode = include_bytes!("fixtures/reentrancy_guard.so");
     let contract_hash = Hash::zero();
     let _tx_sender = Hash::zero();
 
@@ -250,7 +250,7 @@ async fn test_reentrancy_guard_storage_persistence() {
         .await
         .unwrap();
 
-    let bytecode = include_bytes!("../../daemon/tests/fixtures/reentrancy_guard.so");
+    let bytecode = include_bytes!("fixtures/reentrancy_guard.so");
     let contract_hash = Hash::zero();
     let _tx_sender = Hash::zero();
 
