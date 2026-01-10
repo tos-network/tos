@@ -3,6 +3,7 @@ use chacha20poly1305::{
     ChaCha20Poly1305, KeyInit,
 };
 use log::trace;
+use rand::Rng;
 use thiserror::Error;
 use tos_common::tokio::sync::Mutex;
 
@@ -24,6 +25,9 @@ struct CipherState {
     nonce_buffer: [u8; 12],
 }
 
+// Encryption struct to handle encryption/decryption of packets
+// It uses ChaCha20-Poly1305 AEAD cipher for encryption/decryption
+// It also uses Snappy compression to compress/decompress packets if enabled
 pub struct Encryption {
     // Cipher using our key to encrypt packets
     our_cipher: Mutex<Option<CipherState>>,
@@ -72,6 +76,7 @@ pub enum EncryptionError {
 }
 
 impl Encryption {
+    #[inline]
     pub fn new() -> Self {
         Self {
             our_cipher: Mutex::new(None),
@@ -81,11 +86,13 @@ impl Encryption {
     }
 
     // Enable encryption
+    #[inline]
     pub fn mark_ready(&mut self) {
         self.ready = true;
     }
 
     // Is encryption mode ready
+    #[inline]
     pub fn is_ready(&self) -> bool {
         self.ready
     }
@@ -101,41 +108,24 @@ impl Encryption {
     }
 
     // Generate a new random key
-    #[allow(unexpected_cfgs)]
     pub fn generate_key(&self) -> Result<EncryptionKey, EncryptionError> {
-        // Handle API differences between stable and nightly Rust
-        // Nightly (fuzzing): uses rand_core 0.10.x with different OsRng API
-        // Stable: uses rand_core 0.9.x with generate_key() -> Result
-        #[cfg(fuzzing)]
-        {
-            use rand_core::TryRngCore;
-            let mut key = [0u8; 32];
-            rand_core::OsRng
-                .try_fill_bytes(&mut key)
-                .map_err(|_| EncryptionError::Rng)?;
-            Ok(key)
-        }
-        #[cfg(not(fuzzing))]
-        {
-            ChaCha20Poly1305::generate_key()
-                .map(Into::into)
-                .map_err(|_| EncryptionError::Rng)
-        }
+        let mut key = EncryptionKey::default();
+        rand::thread_rng()
+            .try_fill(&mut key)
+            .map_err(|_| EncryptionError::Rng)?;
+
+        Ok(key)
     }
 
     // Encrypt a packet using the shared symetric key
     pub async fn encrypt_packet(&self, input: &mut impl Buffer) -> Result<(), EncryptionError> {
-        if log::log_enabled!(log::Level::Trace) {
-            trace!("Encrypting packet");
-        }
+        trace!("Encrypting packet with length {}", input.len());
         let mut lock = self.our_cipher.lock().await;
+        trace!("our cipher locked");
 
-        if log::log_enabled!(log::Level::Trace) {
-            trace!("our cipher locked");
-        }
         let cipher_state = lock.as_mut().ok_or(EncryptionError::WriteNotReady)?;
 
-        // SECURITY FIX: Prevent nonce overflow by checking before use
+        // Prevent nonce overflow by checking before use
         // While we rotate keys every 1GB (making this practically impossible),
         // we add an explicit check to mathematically eliminate nonce reuse risk
         if cipher_state.nonce == u64::MAX {
@@ -159,17 +149,13 @@ impl Encryption {
 
     // Decrypt a packet using the shared symetric key
     pub async fn decrypt_packet(&self, buf: &mut impl Buffer) -> Result<(), EncryptionError> {
-        if log::log_enabled!(log::Level::Trace) {
-            trace!("Decrypting packet");
-        }
+        trace!("Decrypting packet with length {}", buf.len());
         let mut lock = self.peer_cipher.lock().await;
+        trace!("peer cipher locked");
 
-        if log::log_enabled!(log::Level::Trace) {
-            trace!("peer cipher locked");
-        }
         let cipher_state = lock.as_mut().ok_or(EncryptionError::ReadNotReady)?;
 
-        // SECURITY FIX: Prevent nonce overflow by checking before use
+        // Prevent nonce overflow by checking before use
         // While we rotate keys every 1GB (making this practically impossible),
         // we add an explicit check to mathematically eliminate nonce reuse risk
         if cipher_state.nonce == u64::MAX {
@@ -188,6 +174,8 @@ impl Encryption {
         // Increment the nonce so we don't use the same nonce twice
         cipher_state.nonce += 1;
 
+        trace!("Packet decrypted with length {}", buf.len());
+
         Ok(())
     }
 
@@ -197,6 +185,7 @@ impl Encryption {
     ) -> Result<(), EncryptionError> {
         let cipher =
             ChaCha20Poly1305::new_from_slice(&key).map_err(|_| EncryptionError::InvalidKey)?;
+
         if let Some(cipher_state) = state.as_mut() {
             cipher_state.cipher = cipher;
             cipher_state.nonce = 0;
@@ -227,5 +216,47 @@ impl Encryption {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bytes::BytesMut;
+    use rand::RngCore;
+
+    #[tokio::test]
+    async fn test_encryption_decryption() {
+        let encryption = Encryption::new();
+
+        let key = encryption.generate_key().unwrap();
+        encryption.rotate_key(key, CipherSide::Both).await.unwrap();
+
+        let mut data = BytesMut::from(&b"Hello, world!"[..]);
+
+        encryption.encrypt_packet(&mut data).await.unwrap();
+        encryption.decrypt_packet(&mut data).await.unwrap();
+
+        assert_eq!(&data[..], b"Hello, world!");
+    }
+
+    #[tokio::test]
+    async fn test_encryption_decryption_large_data() {
+        let encryption = Encryption::new();
+
+        let key = encryption.generate_key().unwrap();
+        encryption.rotate_key(key, CipherSide::Both).await.unwrap();
+
+        // Create a large random data buffer
+        let mut rng = rand::thread_rng();
+        let mut original_data = vec![0u8; 10 * 1024]; // 10 KB of random data
+        rng.fill_bytes(&mut original_data);
+
+        let mut data = BytesMut::from(&original_data[..]);
+
+        encryption.encrypt_packet(&mut data).await.unwrap();
+        encryption.decrypt_packet(&mut data).await.unwrap();
+
+        assert_eq!(&data[..], &original_data[..]);
     }
 }

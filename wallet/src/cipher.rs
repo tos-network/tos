@@ -1,5 +1,9 @@
 use crate::{config::SALT_SIZE, error::WalletError};
-use chacha20poly1305::{aead::Aead, AeadCore, KeyInit, XChaCha20Poly1305, XNonce};
+use chacha20poly1305::{
+    aead::{Aead, KeyInit},
+    XChaCha20Poly1305, XNonce,
+};
+use rand::Rng;
 use tos_common::crypto::{hash, HASH_SIZE};
 
 pub struct Cipher {
@@ -22,10 +26,12 @@ impl Cipher {
     // a Nonce is generated randomly at each call
     pub fn encrypt_value(&self, value: &[u8]) -> Result<Vec<u8>, WalletError> {
         // generate unique random nonce
-        let nonce =
-            XChaCha20Poly1305::generate_nonce().map_err(|_| WalletError::NonceGeneration)?;
+        let mut nonce_bytes = [0u8; Self::NONCE_SIZE];
+        rand::thread_rng()
+            .try_fill(&mut nonce_bytes)
+            .map_err(|_| WalletError::NonceGeneration)?;
 
-        self.encrypt_value_with_nonce(value, &nonce.into())
+        self.encrypt_value_with_nonce(value, &nonce_bytes)
     }
 
     // encrypt value passed in param and add plaintext nonce before encrypted value
@@ -45,7 +51,7 @@ impl Cipher {
         let data = &self
             .cipher
             .encrypt(nonce.into(), plaintext.as_slice())
-            .map_err(WalletError::CryptoError)?;
+            .map_err(|e| WalletError::CryptoError(e))?;
 
         // append unique nonce to the encrypted data
         let mut encrypted = Vec::with_capacity(Self::NONCE_SIZE + data.len());
@@ -59,7 +65,7 @@ impl Cipher {
     pub fn decrypt_value(&self, encrypted: &[u8]) -> Result<Vec<u8>, WalletError> {
         // nonce is 24 bytes and is mandatory in encrypted slice
         if encrypted.len() < 25 {
-            return Err(WalletError::InvalidEncryptedValue);
+            return Err(WalletError::InvalidEncryptedValue.into());
         }
 
         // read the nonce for this data
@@ -70,7 +76,7 @@ impl Cipher {
         let mut decrypted = self
             .cipher
             .decrypt(&nonce, &encrypted[nonce.len()..])
-            .map_err(WalletError::CryptoError)?;
+            .map_err(|e| WalletError::CryptoError(e))?;
         // delete the salt from the decrypted slice
         if let Some(salt) = &self.salt {
             decrypted.drain(0..salt.len());

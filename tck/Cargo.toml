@@ -55,10 +55,10 @@ tos_common = { path = "../common" }
 tos_daemon = { path = "../daemon" }
 
 # TAKO dependencies for contract testing
-tos-kernel = { package = "tos-kernel", git = "https://github.com/tos-network/tako", rev = "3a980a7" }
-tos-syscalls = { package = "tos-syscalls", git = "https://github.com/tos-network/tako", rev = "3a980a7" }
-tos-program-runtime = { package = "tos-program-runtime", git = "https://github.com/tos-network/tako", rev = "3a980a7" }
-tos-environment = { package = "tos-environment", git = "https://github.com/tos-network/tako", rev = "3a980a7" }
+tos-kernel = { package = "tos-kernel", git = "https://github.com/tos-network/tako", branch = "main" }
+tos-syscalls = { package = "tos-syscalls", git = "https://github.com/tos-network/tako", branch = "main" }
+tos-program-runtime = { package = "tos-program-runtime", git = "https://github.com/tos-network/tako", branch = "main" }
+tos-environment = { package = "tos-environment", git = "https://github.com/tos-network/tako", branch = "main" }
 tos-tbpf = { git = "https://github.com/tos-network/tbpf", rev = "03bc48b", features = ["jit"] }
 tos-crypto = { git = "https://github.com/tos-network/tos-crypto", rev = "abb56b0", features = ["uno", "vrf"] }
 

@@ -59,8 +59,8 @@ members = [
 ]
 
 [workspace.dependencies]
-tako-sdk = { git = "https://github.com/tos-network/tako", rev = "3a980a7" }
-tako-macros = { git = "https://github.com/tos-network/tako", rev = "3a980a7" }
+tako-sdk = { git = "https://github.com/tos-network/tako", branch = "main" }
+tako-macros = { git = "https://github.com/tos-network/tako", branch = "main" }
 
 [profile.release]
 opt-level = 3
