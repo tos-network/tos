@@ -5,7 +5,7 @@
 //
 // VRF Randomness Integration Test
 //
-// This test executes a contract that calls `tos_vrf_random` and `tos_vrf_public_key`.
+// This test executes a contract that calls `vrf_random` and `vrf_public_key`.
 // It is skipped if the fixture is not built yet.
 
 use std::path::Path;

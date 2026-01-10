@@ -4,11 +4,11 @@
 //!
 //! Syscalls tested:
 //! - tos_has_referrer
-//! - tos_get_referrer
-//! - tos_get_uplines
-//! - tos_get_direct_referrals_count
-//! - tos_get_team_size
-//! - tos_get_referral_level
+//! - get_referrer
+//! - get_uplines
+//! - get_direct_referrals_count
+//! - get_team_size
+//! - get_referral_level
 //! - tos_is_downline
 
 #![allow(clippy::disallowed_methods)]
@@ -568,11 +568,11 @@ fn test_referral_syscalls_summary() {
 
     println!("\nReferral Syscalls Tested:");
     println!("  • tos_has_referrer       - Check if user has referrer");
-    println!("  • tos_get_referrer       - Get user's referrer address");
-    println!("  • tos_get_uplines        - Get N levels of uplines");
-    println!("  • tos_get_direct_referrals_count - Count direct referrals");
-    println!("  • tos_get_team_size      - Get total team size");
-    println!("  • tos_get_referral_level - Get user's level in tree");
+    println!("  • get_referrer       - Get user's referrer address");
+    println!("  • get_uplines        - Get N levels of uplines");
+    println!("  • get_direct_referrals_count - Count direct referrals");
+    println!("  • get_team_size      - Get total team size");
+    println!("  • get_referral_level - Get user's level in tree");
     println!("  • tos_is_downline        - Check downline relationship");
 
     println!("\nCompute Costs:");

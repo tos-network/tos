@@ -484,7 +484,7 @@ impl Default for RocksDBConfig {
 ///
 /// VRF is mandatory for all nodes. Block producers sign each block hash
 /// with their VRF private key, and contracts can access this verifiable
-/// random value via the `tos_vrf_random()` syscall.
+/// random value via the `vrf_random()` syscall.
 ///
 /// # Key Management
 ///

@@ -11,7 +11,7 @@ use tos_tbpf::error::EbpfError;
 /// # Architecture
 ///
 /// ```text
-/// TAKO syscall tos_invoke(contract_hash, instruction)
+/// TAKO syscall invoke(contract_hash, instruction)
 ///     ↓
 /// TosContractLoaderAdapter::load_contract()
 ///     ↓

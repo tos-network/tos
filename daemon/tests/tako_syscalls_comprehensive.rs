@@ -165,10 +165,10 @@ fn test_blockchain_info_syscalls() {
     println!("\n=== Test: Blockchain Information Syscalls ===\n");
 
     // This test would require a contract that calls:
-    // - tos_get_block_height
-    // - tos_get_block_hash
-    // - tos_get_block_timestamp
-    // - tos_get_contract_address
+    // - get_block_height
+    // - get_block_hash
+    // - get_block_timestamp
+    // - get_contract_address
     //
     // For now, we verify the integration layer passes correct values
     // Full test requires compiling a test contract
@@ -242,9 +242,9 @@ fn test_crypto_syscalls_infrastructure() {
     println!("\n=== Test: Cryptographic Syscalls Infrastructure ===\n");
 
     // These syscalls are available:
-    // - tos_blake3 (32-byte hash)
-    // - tos_sha256 (32-byte hash)
-    // - tos_keccak256 (32-byte hash)
+    // - blake3 (32-byte hash)
+    // - sha256 (32-byte hash)
+    // - keccak256 (32-byte hash)
     // - tos_secp256k1_recover (64-byte pubkey from signature)
 
     // Test data
@@ -254,9 +254,9 @@ fn test_crypto_syscalls_infrastructure() {
 
     // Expected hash sizes
     println!("\n✅ Crypto syscalls registered:");
-    println!("   tos_blake3 → 32 bytes");
-    println!("   tos_sha256 → 32 bytes");
-    println!("   tos_keccak256 → 32 bytes");
+    println!("   blake3 → 32 bytes");
+    println!("   sha256 → 32 bytes");
+    println!("   keccak256 → 32 bytes");
     println!("   tos_secp256k1_recover → 64 bytes");
 
     println!("\nNote: Full test requires contract compilation");
@@ -271,16 +271,16 @@ fn test_memory_operations_infrastructure() {
     println!("\n=== Test: Memory Operations Infrastructure ===\n");
 
     // These syscalls are available:
-    // - tos_memcpy (copy memory)
-    // - tos_memmove (move memory, handles overlap)
-    // - tos_memcmp (compare memory)
-    // - tos_memset (fill memory)
+    // - memcpy (copy memory)
+    // - memmove (move memory, handles overlap)
+    // - memcmp (compare memory)
+    // - memset (fill memory)
 
     println!("✅ Memory syscalls registered:");
-    println!("   tos_memcpy - Copy non-overlapping memory");
-    println!("   tos_memmove - Copy potentially overlapping memory");
-    println!("   tos_memcmp - Compare memory regions");
-    println!("   tos_memset - Fill memory with byte value");
+    println!("   memcpy - Copy non-overlapping memory");
+    println!("   memmove - Copy potentially overlapping memory");
+    println!("   memcmp - Compare memory regions");
+    println!("   memset - Fill memory with byte value");
 
     println!("\nNote: These are tested indirectly by all other syscalls");
 }
@@ -325,10 +325,10 @@ fn test_event_emission_infrastructure() {
     println!("\n=== Test: Event Emission Infrastructure ===\n");
 
     // Event emission syscall:
-    // - tos_emit_log (emit log with topics and data)
+    // - emit_log (emit log with topics and data)
 
     println!("✅ Event emission syscall registered:");
-    println!("   tos_emit_log");
+    println!("   emit_log");
     println!("   - Supports 0-4 topics (EVM LOG0-LOG4)");
     println!("   - Variable length data");
     println!("   - Essential for dApp event tracking");
@@ -345,7 +345,7 @@ fn test_environment_syscalls() {
     println!("\n=== Test: Environment Syscalls ===\n");
 
     // Environment syscalls:
-    // - tos_get_caller (get transaction sender)
+    // - get_caller (get transaction sender)
 
     let tx_sender = Hash::new([0x33; 32]);
     println!(
@@ -354,7 +354,7 @@ fn test_environment_syscalls() {
     );
 
     println!("\n✅ Environment syscalls registered:");
-    println!("   tos_get_caller - Get msg.sender equivalent");
+    println!("   get_caller - Get msg.sender equivalent");
 
     println!("\nNote: Full test requires contract compilation");
 }
@@ -455,28 +455,28 @@ fn test_compute_budget_tracking() {
 
     println!("Syscall Compute Costs (in Compute Units):");
     println!("  Logging:");
-    println!("    tos_log              : 100 CU");
-    println!("    tos_log_u64          : 100 CU");
-    println!("    tos_log_pubkey       : 100 CU");
-    println!("    tos_log_compute_units: 100 CU");
+    println!("    log              : 100 CU");
+    println!("    log_u64          : 100 CU");
+    println!("    log_pubkey       : 100 CU");
+    println!("    log_compute_units: 100 CU");
     println!();
     println!("  Crypto:");
-    println!("    tos_blake3           : 200 CU");
-    println!("    tos_sha256           : 200 CU");
-    println!("    tos_keccak256        : 200 CU");
+    println!("    blake3           : 200 CU");
+    println!("    sha256           : 200 CU");
+    println!("    keccak256        : 200 CU");
     println!("    tos_secp256k1_recover: 3000 CU");
     println!();
     println!("  Storage:");
-    println!("    tos_storage_read     : 100 CU");
-    println!("    tos_storage_write    : 1000 CU");
-    println!("    tos_storage_remove   : 500 CU");
+    println!("    storage_read     : 100 CU");
+    println!("    storage_write    : 1000 CU");
+    println!("    storage_remove   : 500 CU");
     println!();
     println!("  Transient Storage:");
-    println!("    tos_tload            : 100 CU");
-    println!("    tos_tstore           : 100 CU");
+    println!("    tload            : 100 CU");
+    println!("    tstore           : 100 CU");
     println!();
     println!("  Randomness:");
-    println!("    tos_get_instant_random: 100 CU");
+    println!("    get_instant_random: 100 CU");
     println!("    tos_commit_random    : 200 CU");
     println!("    tos_reveal_random    : 2000 CU");
 

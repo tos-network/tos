@@ -18,7 +18,7 @@
 //!     |
 //!     | inject into InvokeContext
 //!     v
-//! Smart Contract calls tos_vrf_random()
+//! Smart Contract calls vrf_random()
 //! ```
 //!
 //! # Usage

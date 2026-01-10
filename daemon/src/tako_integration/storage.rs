@@ -17,7 +17,7 @@ use tos_tbpf::error::EbpfError;
 /// # Architecture
 ///
 /// ```text
-/// TAKO syscall tos_storage_read(key)
+/// TAKO syscall storage_read(key)
 ///     ↓
 /// TosStorageAdapter::get()
 ///     ↓

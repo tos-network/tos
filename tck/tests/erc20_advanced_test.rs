@@ -320,7 +320,7 @@ async fn test_erc20_event_logging() {
     assert_eq!(result.return_value, 0, "Operation should succeed");
 
     // Note: Actual log verification depends on how logs are captured
-    // TAKO VM tos_log syscall should record events
+    // TAKO VM log syscall should record events
 
     if log::log_enabled!(log::Level::Info) {
         log::info!("✅ ERC20 event logging test passed");

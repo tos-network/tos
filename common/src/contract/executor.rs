@@ -65,7 +65,7 @@ pub struct ContractExecutionResult {
 
     /// Optional contract cache overlay produced by the VM during execution.
     ///
-    /// Contains storage writes made via `tos_storage_write` syscall.
+    /// Contains storage writes made via `storage_write` syscall.
     /// Only merged to persistent storage when execution succeeds (exit_code == Some(0)).
     /// On failure, this cache is discarded to ensure atomic rollback.
     pub cache: Option<ContractCache>,

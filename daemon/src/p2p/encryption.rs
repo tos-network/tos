@@ -101,10 +101,26 @@ impl Encryption {
     }
 
     // Generate a new random key
+    #[allow(unexpected_cfgs)]
     pub fn generate_key(&self) -> Result<EncryptionKey, EncryptionError> {
-        ChaCha20Poly1305::generate_key()
-            .map(Into::into)
-            .map_err(|_| EncryptionError::Rng)
+        // Handle API differences between stable and nightly Rust
+        // Nightly (fuzzing): uses rand_core 0.10.x with different OsRng API
+        // Stable: uses rand_core 0.9.x with generate_key() -> Result
+        #[cfg(fuzzing)]
+        {
+            use rand_core::TryRngCore;
+            let mut key = [0u8; 32];
+            rand_core::OsRng
+                .try_fill_bytes(&mut key)
+                .map_err(|_| EncryptionError::Rng)?;
+            Ok(key)
+        }
+        #[cfg(not(fuzzing))]
+        {
+            ChaCha20Poly1305::generate_key()
+                .map(Into::into)
+                .map_err(|_| EncryptionError::Rng)
+        }
     }
 
     // Encrypt a packet using the shared symetric key

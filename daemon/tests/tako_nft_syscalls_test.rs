@@ -3,27 +3,27 @@
 //! Tests the NFT syscalls through the TosNftAdapter with a mock NFT storage.
 //!
 //! Syscalls tested (21 total):
-//! - tos_nft_create_collection
-//! - tos_nft_collection_exists
-//! - tos_nft_update_collection
-//! - tos_nft_transfer_collection_ownership
-//! - tos_nft_mint
-//! - tos_nft_batch_mint
-//! - tos_nft_burn
-//! - tos_nft_batch_burn
-//! - tos_nft_transfer
-//! - tos_nft_batch_transfer
-//! - tos_nft_exists
-//! - tos_nft_owner_of
-//! - tos_nft_balance_of
-//! - tos_nft_token_uri
-//! - tos_nft_approve
-//! - tos_nft_get_approved
-//! - tos_nft_set_approval_for_all
-//! - tos_nft_is_approved_for_all
-//! - tos_nft_set_minting_paused
-//! - tos_nft_update_attribute
-//! - tos_nft_remove_attribute
+//! - nft_create_collection
+//! - nft_collection_exists
+//! - nft_update_collection
+//! - nft_transfer_collection_ownership
+//! - nft_mint
+//! - nft_batch_mint
+//! - nft_burn
+//! - nft_batch_burn
+//! - nft_transfer
+//! - nft_batch_transfer
+//! - nft_exists
+//! - nft_owner_of
+//! - nft_balance_of
+//! - nft_token_uri
+//! - nft_approve
+//! - nft_get_approved
+//! - nft_set_approval_for_all
+//! - nft_is_approved_for_all
+//! - nft_set_minting_paused
+//! - nft_update_attribute
+//! - nft_remove_attribute
 
 #![allow(clippy::disallowed_methods)]
 
@@ -3020,45 +3020,45 @@ fn test_nft_syscalls_summary() {
     println!();
     println!("NFT Syscalls Tested (21 total):");
     println!("  Collection Operations:");
-    println!("    - tos_nft_collection_exists            (500 CU)");
-    println!("    - tos_nft_create_collection            (5000 CU)");
-    println!("    - tos_nft_set_minting_paused           (2000 CU)");
-    println!("    - tos_nft_get_total_supply             (500 CU)");
-    println!("    - tos_nft_get_mint_count               (500 CU)");
-    println!("    - tos_nft_update_collection            (2000 CU + URI bytes)");
-    println!("    - tos_nft_transfer_collection_ownership (2000 CU)");
+    println!("    - nft_collection_exists            (500 CU)");
+    println!("    - nft_create_collection            (5000 CU)");
+    println!("    - nft_set_minting_paused           (2000 CU)");
+    println!("    - nft_get_total_supply             (500 CU)");
+    println!("    - nft_get_mint_count               (500 CU)");
+    println!("    - nft_update_collection            (2000 CU + URI bytes)");
+    println!("    - nft_transfer_collection_ownership (2000 CU)");
     println!();
     println!("  Token Operations:");
-    println!("    - tos_nft_mint                (2000 CU + URI bytes)");
-    println!("    - tos_nft_batch_mint          (2000 CU + per-item cost)");
-    println!("    - tos_nft_burn                (2000 CU)");
-    println!("    - tos_nft_batch_burn          (2000 CU + per-item cost)");
-    println!("    - tos_nft_transfer            (2000 CU)");
-    println!("    - tos_nft_batch_transfer      (2000 CU + per-item cost)");
+    println!("    - nft_mint                (2000 CU + URI bytes)");
+    println!("    - nft_batch_mint          (2000 CU + per-item cost)");
+    println!("    - nft_burn                (2000 CU)");
+    println!("    - nft_batch_burn          (2000 CU + per-item cost)");
+    println!("    - nft_transfer            (2000 CU)");
+    println!("    - nft_batch_transfer      (2000 CU + per-item cost)");
     println!();
     println!("  Query Operations:");
-    println!("    - tos_nft_exists              (500 CU)");
-    println!("    - tos_nft_owner_of            (1000 CU)");
-    println!("    - tos_nft_balance_of          (1000 CU)");
-    println!("    - tos_nft_token_uri           (1000 CU)");
+    println!("    - nft_exists              (500 CU)");
+    println!("    - nft_owner_of            (1000 CU)");
+    println!("    - nft_balance_of          (1000 CU)");
+    println!("    - nft_token_uri           (1000 CU)");
     println!();
     println!("  Approval Operations:");
-    println!("    - tos_nft_approve             (2000 CU)");
-    println!("    - tos_nft_get_approved        (1000 CU)");
-    println!("    - tos_nft_set_approval_for_all (2000 CU)");
-    println!("    - tos_nft_is_approved_for_all (500 CU)");
+    println!("    - nft_approve             (2000 CU)");
+    println!("    - nft_get_approved        (1000 CU)");
+    println!("    - nft_set_approval_for_all (2000 CU)");
+    println!("    - nft_is_approved_for_all (500 CU)");
     println!();
     println!("  Freeze Operations:");
-    println!("    - tos_nft_freeze              (2000 CU)");
-    println!("    - tos_nft_thaw                (2000 CU)");
-    println!("    - tos_nft_is_frozen           (500 CU)");
-    println!("    - tos_nft_batch_freeze        (2000 CU + 1500 CU/item)");
-    println!("    - tos_nft_batch_thaw          (2000 CU + 1500 CU/item)");
+    println!("    - nft_freeze              (2000 CU)");
+    println!("    - nft_thaw                (2000 CU)");
+    println!("    - nft_is_frozen           (500 CU)");
+    println!("    - nft_batch_freeze        (2000 CU + 1500 CU/item)");
+    println!("    - nft_batch_thaw          (2000 CU + 1500 CU/item)");
     println!();
     println!("  Metadata Operations:");
-    println!("    - tos_nft_set_token_uri       (2000 CU + URI bytes)");
-    println!("    - tos_nft_update_attribute    (2000 CU + key/value bytes)");
-    println!("    - tos_nft_remove_attribute    (2000 CU + key bytes)");
+    println!("    - nft_set_token_uri       (2000 CU + URI bytes)");
+    println!("    - nft_update_attribute    (2000 CU + key/value bytes)");
+    println!("    - nft_remove_attribute    (2000 CU + key bytes)");
     println!();
     println!("Architecture:");
     println!("  Smart Contract -> TAKO Syscall -> TosNftAdapter -> NftStorage");

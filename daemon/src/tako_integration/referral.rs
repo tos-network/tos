@@ -21,7 +21,7 @@ use crate::core::storage::ReferralProvider;
 /// # Architecture
 ///
 /// ```text
-/// TAKO syscall (e.g., tos_get_uplines)
+/// TAKO syscall (e.g., get_uplines)
 ///     ↓
 /// InvokeContext::get_uplines()
 ///     ↓

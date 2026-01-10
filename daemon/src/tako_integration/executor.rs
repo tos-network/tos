@@ -210,9 +210,9 @@ impl TakoExecutor {
     ///
     /// # VRF Syscalls Enabled
     ///
-    /// - `tos_vrf_random` - Get VRF output + proof + derived random (500 CU)
-    /// - `tos_vrf_verify` - Verify VRF proof (3000 CU)
-    /// - `tos_vrf_public_key` - Get block producer's VRF public key (100 CU)
+    /// - `vrf_random` - Get VRF output + proof + derived random (500 CU)
+    /// - `vrf_verify` - Verify VRF proof (3000 CU)
+    /// - `vrf_public_key` - Get block producer's VRF public key (100 CU)
     ///
     /// # Arguments
     ///
@@ -262,11 +262,11 @@ impl TakoExecutor {
     /// # Referral Syscalls Enabled
     ///
     /// - `tos_has_referrer` - Check if user has referrer (500 CU)
-    /// - `tos_get_referrer` - Get user's referrer address (500 CU)
-    /// - `tos_get_uplines` - Get N levels of uplines (500 + 200*N CU)
-    /// - `tos_get_direct_referrals_count` - Count of direct referrals (500 CU)
-    /// - `tos_get_team_size` - Team size from cache (500 CU)
-    /// - `tos_get_level` - User's level in referral tree (500 CU)
+    /// - `get_referrer` - Get user's referrer address (500 CU)
+    /// - `get_uplines` - Get N levels of uplines (500 + 200*N CU)
+    /// - `get_direct_referrals_count` - Count of direct referrals (500 CU)
+    /// - `get_team_size` - Team size from cache (500 CU)
+    /// - `get_level` - User's level in referral tree (500 CU)
     /// - `tos_is_downline` - Check downline relationship (500 + 100*depth CU)
     #[allow(clippy::too_many_arguments)]
     pub fn execute_with_referral(
@@ -405,11 +405,11 @@ impl TakoExecutor {
     /// When `referral_provider` is provided, contracts can access the native referral
     /// system via these syscalls:
     /// - `tos_has_referrer` - Check if user has referrer
-    /// - `tos_get_referrer` - Get user's referrer address
-    /// - `tos_get_uplines` - Get N levels of uplines
-    /// - `tos_get_direct_referrals_count` - Count of direct referrals
-    /// - `tos_get_team_size` - Team size (cached)
-    /// - `tos_get_level` - User's level in referral tree
+    /// - `get_referrer` - Get user's referrer address
+    /// - `get_uplines` - Get N levels of uplines
+    /// - `get_direct_referrals_count` - Count of direct referrals
+    /// - `get_team_size` - Team size (cached)
+    /// - `get_level` - User's level in referral tree
     /// - `tos_is_downline` - Check if user is in another's downline
     #[allow(clippy::too_many_arguments)]
     pub fn execute_with_features_and_referral(
@@ -594,7 +594,7 @@ impl TakoExecutor {
 
         // 7. Inject instant randomness for randomness syscalls
         // CRITICAL: This must be set before contract execution to prevent
-        // tos_get_instant_random from returning error code 1
+        // get_instant_random from returning error code 1
         invoke_context.instant_random = Some(Self::generate_instant_randomness(
             block_hash.as_bytes(),
             block_height,
@@ -604,7 +604,7 @@ impl TakoExecutor {
 
         // 7b. Inject VRF data for verifiable randomness syscalls (if available)
         // When enabled, block producers sign the block_hash with their VRF key
-        // to provide provably random values to contracts via tos_vrf_random()
+        // to provide provably random values to contracts via vrf_random()
         if let Some(vrf) = vrf_data {
             invoke_context.vrf_public_key = Some(vrf.public_key.to_bytes());
             invoke_context.vrf_output = Some(vrf.output.to_bytes());
@@ -636,7 +636,7 @@ impl TakoExecutor {
         }
 
         // 7c. Wire referral provider (if available)
-        // Enables contracts to access native referral system via tos_get_uplines, etc.
+        // Enables contracts to access native referral system via get_uplines, etc.
         if let Some(ref mut adapter) = referral_adapter {
             invoke_context.set_referral_provider(adapter);
             if log::log_enabled!(log::Level::Debug) {
@@ -684,7 +684,7 @@ impl TakoExecutor {
             );
         }
 
-        // Set input data for contract to access via tos_get_input_data syscall
+        // Set input data for contract to access via get_input_data syscall
         // This allows contracts to receive parameters (entry points, constructors, user args)
         invoke_context.set_input_data(input_data.to_vec());
 

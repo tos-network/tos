@@ -16,7 +16,7 @@ use tos_tbpf::error::EbpfError;
 /// # Architecture
 ///
 /// ```text
-/// TAKO syscall tos_get_balance(address)
+/// TAKO syscall get_balance(address)
 ///     ↓
 /// TosAccountAdapter::get_balance()
 ///     ↓

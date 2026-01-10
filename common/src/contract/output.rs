@@ -41,7 +41,7 @@ pub enum ContractOutput {
     ExitCode(Option<u64>),
     // Inform that we refund the deposits
     RefundDeposits,
-    // Return data from contract execution (set via tos_set_return_data syscall)
+    // Return data from contract execution (set via set_return_data syscall)
     ReturnData {
         /// The return data bytes from the contract
         data: Vec<u8>,

@@ -553,14 +553,14 @@ fn test_all_syscalls_summary() {
     );
     println!("║                                                              ║");
     println!("║  Syscalls Tested:                                            ║");
-    println!("║    • tos_tstore, tos_tload                                   ║");
-    println!("║    • tos_get_balance, tos_transfer                           ║");
+    println!("║    • tstore, tload                                   ║");
+    println!("║    • get_balance, transfer                           ║");
     println!("║    • tos_ext_code_size, tos_ext_code_hash                    ║");
     println!("║    • tos_ext_code_copy                                       ║");
-    println!("║    • tos_emit_log (LOG0-LOG4)                                ║");
-    println!("║    • tos_get_caller                                          ║");
-    println!("║    • tos_get_contract_address                                ║");
-    println!("║    • tos_storage_read, tos_storage_write                     ║");
-    println!("║    • tos_log, tos_log_u64                                    ║");
+    println!("║    • emit_log (LOG0-LOG4)                                ║");
+    println!("║    • get_caller                                          ║");
+    println!("║    • get_contract_address                                ║");
+    println!("║    • storage_read, storage_write                     ║");
+    println!("║    • log, log_u64                                    ║");
     println!("╚══════════════════════════════════════════════════════════════╝");
 }

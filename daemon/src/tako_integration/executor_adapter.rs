@@ -47,9 +47,9 @@ struct VrfExecutionContext {
 ///
 /// The executor can optionally hold VRF data for verifiable randomness.
 /// When VRF data is set, contract executions will have access to VRF syscalls:
-/// - `tos_vrf_random` - Get VRF output + proof + derived random
-/// - `tos_vrf_verify` - Verify VRF proof
-/// - `tos_vrf_public_key` - Get block producer's VRF public key
+/// - `vrf_random` - Get VRF output + proof + derived random
+/// - `vrf_verify` - Verify VRF proof
+/// - `vrf_public_key` - Get block producer's VRF public key
 ///
 /// # Example
 ///
