@@ -110,35 +110,15 @@ impl ContractStorage for MockProvider {
     }
 }
 
-/// Helper: Load compiled example contract
+/// Helper: Load compiled example contract from fixtures
 fn load_example_contract(name: &str) -> Vec<u8> {
-    // Try multiple paths to support both local development and CI environments
-    // Support both V0 (tbpf-tos-tos) and V3 (tbpfv3-tos-tos) targets
-    let paths = [
-        format!("../../tos-alloc/examples/{name}/target/tbpfv3-tos-tos/release/ex.so"), // V3 local
-        format!("../../tos-alloc/examples/{name}/target/tbpf-tos-tos/release/ex.so"),   // V0 local
-        format!("../tos-alloc/examples/{name}/target/tbpfv3-tos-tos/release/ex.so"),    // V3 CI
-        format!("../tos-alloc/examples/{name}/target/tbpf-tos-tos/release/ex.so"),      // V0 CI
-        format!("tos-alloc/examples/{name}/target/tbpfv3-tos-tos/release/ex.so"),       // V3 CI alt
-        format!("tos-alloc/examples/{name}/target/tbpf-tos-tos/release/ex.so"),         // V0 CI alt
-    ];
-
-    for path in &paths {
-        if let Ok(data) = std::fs::read(path) {
-            return data;
-        }
-    }
-
-    panic!(
-        "Failed to load compiled contract '{name}' from any of:\n  {}\n\n\
-        Build the example first:\n  \
-        cd ../../tos-alloc && ./build-example.sh {name}",
-        paths.join("\n  ")
-    )
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let fixture_path = format!("{manifest_dir}/tests/fixtures/alloc_{name}.so");
+    std::fs::read(&fixture_path)
+        .unwrap_or_else(|_| panic!("Failed to load contract fixture: {fixture_path}"))
 }
 
 #[test]
-#[ignore] // Requires pre-built tos-alloc contracts (needs TOS toolchain)
 fn test_alloc_basic_vec_operations() {
     // Load compiled contract
     let bytecode = load_example_contract("basic");
@@ -197,7 +177,6 @@ fn test_alloc_basic_vec_operations() {
 }
 
 #[test]
-#[ignore] // Requires pre-built tos-alloc contracts (needs TOS toolchain)
 fn test_alloc_heap_usage() {
     let bytecode = load_example_contract("basic");
     let mut provider = MockProvider;
