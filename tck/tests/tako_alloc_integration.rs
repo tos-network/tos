@@ -138,6 +138,7 @@ fn load_example_contract(name: &str) -> Vec<u8> {
 }
 
 #[test]
+#[ignore] // Requires pre-built tos-alloc contracts (needs TOS toolchain)
 fn test_alloc_basic_vec_operations() {
     // Load compiled contract
     let bytecode = load_example_contract("basic");
@@ -196,6 +197,7 @@ fn test_alloc_basic_vec_operations() {
 }
 
 #[test]
+#[ignore] // Requires pre-built tos-alloc contracts (needs TOS toolchain)
 fn test_alloc_heap_usage() {
     let bytecode = load_example_contract("basic");
     let mut provider = MockProvider;
