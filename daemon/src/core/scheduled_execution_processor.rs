@@ -4,14 +4,16 @@
 // It processes OFFERCALL-scheduled contract executions in priority order and
 // handles gas accounting, offer payments, and execution status updates.
 
+use std::collections::HashMap;
+
 use log::{debug, error, info, trace, warn};
 use tos_common::{
     block::TopoHeight,
     contract::{
-        ContractProvider, ScheduledExecution, ScheduledExecutionStatus,
+        ContractProvider, ScheduledExecution, ScheduledExecutionStatus, TransferOutput,
         MAX_SCHEDULED_EXECUTIONS_PER_BLOCK, MAX_SCHEDULED_EXECUTION_GAS_PER_BLOCK,
     },
-    crypto::Hash,
+    crypto::{Hash, PublicKey},
 };
 
 use crate::core::{error::BlockchainError, storage::ContractScheduledExecutionProvider};
@@ -34,6 +36,8 @@ pub struct ScheduledExecutionResult {
     pub events: Vec<tos_program_runtime::Event>,
     /// Log messages from execution
     pub log_messages: Vec<String>,
+    /// Transfers requested during execution
+    pub transfers: Vec<TransferOutput>,
 }
 
 /// Result of processing all scheduled executions at a topoheight
@@ -51,6 +55,9 @@ pub struct BlockScheduledExecutionResults {
     pub failure_count: u32,
     /// Number of deferred executions
     pub deferred_count: u32,
+    /// Aggregated transfers from all successful executions
+    /// Key: destination public key, Value: map of asset hash to amount
+    pub aggregated_transfers: HashMap<PublicKey, HashMap<Hash, u64>>,
 }
 
 /// Configuration for scheduled execution processing
@@ -228,6 +235,17 @@ where
                 }
 
                 results.success_count = results.success_count.saturating_add(1);
+
+                // Aggregate transfers from this execution
+                for transfer in &result.transfers {
+                    let asset_map = results
+                        .aggregated_transfers
+                        .entry(transfer.destination.clone())
+                        .or_default();
+                    let current = asset_map.entry(transfer.asset.clone()).or_insert(0);
+                    *current = current.saturating_add(transfer.amount);
+                }
+
                 results.results.push(ScheduledExecutionResult {
                     execution,
                     success: true,
@@ -236,6 +254,7 @@ where
                     miner_reward,
                     events: result.events,
                     log_messages: result.log_messages,
+                    transfers: result.transfers,
                 });
 
                 // Successful executions consume a block slot
@@ -326,6 +345,7 @@ where
                                 miner_reward,
                                 events: vec![],
                                 log_messages: vec![],
+                                transfers: vec![],
                             });
                         } else {
                             // Successfully deferred - does NOT consume block slot or miner reward
@@ -379,6 +399,7 @@ where
                     miner_reward,
                     events: vec![],
                     log_messages: vec![],
+                    transfers: vec![],
                 });
 
                 // Non-deferred failures consume a block slot
@@ -447,6 +468,7 @@ where
         compute_units_used: result.compute_units_used,
         events: result.events,
         log_messages: result.log_messages,
+        transfers: result.transfers,
     })
 }
 
@@ -457,6 +479,7 @@ struct ExecutionOutput {
     compute_units_used: u64,
     events: Vec<tos_program_runtime::Event>,
     log_messages: Vec<String>,
+    transfers: Vec<TransferOutput>,
 }
 
 /// Check if an error is retryable (should defer rather than fail)
