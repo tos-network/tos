@@ -284,11 +284,12 @@ impl TnsProvider for RocksStorage {
         let mut to_delete = Vec::new();
 
         // Scan the message ID index for expired messages
+        // Index stores MessageIndexEntry which contains (recipient_hash, expiry_topoheight)
         for result in
-            self.iter::<Hash, TopoHeight>(Column::TnsMessageIdIndex, IteratorMode::Start)?
+            self.iter::<Hash, MessageIndexEntry>(Column::TnsMessageIdIndex, IteratorMode::Start)?
         {
-            let (msg_id, expiry) = result?;
-            if expiry <= current_topoheight {
+            let (msg_id, entry) = result?;
+            if entry.expiry_topoheight <= current_topoheight {
                 to_delete.push(msg_id);
             }
         }
