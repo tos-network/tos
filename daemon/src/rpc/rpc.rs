@@ -5171,7 +5171,7 @@ use tos_common::api::daemon::{
     GetMessagesResult, HasRegisteredNameParams, HasRegisteredNameResult, IsNameAvailableParams,
     IsNameAvailableResult, ResolveNameParams, ResolveNameResult,
 };
-use tos_common::tns::{normalize_name, tns_name_hash};
+use tos_common::tns::{normalize_name, tns_name_hash, MAX_NAME_LENGTH};
 
 /// Resolve a TNS name to an address
 /// Returns the address that owns the name, if registered
@@ -5185,6 +5185,15 @@ async fn resolve_name<S: Storage>(
     // Strip @tos.network suffix if present
     let name_str = params.name.as_ref();
     let name_input = name_str.strip_suffix("@tos.network").unwrap_or(name_str);
+
+    // Early length check to prevent DoS via oversized inputs
+    // Reject names exceeding MAX_NAME_LENGTH without processing
+    if name_input.len() > MAX_NAME_LENGTH {
+        return Ok(json!(ResolveNameResult {
+            address: None,
+            name_hash: Cow::Owned(Hash::zero()),
+        }));
+    }
 
     // Normalize first to reject non-ASCII characters before lowercasing
     // This prevents Unicode homoglyph attacks where non-ASCII chars casefold to ASCII

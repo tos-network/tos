@@ -32,6 +32,36 @@ pub struct StoredEphemeralMessage {
 /// Maximum encrypted content size (same as MAX_ENCRYPTED_SIZE from tns constants)
 const MAX_ENCRYPTED_SIZE: usize = 188;
 
+/// Message index entry for O(1) lookup by message_id
+/// Stores recipient_hash to allow direct key construction
+#[derive(Clone, Debug)]
+pub struct MessageIndexEntry {
+    /// Recipient's name hash (needed to construct the message key)
+    pub recipient_hash: Hash,
+    /// Expiry topoheight (for quick expiry checks without loading full message)
+    pub expiry_topoheight: TopoHeight,
+}
+
+impl Serializer for MessageIndexEntry {
+    fn write(&self, writer: &mut Writer) {
+        self.recipient_hash.write(writer);
+        writer.write_u64(&self.expiry_topoheight);
+    }
+
+    fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
+        let recipient_hash = Hash::read(reader)?;
+        let expiry_topoheight = reader.read_u64()?;
+        Ok(Self {
+            recipient_hash,
+            expiry_topoheight,
+        })
+    }
+
+    fn size(&self) -> usize {
+        32 + 8 // Hash (32) + TopoHeight (8)
+    }
+}
+
 impl Serializer for StoredEphemeralMessage {
     fn write(&self, writer: &mut Writer) {
         self.sender_name_hash.write(writer);

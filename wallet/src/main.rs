@@ -6132,13 +6132,13 @@ async fn send_message(
     let ttl_blocks = if args.has_argument("ttl") {
         let ttl_raw = args.get_value("ttl")?.to_number()?;
         // Validate TTL is positive and within u32 range
-        if ttl_raw < 0 {
+        if ttl_raw < 0 || ttl_raw > i64::from(u32::MAX) {
             return Err(CommandError::InvalidArgument(
-                "TTL must be a positive number".to_string(),
+                "TTL must be a positive number within valid range".to_string(),
             ));
         }
         let ttl = ttl_raw as u32;
-        // Validate TTL range
+        // Validate TTL range against protocol limits
         if ttl < tos_common::tns::MIN_TTL || ttl > tos_common::tns::MAX_TTL {
             return Err(CommandError::InvalidArgument(format!(
                 "TTL must be between {} and {} blocks. Got: {}",

@@ -4,7 +4,7 @@ use crate::core::{
     error::BlockchainError,
     storage::{
         rocksdb::{Column, IteratorMode, RocksStorage},
-        NetworkProvider, StoredEphemeralMessage, TnsProvider,
+        MessageIndexEntry, NetworkProvider, StoredEphemeralMessage, TnsProvider,
     },
 };
 use async_trait::async_trait;
@@ -112,12 +112,16 @@ impl TnsProvider for RocksStorage {
             return Err(BlockchainError::TnsMessageIdAlreadyUsed);
         }
 
-        // Store in message ID index for replay protection
-        // Value is the expiry topoheight for efficient cleanup
+        // Store in message ID index for replay protection and O(1) lookup
+        // Value includes recipient_hash for direct key construction
+        let index_entry = MessageIndexEntry {
+            recipient_hash: message.recipient_name_hash.clone(),
+            expiry_topoheight: message.expiry_topoheight,
+        };
         self.insert_into_disk(
             Column::TnsMessageIdIndex,
             message_id.as_bytes(),
-            &message.expiry_topoheight,
+            &index_entry,
         )?;
 
         // Store in recipient-indexed storage
@@ -136,33 +140,21 @@ impl TnsProvider for RocksStorage {
             trace!("getting ephemeral message {}", message_id);
         }
 
-        // First check if message exists in the index
-        let expiry: Option<TopoHeight> =
+        // Load index entry which contains recipient_hash for O(1) lookup
+        let index_entry: Option<MessageIndexEntry> =
             self.load_optional_from_disk(Column::TnsMessageIdIndex, message_id.as_bytes())?;
 
-        if expiry.is_none() {
-            return Ok(None);
-        }
+        let index_entry = match index_entry {
+            Some(entry) => entry,
+            None => return Ok(None),
+        };
 
-        // We need to scan for the message since we don't store recipient hash in the index
-        // This is a trade-off for simpler cleanup
-        for result in self.iter::<Vec<u8>, StoredEphemeralMessage>(
-            Column::TnsEphemeralMessages,
-            IteratorMode::Start,
-        )? {
-            let (key, msg) = result?;
-            // Extract message_id from key (last 32 bytes)
-            if key.len() >= 64 {
-                let mut msg_id_bytes = [0u8; 32];
-                msg_id_bytes.copy_from_slice(&key[32..64]);
-                let stored_msg_id = Hash::new(msg_id_bytes);
-                if &stored_msg_id == message_id {
-                    return Ok(Some(msg));
-                }
-            }
-        }
+        // Direct lookup using recipient_hash from index
+        let key = Self::make_ephemeral_message_key(&index_entry.recipient_hash, message_id);
+        let message: Option<StoredEphemeralMessage> =
+            self.load_optional_from_disk(Column::TnsEphemeralMessages, &key)?;
 
-        Ok(None)
+        Ok(message)
     }
 
     async fn get_messages_for_recipient(
