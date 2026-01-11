@@ -489,6 +489,8 @@ pub enum BlockchainError {
     TnsInvalidNameFormat,
     #[error("Name is reserved")]
     TnsNameReserved,
+    #[error("Invalid compressed public key")]
+    InvalidPublicKey,
 }
 
 impl BlockchainError {

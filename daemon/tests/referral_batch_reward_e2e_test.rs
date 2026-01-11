@@ -450,6 +450,27 @@ impl<'a> BlockchainVerificationState<'a, TestError> for TestChainState {
     ) -> Result<(), TestError> {
         Err(TestError::Unsupported)
     }
+
+    // ===== TNS (TOS Name Service) Verification Methods =====
+
+    async fn is_name_registered(&self, _name_hash: &Hash) -> Result<bool, TestError> {
+        Ok(false)
+    }
+
+    async fn account_has_name(&self, _account: &'a CompressedPublicKey) -> Result<bool, TestError> {
+        Ok(false)
+    }
+
+    async fn get_account_name_hash(
+        &self,
+        _account: &'a CompressedPublicKey,
+    ) -> Result<Option<Hash>, TestError> {
+        Ok(None)
+    }
+
+    async fn is_message_id_used(&self, _message_id: &Hash) -> Result<bool, TestError> {
+        Ok(false)
+    }
 }
 
 #[async_trait]
@@ -720,6 +741,30 @@ impl<'a> BlockchainApplyState<'a, DummyContractProvider, TestError> for TestChai
 
     async fn is_global_committee_bootstrapped(&self) -> Result<bool, TestError> {
         Ok(false)
+    }
+
+    // ===== TNS (TOS Name Service) Apply Methods =====
+
+    async fn register_name(
+        &mut self,
+        _name_hash: Hash,
+        _owner: &'a CompressedPublicKey,
+    ) -> Result<(), TestError> {
+        Ok(())
+    }
+
+    async fn store_ephemeral_message(
+        &mut self,
+        _message_id: Hash,
+        _sender_name_hash: Hash,
+        _recipient_name_hash: Hash,
+        _message_nonce: u64,
+        _ttl_blocks: u32,
+        _encrypted_content: Vec<u8>,
+        _receiver_handle: [u8; 32],
+        _current_topoheight: u64,
+    ) -> Result<(), TestError> {
+        Ok(())
     }
 }
 

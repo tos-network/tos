@@ -778,9 +778,64 @@ impl Transaction {
                     return Err(VerificationError::TransactionExtraDataSize);
                 }
             }
-            TransactionType::RegisterName(_) | TransactionType::EphemeralMessage(_) => {
-                // TNS transactions: validation happens in dedicated verify functions
-                // Called from verify_with_state_internal
+            TransactionType::RegisterName(payload) => {
+                // TNS RegisterName: stateless format validation + stateful checks
+                verify_register_name_format::<E>(payload)?;
+
+                // Stateful checks: name not taken, account doesn't have name
+                let name_hash = get_register_name_hash(payload)
+                    .ok_or_else(|| VerificationError::InvalidFormat)?;
+
+                if state
+                    .is_name_registered(&name_hash)
+                    .await
+                    .map_err(VerificationError::State)?
+                {
+                    return Err(VerificationError::NameAlreadyRegistered);
+                }
+
+                if state
+                    .account_has_name(&self.source)
+                    .await
+                    .map_err(VerificationError::State)?
+                {
+                    return Err(VerificationError::AccountAlreadyHasName);
+                }
+            }
+            TransactionType::EphemeralMessage(payload) => {
+                // TNS EphemeralMessage: stateless format validation + stateful checks
+                verify_ephemeral_message_format::<E>(payload)?;
+
+                // Verify sender has registered TNS name
+                let sender_name_hash = state
+                    .get_account_name_hash(&self.source)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or(VerificationError::SenderNotRegistered)?;
+
+                // Verify sender_name_hash in payload matches actual sender's name
+                if sender_name_hash != *payload.get_sender_name_hash() {
+                    return Err(VerificationError::InvalidSender);
+                }
+
+                // Verify recipient name is registered
+                if !state
+                    .is_name_registered(payload.get_recipient_name_hash())
+                    .await
+                    .map_err(VerificationError::State)?
+                {
+                    return Err(VerificationError::RecipientNotFound);
+                }
+
+                // Replay protection: check message ID not already used
+                let message_id = compute_message_id(payload);
+                if state
+                    .is_message_id_used(&message_id)
+                    .await
+                    .map_err(VerificationError::State)?
+                {
+                    return Err(VerificationError::MessageAlreadyExists);
+                }
             }
         };
 
@@ -2051,9 +2106,64 @@ impl Transaction {
                     return Err(VerificationError::TransactionExtraDataSize);
                 }
             }
-            TransactionType::RegisterName(_) | TransactionType::EphemeralMessage(_) => {
-                // TNS transactions: validation happens in dedicated verify functions
-                // Called from verify_with_state_internal
+            TransactionType::RegisterName(payload) => {
+                // TNS RegisterName: stateless format validation + stateful checks
+                verify_register_name_format::<E>(payload)?;
+
+                // Stateful checks: name not taken, account doesn't have name
+                let name_hash = get_register_name_hash(payload)
+                    .ok_or_else(|| VerificationError::InvalidFormat)?;
+
+                if state
+                    .is_name_registered(&name_hash)
+                    .await
+                    .map_err(VerificationError::State)?
+                {
+                    return Err(VerificationError::NameAlreadyRegistered);
+                }
+
+                if state
+                    .account_has_name(&self.source)
+                    .await
+                    .map_err(VerificationError::State)?
+                {
+                    return Err(VerificationError::AccountAlreadyHasName);
+                }
+            }
+            TransactionType::EphemeralMessage(payload) => {
+                // TNS EphemeralMessage: stateless format validation + stateful checks
+                verify_ephemeral_message_format::<E>(payload)?;
+
+                // Verify sender has registered TNS name
+                let sender_name_hash = state
+                    .get_account_name_hash(&self.source)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or(VerificationError::SenderNotRegistered)?;
+
+                // Verify sender_name_hash in payload matches actual sender's name
+                if sender_name_hash != *payload.get_sender_name_hash() {
+                    return Err(VerificationError::InvalidSender);
+                }
+
+                // Verify recipient name is registered
+                if !state
+                    .is_name_registered(payload.get_recipient_name_hash())
+                    .await
+                    .map_err(VerificationError::State)?
+                {
+                    return Err(VerificationError::RecipientNotFound);
+                }
+
+                // Replay protection: check message ID not already used
+                let message_id = compute_message_id(payload);
+                if state
+                    .is_message_id_used(&message_id)
+                    .await
+                    .map_err(VerificationError::State)?
+                {
+                    return Err(VerificationError::MessageAlreadyExists);
+                }
             }
         };
 
@@ -4332,10 +4442,50 @@ impl Transaction {
                     }
                 }
             }
-            TransactionType::RegisterName(_) | TransactionType::EphemeralMessage(_) => {
-                // TNS transactions: state changes handled by dedicated apply functions
-                // RegisterName: stores name->account mapping
-                // EphemeralMessage: stores message in ephemeral storage
+            TransactionType::RegisterName(payload) => {
+                // TNS RegisterName: store name->account mapping
+                let name_hash = get_register_name_hash(payload)
+                    .ok_or_else(|| VerificationError::InvalidFormat)?;
+
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "RegisterName applying - owner: {:?}, name_hash: {}",
+                        self.source, name_hash
+                    );
+                }
+
+                state
+                    .register_name(name_hash, &self.source)
+                    .await
+                    .map_err(VerificationError::State)?;
+            }
+            TransactionType::EphemeralMessage(payload) => {
+                // TNS EphemeralMessage: store message in ephemeral storage
+                let message_id = compute_message_id(payload);
+                let current_topoheight = state.get_verification_topoheight();
+
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "EphemeralMessage applying - message_id: {}, sender: {}, recipient: {}",
+                        message_id,
+                        payload.get_sender_name_hash(),
+                        payload.get_recipient_name_hash()
+                    );
+                }
+
+                state
+                    .store_ephemeral_message(
+                        message_id,
+                        payload.get_sender_name_hash().clone(),
+                        payload.get_recipient_name_hash().clone(),
+                        payload.get_message_nonce(),
+                        payload.get_ttl_blocks(),
+                        payload.get_encrypted_content().to_vec(),
+                        *payload.get_receiver_handle(),
+                        current_topoheight,
+                    )
+                    .await
+                    .map_err(VerificationError::State)?;
             }
         }
 

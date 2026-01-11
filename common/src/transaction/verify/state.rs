@@ -163,6 +163,47 @@ pub trait BlockchainVerificationState<'a, E> {
         &self,
         hash: &Hash,
     ) -> Result<(&Module, &Environment), E>;
+
+    // ===== TNS (TOS Name Service) Verification Methods =====
+
+    /// Check if a TNS name hash is registered
+    ///
+    /// # Arguments
+    /// * `name_hash` - The blake3 hash of the normalized name
+    ///
+    /// # Returns
+    /// true if the name is already registered
+    async fn is_name_registered(&self, name_hash: &Hash) -> Result<bool, E>;
+
+    /// Check if an account already has a registered TNS name
+    ///
+    /// # Arguments
+    /// * `account` - The account's public key
+    ///
+    /// # Returns
+    /// true if the account already has a name
+    async fn account_has_name(&self, account: &'a CompressedPublicKey) -> Result<bool, E>;
+
+    /// Get the TNS name hash for an account
+    ///
+    /// # Arguments
+    /// * `account` - The account's public key
+    ///
+    /// # Returns
+    /// The name hash if the account has a registered name, None otherwise
+    async fn get_account_name_hash(
+        &self,
+        account: &'a CompressedPublicKey,
+    ) -> Result<Option<Hash>, E>;
+
+    /// Check if a message ID has been used (for replay protection)
+    ///
+    /// # Arguments
+    /// * `message_id` - The unique message identifier (blake3 hash)
+    ///
+    /// # Returns
+    /// true if the message ID has already been used
+    async fn is_message_id_used(&self, message_id: &Hash) -> Result<bool, E>;
 }
 
 pub struct ContractEnvironment<'a, P: ContractProvider> {
@@ -508,4 +549,45 @@ pub trait BlockchainApplyState<'a, P: ContractProvider, E>:
         total_amount: u64,
         ratios: &[u16],
     ) -> Result<crate::referral::DistributionResult, E>;
+
+    // ===== TNS (TOS Name Service) Apply Methods =====
+
+    /// Register a TNS name for an account
+    ///
+    /// # Arguments
+    /// * `name_hash` - The blake3 hash of the normalized name
+    /// * `owner` - The account's public key
+    ///
+    /// # Errors
+    /// * Name already registered
+    /// * Account already has a name
+    async fn register_name(
+        &mut self,
+        name_hash: Hash,
+        owner: &'a CompressedPublicKey,
+    ) -> Result<(), E>;
+
+    /// Store an ephemeral message
+    ///
+    /// # Arguments
+    /// * `message_id` - The unique message identifier (for replay protection)
+    /// * `sender_name_hash` - Blake3 hash of sender's name
+    /// * `recipient_name_hash` - Blake3 hash of recipient's name
+    /// * `message_nonce` - Message nonce (from transaction)
+    /// * `ttl_blocks` - Time-to-live in blocks
+    /// * `encrypted_content` - Encrypted message content
+    /// * `receiver_handle` - ECDH handle for decryption
+    /// * `current_topoheight` - Current block topoheight (for expiry calculation)
+    #[allow(clippy::too_many_arguments)]
+    async fn store_ephemeral_message(
+        &mut self,
+        message_id: Hash,
+        sender_name_hash: Hash,
+        recipient_name_hash: Hash,
+        message_nonce: u64,
+        ttl_blocks: u32,
+        encrypted_content: Vec<u8>,
+        receiver_handle: [u8; 32],
+        current_topoheight: u64,
+    ) -> Result<(), E>;
 }
