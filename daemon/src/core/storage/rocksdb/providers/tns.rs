@@ -280,31 +280,43 @@ impl TnsProvider for RocksStorage {
             );
         }
 
-        let mut deleted_count = 0u64;
-        let mut to_delete = Vec::new();
+        // Process deletions in batches to prevent memory exhaustion DoS
+        // Limit batch size to prevent excessive memory use and block processing delay
+        const CLEANUP_BATCH_SIZE: usize = 100;
+        let mut total_deleted = 0u64;
 
-        // Scan the message ID index for expired messages
-        // Index stores MessageIndexEntry which contains (recipient_hash, expiry_topoheight)
-        for result in
-            self.iter::<Hash, MessageIndexEntry>(Column::TnsMessageIdIndex, IteratorMode::Start)?
-        {
-            let (msg_id, entry) = result?;
-            if entry.expiry_topoheight <= current_topoheight {
-                to_delete.push(msg_id);
+        loop {
+            // Collect up to CLEANUP_BATCH_SIZE expired message IDs
+            let mut batch = Vec::with_capacity(CLEANUP_BATCH_SIZE);
+            for result in self
+                .iter::<Hash, MessageIndexEntry>(Column::TnsMessageIdIndex, IteratorMode::Start)?
+            {
+                let (msg_id, entry) = result?;
+                if entry.expiry_topoheight <= current_topoheight {
+                    batch.push(msg_id);
+                    if batch.len() >= CLEANUP_BATCH_SIZE {
+                        break;
+                    }
+                }
+            }
+
+            // If no expired messages found, we're done
+            if batch.is_empty() {
+                break;
+            }
+
+            // Delete this batch
+            for msg_id in batch {
+                self.delete_ephemeral_message(&msg_id).await?;
+                total_deleted = total_deleted.saturating_add(1);
             }
         }
 
-        // Delete expired messages
-        for msg_id in to_delete {
-            self.delete_ephemeral_message(&msg_id).await?;
-            deleted_count = deleted_count.saturating_add(1);
-        }
-
         if log::log_enabled!(log::Level::Trace) {
-            trace!("deleted {} expired messages", deleted_count);
+            trace!("deleted {} expired messages", total_deleted);
         }
 
-        Ok(deleted_count)
+        Ok(total_deleted)
     }
 
     // ===== Administrative Operations =====
