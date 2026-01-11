@@ -2,6 +2,7 @@ mod contract;
 mod error;
 mod kyc;
 mod state;
+mod tns;
 mod zkp_cache;
 
 use std::{borrow::Cow, iter, sync::Arc};
@@ -42,6 +43,7 @@ use contract::InvokeContract;
 
 pub use error::*;
 pub use state::*;
+pub use tns::*;
 pub use zkp_cache::*;
 
 /// Prepared UNO transaction data for batch range proof verification
