@@ -5240,6 +5240,19 @@ async fn is_name_available<S: Storage>(
     let name_str = params.name.as_ref();
     let name = name_str.strip_suffix("@tos.network").unwrap_or(name_str);
 
+    // Early length check to prevent DoS via oversized inputs
+    // Reject names exceeding MAX_NAME_LENGTH without processing
+    if name.len() > MAX_NAME_LENGTH {
+        return Ok(json!(IsNameAvailableResult {
+            available: false,
+            valid_format: false,
+            format_error: Some(format!(
+                "Name too long (max {} characters)",
+                MAX_NAME_LENGTH
+            )),
+        }));
+    }
+
     // Validate name format using the full validation rules
     let validation = validate_name_format(name);
     if !validation.valid {
