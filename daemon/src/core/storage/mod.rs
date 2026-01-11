@@ -50,6 +50,7 @@ pub trait Storage:
     + KycProvider
     + CommitteeProvider
     + UnoBalanceProvider
+    + TnsProvider
     + Sync
     + Send
     + 'static

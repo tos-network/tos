@@ -183,6 +183,22 @@ pub enum Column {
     // Child committees index: parent_id -> list of child IDs
     // {parent_committee_id (32 bytes)} => {Vec<Hash>}
     ChildCommittees,
+
+    // ===== TNS (TOS Name Service) =====
+
+    // Name to owner mapping: name_hash -> owner_public_key
+    // {name_hash (32 bytes)} => {PublicKey (32 bytes)}
+    TnsNameToOwner,
+    // Account to name mapping: owner_public_key -> name_hash
+    // Used to check if account already has a registered name
+    // {owner_public_key (32 bytes)} => {Hash (32 bytes)}
+    TnsAccountToName,
+    // Ephemeral messages storage with TTL
+    // {recipient_name_hash (32 bytes)}{message_id (32 bytes)} => {EphemeralMessage}
+    TnsEphemeralMessages,
+    // Message ID index for replay protection
+    // {message_id (32 bytes)} => {expiry_topoheight (8 bytes)}
+    TnsMessageIdIndex,
 }
 
 impl Column {
@@ -229,6 +245,9 @@ impl Column {
             CommitteesByRegion => Some(1),
             // Child committees: prefix by parent committee ID (32 bytes)
             ChildCommittees => Some(32),
+
+            // TNS ephemeral messages: prefix by recipient name hash (32 bytes)
+            TnsEphemeralMessages => Some(32),
 
             _ => None,
         }
