@@ -5184,17 +5184,15 @@ async fn resolve_name<S: Storage>(
 
     // Strip @tos.network suffix if present
     let name_str = params.name.as_ref();
-    let name = name_str
-        .strip_suffix("@tos.network")
-        .unwrap_or(name_str)
-        .to_lowercase();
+    let name_input = name_str.strip_suffix("@tos.network").unwrap_or(name_str);
 
-    // Normalize and hash the name
-    let normalized = match normalize_name(&name) {
+    // Normalize first to reject non-ASCII characters before lowercasing
+    // This prevents Unicode homoglyph attacks where non-ASCII chars casefold to ASCII
+    let normalized = match normalize_name(name_input) {
         Ok(n) => n,
         Err(_) => {
-            // Invalid name format - return empty result
-            let name_hash = tns_name_hash(&name);
+            // Invalid name format - return empty result with hash of input
+            let name_hash = tns_name_hash(&name_input.to_lowercase());
             return Ok(json!(ResolveNameResult {
                 address: None,
                 name_hash: Cow::Owned(name_hash),

@@ -106,4 +106,6 @@ pub enum VerificationError<T> {
     SelfMessage,
     #[error("Message with this nonce already exists (replay attack)")]
     MessageAlreadyExists,
+    #[error("Insufficient TNS fee: required {required}, provided {provided}")]
+    InsufficientTnsFee { required: u64, provided: u64 },
 }

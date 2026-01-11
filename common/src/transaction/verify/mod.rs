@@ -782,6 +782,9 @@ impl Transaction {
                 // TNS RegisterName: stateless format validation + stateful checks
                 verify_register_name_format::<E>(payload)?;
 
+                // Fee verification: minimum registration fee required
+                verify_register_name_fee::<E>(self.fee)?;
+
                 // Stateful checks: name not taken, account doesn't have name
                 let name_hash = get_register_name_hash(payload)
                     .ok_or_else(|| VerificationError::InvalidFormat)?;
@@ -805,6 +808,9 @@ impl Transaction {
             TransactionType::EphemeralMessage(payload) => {
                 // TNS EphemeralMessage: stateless format validation + stateful checks
                 verify_ephemeral_message_format::<E>(payload)?;
+
+                // Fee verification: minimum message fee required based on TTL
+                verify_ephemeral_message_fee::<E>(payload, self.fee)?;
 
                 // Verify sender has registered TNS name
                 let sender_name_hash = state
@@ -2110,6 +2116,9 @@ impl Transaction {
                 // TNS RegisterName: stateless format validation + stateful checks
                 verify_register_name_format::<E>(payload)?;
 
+                // Fee verification: minimum registration fee required
+                verify_register_name_fee::<E>(self.fee)?;
+
                 // Stateful checks: name not taken, account doesn't have name
                 let name_hash = get_register_name_hash(payload)
                     .ok_or_else(|| VerificationError::InvalidFormat)?;
@@ -2133,6 +2142,9 @@ impl Transaction {
             TransactionType::EphemeralMessage(payload) => {
                 // TNS EphemeralMessage: stateless format validation + stateful checks
                 verify_ephemeral_message_format::<E>(payload)?;
+
+                // Fee verification: minimum message fee required based on TTL
+                verify_ephemeral_message_fee::<E>(payload, self.fee)?;
 
                 // Verify sender has registered TNS name
                 let sender_name_hash = state

@@ -5991,17 +5991,16 @@ async fn register_name(
     ));
 
     // Build the transaction
+    // Registration requires REGISTRATION_FEE (10 TOS)
+    let registration_fee = tos_common::tns::REGISTRATION_FEE;
+    let fee_builder = tos_common::transaction::builder::FeeBuilder::Value(registration_fee);
+
     let payload = tos_common::transaction::RegisterNamePayload::new(normalized_name.clone());
     let tx_type = tos_common::transaction::builder::TransactionTypeBuilder::RegisterName(payload);
 
     let storage = wallet.get_storage().read().await;
     let mut state = wallet
-        .create_transaction_state_with_storage(
-            &storage,
-            &tx_type,
-            &tos_common::transaction::builder::FeeBuilder::default(),
-            None,
-        )
+        .create_transaction_state_with_storage(&storage, &tx_type, &fee_builder, None)
         .await
         .context("Error while creating transaction state")?;
 
@@ -6016,7 +6015,7 @@ async fn register_name(
         wallet.get_public_key().clone(),
         None,
         tx_type,
-        tos_common::transaction::builder::FeeBuilder::default(),
+        fee_builder,
     );
 
     let tx = match builder.build(&mut state, wallet.get_keypair()) {
@@ -6112,6 +6111,13 @@ async fn send_message(
         "send_message recipient=<name> message=<text>",
         "send_message recipient=bob message=\"Hello Bob!\"",
     )?;
+
+    // Validate message is not empty
+    if message.is_empty() {
+        return Err(CommandError::InvalidArgument(
+            "Message cannot be empty".to_string(),
+        ));
+    }
 
     // Validate message size
     if message.len() > tos_common::tns::MAX_MESSAGE_SIZE {
@@ -6246,6 +6252,10 @@ async fn send_message(
     let receiver_handle = DecryptHandle::new(&recipient_pk, &opening).compress();
 
     // Build the transaction
+    // Message fee depends on TTL: BASE_MESSAGE_FEE * (1, 2, or 3) based on duration
+    let message_fee = tos_common::tns::calculate_message_fee(ttl_blocks);
+    let fee_builder = tos_common::transaction::builder::FeeBuilder::Value(message_fee);
+
     let payload = tos_common::transaction::EphemeralMessagePayload::new(
         sender_name_hash.into_owned(),
         recipient_name_hash,
@@ -6259,12 +6269,7 @@ async fn send_message(
 
     let storage = wallet.get_storage().read().await;
     let mut state = wallet
-        .create_transaction_state_with_storage(
-            &storage,
-            &tx_type,
-            &tos_common::transaction::builder::FeeBuilder::default(),
-            None,
-        )
+        .create_transaction_state_with_storage(&storage, &tx_type, &fee_builder, None)
         .await
         .context("Error while creating transaction state")?;
 
@@ -6279,7 +6284,7 @@ async fn send_message(
         wallet.get_public_key().clone(),
         None,
         tx_type,
-        tos_common::transaction::builder::FeeBuilder::default(),
+        fee_builder,
     );
 
     let tx = match builder.build(&mut state, wallet.get_keypair()) {

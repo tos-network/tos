@@ -2,8 +2,8 @@
 
 use crate::{
     tns::{
-        is_confusing_name, is_reserved_name, normalize_name, tns_name_hash, MAX_ENCRYPTED_SIZE,
-        MAX_NAME_LENGTH, MAX_TTL, MIN_NAME_LENGTH, MIN_TTL,
+        calculate_message_fee, is_confusing_name, is_reserved_name, normalize_name, tns_name_hash,
+        MAX_ENCRYPTED_SIZE, MAX_NAME_LENGTH, MAX_TTL, MIN_NAME_LENGTH, MIN_TTL, REGISTRATION_FEE,
     },
     transaction::{
         payload::{EphemeralMessagePayload, RegisterNamePayload},
@@ -134,6 +134,39 @@ pub fn compute_message_id(payload: &EphemeralMessagePayload) -> crate::crypto::H
     hasher.update(&payload.get_message_nonce().to_le_bytes());
     let hash_bytes: [u8; 32] = hasher.finalize().into();
     crate::crypto::Hash::new(hash_bytes)
+}
+
+/// Verify that the transaction fee is sufficient for name registration
+///
+/// Name registration requires a fixed fee of REGISTRATION_FEE (10 TOS)
+pub fn verify_register_name_fee<E>(tx_fee: u64) -> Result<(), VerificationError<E>> {
+    if tx_fee < REGISTRATION_FEE {
+        return Err(VerificationError::InsufficientTnsFee {
+            required: REGISTRATION_FEE,
+            provided: tx_fee,
+        });
+    }
+    Ok(())
+}
+
+/// Verify that the transaction fee is sufficient for ephemeral message
+///
+/// Message fee depends on TTL:
+/// - TTL <= 100 blocks: BASE_MESSAGE_FEE (0.5 TOS)
+/// - TTL <= 17280 blocks (~1 day): BASE_MESSAGE_FEE * 2
+/// - TTL > 17280 blocks: BASE_MESSAGE_FEE * 3
+pub fn verify_ephemeral_message_fee<E>(
+    payload: &EphemeralMessagePayload,
+    tx_fee: u64,
+) -> Result<(), VerificationError<E>> {
+    let required_fee = calculate_message_fee(payload.get_ttl_blocks());
+    if tx_fee < required_fee {
+        return Err(VerificationError::InsufficientTnsFee {
+            required: required_fee,
+            provided: tx_fee,
+        });
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -442,5 +475,83 @@ mod tests {
         // Should be deterministic
         let msg_id2 = compute_message_id(&payload);
         assert_eq!(msg_id, msg_id2);
+    }
+
+    // ===== Fee Verification Tests =====
+
+    #[test]
+    fn test_register_name_fee_sufficient() {
+        use crate::tns::REGISTRATION_FEE;
+        assert!(verify_register_name_fee::<()>(REGISTRATION_FEE).is_ok());
+        assert!(verify_register_name_fee::<()>(REGISTRATION_FEE + 1000).is_ok());
+    }
+
+    #[test]
+    fn test_register_name_fee_insufficient() {
+        use crate::tns::REGISTRATION_FEE;
+        let result = verify_register_name_fee::<()>(REGISTRATION_FEE - 1);
+        assert!(matches!(
+            result,
+            Err(VerificationError::InsufficientTnsFee { .. })
+        ));
+    }
+
+    #[test]
+    fn test_ephemeral_message_fee_min_ttl() {
+        use crate::tns::{BASE_MESSAGE_FEE, MIN_TTL};
+        let payload = make_ephemeral_message_payload(
+            MIN_TTL,
+            vec![1, 2, 3],
+            Hash::zero(),
+            Hash::new([1u8; 32]),
+        );
+        // Sufficient fee
+        assert!(verify_ephemeral_message_fee::<()>(&payload, BASE_MESSAGE_FEE).is_ok());
+        // Insufficient fee
+        let result = verify_ephemeral_message_fee::<()>(&payload, BASE_MESSAGE_FEE - 1);
+        assert!(matches!(
+            result,
+            Err(VerificationError::InsufficientTnsFee { .. })
+        ));
+    }
+
+    #[test]
+    fn test_ephemeral_message_fee_medium_ttl() {
+        use crate::tns::BASE_MESSAGE_FEE;
+        let payload = make_ephemeral_message_payload(
+            5000, // Medium TTL (> 100, <= 17280)
+            vec![1, 2, 3],
+            Hash::zero(),
+            Hash::new([1u8; 32]),
+        );
+        let required = BASE_MESSAGE_FEE.saturating_mul(2);
+        // Sufficient fee
+        assert!(verify_ephemeral_message_fee::<()>(&payload, required).is_ok());
+        // Insufficient fee
+        let result = verify_ephemeral_message_fee::<()>(&payload, required - 1);
+        assert!(matches!(
+            result,
+            Err(VerificationError::InsufficientTnsFee { .. })
+        ));
+    }
+
+    #[test]
+    fn test_ephemeral_message_fee_high_ttl() {
+        use crate::tns::BASE_MESSAGE_FEE;
+        let payload = make_ephemeral_message_payload(
+            50000, // High TTL (> 17280)
+            vec![1, 2, 3],
+            Hash::zero(),
+            Hash::new([1u8; 32]),
+        );
+        let required = BASE_MESSAGE_FEE.saturating_mul(3);
+        // Sufficient fee
+        assert!(verify_ephemeral_message_fee::<()>(&payload, required).is_ok());
+        // Insufficient fee
+        let result = verify_ephemeral_message_fee::<()>(&payload, required - 1);
+        assert!(matches!(
+            result,
+            Err(VerificationError::InsufficientTnsFee { .. })
+        ));
     }
 }
