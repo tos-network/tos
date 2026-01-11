@@ -5,6 +5,7 @@ mod executor_adapter;
 mod feature_set;
 mod kyc;
 mod loader;
+mod native_asset;
 mod nft;
 pub mod precompile_cost;
 mod precompile_verifier;
@@ -39,6 +40,7 @@ mod scheduled_execution;
 /// - `executor_adapter`: ContractExecutor trait implementation for TOS Kernel(TAKO)
 /// - `error`: Error types for TOS Kernel(TAKO) execution
 /// - `precompile_verifier`: Transaction-level precompile verification (Ed25519, secp256k1, secp256r1)
+/// - `native_asset`: Adapts TOS native asset storage to TAKO's asset syscalls
 mod storage;
 pub mod transaction_cost;
 
@@ -49,6 +51,7 @@ pub use executor_adapter::TakoContractExecutor;
 pub use feature_set::SVMFeatureSet;
 pub use kyc::TosKycAdapter;
 pub use loader::TosContractLoaderAdapter;
+pub use native_asset::TosNativeAssetAdapter;
 pub use nft::{NoOpNftStorage, TosNftAdapter};
 pub use precompile_cost::{
     costs, estimate_single_precompile_cost, estimate_transaction_precompile_cost,

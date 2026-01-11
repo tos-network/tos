@@ -36,9 +36,9 @@ use tos_tbpf::{
 
 use super::{
     NoOpNftStorage, SVMFeatureSet, TakoExecutionError, TosAccountAdapter, TosContractLoaderAdapter,
-    TosNftAdapter, TosReferralAdapter, TosStorageAdapter,
+    TosNativeAssetAdapter, TosNftAdapter, TosReferralAdapter, TosStorageAdapter,
 };
-use crate::core::storage::ReferralProvider;
+use crate::core::storage::{NativeAssetProvider, ReferralProvider};
 use crate::vrf::VrfData;
 use tos_common::nft::operations::NftStorage;
 
@@ -444,6 +444,7 @@ impl TakoExecutor {
             feature_set,
             referral_provider,
             None, // No NFT provider
+            None, // No native asset provider
             vrf_data,
             miner_public_key,
         )
@@ -454,6 +455,7 @@ impl TakoExecutor {
     /// This is the most comprehensive execution method, supporting all provider types:
     /// - Referral provider for accessing the native referral system
     /// - NFT provider for accessing the native NFT system
+    /// - Native asset provider for accessing the native asset system
     /// - VRF data for verifiable randomness
     ///
     /// # NFT System Access
@@ -464,6 +466,18 @@ impl TakoExecutor {
     /// - Token operations (mint, burn, transfer)
     /// - Ownership queries (owner_of, balance_of)
     /// - Approval management (approve, set_approval_for_all)
+    ///
+    /// # Native Asset System Access
+    ///
+    /// When `native_asset_provider` is provided, contracts can access the native asset
+    /// system via syscalls for:
+    /// - Asset creation and management (create_asset, asset_exists)
+    /// - Token operations (transfer, mint, burn)
+    /// - Balance queries (balance_of, total_supply)
+    /// - Approval management (approve, allowance, transfer_from)
+    /// - Governance features (delegate, lock, timelock)
+    /// - Role management (grant_role, revoke_role, has_role)
+    /// - Advanced features (escrow, permit, agent operations)
     #[allow(clippy::too_many_arguments)]
     pub fn execute_with_all_providers<N: NftStorage>(
         bytecode: &[u8],
@@ -479,8 +493,9 @@ impl TakoExecutor {
         compute_budget: Option<u64>,
         feature_set: &SVMFeatureSet,
         referral_provider: Option<&mut (dyn ReferralProvider + Send + Sync)>,
-        nft_provider: Option<&mut N>,        // NFT storage provider
-        vrf_data: Option<&VrfData>,          // VRF data for verifiable randomness
+        nft_provider: Option<&mut N>, // NFT storage provider
+        native_asset_provider: Option<&mut (dyn NativeAssetProvider + Send + Sync)>, // Native asset provider
+        vrf_data: Option<&VrfData>, // VRF data for verifiable randomness
         miner_public_key: Option<&[u8; 32]>, // Block producer's key for VRF identity binding
     ) -> Result<ExecutionResult, TakoExecutionError> {
         use log::{debug, error, info, warn};
@@ -531,6 +546,11 @@ impl TakoExecutor {
         // 3b. Create NFT adapter (if provider is available)
         // NFT adapter bridges TAKO's NftProvider trait with TOS's NftStorage operations
         let mut nft_adapter = nft_provider.map(TosNftAdapter::new);
+
+        // 3c. Create native asset adapter (if provider is available)
+        // Native asset adapter bridges TAKO's NativeAssetProvider trait with TOS's native asset storage
+        let mut native_asset_adapter =
+            native_asset_provider.map(|p| TosNativeAssetAdapter::new(p, block_height));
 
         // 4. Create TBPF loader with syscalls (needed for InvokeContext creation)
         // Note: JIT compilation is enabled via the "jit" feature in Cargo.toml
@@ -650,6 +670,15 @@ impl TakoExecutor {
             invoke_context.set_nft_provider(adapter);
             if log::log_enabled!(log::Level::Debug) {
                 debug!("NFT provider wired to InvokeContext");
+            }
+        }
+
+        // 7e. Wire native asset provider (if available)
+        // Enables contracts to access native asset system via asset syscalls
+        if let Some(ref mut adapter) = native_asset_adapter {
+            invoke_context.set_asset_provider(adapter);
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Native asset provider wired to InvokeContext");
             }
         }
 
