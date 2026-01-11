@@ -6122,9 +6122,16 @@ async fn send_message(
         )));
     }
 
-    // Get optional TTL (default: DEFAULT_TTL = 1000 blocks)
+    // Get optional TTL (default: DEFAULT_TTL = 100 blocks)
     let ttl_blocks = if args.has_argument("ttl") {
-        let ttl = args.get_value("ttl")?.to_number()? as u32;
+        let ttl_raw = args.get_value("ttl")?.to_number()?;
+        // Validate TTL is positive and within u32 range
+        if ttl_raw < 0 {
+            return Err(CommandError::InvalidArgument(
+                "TTL must be a positive number".to_string(),
+            ));
+        }
+        let ttl = ttl_raw as u32;
         // Validate TTL range
         if ttl < tos_common::tns::MIN_TTL || ttl > tos_common::tns::MAX_TTL {
             return Err(CommandError::InvalidArgument(format!(
@@ -6301,9 +6308,15 @@ async fn list_messages(
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
 
-    // Get pagination page
+    // Get pagination page (validated to be non-negative)
     let page = if args.has_argument("page") {
-        args.get_value("page")?.to_number()? as u32
+        let page_raw = args.get_value("page")?.to_number()?;
+        if page_raw < 0 {
+            return Err(CommandError::InvalidArgument(
+                "Page must be a non-negative number".to_string(),
+            ));
+        }
+        page_raw as u32
     } else {
         0
     };
@@ -6385,16 +6398,19 @@ async fn list_messages(
                             }
                         };
 
+                        // Safe truncation that respects UTF-8 char boundaries
+                        let preview = if content.chars().count() > 40 {
+                            let truncated: String = content.chars().take(40).collect();
+                            format!("{}...", truncated)
+                        } else {
+                            content
+                        };
                         manager.message(format!(
                             "  {}. ID: {} | From: {} | Content: {}",
                             offset as usize + i + 1,
                             msg.message_id,
                             msg.sender_name_hash,
-                            if content.len() > 40 {
-                                format!("{}...", &content[..40])
-                            } else {
-                                content
-                            }
+                            preview
                         ));
                     }
                 }
