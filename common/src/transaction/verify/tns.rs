@@ -152,9 +152,9 @@ pub fn verify_register_name_fee<E>(tx_fee: u64) -> Result<(), VerificationError<
 /// Verify that the transaction fee is sufficient for ephemeral message
 ///
 /// Message fee depends on TTL:
-/// - TTL <= 100 blocks: BASE_MESSAGE_FEE (0.5 TOS)
-/// - TTL <= 17280 blocks (~1 day): BASE_MESSAGE_FEE * 2
-/// - TTL > 17280 blocks: BASE_MESSAGE_FEE * 3
+/// - TTL <= 100 blocks (~30 min): BASE_MESSAGE_FEE (0.00005 TOS)
+/// - TTL <= 28,800 blocks (~1 day): BASE_MESSAGE_FEE * 2 (0.00010 TOS)
+/// - TTL > 28,800 blocks: BASE_MESSAGE_FEE * 3 (0.00015 TOS)
 pub fn verify_ephemeral_message_fee<E>(
     payload: &EphemeralMessagePayload,
     tx_fee: u64,

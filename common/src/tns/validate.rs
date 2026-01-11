@@ -14,7 +14,7 @@ pub struct NameValidationResult {
     pub valid: bool,
     /// Error message if invalid
     pub error: Option<String>,
-    /// Normalized name (lowercase, trimmed) if valid
+    /// Normalized name (lowercase) if valid
     pub normalized: Option<String>,
 }
 
