@@ -1300,7 +1300,7 @@ async fn setup_wallet_command_manager(
         CommandHandler::Async(async_handler!(resolve_name)),
     ))?;
 
-    command_manager.add_command(Command::with_required_arguments(
+    command_manager.add_command(Command::with_arguments(
         "send_message",
         "Send an ephemeral message to a TNS name",
         vec![
@@ -1315,6 +1315,11 @@ async fn setup_wallet_command_manager(
                 "Message content (max 140 bytes)",
             ),
         ],
+        vec![Arg::new(
+            "ttl",
+            ArgType::Number,
+            "Time-to-live in blocks (100-86400, default: 1000)",
+        )],
         CommandHandler::Async(async_handler!(send_message)),
     ))?;
 
@@ -1851,13 +1856,48 @@ async fn transfer(manager: &CommandManager, mut args: ArgumentManager) -> Result
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
 
-    // read address (batch mode only)
+    // read address (batch mode only) - supports both regular addresses and TNS names
     let str_address = if args.has_argument("address") {
         args.get_value("address")?.to_string_value()?
     } else {
         return Err(CommandError::MissingArgument("address".to_string()));
     };
-    let address = Address::from_string(&str_address).context("Invalid address")?;
+
+    // Check if this is a TNS name (ends with @tos.network)
+    let address = if str_address.ends_with("@tos.network") {
+        // Extract the name part (without @tos.network suffix)
+        let name_part = &str_address[..str_address.len() - 12];
+
+        // Resolve TNS name to address
+        let network_handler = wallet.get_network_handler().lock().await;
+        let handler = network_handler.as_ref().ok_or_else(|| {
+            CommandError::InvalidArgument("Wallet not connected to daemon".to_string())
+        })?;
+        let daemon_api = handler.get_api();
+
+        let result = daemon_api.resolve_name(name_part).await.map_err(|e| {
+            CommandError::Any(anyhow::anyhow!(
+                "Failed to resolve TNS name '{}': {}",
+                name_part,
+                e
+            ))
+        })?;
+
+        match result.address {
+            Some(addr) => {
+                manager.message(format!("Resolved {}@tos.network -> {}", name_part, addr));
+                addr.into_owned()
+            }
+            None => {
+                return Err(CommandError::InvalidArgument(format!(
+                    "TNS name '{}' is not registered",
+                    name_part
+                )));
+            }
+        }
+    } else {
+        Address::from_string(&str_address).context("Invalid address")?
+    };
 
     // Parse asset - TOS or hash only (no name lookup from local storage)
     let asset = if args.has_argument("asset") {
@@ -2052,13 +2092,48 @@ async fn transfer_all(
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
 
-    // read address (batch mode only)
+    // read address (batch mode only) - supports both regular addresses and TNS names
     let str_address = if args.has_argument("address") {
         args.get_value("address")?.to_string_value()?
     } else {
         return Err(CommandError::MissingArgument("address".to_string()));
     };
-    let address = Address::from_string(&str_address).context("Invalid address")?;
+
+    // Check if this is a TNS name (ends with @tos.network)
+    let address = if str_address.ends_with("@tos.network") {
+        // Extract the name part (without @tos.network suffix)
+        let name_part = &str_address[..str_address.len() - 12];
+
+        // Resolve TNS name to address
+        let network_handler = wallet.get_network_handler().lock().await;
+        let handler = network_handler.as_ref().ok_or_else(|| {
+            CommandError::InvalidArgument("Wallet not connected to daemon".to_string())
+        })?;
+        let daemon_api = handler.get_api();
+
+        let result = daemon_api.resolve_name(name_part).await.map_err(|e| {
+            CommandError::Any(anyhow::anyhow!(
+                "Failed to resolve TNS name '{}': {}",
+                name_part,
+                e
+            ))
+        })?;
+
+        match result.address {
+            Some(addr) => {
+                manager.message(format!("Resolved {}@tos.network -> {}", name_part, addr));
+                addr.into_owned()
+            }
+            None => {
+                return Err(CommandError::InvalidArgument(format!(
+                    "TNS name '{}' is not registered",
+                    name_part
+                )));
+            }
+        }
+    } else {
+        Address::from_string(&str_address).context("Invalid address")?
+    };
 
     // Parse asset (batch mode only)
     let asset = if args.has_argument("asset") {
@@ -6051,6 +6126,23 @@ async fn send_message(
         )));
     }
 
+    // Get optional TTL (default: DEFAULT_TTL = 1000 blocks)
+    let ttl_blocks = if args.has_argument("ttl") {
+        let ttl = args.get_value("ttl")?.to_number()? as u32;
+        // Validate TTL range
+        if ttl < tos_common::tns::MIN_TTL || ttl > tos_common::tns::MAX_TTL {
+            return Err(CommandError::InvalidArgument(format!(
+                "TTL must be between {} and {} blocks. Got: {}",
+                tos_common::tns::MIN_TTL,
+                tos_common::tns::MAX_TTL,
+                ttl
+            )));
+        }
+        ttl
+    } else {
+        tos_common::tns::DEFAULT_TTL
+    };
+
     // Strip @tos.network suffix if present
     let recipient_name = if recipient.ends_with("@tos.network") {
         &recipient[..recipient.len() - 12]
@@ -6082,8 +6174,8 @@ async fn send_message(
         })?
     };
 
-    // Resolve recipient name
-    let recipient_name_hash = {
+    // Resolve recipient name and get their public key for encryption
+    let (recipient_name_hash, recipient_public_key) = {
         let network_handler = wallet.get_network_handler().lock().await;
         let handler = network_handler.as_ref().ok_or_else(|| {
             CommandError::InvalidArgument("Wallet not connected to daemon".to_string())
@@ -6094,34 +6186,54 @@ async fn send_message(
             CommandError::Any(anyhow::anyhow!("Failed to resolve recipient: {}", e))
         })?;
 
-        if result.address.is_none() {
-            return Err(CommandError::InvalidArgument(format!(
-                "Recipient '{}' is not registered.",
-                recipient_name
-            )));
+        match result.address {
+            Some(addr) => {
+                let pk = addr.get_public_key().clone();
+                (result.name_hash.into_owned(), pk)
+            }
+            None => {
+                return Err(CommandError::InvalidArgument(format!(
+                    "Recipient '{}' is not registered.",
+                    recipient_name
+                )));
+            }
         }
-
-        result.name_hash.into_owned()
     };
 
     manager.message(format!(
-        "Sending message to {}@tos.network...",
-        recipient_name
+        "Sending message to {}@tos.network (TTL: {} blocks)...",
+        recipient_name, ttl_blocks
     ));
 
-    // For now, use simple unencrypted message (encryption would require recipient's public key)
-    // In a full implementation, we would encrypt the message content
-    let encrypted_content = message.as_bytes().to_vec();
-    let receiver_handle = [0u8; 32]; // Placeholder for actual encryption handle
+    // Encrypt message using ECDH with recipient's public key
+    use tos_common::crypto::elgamal::{DecryptHandle, PedersenOpening};
+    use tos_common::transaction::extra_data::{derive_shared_key_from_opening, PlaintextData};
+
+    // Generate random opening for key derivation
+    let opening = PedersenOpening::generate_new();
+
+    // Derive shared key: k = SHA3-256(r * H)
+    let shared_key = derive_shared_key_from_opening(&opening);
+
+    // Encrypt message content with ChaCha20
+    let encrypted_content = PlaintextData(message.as_bytes().to_vec())
+        .encrypt_in_place(&shared_key)
+        .0;
+
+    // Create receiver handle: r * Pk_recipient (allows recipient to derive same shared key)
+    let recipient_pk = recipient_public_key.decompress().map_err(|_| {
+        CommandError::InvalidArgument("Failed to decompress recipient's public key".to_string())
+    })?;
+    let receiver_handle = DecryptHandle::new(&recipient_pk, &opening).compress();
 
     // Build the transaction
     let payload = tos_common::transaction::EphemeralMessagePayload::new(
         sender_name_hash.into_owned(),
         recipient_name_hash,
         0, // nonce will be set by transaction builder
-        tos_common::tns::DEFAULT_TTL,
+        ttl_blocks,
         encrypted_content,
-        receiver_handle,
+        *receiver_handle.as_bytes(),
     );
     let tx_type =
         tos_common::transaction::builder::TransactionTypeBuilder::EphemeralMessage(payload);
@@ -6227,8 +6339,40 @@ async fn list_messages(
                         "Messages (page {}, {} total):",
                         page, result.total_count
                     ));
+
+                    // Import decryption helpers
+                    use tos_common::crypto::elgamal::CompressedHandle;
+                    use tos_common::serializer::{Reader, Serializer as _};
+                    use tos_common::transaction::extra_data::{
+                        derive_shared_key_from_handle, Cipher,
+                    };
+
                     for (i, msg) in result.messages.iter().enumerate() {
-                        let content = String::from_utf8_lossy(&msg.encrypted_content);
+                        // Try to decrypt message preview
+                        let content = {
+                            // Read compressed handle from bytes using Serializer
+                            let mut reader = Reader::new(&msg.receiver_handle);
+                            if let Ok(compressed_handle) = CompressedHandle::read(&mut reader) {
+                                if let Ok(handle) = compressed_handle.decompress() {
+                                    let shared_key = derive_shared_key_from_handle(
+                                        wallet.get_keypair().get_private_key(),
+                                        &handle,
+                                    );
+                                    let cipher = Cipher(msg.encrypted_content.clone());
+                                    match cipher.decrypt(&shared_key) {
+                                        Ok(plaintext) => {
+                                            String::from_utf8_lossy(&plaintext.0).to_string()
+                                        }
+                                        Err(_) => "[encrypted]".to_string(),
+                                    }
+                                } else {
+                                    "[encrypted]".to_string()
+                                }
+                            } else {
+                                "[encrypted]".to_string()
+                            }
+                        };
+
                         manager.message(format!(
                             "  {}. ID: {} | From: {} | Content: {}",
                             offset as usize + i + 1,
@@ -6237,7 +6381,7 @@ async fn list_messages(
                             if content.len() > 40 {
                                 format!("{}...", &content[..40])
                             } else {
-                                content.to_string()
+                                content
                             }
                         ));
                     }
@@ -6281,14 +6425,57 @@ async fn read_message(
         match daemon_api.get_message_by_id(&message_id).await {
             Ok(result) => {
                 if let Some(msg) = result.message {
-                    let content = String::from_utf8_lossy(&msg.encrypted_content);
+                    // Decrypt message content using wallet's private key
+                    use tos_common::crypto::elgamal::CompressedHandle;
+                    use tos_common::serializer::{Reader, Serializer as _};
+                    use tos_common::transaction::extra_data::{
+                        derive_shared_key_from_handle, Cipher,
+                    };
+
+                    let decrypted_content = {
+                        // Read compressed handle from bytes using Serializer
+                        let mut reader = Reader::new(&msg.receiver_handle);
+                        let compressed_handle =
+                            CompressedHandle::read(&mut reader).map_err(|_| {
+                                CommandError::InvalidArgument(
+                                    "Invalid receiver handle in message".to_string(),
+                                )
+                            })?;
+
+                        // Decompress the handle
+                        let handle = compressed_handle.decompress().map_err(|_| {
+                            CommandError::InvalidArgument(
+                                "Failed to decompress receiver handle".to_string(),
+                            )
+                        })?;
+
+                        // Derive shared key using wallet's private key: k = SHA3-256(sk * handle)
+                        let shared_key = derive_shared_key_from_handle(
+                            wallet.get_keypair().get_private_key(),
+                            &handle,
+                        );
+
+                        // Decrypt with ChaCha20
+                        let cipher = Cipher(msg.encrypted_content.clone());
+                        match cipher.decrypt(&shared_key) {
+                            Ok(plaintext) => String::from_utf8_lossy(&plaintext.0).to_string(),
+                            Err(_) => {
+                                // Decryption failed - message may not be for us or corrupted
+                                format!(
+                                    "[Decryption failed - raw: {}]",
+                                    String::from_utf8_lossy(&msg.encrypted_content)
+                                )
+                            }
+                        }
+                    };
+
                     manager.message("Message details:");
                     manager.message(format!("  ID: {}", msg.message_id));
                     manager.message(format!("  From: {}", msg.sender_name_hash));
                     manager.message(format!("  Nonce: {}", msg.message_nonce));
                     manager.message(format!("  Stored at: block {}", msg.stored_topoheight));
                     manager.message(format!("  Expires at: block {}", msg.expiry_topoheight));
-                    manager.message(format!("  Content: {}", content));
+                    manager.message(format!("  Content: {}", decrypted_content));
                 } else {
                     manager.message(format!("Message {} not found.", message_id));
                 }
