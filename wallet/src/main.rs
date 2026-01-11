@@ -6131,10 +6131,10 @@ async fn send_message(
     // Get optional TTL (default: DEFAULT_TTL = 100 blocks)
     let ttl_blocks = if args.has_argument("ttl") {
         let ttl_raw = args.get_value("ttl")?.to_number()?;
-        // Validate TTL is positive and within u32 range
-        if ttl_raw < 0 || ttl_raw > i64::from(u32::MAX) {
+        // Validate TTL is within u32 range (to_number returns u64)
+        if ttl_raw > u64::from(u32::MAX) {
             return Err(CommandError::InvalidArgument(
-                "TTL must be a positive number within valid range".to_string(),
+                "TTL value exceeds maximum allowed range".to_string(),
             ));
         }
         let ttl = ttl_raw as u32;
