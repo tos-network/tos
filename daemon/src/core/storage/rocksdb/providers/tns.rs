@@ -232,6 +232,9 @@ impl TnsProvider for RocksStorage {
             );
         }
 
+        // Cap the count to prevent DoS via expensive full scans
+        // Since RPC limits offset to 10000 and limit to 100, counting beyond 10100 is not useful
+        const MAX_COUNT: u64 = 10100;
         let mut count = 0u64;
 
         // Iterate with prefix for the recipient, only counting non-expired messages
@@ -245,6 +248,10 @@ impl TnsProvider for RocksStorage {
             // Only count non-expired messages
             if msg.expiry_topoheight > current_topoheight {
                 count = count.saturating_add(1);
+                // Early exit once we've counted enough for pagination purposes
+                if count >= MAX_COUNT {
+                    break;
+                }
             }
         }
 
