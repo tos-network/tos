@@ -2451,6 +2451,10 @@ async fn get_account_history<S: Storage>(
                     // UNO/Shield/Unshield transfers involve encrypted balances
                     // This could be extended to track privacy transfer activities
                 }
+                TransactionType::RegisterName(_) | TransactionType::EphemeralMessage(_) => {
+                    // TNS transactions are tracked in dedicated TNS history endpoints
+                    // Not relevant to asset flow tracking
+                }
             }
         }
 

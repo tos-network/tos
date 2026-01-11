@@ -3361,6 +3361,19 @@ async fn transaction(
                     ));
                 }
             }
+            TransactionType::RegisterName(payload) => {
+                manager.message("Type: Register TNS Name");
+                manager.message(format!("  Name: {}", payload.get_name()));
+            }
+            TransactionType::EphemeralMessage(payload) => {
+                manager.message("Type: Ephemeral Message");
+                manager.message(format!("  Sender Hash: {}", payload.get_sender_name_hash()));
+                manager.message(format!(
+                    "  Recipient Hash: {}",
+                    payload.get_recipient_name_hash()
+                ));
+                manager.message(format!("  TTL Blocks: {}", payload.get_ttl_blocks()));
+            }
         }
     }
 

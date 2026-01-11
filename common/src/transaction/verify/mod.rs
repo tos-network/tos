@@ -125,7 +125,9 @@ impl Transaction {
                     | TransactionType::EmergencySuspend(_)
                     | TransactionType::UnoTransfers(_)
                     | TransactionType::ShieldTransfers(_)
-                    | TransactionType::UnshieldTransfers(_) => true,
+                    | TransactionType::UnshieldTransfers(_)
+                    | TransactionType::RegisterName(_)
+                    | TransactionType::EphemeralMessage(_) => true,
                 }
             }
         }
@@ -774,6 +776,10 @@ impl Transaction {
                     return Err(VerificationError::TransactionExtraDataSize);
                 }
             }
+            TransactionType::RegisterName(_) | TransactionType::EphemeralMessage(_) => {
+                // TNS transactions: validation happens in dedicated verify functions
+                // Called from verify_with_state_internal
+            }
         };
 
         // SECURITY FIX: Verify sender has sufficient balance for all spending
@@ -905,6 +911,11 @@ impl Transaction {
                 // Spending verification is done through ZKP proofs (CommitmentEqProof)
                 // No plaintext spending to verify here
                 // Shield/Unshield: actual balance checks happen in apply()
+            }
+            TransactionType::RegisterName(_) | TransactionType::EphemeralMessage(_) => {
+                // TNS transactions: fees are paid from TOS balance
+                // Registration fee and message fee are added to TOS spending via the fee field
+                // Actual name/message verification happens in verify_register_name/verify_ephemeral_message
             }
         };
 
@@ -2038,6 +2049,10 @@ impl Transaction {
                     return Err(VerificationError::TransactionExtraDataSize);
                 }
             }
+            TransactionType::RegisterName(_) | TransactionType::EphemeralMessage(_) => {
+                // TNS transactions: validation happens in dedicated verify functions
+                // Called from verify_with_state_internal
+            }
         };
 
         let source_decompressed = self
@@ -2229,6 +2244,9 @@ impl Transaction {
                 // UNO/Shield/Unshield transfers are verified through ZKP proofs
                 // Logging handled during apply phase
             }
+            TransactionType::RegisterName(_) | TransactionType::EphemeralMessage(_) => {
+                // TNS transactions: verification handled in dedicated functions
+            }
         }
 
         // With plaintext balances, we don't need Bulletproofs range proofs
@@ -2375,6 +2393,10 @@ impl Transaction {
                 // Unshield transfers spend from encrypted UNO balances
                 // Spending verification is done through ZKP proofs
                 // No plaintext spending to verify here (adds to plaintext balance)
+            }
+            TransactionType::RegisterName(_) | TransactionType::EphemeralMessage(_) => {
+                // TNS transactions: registration/message fees are paid via the fee field
+                // No additional spending verification needed here
             }
         };
 
@@ -2761,6 +2783,10 @@ impl Transaction {
                 // Unshield transfers spend from encrypted UNO balances
                 // Spending verification is done through ZKP proofs
                 // No plaintext spending to verify here (adds to plaintext balance)
+            }
+            TransactionType::RegisterName(_) | TransactionType::EphemeralMessage(_) => {
+                // TNS transactions: registration/message fees are paid via the fee field
+                // No additional spending verification needed here
             }
         };
 
@@ -4304,6 +4330,11 @@ impl Transaction {
                     }
                 }
             }
+            TransactionType::RegisterName(_) | TransactionType::EphemeralMessage(_) => {
+                // TNS transactions: state changes handled by dedicated apply functions
+                // RegisterName: stores name->account mapping
+                // EphemeralMessage: stores message in ephemeral storage
+            }
         }
 
         Ok(())
@@ -4479,6 +4510,10 @@ impl Transaction {
                 // Unshield transfers spend from encrypted UNO balances
                 // Spending verification is done through ZKP proofs
                 // No plaintext spending to verify here (adds to plaintext balance)
+            }
+            TransactionType::RegisterName(_) | TransactionType::EphemeralMessage(_) => {
+                // TNS transactions: registration/message fees are paid via the fee field
+                // No additional spending verification needed here
             }
         };
 

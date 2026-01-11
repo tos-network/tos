@@ -19,11 +19,11 @@ use crate::{
     transaction::{
         extra_data::UnknownExtraDataFormat, multisig::MultiSig, AppealKycPayload,
         BatchReferralRewardPayload, BindReferrerPayload, BootstrapCommitteePayload, BurnPayload,
-        DeployContractPayload, EmergencySuspendPayload, EnergyPayload, FeeType,
-        InvokeContractPayload, MultiSigPayload, Reference, RegisterCommitteePayload,
-        RenewKycPayload, RevokeKycPayload, SetKycPayload, ShieldTransferPayload, Transaction,
-        TransactionType, TransferKycPayload, TransferPayload, TxVersion, UnoTransferPayload,
-        UnshieldTransferPayload, UpdateCommitteePayload,
+        DeployContractPayload, EmergencySuspendPayload, EnergyPayload, EphemeralMessagePayload,
+        FeeType, InvokeContractPayload, MultiSigPayload, Reference, RegisterCommitteePayload,
+        RegisterNamePayload, RenewKycPayload, RevokeKycPayload, SetKycPayload,
+        ShieldTransferPayload, Transaction, TransactionType, TransferKycPayload, TransferPayload,
+        TxVersion, UnoTransferPayload, UnshieldTransferPayload, UpdateCommitteePayload,
     },
 };
 pub use data::*;
@@ -91,6 +91,9 @@ pub enum RPCTransactionType<'a> {
     UnoTransfers(Cow<'a, Vec<UnoTransferPayload>>),
     ShieldTransfers(Cow<'a, Vec<ShieldTransferPayload>>),
     UnshieldTransfers(Cow<'a, Vec<UnshieldTransferPayload>>),
+    // TNS (TOS Name Service) transaction types
+    RegisterName(Cow<'a, RegisterNamePayload>),
+    EphemeralMessage(Cow<'a, EphemeralMessagePayload>),
 }
 
 impl<'a> RPCTransactionType<'a> {
@@ -147,6 +150,10 @@ impl<'a> RPCTransactionType<'a> {
             }
             TransactionType::UnshieldTransfers(transfers) => {
                 Self::UnshieldTransfers(Cow::Borrowed(transfers))
+            }
+            TransactionType::RegisterName(payload) => Self::RegisterName(Cow::Borrowed(payload)),
+            TransactionType::EphemeralMessage(payload) => {
+                Self::EphemeralMessage(Cow::Borrowed(payload))
             }
         }
     }
@@ -212,6 +219,12 @@ impl From<RPCTransactionType<'_>> for TransactionType {
             }
             RPCTransactionType::UnshieldTransfers(transfers) => {
                 TransactionType::UnshieldTransfers(transfers.into_owned())
+            }
+            RPCTransactionType::RegisterName(payload) => {
+                TransactionType::RegisterName(payload.into_owned())
+            }
+            RPCTransactionType::EphemeralMessage(payload) => {
+                TransactionType::EphemeralMessage(payload.into_owned())
             }
         }
     }
