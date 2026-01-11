@@ -29,7 +29,10 @@
 use tempdir::TempDir;
 use tos_common::{
     crypto::Hash,
-    native_asset::{Escrow, EscrowStatus, NativeAssetData, ReleaseCondition, TokenLock},
+    native_asset::{
+        BalanceCheckpoint, DelegationCheckpoint, Escrow, EscrowStatus, NativeAssetData,
+        ReleaseCondition, TokenLock,
+    },
     network::Network,
 };
 use tos_daemon::core::{
@@ -966,6 +969,396 @@ async fn test_role_lifecycle_with_member_index() {
 }
 
 // ============================================================================
+// G. Balance Checkpoint Operations
+// ============================================================================
+
+/// Test G.1: Set and get balance checkpoint count
+#[tokio::test]
+async fn test_balance_checkpoint_count() {
+    let temp_dir = TempDir::new("native_asset_test").expect("Failed to create temp dir");
+    let mut storage = create_test_storage(&temp_dir);
+
+    let asset = random_asset();
+    let account = random_account();
+
+    // Initially zero
+    let count = storage
+        .get_native_asset_balance_checkpoint_count(&asset, &account)
+        .await
+        .expect("Should get checkpoint count");
+    assert_eq!(count, 0, "Count should be 0 initially");
+
+    // Set count
+    storage
+        .set_native_asset_balance_checkpoint_count(&asset, &account, 5)
+        .await
+        .expect("Should set checkpoint count");
+
+    let count = storage
+        .get_native_asset_balance_checkpoint_count(&asset, &account)
+        .await
+        .expect("Should get checkpoint count");
+    assert_eq!(count, 5, "Count should be 5");
+
+    println!("Test G.1 passed: Set and get balance checkpoint count");
+}
+
+/// Test G.2: Set and get balance checkpoint
+#[tokio::test]
+async fn test_balance_checkpoint_set_and_get() {
+    let temp_dir = TempDir::new("native_asset_test").expect("Failed to create temp dir");
+    let mut storage = create_test_storage(&temp_dir);
+
+    let asset = random_asset();
+    let account = random_account();
+
+    let checkpoint = BalanceCheckpoint {
+        from_block: 100,
+        balance: 1000,
+    };
+
+    // Set checkpoint at index 0
+    storage
+        .set_native_asset_balance_checkpoint(&asset, &account, 0, &checkpoint)
+        .await
+        .expect("Should set checkpoint");
+
+    // Get checkpoint at index 0
+    let retrieved = storage
+        .get_native_asset_balance_checkpoint(&asset, &account, 0)
+        .await
+        .expect("Should get checkpoint");
+
+    assert_eq!(retrieved.from_block, 100, "from_block should match");
+    assert_eq!(retrieved.balance, 1000, "balance should match");
+
+    println!("Test G.2 passed: Set and get balance checkpoint");
+}
+
+/// Test G.3: Multiple balance checkpoints (binary search simulation)
+#[tokio::test]
+async fn test_balance_checkpoint_multiple() {
+    let temp_dir = TempDir::new("native_asset_test").expect("Failed to create temp dir");
+    let mut storage = create_test_storage(&temp_dir);
+
+    let asset = random_asset();
+    let account = random_account();
+
+    // Create multiple checkpoints at different block heights
+    let checkpoints = [
+        BalanceCheckpoint {
+            from_block: 100,
+            balance: 1000,
+        },
+        BalanceCheckpoint {
+            from_block: 200,
+            balance: 1500,
+        },
+        BalanceCheckpoint {
+            from_block: 300,
+            balance: 500,
+        },
+        BalanceCheckpoint {
+            from_block: 400,
+            balance: 2000,
+        },
+    ];
+
+    // Store all checkpoints
+    for (i, checkpoint) in checkpoints.iter().enumerate() {
+        storage
+            .set_native_asset_balance_checkpoint(&asset, &account, i as u32, checkpoint)
+            .await
+            .expect("Should set checkpoint");
+    }
+
+    // Update count
+    storage
+        .set_native_asset_balance_checkpoint_count(&asset, &account, checkpoints.len() as u32)
+        .await
+        .expect("Should set count");
+
+    // Verify count
+    let count = storage
+        .get_native_asset_balance_checkpoint_count(&asset, &account)
+        .await
+        .expect("Should get count");
+    assert_eq!(count, 4);
+
+    // Verify each checkpoint
+    for (i, expected) in checkpoints.iter().enumerate() {
+        let retrieved = storage
+            .get_native_asset_balance_checkpoint(&asset, &account, i as u32)
+            .await
+            .expect("Should get checkpoint");
+        assert_eq!(retrieved.from_block, expected.from_block);
+        assert_eq!(retrieved.balance, expected.balance);
+    }
+
+    println!("Test G.3 passed: Multiple balance checkpoints");
+}
+
+/// Test G.4: Balance checkpoints per asset/account isolation
+#[tokio::test]
+async fn test_balance_checkpoint_isolation() {
+    let temp_dir = TempDir::new("native_asset_test").expect("Failed to create temp dir");
+    let mut storage = create_test_storage(&temp_dir);
+
+    let asset1 = random_asset();
+    let asset2 = random_asset();
+    let account1 = random_account();
+    let account2 = random_account();
+
+    // Set checkpoint for asset1/account1
+    let cp1 = BalanceCheckpoint {
+        from_block: 100,
+        balance: 1000,
+    };
+    storage
+        .set_native_asset_balance_checkpoint(&asset1, &account1, 0, &cp1)
+        .await
+        .expect("Should set checkpoint");
+    storage
+        .set_native_asset_balance_checkpoint_count(&asset1, &account1, 1)
+        .await
+        .expect("Should set count");
+
+    // Set checkpoint for asset2/account2
+    let cp2 = BalanceCheckpoint {
+        from_block: 200,
+        balance: 2000,
+    };
+    storage
+        .set_native_asset_balance_checkpoint(&asset2, &account2, 0, &cp2)
+        .await
+        .expect("Should set checkpoint");
+    storage
+        .set_native_asset_balance_checkpoint_count(&asset2, &account2, 1)
+        .await
+        .expect("Should set count");
+
+    // Verify isolation - asset1/account1 should not see asset2/account2's checkpoints
+    let count1 = storage
+        .get_native_asset_balance_checkpoint_count(&asset1, &account1)
+        .await
+        .expect("Should get count");
+    let count2 = storage
+        .get_native_asset_balance_checkpoint_count(&asset2, &account2)
+        .await
+        .expect("Should get count");
+
+    // asset1/account2 should be zero
+    let cross_count = storage
+        .get_native_asset_balance_checkpoint_count(&asset1, &account2)
+        .await
+        .expect("Should get count");
+
+    assert_eq!(count1, 1);
+    assert_eq!(count2, 1);
+    assert_eq!(cross_count, 0, "Cross-account checkpoint should not exist");
+
+    println!("Test G.4 passed: Balance checkpoints per asset/account isolation");
+}
+
+// ============================================================================
+// H. Delegation Checkpoint Operations
+// ============================================================================
+
+/// Test H.1: Set and get delegation checkpoint count
+#[tokio::test]
+async fn test_delegation_checkpoint_count() {
+    let temp_dir = TempDir::new("native_asset_test").expect("Failed to create temp dir");
+    let mut storage = create_test_storage(&temp_dir);
+
+    let asset = random_asset();
+    let account = random_account();
+
+    // Initially zero
+    let count = storage
+        .get_native_asset_delegation_checkpoint_count(&asset, &account)
+        .await
+        .expect("Should get checkpoint count");
+    assert_eq!(count, 0, "Count should be 0 initially");
+
+    // Set count
+    storage
+        .set_native_asset_delegation_checkpoint_count(&asset, &account, 3)
+        .await
+        .expect("Should set checkpoint count");
+
+    let count = storage
+        .get_native_asset_delegation_checkpoint_count(&asset, &account)
+        .await
+        .expect("Should get checkpoint count");
+    assert_eq!(count, 3, "Count should be 3");
+
+    println!("Test H.1 passed: Set and get delegation checkpoint count");
+}
+
+/// Test H.2: Set and get delegation checkpoint
+#[tokio::test]
+async fn test_delegation_checkpoint_set_and_get() {
+    let temp_dir = TempDir::new("native_asset_test").expect("Failed to create temp dir");
+    let mut storage = create_test_storage(&temp_dir);
+
+    let asset = random_asset();
+    let account = random_account();
+    let delegatee = random_account();
+
+    let checkpoint = DelegationCheckpoint {
+        from_block: 150,
+        delegatee,
+    };
+
+    // Set checkpoint at index 0
+    storage
+        .set_native_asset_delegation_checkpoint(&asset, &account, 0, &checkpoint)
+        .await
+        .expect("Should set checkpoint");
+
+    // Get checkpoint at index 0
+    let retrieved = storage
+        .get_native_asset_delegation_checkpoint(&asset, &account, 0)
+        .await
+        .expect("Should get checkpoint");
+
+    assert_eq!(retrieved.from_block, 150, "from_block should match");
+    assert_eq!(retrieved.delegatee, delegatee, "delegatee should match");
+
+    println!("Test H.2 passed: Set and get delegation checkpoint");
+}
+
+/// Test H.3: Multiple delegation checkpoints (delegation history)
+#[tokio::test]
+async fn test_delegation_checkpoint_multiple() {
+    let temp_dir = TempDir::new("native_asset_test").expect("Failed to create temp dir");
+    let mut storage = create_test_storage(&temp_dir);
+
+    let asset = random_asset();
+    let account = random_account();
+    let delegatee1 = random_account();
+    let delegatee2 = random_account();
+    let delegatee3 = random_account();
+
+    // Create delegation history: account delegates to different accounts over time
+    let checkpoints = [
+        DelegationCheckpoint {
+            from_block: 100,
+            delegatee: delegatee1,
+        },
+        DelegationCheckpoint {
+            from_block: 200,
+            delegatee: delegatee2,
+        },
+        DelegationCheckpoint {
+            from_block: 300,
+            delegatee: delegatee3,
+        },
+        DelegationCheckpoint {
+            from_block: 400,
+            delegatee: [0u8; 32], // Self-delegation (zero = self)
+        },
+    ];
+
+    // Store all checkpoints
+    for (i, checkpoint) in checkpoints.iter().enumerate() {
+        storage
+            .set_native_asset_delegation_checkpoint(&asset, &account, i as u32, checkpoint)
+            .await
+            .expect("Should set checkpoint");
+    }
+
+    // Update count
+    storage
+        .set_native_asset_delegation_checkpoint_count(&asset, &account, checkpoints.len() as u32)
+        .await
+        .expect("Should set count");
+
+    // Verify count
+    let count = storage
+        .get_native_asset_delegation_checkpoint_count(&asset, &account)
+        .await
+        .expect("Should get count");
+    assert_eq!(count, 4);
+
+    // Verify each checkpoint
+    for (i, expected) in checkpoints.iter().enumerate() {
+        let retrieved = storage
+            .get_native_asset_delegation_checkpoint(&asset, &account, i as u32)
+            .await
+            .expect("Should get checkpoint");
+        assert_eq!(retrieved.from_block, expected.from_block);
+        assert_eq!(retrieved.delegatee, expected.delegatee);
+    }
+
+    println!("Test H.3 passed: Multiple delegation checkpoints");
+}
+
+/// Test H.4: Delegation checkpoints per asset/account isolation
+#[tokio::test]
+async fn test_delegation_checkpoint_isolation() {
+    let temp_dir = TempDir::new("native_asset_test").expect("Failed to create temp dir");
+    let mut storage = create_test_storage(&temp_dir);
+
+    let asset1 = random_asset();
+    let asset2 = random_asset();
+    let account1 = random_account();
+    let account2 = random_account();
+    let delegatee1 = random_account();
+    let delegatee2 = random_account();
+
+    // Set checkpoint for asset1/account1
+    let cp1 = DelegationCheckpoint {
+        from_block: 100,
+        delegatee: delegatee1,
+    };
+    storage
+        .set_native_asset_delegation_checkpoint(&asset1, &account1, 0, &cp1)
+        .await
+        .expect("Should set checkpoint");
+    storage
+        .set_native_asset_delegation_checkpoint_count(&asset1, &account1, 1)
+        .await
+        .expect("Should set count");
+
+    // Set checkpoint for asset2/account2
+    let cp2 = DelegationCheckpoint {
+        from_block: 200,
+        delegatee: delegatee2,
+    };
+    storage
+        .set_native_asset_delegation_checkpoint(&asset2, &account2, 0, &cp2)
+        .await
+        .expect("Should set checkpoint");
+    storage
+        .set_native_asset_delegation_checkpoint_count(&asset2, &account2, 1)
+        .await
+        .expect("Should set count");
+
+    // Verify isolation
+    let count1 = storage
+        .get_native_asset_delegation_checkpoint_count(&asset1, &account1)
+        .await
+        .expect("Should get count");
+    let count2 = storage
+        .get_native_asset_delegation_checkpoint_count(&asset2, &account2)
+        .await
+        .expect("Should get count");
+
+    // asset1/account2 should be zero
+    let cross_count = storage
+        .get_native_asset_delegation_checkpoint_count(&asset1, &account2)
+        .await
+        .expect("Should get count");
+
+    assert_eq!(count1, 1);
+    assert_eq!(count2, 1);
+    assert_eq!(cross_count, 0, "Cross-account checkpoint should not exist");
+
+    println!("Test H.4 passed: Delegation checkpoints per asset/account isolation");
+}
+
+// ============================================================================
 // Summary test
 // ============================================================================
 
@@ -1007,6 +1400,18 @@ fn test_native_asset_rocksdb_test_summary() {
     println!("   F.1 test_lock_lifecycle_with_index");
     println!("   F.2 test_escrow_lifecycle_with_user_index");
     println!("   F.3 test_role_lifecycle_with_member_index");
+    println!();
+    println!("G. Balance Checkpoint Operations:");
+    println!("   G.1 test_balance_checkpoint_count");
+    println!("   G.2 test_balance_checkpoint_set_and_get");
+    println!("   G.3 test_balance_checkpoint_multiple");
+    println!("   G.4 test_balance_checkpoint_isolation");
+    println!();
+    println!("H. Delegation Checkpoint Operations:");
+    println!("   H.1 test_delegation_checkpoint_count");
+    println!("   H.2 test_delegation_checkpoint_set_and_get");
+    println!("   H.3 test_delegation_checkpoint_multiple");
+    println!("   H.4 test_delegation_checkpoint_isolation");
     println!();
     println!("These tests verify the storage layer for native asset syscalls.");
     println!("========================================\n");
