@@ -8,8 +8,10 @@ mod constants;
 mod hash;
 mod normalize;
 mod reserved;
+mod validate;
 
 pub use constants::*;
 pub use hash::*;
 pub use normalize::*;
 pub use reserved::*;
+pub use validate::*;

@@ -131,21 +131,37 @@ pub trait TnsProvider {
         message_id: &Hash,
     ) -> Result<Option<StoredEphemeralMessage>, BlockchainError>;
 
-    /// Get messages for a recipient (paginated)
+    /// Get messages for a recipient (paginated, filtered by expiry)
     ///
     /// # Arguments
     /// * `recipient_name_hash` - The recipient's name hash
     /// * `offset` - Pagination offset
     /// * `limit` - Maximum number of results
+    /// * `current_topoheight` - Current topoheight for filtering expired messages
     ///
     /// # Returns
-    /// Vector of (message_id, message) tuples
+    /// Vector of (message_id, message) tuples for non-expired messages only
     async fn get_messages_for_recipient(
         &self,
         recipient_name_hash: &Hash,
         offset: u32,
         limit: u32,
+        current_topoheight: TopoHeight,
     ) -> Result<Vec<(Hash, StoredEphemeralMessage)>, BlockchainError>;
+
+    /// Count messages for a recipient (efficient count without loading all data)
+    ///
+    /// # Arguments
+    /// * `recipient_name_hash` - The recipient's name hash
+    /// * `current_topoheight` - Current topoheight for filtering expired messages
+    ///
+    /// # Returns
+    /// Number of non-expired messages for the recipient
+    async fn count_messages_for_recipient(
+        &self,
+        recipient_name_hash: &Hash,
+        current_topoheight: TopoHeight,
+    ) -> Result<u64, BlockchainError>;
 
     /// Delete an ephemeral message (for cleanup after expiry)
     async fn delete_ephemeral_message(&mut self, message_id: &Hash) -> Result<(), BlockchainError>;

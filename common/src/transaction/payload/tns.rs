@@ -35,8 +35,17 @@ impl RegisterNamePayload {
 impl Serializer for RegisterNamePayload {
     fn write(&self, writer: &mut Writer) {
         // Use u8 for length (max 64 chars)
-        writer.write_u8(self.name.len() as u8);
-        writer.write_bytes(self.name.as_bytes());
+        // Debug assert to catch programming errors - name should be validated before construction
+        debug_assert!(
+            self.name.len() <= MAX_NAME_LENGTH,
+            "Name length {} exceeds max {}",
+            self.name.len(),
+            MAX_NAME_LENGTH
+        );
+        // Saturating cast to prevent overflow/truncation in release builds
+        let len = self.name.len().min(u8::MAX as usize) as u8;
+        writer.write_u8(len);
+        writer.write_bytes(&self.name.as_bytes()[..len as usize]);
     }
 
     fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
@@ -141,9 +150,18 @@ impl Serializer for EphemeralMessagePayload {
         self.recipient_name_hash.write(writer);
         writer.write_u64(&self.message_nonce);
         writer.write_u32(&self.ttl_blocks);
-        // Use u16 for content length (max 188 bytes)
-        writer.write_u16(self.encrypted_content.len() as u16);
-        writer.write_bytes(&self.encrypted_content);
+        // Use u16 for content length (max 188 bytes = 140 + 48 overhead)
+        // Debug assert to catch programming errors - content should be validated before construction
+        debug_assert!(
+            self.encrypted_content.len() <= MAX_ENCRYPTED_SIZE,
+            "Encrypted content length {} exceeds max {}",
+            self.encrypted_content.len(),
+            MAX_ENCRYPTED_SIZE
+        );
+        // Saturating cast to prevent overflow/truncation in release builds
+        let len = self.encrypted_content.len().min(u16::MAX as usize) as u16;
+        writer.write_u16(len);
+        writer.write_bytes(&self.encrypted_content[..len as usize]);
         writer.write_bytes(&self.receiver_handle);
     }
 

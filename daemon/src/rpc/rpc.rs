@@ -5171,10 +5171,7 @@ use tos_common::api::daemon::{
     GetMessagesResult, HasRegisteredNameParams, HasRegisteredNameResult, IsNameAvailableParams,
     IsNameAvailableResult, ResolveNameParams, ResolveNameResult,
 };
-use tos_common::tns::{
-    is_confusing_name, is_reserved_name, normalize_name, tns_name_hash, MAX_NAME_LENGTH,
-    MIN_NAME_LENGTH,
-};
+use tos_common::tns::{normalize_name, tns_name_hash};
 
 /// Resolve a TNS name to an address
 /// Returns the address that owns the name, if registered
@@ -5227,66 +5224,29 @@ async fn is_name_available<S: Storage>(
     context: &Context,
     body: Value,
 ) -> Result<Value, InternalRpcError> {
+    use tos_common::tns::validate_name_format;
+
     let params: IsNameAvailableParams = parse_params(body)?;
     let blockchain: &Arc<Blockchain<S>> = context.get()?;
 
     // Strip @tos.network suffix if present
     let name_str = params.name.as_ref();
-    let name = name_str
-        .strip_suffix("@tos.network")
-        .unwrap_or(name_str)
-        .to_lowercase();
+    let name = name_str.strip_suffix("@tos.network").unwrap_or(name_str);
 
-    // Check format validity
-    if name.len() < MIN_NAME_LENGTH {
+    // Validate name format using the full validation rules
+    let validation = validate_name_format(name);
+    if !validation.valid {
         return Ok(json!(IsNameAvailableResult {
             available: false,
             valid_format: false,
-            format_error: Some(format!(
-                "Name too short (min {} characters)",
-                MIN_NAME_LENGTH
-            )),
+            format_error: validation.error,
         }));
     }
 
-    if name.len() > MAX_NAME_LENGTH {
-        return Ok(json!(IsNameAvailableResult {
-            available: false,
-            valid_format: false,
-            format_error: Some(format!(
-                "Name too long (max {} characters)",
-                MAX_NAME_LENGTH
-            )),
-        }));
-    }
-
-    if is_reserved_name(&name) {
-        return Ok(json!(IsNameAvailableResult {
-            available: false,
-            valid_format: false,
-            format_error: Some("Name is reserved".to_string()),
-        }));
-    }
-
-    if is_confusing_name(&name) {
-        return Ok(json!(IsNameAvailableResult {
-            available: false,
-            valid_format: false,
-            format_error: Some("Name contains confusing characters".to_string()),
-        }));
-    }
-
-    // Normalize the name
-    let normalized = match normalize_name(&name) {
-        Ok(n) => n,
-        Err(e) => {
-            return Ok(json!(IsNameAvailableResult {
-                available: false,
-                valid_format: false,
-                format_error: Some(format!("{:?}", e)),
-            }));
-        }
-    };
+    // Get the normalized name from validation result
+    let normalized = validation.normalized.ok_or_else(|| {
+        InternalRpcError::InternalError("Validation passed but normalized name is None")
+    })?;
 
     let name_hash = tns_name_hash(&normalized);
 
@@ -5370,8 +5330,16 @@ async fn get_messages<S: Storage>(
     let limit = params.limit.min(100);
 
     let storage = blockchain.get_storage().read().await;
+    let current_topoheight = blockchain.get_topo_height();
+
+    // Get non-expired messages only
     let messages = storage
-        .get_messages_for_recipient(&params.recipient_name_hash, params.offset, limit)
+        .get_messages_for_recipient(
+            &params.recipient_name_hash,
+            params.offset,
+            limit,
+            current_topoheight,
+        )
         .await
         .context("Error while getting messages")?;
 
@@ -5389,16 +5357,15 @@ async fn get_messages<S: Storage>(
         })
         .collect();
 
-    // Get total count for pagination info
-    // We use a larger limit to count
-    let total_messages = storage
-        .get_messages_for_recipient(&params.recipient_name_hash, 0, u32::MAX)
+    // Get total count for pagination info using efficient count function
+    let total_count = storage
+        .count_messages_for_recipient(&params.recipient_name_hash, current_topoheight)
         .await
         .context("Error while counting messages")?;
 
     Ok(json!(GetMessagesResult {
         messages: message_infos,
-        total_count: total_messages.len() as u64,
+        total_count,
     }))
 }
 
@@ -5411,14 +5378,13 @@ async fn get_message_count<S: Storage>(
     let blockchain: &Arc<Blockchain<S>> = context.get()?;
 
     let storage = blockchain.get_storage().read().await;
-    let messages = storage
-        .get_messages_for_recipient(&params.recipient_name_hash, 0, u32::MAX)
+    let current_topoheight = blockchain.get_topo_height();
+    let count = storage
+        .count_messages_for_recipient(&params.recipient_name_hash, current_topoheight)
         .await
         .context("Error while counting messages")?;
 
-    Ok(json!(GetMessageCountResult {
-        count: messages.len() as u64,
-    }))
+    Ok(json!(GetMessageCountResult { count }))
 }
 
 /// Get a specific ephemeral message by ID

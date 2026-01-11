@@ -170,13 +170,15 @@ impl TnsProvider for RocksStorage {
         recipient_name_hash: &Hash,
         offset: u32,
         limit: u32,
+        current_topoheight: TopoHeight,
     ) -> Result<Vec<(Hash, StoredEphemeralMessage)>, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!(
-                "getting messages for recipient {} (offset: {}, limit: {})",
+                "getting messages for recipient {} (offset: {}, limit: {}, topoheight: {})",
                 recipient_name_hash,
                 offset,
-                limit
+                limit,
+                current_topoheight
             );
         }
 
@@ -191,6 +193,11 @@ impl TnsProvider for RocksStorage {
             IteratorMode::WithPrefix(&prefix, Direction::Forward),
         )? {
             let (key, msg) = result?;
+
+            // Filter out expired messages
+            if msg.expiry_topoheight <= current_topoheight {
+                continue;
+            }
 
             // Skip messages until we reach the offset
             if skipped < offset {
@@ -213,6 +220,38 @@ impl TnsProvider for RocksStorage {
         }
 
         Ok(messages)
+    }
+
+    async fn count_messages_for_recipient(
+        &self,
+        recipient_name_hash: &Hash,
+        current_topoheight: TopoHeight,
+    ) -> Result<u64, BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "counting messages for recipient {} at topoheight {}",
+                recipient_name_hash,
+                current_topoheight
+            );
+        }
+
+        let mut count = 0u64;
+
+        // Iterate with prefix for the recipient, only counting non-expired messages
+        let prefix = recipient_name_hash.as_bytes().to_vec();
+        for result in self.iter::<Vec<u8>, StoredEphemeralMessage>(
+            Column::TnsEphemeralMessages,
+            IteratorMode::WithPrefix(&prefix, Direction::Forward),
+        )? {
+            let (_key, msg) = result?;
+
+            // Only count non-expired messages
+            if msg.expiry_topoheight > current_topoheight {
+                count = count.saturating_add(1);
+            }
+        }
+
+        Ok(count)
     }
 
     async fn delete_ephemeral_message(&mut self, message_id: &Hash) -> Result<(), BlockchainError> {

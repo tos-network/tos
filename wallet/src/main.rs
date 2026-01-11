@@ -2010,10 +2010,10 @@ async fn transfer(manager: &CommandManager, mut args: ArgumentManager) -> Result
         }
     });
 
-    if multisig_threshold.is_some() {
+    if let Some(threshold) = multisig_threshold {
         manager.message(format!(
             "Multisig detected (threshold: {}). Note: Full multisig signing not supported in stateless mode.",
-            multisig_threshold.unwrap()
+            threshold
         ));
     }
 
@@ -2281,10 +2281,10 @@ async fn transfer_all(
         }
     });
 
-    if multisig_threshold.is_some() {
+    if let Some(threshold) = multisig_threshold {
         manager.message(format!(
             "Multisig detected (threshold: {}). Note: Full multisig signing not supported in stateless mode.",
-            multisig_threshold.unwrap()
+            threshold
         ));
     }
 
@@ -2436,10 +2436,10 @@ async fn burn(manager: &CommandManager, mut args: ArgumentManager) -> Result<(),
         }
     });
 
-    if multisig_threshold.is_some() {
+    if let Some(threshold) = multisig_threshold {
         manager.message(format!(
             "Multisig detected (threshold: {}). Note: Full multisig signing not supported in stateless mode.",
-            multisig_threshold.unwrap()
+            threshold
         ));
     }
 
@@ -5938,24 +5938,20 @@ async fn register_name(
         "register_name name=alice",
     )?;
 
-    // Normalize and validate the name
-    let normalized_name = tos_common::tns::normalize_name(&name).map_err(|e| {
-        CommandError::InvalidArgument(format!("Invalid name format '{}': {}", name, e))
+    // Validate name format locally before making RPC call
+    let validation = tos_common::tns::validate_name_format(&name);
+    if !validation.valid {
+        return Err(CommandError::InvalidArgument(format!(
+            "Invalid name '{}': {}",
+            name,
+            validation
+                .error
+                .unwrap_or_else(|| "Unknown error".to_string())
+        )));
+    }
+    let normalized_name = validation.normalized.ok_or_else(|| {
+        CommandError::InvalidArgument("Validation passed but normalized name is None".to_string())
     })?;
-
-    // Check if name is reserved or confusing
-    if tos_common::tns::is_reserved_name(&normalized_name) {
-        return Err(CommandError::InvalidArgument(format!(
-            "Name '{}' is reserved and cannot be registered.",
-            normalized_name
-        )));
-    }
-    if tos_common::tns::is_confusing_name(&normalized_name) {
-        return Err(CommandError::InvalidArgument(format!(
-            "Name '{}' is potentially confusing and cannot be registered.",
-            normalized_name
-        )));
-    }
 
     // Check if the name is available
     {
@@ -6205,6 +6201,22 @@ async fn send_message(
         recipient_name, ttl_blocks
     ));
 
+    // Get the next available nonce for this transaction
+    // This nonce will be used both as the message_nonce (for replay protection)
+    // and as the transaction nonce
+    let message_nonce = {
+        let light_api = wallet
+            .get_light_api()
+            .await
+            .map_err(|e| CommandError::Any(anyhow::anyhow!("Failed to get light API: {}", e)))?;
+        light_api
+            .get_next_nonce(&wallet.get_address())
+            .await
+            .map_err(|e| {
+                CommandError::Any(anyhow::anyhow!("Failed to get nonce from daemon: {}", e))
+            })?
+    };
+
     // Encrypt message using ECDH with recipient's public key
     use tos_common::crypto::elgamal::{DecryptHandle, PedersenOpening};
     use tos_common::transaction::extra_data::{derive_shared_key_from_opening, PlaintextData};
@@ -6230,7 +6242,7 @@ async fn send_message(
     let payload = tos_common::transaction::EphemeralMessagePayload::new(
         sender_name_hash.into_owned(),
         recipient_name_hash,
-        0, // nonce will be set by transaction builder
+        message_nonce,
         ttl_blocks,
         encrypted_content,
         *receiver_handle.as_bytes(),
