@@ -19,6 +19,31 @@ use tos_common::{
 use crate::core::{error::BlockchainError, storage::ContractScheduledExecutionProvider};
 use crate::tako_integration::{calculate_offer_miner_reward, TakoExecutor};
 
+/// Error category for scheduled execution failures
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScheduledExecutionErrorKind {
+    /// Execution completed successfully
+    None,
+    /// Contract bytecode not found
+    ContractNotFound,
+    /// Execution ran out of gas
+    OutOfGas,
+    /// Contract returned a non-zero exit code
+    ContractError,
+    /// Maximum deferrals reached, execution expired
+    Expired,
+    /// Internal system error (storage, I/O, etc.)
+    InternalError,
+    /// Unknown or uncategorized error
+    Unknown,
+}
+
+impl Default for ScheduledExecutionErrorKind {
+    fn default() -> Self {
+        Self::None
+    }
+}
+
 /// Result of processing a single scheduled execution
 #[derive(Debug)]
 pub struct ScheduledExecutionResult {
@@ -28,8 +53,10 @@ pub struct ScheduledExecutionResult {
     pub success: bool,
     /// Compute units used
     pub compute_units_used: u64,
-    /// Error message if failed
+    /// Error message if failed (detailed, human-readable)
     pub error: Option<String>,
+    /// Error category for programmatic handling
+    pub error_kind: ScheduledExecutionErrorKind,
     /// Miner reward from offer
     pub miner_reward: u64,
     /// Events emitted during execution
@@ -248,6 +275,7 @@ where
                     success: true,
                     compute_units_used: result.compute_units_used,
                     error: None,
+                    error_kind: ScheduledExecutionErrorKind::None,
                     miner_reward,
                     events: result.events,
                     log_messages: result.log_messages,
@@ -258,7 +286,14 @@ where
                 execution_count = execution_count.saturating_add(1);
             }
             Err(e) => {
-                let error_msg = e.to_string();
+                // Create detailed error message with context
+                let error_msg = format!(
+                    "Scheduled execution failed: contract={}, execution_hash={}, chunk_id={}, error={}",
+                    execution.contract,
+                    execution.hash,
+                    execution.chunk_id,
+                    e
+                );
 
                 // Determine if we should defer or mark as failed
                 let should_defer = execution.defer_count < tos_common::contract::MAX_DEFER_COUNT
@@ -339,6 +374,7 @@ where
                                 success: false,
                                 compute_units_used: 0,
                                 error: Some(error_msg),
+                                error_kind: ScheduledExecutionErrorKind::InternalError,
                                 miner_reward,
                                 events: vec![],
                                 log_messages: vec![],
@@ -388,11 +424,19 @@ where
                 results.total_miner_rewards =
                     results.total_miner_rewards.saturating_add(miner_reward);
 
+                // Determine error kind based on execution status and error type
+                let error_kind = if execution.status == ScheduledExecutionStatus::Expired {
+                    ScheduledExecutionErrorKind::Expired
+                } else {
+                    categorize_error(&e)
+                };
+
                 results.results.push(ScheduledExecutionResult {
                     execution,
                     success: false,
                     compute_units_used: 0,
                     error: Some(error_msg),
+                    error_kind,
                     miner_reward,
                     events: vec![],
                     log_messages: vec![],
@@ -507,6 +551,23 @@ fn is_retryable_error(error: &BlockchainError) -> bool {
         // Contract not found might resolve if deployed in a concurrent transaction
         | BlockchainError::ContractNotFound(_)
     )
+}
+
+/// Categorize a blockchain error into an error kind for reporting
+fn categorize_error(error: &BlockchainError) -> ScheduledExecutionErrorKind {
+    match error {
+        BlockchainError::ContractNotFound(_) => ScheduledExecutionErrorKind::ContractNotFound,
+        BlockchainError::ModuleError(msg) if msg.contains("out of gas") => {
+            ScheduledExecutionErrorKind::OutOfGas
+        }
+        BlockchainError::ModuleError(_) => ScheduledExecutionErrorKind::ContractError,
+        BlockchainError::DatabaseError(_)
+        | BlockchainError::ErrorStd(_)
+        | BlockchainError::SemaphoreError(_)
+        | BlockchainError::PoisonError(_)
+        | BlockchainError::IsSyncing => ScheduledExecutionErrorKind::InternalError,
+        _ => ScheduledExecutionErrorKind::Unknown,
+    }
 }
 
 #[cfg(test)]

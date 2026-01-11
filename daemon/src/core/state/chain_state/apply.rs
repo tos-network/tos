@@ -1020,6 +1020,13 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
             .total_miner_rewards
     }
 
+    /// Get the scheduled execution results for this block
+    ///
+    /// Returns a reference to all scheduled execution results for firing events.
+    pub fn get_scheduled_execution_results(&self) -> &BlockScheduledExecutionResults {
+        &self.contract_manager.scheduled_execution_results
+    }
+
     async fn remove_contract_module_internal(
         &mut self,
         hash: &Hash,

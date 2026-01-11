@@ -50,8 +50,9 @@ use tos_common::{
         daemon::{
             AddressPaymentEvent, BlockOrderedEvent, BlockOrphanedEvent, BlockType, ContractEvent,
             ContractTransferEvent, InvokeContractEvent, MempoolTransactionSummary, NewAssetEvent,
-            NewContractEvent, NotifyEvent, StableHeightChangedEvent, StableTopoHeightChangedEvent,
-            TransactionExecutedEvent, TransactionResponse,
+            NewContractEvent, NotifyEvent, ScheduledExecutionExecutedEvent,
+            StableHeightChangedEvent, StableTopoHeightChangedEvent, TransactionExecutedEvent,
+            TransactionResponse,
         },
         payment::decode_payment_extra_data,
         RPCContractOutput, RPCTransaction,
@@ -4372,6 +4373,30 @@ impl<S: Storage> Blockchain<S> {
                             "Processed contracts events in {}ms",
                             start.elapsed().as_millis()
                         );
+                    }
+                }
+
+                // Fire scheduled execution events
+                {
+                    let scheduled_results = chain_state.get_scheduled_execution_results();
+                    for result in &scheduled_results.results {
+                        let event = NotifyEvent::ScheduledExecutionExecuted {
+                            contract: result.execution.contract.clone(),
+                        };
+                        if should_track_events.contains(&event) {
+                            let entry = events.entry(event).or_insert_with(Vec::new);
+                            let value = json!(ScheduledExecutionExecutedEvent {
+                                execution_hash: Cow::Borrowed(&result.execution.hash),
+                                contract: Cow::Borrowed(&result.execution.contract),
+                                block_hash: Cow::Borrowed(&hash),
+                                topoheight: highest_topo,
+                                success: result.success,
+                                compute_units_used: result.compute_units_used,
+                                error: result.error.as_ref().map(|e| Cow::Borrowed(e.as_str())),
+                                miner_reward: result.miner_reward,
+                            });
+                            entry.push(value);
+                        }
                     }
                 }
 
