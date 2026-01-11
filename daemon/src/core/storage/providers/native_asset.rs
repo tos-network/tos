@@ -381,6 +381,129 @@ pub trait NativeAssetProvider {
         asset: &Hash,
         uri: Option<&str>,
     ) -> Result<(), BlockchainError>;
+
+    // ===== Lock Index Operations =====
+
+    /// Get list of lock IDs for an account
+    async fn get_native_asset_lock_ids(
+        &self,
+        asset: &Hash,
+        account: &[u8; 32],
+    ) -> Result<Vec<u64>, BlockchainError>;
+
+    /// Add lock ID to account's lock index
+    async fn add_native_asset_lock_id(
+        &mut self,
+        asset: &Hash,
+        account: &[u8; 32],
+        lock_id: u64,
+    ) -> Result<(), BlockchainError>;
+
+    /// Remove lock ID from account's lock index
+    async fn remove_native_asset_lock_id(
+        &mut self,
+        asset: &Hash,
+        account: &[u8; 32],
+        lock_id: u64,
+    ) -> Result<(), BlockchainError>;
+
+    // ===== User Escrow Index Operations =====
+
+    /// Get list of escrow IDs for a user
+    async fn get_native_asset_user_escrows(
+        &self,
+        asset: &Hash,
+        user: &[u8; 32],
+    ) -> Result<Vec<u64>, BlockchainError>;
+
+    /// Add escrow ID to user's escrow index
+    async fn add_native_asset_user_escrow(
+        &mut self,
+        asset: &Hash,
+        user: &[u8; 32],
+        escrow_id: u64,
+    ) -> Result<(), BlockchainError>;
+
+    /// Remove escrow ID from user's escrow index
+    async fn remove_native_asset_user_escrow(
+        &mut self,
+        asset: &Hash,
+        user: &[u8; 32],
+        escrow_id: u64,
+    ) -> Result<(), BlockchainError>;
+
+    // ===== Owner Agents Index Operations =====
+
+    /// Get list of agents for an owner
+    async fn get_native_asset_owner_agents(
+        &self,
+        asset: &Hash,
+        owner: &[u8; 32],
+    ) -> Result<Vec<[u8; 32]>, BlockchainError>;
+
+    /// Add agent to owner's agents index
+    async fn add_native_asset_owner_agent(
+        &mut self,
+        asset: &Hash,
+        owner: &[u8; 32],
+        agent: &[u8; 32],
+    ) -> Result<(), BlockchainError>;
+
+    /// Remove agent from owner's agents index
+    async fn remove_native_asset_owner_agent(
+        &mut self,
+        asset: &Hash,
+        owner: &[u8; 32],
+        agent: &[u8; 32],
+    ) -> Result<(), BlockchainError>;
+
+    // ===== Role Members Index Operations =====
+
+    /// Get list of members for a role
+    async fn get_native_asset_role_members(
+        &self,
+        asset: &Hash,
+        role: &RoleId,
+    ) -> Result<Vec<[u8; 32]>, BlockchainError>;
+
+    /// Get role member by index
+    async fn get_native_asset_role_member(
+        &self,
+        asset: &Hash,
+        role: &RoleId,
+        index: u32,
+    ) -> Result<[u8; 32], BlockchainError>;
+
+    /// Add member to role members index
+    async fn add_native_asset_role_member(
+        &mut self,
+        asset: &Hash,
+        role: &RoleId,
+        account: &[u8; 32],
+    ) -> Result<(), BlockchainError>;
+
+    /// Remove member from role members index
+    async fn remove_native_asset_role_member(
+        &mut self,
+        asset: &Hash,
+        role: &RoleId,
+        account: &[u8; 32],
+    ) -> Result<(), BlockchainError>;
+
+    // ===== Admin Proposal Operations =====
+
+    /// Get pending admin for asset
+    async fn get_native_asset_pending_admin(
+        &self,
+        asset: &Hash,
+    ) -> Result<Option<[u8; 32]>, BlockchainError>;
+
+    /// Set pending admin for asset
+    async fn set_native_asset_pending_admin(
+        &mut self,
+        asset: &Hash,
+        admin: Option<&[u8; 32]>,
+    ) -> Result<(), BlockchainError>;
 }
 
 // ===== Storage Key Builders =====
@@ -573,6 +696,50 @@ pub fn build_native_asset_agent_auth_key(
 pub fn build_native_asset_metadata_key(asset: &Hash) -> Vec<u8> {
     let mut key = Vec::with_capacity(4 + 32);
     key.extend_from_slice(tos_common::native_asset::NATIVE_ASSET_METADATA_PREFIX);
+    key.extend_from_slice(asset.as_bytes());
+    key
+}
+
+/// Build storage key for lock index (list of lock IDs per account)
+pub fn build_native_asset_lock_index_key(asset: &Hash, account: &[u8; 32]) -> Vec<u8> {
+    let mut key = Vec::with_capacity(4 + 32 + 32);
+    key.extend_from_slice(tos_common::native_asset::NATIVE_ASSET_LOCK_INDEX_PREFIX);
+    key.extend_from_slice(asset.as_bytes());
+    key.extend_from_slice(account);
+    key
+}
+
+/// Build storage key for user escrows index
+pub fn build_native_asset_user_escrows_key(asset: &Hash, user: &[u8; 32]) -> Vec<u8> {
+    let mut key = Vec::with_capacity(4 + 32 + 32);
+    key.extend_from_slice(tos_common::native_asset::NATIVE_ASSET_USER_ESCROWS_PREFIX);
+    key.extend_from_slice(asset.as_bytes());
+    key.extend_from_slice(user);
+    key
+}
+
+/// Build storage key for owner agents index
+pub fn build_native_asset_owner_agents_key(asset: &Hash, owner: &[u8; 32]) -> Vec<u8> {
+    let mut key = Vec::with_capacity(4 + 32 + 32);
+    key.extend_from_slice(tos_common::native_asset::NATIVE_ASSET_OWNER_AGENTS_PREFIX);
+    key.extend_from_slice(asset.as_bytes());
+    key.extend_from_slice(owner);
+    key
+}
+
+/// Build storage key for role members index
+pub fn build_native_asset_role_members_key(asset: &Hash, role: &RoleId) -> Vec<u8> {
+    let mut key = Vec::with_capacity(4 + 32 + 32);
+    key.extend_from_slice(tos_common::native_asset::NATIVE_ASSET_ROLE_MEMBERS_PREFIX);
+    key.extend_from_slice(asset.as_bytes());
+    key.extend_from_slice(role);
+    key
+}
+
+/// Build storage key for pending admin
+pub fn build_native_asset_pending_admin_key(asset: &Hash) -> Vec<u8> {
+    let mut key = Vec::with_capacity(4 + 32);
+    key.extend_from_slice(tos_common::native_asset::NATIVE_ASSET_PENDING_ADMIN_PREFIX);
     key.extend_from_slice(asset.as_bytes());
     key
 }

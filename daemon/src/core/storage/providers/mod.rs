@@ -16,7 +16,7 @@ mod energy;
 mod kyc;
 mod merkle;
 mod multisig;
-mod native_asset;
+pub mod native_asset;
 mod network;
 mod nonce;
 mod pruned_topoheight;

@@ -926,6 +926,14 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
 
+        // Add to lock index
+        try_block_on(
+            self.provider
+                .add_native_asset_lock_id(&hash, account, lock_id),
+        )
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)?;
+
         // Update locked balance
         let locked = try_block_on(
             self.provider
@@ -984,6 +992,14 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
 
+        // Remove from lock index
+        try_block_on(
+            self.provider
+                .remove_native_asset_lock_id(&hash, account, lock_id),
+        )
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)?;
+
         // Update locked balance
         let locked = try_block_on(
             self.provider
@@ -1023,13 +1039,23 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
 
     fn get_locks(
         &self,
-        _asset: &[u8; 32],
-        _account: &[u8; 32],
-        _offset: u64,
-        _limit: u64,
+        asset: &[u8; 32],
+        account: &[u8; 32],
+        offset: u64,
+        limit: u64,
     ) -> Result<Vec<u64>, EbpfError> {
-        // Would need iterator support in provider
-        Ok(vec![])
+        let hash = Self::bytes_to_hash(asset);
+        let all_locks = try_block_on(self.provider.get_native_asset_lock_ids(&hash, account))
+            .map_err(Self::convert_error)?
+            .map_err(Self::convert_error)?;
+
+        // Apply pagination
+        let start = offset as usize;
+        if start >= all_locks.len() {
+            return Ok(vec![]);
+        }
+        let end = std::cmp::min(start + limit as usize, all_locks.len());
+        Ok(all_locks[start..end].to_vec())
     }
 
     fn locked_balance(&self, asset: &[u8; 32], account: &[u8; 32]) -> Result<u64, EbpfError> {
@@ -1357,9 +1383,21 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         _block_height: u64,
     ) -> Result<(), EbpfError> {
         let hash = Self::bytes_to_hash(asset);
+
+        // Grant the role
+        try_block_on(self.provider.grant_native_asset_role(
+            &hash,
+            role,
+            account,
+            self.block_height,
+        ))
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)?;
+
+        // Add to role members index
         try_block_on(
             self.provider
-                .grant_native_asset_role(&hash, role, account, self.block_height),
+                .add_native_asset_role_member(&hash, role, account),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)
@@ -1372,9 +1410,19 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         account: &[u8; 32],
     ) -> Result<(), EbpfError> {
         let hash = Self::bytes_to_hash(asset);
+
+        // Revoke the role
         try_block_on(self.provider.revoke_native_asset_role(&hash, role, account))
             .map_err(Self::convert_error)?
-            .map_err(Self::convert_error)
+            .map_err(Self::convert_error)?;
+
+        // Remove from role members index
+        try_block_on(
+            self.provider
+                .remove_native_asset_role_member(&hash, role, account),
+        )
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)
     }
 
     fn get_role_admin(&self, asset: &[u8; 32], role: &[u8; 32]) -> Result<[u8; 32], EbpfError> {
@@ -1607,7 +1655,23 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         };
         try_block_on(self.provider.set_native_asset_escrow(&hash, &escrow))
             .map_err(Self::convert_error)?
-            .map_err(Self::convert_error)
+            .map_err(Self::convert_error)?;
+
+        // Add to user escrow index for sender
+        try_block_on(
+            self.provider
+                .add_native_asset_user_escrow(&hash, sender, escrow_id),
+        )
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)?;
+
+        // Add to user escrow index for recipient
+        try_block_on(
+            self.provider
+                .add_native_asset_user_escrow(&hash, recipient, escrow_id),
+        )
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)
     }
 
     #[allow(clippy::type_complexity)]
@@ -1736,19 +1800,26 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         Ok(escrow.approvals)
     }
 
-    fn get_user_escrows(&self, _asset: &[u8; 32], _user: &[u8; 32]) -> Result<Vec<u64>, EbpfError> {
-        // Would need index support in provider
-        Ok(vec![])
+    fn get_user_escrows(&self, asset: &[u8; 32], user: &[u8; 32]) -> Result<Vec<u64>, EbpfError> {
+        let hash = Self::bytes_to_hash(asset);
+        try_block_on(self.provider.get_native_asset_user_escrows(&hash, user))
+            .map_err(Self::convert_error)?
+            .map_err(Self::convert_error)
     }
 
     fn add_user_escrow(
         &mut self,
-        _asset: &[u8; 32],
-        _user: &[u8; 32],
-        _escrow_id: u64,
+        asset: &[u8; 32],
+        user: &[u8; 32],
+        escrow_id: u64,
     ) -> Result<(), EbpfError> {
-        // Would need index support in provider
-        Ok(())
+        let hash = Self::bytes_to_hash(asset);
+        try_block_on(
+            self.provider
+                .add_native_asset_user_escrow(&hash, user, escrow_id),
+        )
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)
     }
 
     // ========================================
@@ -1906,31 +1977,43 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
 
     fn get_owner_agents(
         &self,
-        _asset: &[u8; 32],
-        _owner: &[u8; 32],
+        asset: &[u8; 32],
+        owner: &[u8; 32],
     ) -> Result<Vec<[u8; 32]>, EbpfError> {
-        // Would need index support
-        Ok(vec![])
+        let hash = Self::bytes_to_hash(asset);
+        try_block_on(self.provider.get_native_asset_owner_agents(&hash, owner))
+            .map_err(Self::convert_error)?
+            .map_err(Self::convert_error)
     }
 
     fn add_owner_agent(
         &mut self,
-        _asset: &[u8; 32],
-        _owner: &[u8; 32],
-        _agent: &[u8; 32],
+        asset: &[u8; 32],
+        owner: &[u8; 32],
+        agent: &[u8; 32],
     ) -> Result<(), EbpfError> {
-        // Index managed by set_agent_auth
-        Ok(())
+        let hash = Self::bytes_to_hash(asset);
+        try_block_on(
+            self.provider
+                .add_native_asset_owner_agent(&hash, owner, agent),
+        )
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)
     }
 
     fn remove_owner_agent(
         &mut self,
-        _asset: &[u8; 32],
-        _owner: &[u8; 32],
-        _agent: &[u8; 32],
+        asset: &[u8; 32],
+        owner: &[u8; 32],
+        agent: &[u8; 32],
     ) -> Result<(), EbpfError> {
-        // Index managed by remove_agent_auth
-        Ok(())
+        let hash = Self::bytes_to_hash(asset);
+        try_block_on(
+            self.provider
+                .remove_native_asset_owner_agent(&hash, owner, agent),
+        )
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)
     }
 
     fn get_agent_allowed_recipients(
@@ -1984,21 +2067,28 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
 
     fn get_role_member(
         &self,
-        _asset: &[u8; 32],
-        _role: &[u8; 32],
-        _index: u64,
+        asset: &[u8; 32],
+        role: &[u8; 32],
+        index: u64,
     ) -> Result<[u8; 32], EbpfError> {
-        // Would need member index support
-        Err(Self::not_found_error("Role member index not supported"))
+        let hash = Self::bytes_to_hash(asset);
+        try_block_on(
+            self.provider
+                .get_native_asset_role_member(&hash, role, index as u32),
+        )
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)
     }
 
     fn get_role_members(
         &self,
-        _asset: &[u8; 32],
-        _role: &[u8; 32],
+        asset: &[u8; 32],
+        role: &[u8; 32],
     ) -> Result<Vec<[u8; 32]>, EbpfError> {
-        // Would need member iteration support
-        Ok(vec![])
+        let hash = Self::bytes_to_hash(asset);
+        try_block_on(self.provider.get_native_asset_role_members(&hash, role))
+            .map_err(Self::convert_error)?
+            .map_err(Self::convert_error)
     }
 
     // ========================================
@@ -2095,36 +2185,89 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
 
     fn propose_admin(
         &mut self,
-        _asset: &[u8; 32],
-        _new_admin: &[u8; 32],
-        _caller: &[u8; 32],
+        asset: &[u8; 32],
+        new_admin: &[u8; 32],
+        caller: &[u8; 32],
         _block_height: u64,
     ) -> Result<(), EbpfError> {
-        // Would need pending admin storage
-        Ok(())
+        let hash = Self::bytes_to_hash(asset);
+
+        // Check if caller is current admin
+        let admin_role = tos_common::native_asset::DEFAULT_ADMIN_ROLE;
+        if !self.check_role(&hash, &admin_role, caller)? {
+            return Err(Self::permission_denied_error("Caller is not admin"));
+        }
+
+        try_block_on(
+            self.provider
+                .set_native_asset_pending_admin(&hash, Some(new_admin)),
+        )
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)
     }
 
     fn accept_admin(
         &mut self,
-        _asset: &[u8; 32],
-        _caller: &[u8; 32],
+        asset: &[u8; 32],
+        caller: &[u8; 32],
         _block_height: u64,
     ) -> Result<(), EbpfError> {
-        // Would need pending admin storage
-        Ok(())
+        let hash = Self::bytes_to_hash(asset);
+
+        // Get pending admin
+        let pending = try_block_on(self.provider.get_native_asset_pending_admin(&hash))
+            .map_err(Self::convert_error)?
+            .map_err(Self::convert_error)?;
+
+        let pending_admin = pending.ok_or_else(|| Self::not_found_error("No pending admin"))?;
+
+        // Check if caller is the pending admin
+        if caller != &pending_admin {
+            return Err(Self::permission_denied_error("Caller is not pending admin"));
+        }
+
+        // Grant admin role to new admin
+        let admin_role = tos_common::native_asset::DEFAULT_ADMIN_ROLE;
+        try_block_on(self.provider.grant_native_asset_role(
+            &hash,
+            &admin_role,
+            caller,
+            self.block_height,
+        ))
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)?;
+
+        // Clear pending admin
+        try_block_on(self.provider.set_native_asset_pending_admin(&hash, None))
+            .map_err(Self::convert_error)?
+            .map_err(Self::convert_error)
     }
 
     fn cancel_admin_proposal(
         &mut self,
-        _asset: &[u8; 32],
-        _caller: &[u8; 32],
+        asset: &[u8; 32],
+        caller: &[u8; 32],
         _block_height: u64,
     ) -> Result<(), EbpfError> {
-        Ok(())
+        let hash = Self::bytes_to_hash(asset);
+
+        // Check if caller is current admin
+        let admin_role = tos_common::native_asset::DEFAULT_ADMIN_ROLE;
+        if !self.check_role(&hash, &admin_role, caller)? {
+            return Err(Self::permission_denied_error("Caller is not admin"));
+        }
+
+        try_block_on(self.provider.set_native_asset_pending_admin(&hash, None))
+            .map_err(Self::convert_error)?
+            .map_err(Self::convert_error)
     }
 
-    fn get_pending_admin(&self, _asset: &[u8; 32]) -> Result<[u8; 32], EbpfError> {
-        Ok([0u8; 32])
+    fn get_pending_admin(&self, asset: &[u8; 32]) -> Result<[u8; 32], EbpfError> {
+        let hash = Self::bytes_to_hash(asset);
+        let pending = try_block_on(self.provider.get_native_asset_pending_admin(&hash))
+            .map_err(Self::convert_error)?
+            .map_err(Self::convert_error)?;
+        Ok(pending.unwrap_or([0u8; 32]))
     }
 
     fn renounce_admin(

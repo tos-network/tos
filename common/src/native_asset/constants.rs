@@ -121,3 +121,15 @@ pub const NATIVE_ASSET_CHECKPOINT_COUNT_PREFIX: &[u8] = b"nacc";
 
 /// Agent authorization prefix
 pub const NATIVE_ASSET_AGENT_AUTH_PREFIX: &[u8] = b"naag";
+
+/// Lock index prefix (list of lock IDs per account)
+pub const NATIVE_ASSET_LOCK_INDEX_PREFIX: &[u8] = b"nali";
+
+/// Owner agents prefix (list of agents per owner)
+pub const NATIVE_ASSET_OWNER_AGENTS_PREFIX: &[u8] = b"naoa";
+
+/// Role members index prefix (list of members per role)
+pub const NATIVE_ASSET_ROLE_MEMBERS_PREFIX: &[u8] = b"nari";
+
+/// Pending admin prefix (for admin proposal workflow)
+pub const NATIVE_ASSET_PENDING_ADMIN_PREFIX: &[u8] = b"napa";

@@ -183,6 +183,12 @@ pub enum Column {
     // Child committees index: parent_id -> list of child IDs
     // {parent_committee_id (32 bytes)} => {Vec<Hash>}
     ChildCommittees,
+
+    // ===== Native Asset System =====
+
+    // Native asset data: asset_hash -> NativeAssetData
+    // {prefix}{asset_hash (32 bytes)} => {NativeAssetData}
+    NativeAssets,
 }
 
 impl Column {
