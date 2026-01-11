@@ -812,3 +812,174 @@ impl Serializer for FreezeState {
         1 + self.frozen_by.size() + self.frozen_at.size()
     }
 }
+
+// ===== Supply Checkpoint =====
+
+/// Supply checkpoint for historical total supply queries
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SupplyCheckpoint {
+    /// Block height when checkpoint was created
+    pub from_block: u64,
+    /// Total supply at this checkpoint
+    pub supply: u64,
+}
+
+impl Serializer for SupplyCheckpoint {
+    fn write(&self, writer: &mut Writer) {
+        self.from_block.write(writer);
+        self.supply.write(writer);
+    }
+
+    fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
+        Ok(Self {
+            from_block: reader.read()?,
+            supply: reader.read()?,
+        })
+    }
+
+    fn size(&self) -> usize {
+        self.from_block.size() + self.supply.size()
+    }
+}
+
+// ===== Admin Delay =====
+
+/// Admin delay configuration for time-locked admin changes
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct AdminDelay {
+    /// Current delay in blocks
+    pub delay: u64,
+    /// Pending delay change (if any)
+    pub pending_delay: Option<u64>,
+    /// Block height when pending delay becomes effective
+    pub pending_delay_effective_at: Option<u64>,
+}
+
+impl Serializer for AdminDelay {
+    fn write(&self, writer: &mut Writer) {
+        self.delay.write(writer);
+        self.pending_delay.write(writer);
+        self.pending_delay_effective_at.write(writer);
+    }
+
+    fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
+        Ok(Self {
+            delay: reader.read()?,
+            pending_delay: reader.read()?,
+            pending_delay_effective_at: reader.read()?,
+        })
+    }
+
+    fn size(&self) -> usize {
+        self.delay.size() + self.pending_delay.size() + self.pending_delay_effective_at.size()
+    }
+}
+
+// ===== Timelock Operation =====
+
+/// Status of a timelock operation
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[repr(u8)]
+pub enum TimelockStatus {
+    /// Operation does not exist
+    #[default]
+    None = 0,
+    /// Operation is pending (scheduled but not ready)
+    Pending = 1,
+    /// Operation is ready to execute
+    Ready = 2,
+    /// Operation has been executed
+    Done = 3,
+}
+
+impl From<u8> for TimelockStatus {
+    fn from(value: u8) -> Self {
+        match value {
+            1 => TimelockStatus::Pending,
+            2 => TimelockStatus::Ready,
+            3 => TimelockStatus::Done,
+            _ => TimelockStatus::None,
+        }
+    }
+}
+
+impl Serializer for TimelockStatus {
+    fn write(&self, writer: &mut Writer) {
+        (*self as u8).write(writer);
+    }
+
+    fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
+        let value: u8 = reader.read()?;
+        Ok(Self::from(value))
+    }
+
+    fn size(&self) -> usize {
+        1
+    }
+}
+
+/// Timelock operation for scheduled admin actions
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TimelockOperation {
+    /// Operation ID (hash of target + data + salt)
+    pub id: [u8; 32],
+    /// Target address for the operation
+    pub target: [u8; 32],
+    /// Call data for the operation
+    pub data: Vec<u8>,
+    /// Timestamp when the operation becomes ready (block height)
+    pub ready_at: u64,
+    /// Current status
+    pub status: TimelockStatus,
+    /// Who scheduled the operation
+    pub scheduler: [u8; 32],
+    /// When it was scheduled
+    pub scheduled_at: u64,
+}
+
+impl Default for TimelockOperation {
+    fn default() -> Self {
+        Self {
+            id: [0u8; 32],
+            target: [0u8; 32],
+            data: Vec::new(),
+            ready_at: 0,
+            status: TimelockStatus::None,
+            scheduler: [0u8; 32],
+            scheduled_at: 0,
+        }
+    }
+}
+
+impl Serializer for TimelockOperation {
+    fn write(&self, writer: &mut Writer) {
+        writer.write_bytes(&self.id);
+        writer.write_bytes(&self.target);
+        self.data.write(writer);
+        self.ready_at.write(writer);
+        self.status.write(writer);
+        writer.write_bytes(&self.scheduler);
+        self.scheduled_at.write(writer);
+    }
+
+    fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
+        Ok(Self {
+            id: reader.read()?,
+            target: reader.read()?,
+            data: reader.read()?,
+            ready_at: reader.read()?,
+            status: reader.read()?,
+            scheduler: reader.read()?,
+            scheduled_at: reader.read()?,
+        })
+    }
+
+    fn size(&self) -> usize {
+        32 + 32
+            + self.data.size()
+            + self.ready_at.size()
+            + self.status.size()
+            + 32
+            + self.scheduled_at.size()
+    }
+}

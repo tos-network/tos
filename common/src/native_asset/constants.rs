@@ -145,3 +145,18 @@ pub const NATIVE_ASSET_DELEGATION_CHECKPOINT_PREFIX: &[u8] = b"nadc";
 
 /// Delegation checkpoint count prefix
 pub const NATIVE_ASSET_DELEGATION_CHECKPOINT_COUNT_PREFIX: &[u8] = b"nadC";
+
+/// Supply checkpoint prefix (for historical total supply queries)
+pub const NATIVE_ASSET_SUPPLY_CHECKPOINT_PREFIX: &[u8] = b"nasc";
+
+/// Supply checkpoint count prefix
+pub const NATIVE_ASSET_SUPPLY_CHECKPOINT_COUNT_PREFIX: &[u8] = b"nasC";
+
+/// Admin delay prefix (for time-locked admin changes)
+pub const NATIVE_ASSET_ADMIN_DELAY_PREFIX: &[u8] = b"naad";
+
+/// Timelock operation prefix
+pub const NATIVE_ASSET_TIMELOCK_OP_PREFIX: &[u8] = b"nato";
+
+/// Timelock minimum delay prefix
+pub const NATIVE_ASSET_TIMELOCK_MIN_DELAY_PREFIX: &[u8] = b"natm";

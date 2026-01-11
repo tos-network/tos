@@ -14,7 +14,8 @@ use tos_common::{
     native_asset::{
         AgentAuthorization, Allowance, BalanceCheckpoint, Delegation, DelegationCheckpoint, Escrow,
         EscrowStatus, FreezeState, NativeAssetData, PauseState, ReleaseCondition, RoleId,
-        SpendingLimit, SpendingPeriod, TokenLock,
+        SpendingLimit, SpendingPeriod, SupplyCheckpoint, TimelockOperation, TimelockStatus,
+        TokenLock,
     },
     serializer::Serializer,
     tokio::try_block_on,
@@ -292,6 +293,32 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TosNativeAssetAdapter<'a
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)
     }
+
+    /// Create a supply checkpoint for historical total supply queries
+    fn write_supply_checkpoint(&mut self, hash: &Hash, supply: u64) -> Result<(), EbpfError> {
+        let checkpoint = SupplyCheckpoint {
+            from_block: self.block_height,
+            supply,
+        };
+
+        let count = try_block_on(self.provider.get_native_asset_supply_checkpoint_count(hash))
+            .map_err(Self::convert_error)?
+            .map_err(Self::convert_error)?;
+
+        try_block_on(
+            self.provider
+                .set_native_asset_supply_checkpoint(hash, count, &checkpoint),
+        )
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)?;
+
+        try_block_on(
+            self.provider
+                .set_native_asset_supply_checkpoint_count(hash, count + 1),
+        )
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)
+    }
 }
 
 impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
@@ -555,6 +582,9 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
 
+        // Create supply checkpoint
+        self.write_supply_checkpoint(&hash, new_supply)?;
+
         Ok(())
     }
 
@@ -604,6 +634,9 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         try_block_on(self.provider.set_native_asset_supply(&hash, new_supply))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
+
+        // Create supply checkpoint
+        self.write_supply_checkpoint(&hash, new_supply)?;
 
         Ok(())
     }
@@ -899,10 +932,52 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         Ok(checkpoint.votes)
     }
 
-    fn get_past_total_supply(&self, asset: &[u8; 32], _timepoint: u64) -> Result<u64, EbpfError> {
-        // For simplicity, return current supply
-        // Full implementation would need supply checkpoints
-        self.total_supply(asset)
+    fn get_past_total_supply(&self, asset: &[u8; 32], timepoint: u64) -> Result<u64, EbpfError> {
+        let hash = Self::bytes_to_hash(asset);
+        let count = try_block_on(
+            self.provider
+                .get_native_asset_supply_checkpoint_count(&hash),
+        )
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)?;
+
+        if count == 0 {
+            // No supply history, return current supply
+            return self.total_supply(asset);
+        }
+
+        // Binary search for the checkpoint at or before timepoint
+        let mut low = 0u32;
+        let mut high = count;
+
+        while low < high {
+            let mid = (low + high) / 2;
+            let checkpoint =
+                try_block_on(self.provider.get_native_asset_supply_checkpoint(&hash, mid))
+                    .map_err(Self::convert_error)?
+                    .map_err(Self::convert_error)?;
+
+            if checkpoint.from_block <= timepoint {
+                low = mid + 1;
+            } else {
+                high = mid;
+            }
+        }
+
+        if low == 0 {
+            // No checkpoint at or before timepoint, return 0
+            return Ok(0);
+        }
+
+        // Get the checkpoint at low - 1 (the last one at or before timepoint)
+        let checkpoint = try_block_on(
+            self.provider
+                .get_native_asset_supply_checkpoint(&hash, low - 1),
+        )
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)?;
+
+        Ok(checkpoint.supply)
     }
 
     fn num_checkpoints(&self, asset: &[u8; 32], account: &[u8; 32]) -> Result<u64, EbpfError> {
@@ -2462,131 +2537,368 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         self.revoke_role(asset, &admin_role, caller)
     }
 
-    fn get_admin_delay(&self, _asset: &[u8; 32]) -> Result<u64, EbpfError> {
-        Ok(0) // No delay by default
+    fn get_admin_delay(&self, asset: &[u8; 32]) -> Result<u64, EbpfError> {
+        let hash = Self::bytes_to_hash(asset);
+        let admin_delay = try_block_on(self.provider.get_native_asset_admin_delay(&hash))
+            .map_err(Self::convert_error)?
+            .map_err(Self::convert_error)?;
+
+        // If pending delay is set and effective, return it
+        if let (Some(pending), Some(effective_at)) = (
+            admin_delay.pending_delay,
+            admin_delay.pending_delay_effective_at,
+        ) {
+            if self.block_height >= effective_at {
+                return Ok(pending);
+            }
+        }
+
+        Ok(admin_delay.delay)
     }
 
     fn change_admin_delay(
         &mut self,
-        _asset: &[u8; 32],
-        _new_delay: u64,
+        asset: &[u8; 32],
+        new_delay: u64,
         _caller: &[u8; 32],
         _block_height: u64,
     ) -> Result<(), EbpfError> {
-        Ok(())
+        let hash = Self::bytes_to_hash(asset);
+
+        // Get current admin delay config
+        let mut admin_delay = try_block_on(self.provider.get_native_asset_admin_delay(&hash))
+            .map_err(Self::convert_error)?
+            .map_err(Self::convert_error)?;
+
+        // Check if pending delay should be applied first
+        if let (Some(pending), Some(effective_at)) = (
+            admin_delay.pending_delay,
+            admin_delay.pending_delay_effective_at,
+        ) {
+            if self.block_height >= effective_at {
+                admin_delay.delay = pending;
+            }
+        }
+
+        // Set new pending delay
+        admin_delay.pending_delay = Some(new_delay);
+        // Delay becomes effective after current delay period
+        admin_delay.pending_delay_effective_at = Some(
+            self.block_height
+                .checked_add(admin_delay.delay)
+                .ok_or_else(|| Self::invalid_data_error("Block height overflow"))?,
+        );
+
+        try_block_on(
+            self.provider
+                .set_native_asset_admin_delay(&hash, &admin_delay),
+        )
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)
     }
 
-    fn get_pending_admin_delay(&self, _asset: &[u8; 32]) -> Result<u64, EbpfError> {
-        Ok(0)
+    fn get_pending_admin_delay(&self, asset: &[u8; 32]) -> Result<u64, EbpfError> {
+        let hash = Self::bytes_to_hash(asset);
+        let admin_delay = try_block_on(self.provider.get_native_asset_admin_delay(&hash))
+            .map_err(Self::convert_error)?
+            .map_err(Self::convert_error)?;
+
+        Ok(admin_delay.pending_delay.unwrap_or(0))
     }
 
     fn cancel_admin_delay_change(
         &mut self,
-        _asset: &[u8; 32],
+        asset: &[u8; 32],
         _caller: &[u8; 32],
         _block_height: u64,
     ) -> Result<(), EbpfError> {
-        Ok(())
+        let hash = Self::bytes_to_hash(asset);
+
+        // Get current admin delay config
+        let mut admin_delay = try_block_on(self.provider.get_native_asset_admin_delay(&hash))
+            .map_err(Self::convert_error)?
+            .map_err(Self::convert_error)?;
+
+        // Clear pending delay
+        admin_delay.pending_delay = None;
+        admin_delay.pending_delay_effective_at = None;
+
+        try_block_on(
+            self.provider
+                .set_native_asset_admin_delay(&hash, &admin_delay),
+        )
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)
     }
 
     // ========================================
-    // Phase 2.7: Admin Timelock (stubs)
+    // Phase 2.7: Admin Timelock
     // ========================================
 
     #[allow(clippy::too_many_arguments)]
     fn timelock_schedule(
         &mut self,
-        _asset: &[u8; 32],
-        _operation_id: &[u8; 32],
-        _target: &[u8; 32],
-        _data: &[u8],
-        _delay: u64,
-        _caller: &[u8; 32],
-        _block_height: u64,
+        asset: &[u8; 32],
+        operation_id: &[u8; 32],
+        target: &[u8; 32],
+        data: &[u8],
+        delay: u64,
+        caller: &[u8; 32],
+        block_height: u64,
     ) -> Result<(), EbpfError> {
-        Ok(())
+        let hash = Self::bytes_to_hash(asset);
+
+        // Check if operation already exists
+        let existing = try_block_on(
+            self.provider
+                .get_native_asset_timelock_operation(&hash, operation_id),
+        )
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)?;
+
+        if existing.is_some() {
+            return Err(Self::invalid_data_error("Operation already exists"));
+        }
+
+        // Enforce minimum delay
+        let min_delay = try_block_on(self.provider.get_native_asset_timelock_min_delay(&hash))
+            .map_err(Self::convert_error)?
+            .map_err(Self::convert_error)?;
+
+        if delay < min_delay {
+            return Err(Self::invalid_data_error("Delay is less than minimum"));
+        }
+
+        // Calculate ready_at timestamp
+        let ready_at = block_height
+            .checked_add(delay)
+            .ok_or_else(|| Self::invalid_data_error("Block height overflow"))?;
+
+        // Create and store the operation
+        let operation = TimelockOperation {
+            id: *operation_id,
+            target: *target,
+            data: data.to_vec(),
+            ready_at,
+            status: TimelockStatus::Pending,
+            scheduler: *caller,
+            scheduled_at: block_height,
+        };
+
+        try_block_on(
+            self.provider
+                .set_native_asset_timelock_operation(&hash, &operation),
+        )
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)
     }
 
     fn timelock_execute(
         &mut self,
-        _asset: &[u8; 32],
-        _operation_id: &[u8; 32],
+        asset: &[u8; 32],
+        operation_id: &[u8; 32],
         _caller: &[u8; 32],
-        _block_height: u64,
+        block_height: u64,
     ) -> Result<(), EbpfError> {
-        Ok(())
+        let hash = Self::bytes_to_hash(asset);
+
+        // Get the operation
+        let operation = try_block_on(
+            self.provider
+                .get_native_asset_timelock_operation(&hash, operation_id),
+        )
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)?
+        .ok_or_else(|| Self::not_found_error("Operation not found"))?;
+
+        // Check if operation is ready
+        if operation.status != TimelockStatus::Pending {
+            return Err(Self::invalid_data_error("Operation is not pending"));
+        }
+
+        if block_height < operation.ready_at {
+            return Err(Self::invalid_data_error("Operation is not ready yet"));
+        }
+
+        // Mark as done
+        let mut updated_operation = operation;
+        updated_operation.status = TimelockStatus::Done;
+
+        try_block_on(
+            self.provider
+                .set_native_asset_timelock_operation(&hash, &updated_operation),
+        )
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)
     }
 
     fn timelock_cancel(
         &mut self,
-        _asset: &[u8; 32],
-        _operation_id: &[u8; 32],
+        asset: &[u8; 32],
+        operation_id: &[u8; 32],
         _caller: &[u8; 32],
         _block_height: u64,
     ) -> Result<(), EbpfError> {
-        Ok(())
+        let hash = Self::bytes_to_hash(asset);
+
+        // Check if operation exists and is pending
+        let operation = try_block_on(
+            self.provider
+                .get_native_asset_timelock_operation(&hash, operation_id),
+        )
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)?
+        .ok_or_else(|| Self::not_found_error("Operation not found"))?;
+
+        if operation.status != TimelockStatus::Pending {
+            return Err(Self::invalid_data_error(
+                "Can only cancel pending operations",
+            ));
+        }
+
+        // Delete the operation
+        try_block_on(
+            self.provider
+                .delete_native_asset_timelock_operation(&hash, operation_id),
+        )
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)
     }
 
     fn timelock_get_operation(
         &self,
-        _asset: &[u8; 32],
-        _operation_id: &[u8; 32],
+        asset: &[u8; 32],
+        operation_id: &[u8; 32],
     ) -> Result<Option<Vec<u8>>, EbpfError> {
-        Ok(None)
+        let hash = Self::bytes_to_hash(asset);
+
+        let operation = try_block_on(
+            self.provider
+                .get_native_asset_timelock_operation(&hash, operation_id),
+        )
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)?;
+
+        match operation {
+            Some(op) => {
+                // Serialize operation to bytes
+                let bytes = op.to_bytes();
+                Ok(Some(bytes))
+            }
+            None => Ok(None),
+        }
     }
 
-    fn timelock_get_min_delay(&self, _asset: &[u8; 32]) -> Result<u64, EbpfError> {
-        Ok(0)
+    fn timelock_get_min_delay(&self, asset: &[u8; 32]) -> Result<u64, EbpfError> {
+        let hash = Self::bytes_to_hash(asset);
+
+        try_block_on(self.provider.get_native_asset_timelock_min_delay(&hash))
+            .map_err(Self::convert_error)?
+            .map_err(Self::convert_error)
     }
 
     fn timelock_set_min_delay(
         &mut self,
-        _asset: &[u8; 32],
-        _new_delay: u64,
+        asset: &[u8; 32],
+        new_delay: u64,
         _caller: &[u8; 32],
         _block_height: u64,
     ) -> Result<(), EbpfError> {
-        Ok(())
+        let hash = Self::bytes_to_hash(asset);
+
+        try_block_on(
+            self.provider
+                .set_native_asset_timelock_min_delay(&hash, new_delay),
+        )
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)
     }
 
     fn timelock_get_timestamp(
         &self,
-        _asset: &[u8; 32],
-        _operation_id: &[u8; 32],
+        asset: &[u8; 32],
+        operation_id: &[u8; 32],
     ) -> Result<Option<u64>, EbpfError> {
-        Ok(None)
+        let hash = Self::bytes_to_hash(asset);
+
+        let operation = try_block_on(
+            self.provider
+                .get_native_asset_timelock_operation(&hash, operation_id),
+        )
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)?;
+
+        Ok(operation.map(|op| op.ready_at))
     }
 
     fn timelock_is_operation(
         &self,
-        _asset: &[u8; 32],
-        _operation_id: &[u8; 32],
+        asset: &[u8; 32],
+        operation_id: &[u8; 32],
     ) -> Result<bool, EbpfError> {
-        Ok(false)
+        let hash = Self::bytes_to_hash(asset);
+
+        let operation = try_block_on(
+            self.provider
+                .get_native_asset_timelock_operation(&hash, operation_id),
+        )
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)?;
+
+        Ok(operation.is_some())
     }
 
     fn timelock_is_pending(
         &self,
-        _asset: &[u8; 32],
-        _operation_id: &[u8; 32],
+        asset: &[u8; 32],
+        operation_id: &[u8; 32],
     ) -> Result<bool, EbpfError> {
-        Ok(false)
+        let hash = Self::bytes_to_hash(asset);
+
+        let operation = try_block_on(
+            self.provider
+                .get_native_asset_timelock_operation(&hash, operation_id),
+        )
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)?;
+
+        Ok(operation.map_or(false, |op| op.status == TimelockStatus::Pending))
     }
 
     fn timelock_is_ready(
         &self,
-        _asset: &[u8; 32],
-        _operation_id: &[u8; 32],
-        _block_height: u64,
+        asset: &[u8; 32],
+        operation_id: &[u8; 32],
+        block_height: u64,
     ) -> Result<bool, EbpfError> {
-        Ok(false)
+        let hash = Self::bytes_to_hash(asset);
+
+        let operation = try_block_on(
+            self.provider
+                .get_native_asset_timelock_operation(&hash, operation_id),
+        )
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)?;
+
+        Ok(operation.map_or(false, |op| {
+            op.status == TimelockStatus::Pending && block_height >= op.ready_at
+        }))
     }
 
     fn timelock_is_done(
         &self,
-        _asset: &[u8; 32],
-        _operation_id: &[u8; 32],
+        asset: &[u8; 32],
+        operation_id: &[u8; 32],
     ) -> Result<bool, EbpfError> {
-        Ok(false)
+        let hash = Self::bytes_to_hash(asset);
+
+        let operation = try_block_on(
+            self.provider
+                .get_native_asset_timelock_operation(&hash, operation_id),
+        )
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)?;
+
+        Ok(operation.map_or(false, |op| op.status == TimelockStatus::Done))
     }
 }

@@ -6,8 +6,8 @@ use crate::core::{
     error::BlockchainError,
     storage::{
         providers::native_asset::{
-            build_native_asset_agent_auth_key, build_native_asset_allowance_key,
-            build_native_asset_balance_checkpoint_count_key,
+            build_native_asset_admin_delay_key, build_native_asset_agent_auth_key,
+            build_native_asset_allowance_key, build_native_asset_balance_checkpoint_count_key,
             build_native_asset_balance_checkpoint_key, build_native_asset_balance_key,
             build_native_asset_checkpoint_count_key, build_native_asset_checkpoint_key,
             build_native_asset_delegation_checkpoint_count_key,
@@ -20,7 +20,9 @@ use crate::core::{
             build_native_asset_owner_agents_key, build_native_asset_pause_key,
             build_native_asset_pending_admin_key, build_native_asset_permit_nonce_key,
             build_native_asset_role_config_key, build_native_asset_role_member_key,
-            build_native_asset_role_members_key, build_native_asset_supply_key,
+            build_native_asset_role_members_key, build_native_asset_supply_checkpoint_count_key,
+            build_native_asset_supply_checkpoint_key, build_native_asset_supply_key,
+            build_native_asset_timelock_min_delay_key, build_native_asset_timelock_operation_key,
             build_native_asset_user_escrows_key,
         },
         NativeAssetProvider, RocksStorage,
@@ -31,9 +33,9 @@ use log::trace;
 use tos_common::{
     crypto::Hash,
     native_asset::{
-        AgentAuthorization, Allowance, BalanceCheckpoint, Checkpoint, Delegation,
+        AdminDelay, AgentAuthorization, Allowance, BalanceCheckpoint, Checkpoint, Delegation,
         DelegationCheckpoint, Escrow, FreezeState, NativeAssetData, PauseState, RoleConfig, RoleId,
-        TokenLock,
+        SupplyCheckpoint, TimelockOperation, TokenLock,
     },
 };
 
@@ -1288,5 +1290,168 @@ impl NativeAssetProvider for RocksStorage {
         }
         let key = build_native_asset_delegation_checkpoint_key(asset, account, index);
         self.insert_into_disk(Column::NativeAssets, &key, checkpoint)
+    }
+
+    // ===== Supply Checkpoint Operations =====
+
+    async fn get_native_asset_supply_checkpoint_count(
+        &self,
+        asset: &Hash,
+    ) -> Result<u32, BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get native asset supply checkpoint count {}", asset);
+        }
+        let key = build_native_asset_supply_checkpoint_count_key(asset);
+        self.load_optional_from_disk(Column::NativeAssets, &key)
+            .map(|opt| opt.unwrap_or(0))
+    }
+
+    async fn set_native_asset_supply_checkpoint_count(
+        &mut self,
+        asset: &Hash,
+        count: u32,
+    ) -> Result<(), BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "set native asset supply checkpoint count {} = {}",
+                asset,
+                count
+            );
+        }
+        let key = build_native_asset_supply_checkpoint_count_key(asset);
+        self.insert_into_disk(Column::NativeAssets, &key, &count)
+    }
+
+    async fn get_native_asset_supply_checkpoint(
+        &self,
+        asset: &Hash,
+        index: u32,
+    ) -> Result<SupplyCheckpoint, BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "get native asset supply checkpoint {} index {}",
+                asset,
+                index
+            );
+        }
+        let key = build_native_asset_supply_checkpoint_key(asset, index);
+        self.load_from_disk(Column::NativeAssets, &key)
+    }
+
+    async fn set_native_asset_supply_checkpoint(
+        &mut self,
+        asset: &Hash,
+        index: u32,
+        checkpoint: &SupplyCheckpoint,
+    ) -> Result<(), BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "set native asset supply checkpoint {} index {}",
+                asset,
+                index
+            );
+        }
+        let key = build_native_asset_supply_checkpoint_key(asset, index);
+        self.insert_into_disk(Column::NativeAssets, &key, checkpoint)
+    }
+
+    // ===== Admin Delay Operations =====
+
+    async fn get_native_asset_admin_delay(
+        &self,
+        asset: &Hash,
+    ) -> Result<AdminDelay, BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get native asset admin delay {}", asset);
+        }
+        let key = build_native_asset_admin_delay_key(asset);
+        self.load_optional_from_disk(Column::NativeAssets, &key)
+            .map(|opt| opt.unwrap_or_default())
+    }
+
+    async fn set_native_asset_admin_delay(
+        &mut self,
+        asset: &Hash,
+        delay: &AdminDelay,
+    ) -> Result<(), BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("set native asset admin delay {} = {:?}", asset, delay.delay);
+        }
+        let key = build_native_asset_admin_delay_key(asset);
+        self.insert_into_disk(Column::NativeAssets, &key, delay)
+    }
+
+    // ===== Timelock Operations =====
+
+    async fn get_native_asset_timelock_min_delay(
+        &self,
+        asset: &Hash,
+    ) -> Result<u64, BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get native asset timelock min delay {}", asset);
+        }
+        let key = build_native_asset_timelock_min_delay_key(asset);
+        self.load_optional_from_disk(Column::NativeAssets, &key)
+            .map(|opt| opt.unwrap_or(0))
+    }
+
+    async fn set_native_asset_timelock_min_delay(
+        &mut self,
+        asset: &Hash,
+        delay: u64,
+    ) -> Result<(), BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("set native asset timelock min delay {} = {}", asset, delay);
+        }
+        let key = build_native_asset_timelock_min_delay_key(asset);
+        self.insert_into_disk(Column::NativeAssets, &key, &delay)
+    }
+
+    async fn get_native_asset_timelock_operation(
+        &self,
+        asset: &Hash,
+        operation_id: &[u8; 32],
+    ) -> Result<Option<TimelockOperation>, BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "get native asset timelock operation {} id {:?}",
+                asset,
+                operation_id
+            );
+        }
+        let key = build_native_asset_timelock_operation_key(asset, operation_id);
+        self.load_optional_from_disk(Column::NativeAssets, &key)
+    }
+
+    async fn set_native_asset_timelock_operation(
+        &mut self,
+        asset: &Hash,
+        operation: &TimelockOperation,
+    ) -> Result<(), BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "set native asset timelock operation {} id {:?}",
+                asset,
+                operation.id
+            );
+        }
+        let key = build_native_asset_timelock_operation_key(asset, &operation.id);
+        self.insert_into_disk(Column::NativeAssets, &key, operation)
+    }
+
+    async fn delete_native_asset_timelock_operation(
+        &mut self,
+        asset: &Hash,
+        operation_id: &[u8; 32],
+    ) -> Result<(), BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "delete native asset timelock operation {} id {:?}",
+                asset,
+                operation_id
+            );
+        }
+        let key = build_native_asset_timelock_operation_key(asset, operation_id);
+        self.remove_from_disk(Column::NativeAssets, &key)
     }
 }

@@ -7,9 +7,9 @@ use async_trait::async_trait;
 use tos_common::{
     crypto::Hash,
     native_asset::{
-        AgentAuthorization, Allowance, BalanceCheckpoint, Checkpoint, Delegation,
+        AdminDelay, AgentAuthorization, Allowance, BalanceCheckpoint, Checkpoint, Delegation,
         DelegationCheckpoint, Escrow, FreezeState, NativeAssetData, PauseState, RoleConfig, RoleId,
-        TokenLock,
+        SupplyCheckpoint, TimelockOperation, TokenLock,
     },
 };
 
@@ -573,6 +573,87 @@ pub trait NativeAssetProvider {
         index: u32,
         checkpoint: &DelegationCheckpoint,
     ) -> Result<(), BlockchainError>;
+
+    // ===== Supply Checkpoint Operations =====
+
+    /// Get supply checkpoint count for an asset
+    async fn get_native_asset_supply_checkpoint_count(
+        &self,
+        asset: &Hash,
+    ) -> Result<u32, BlockchainError>;
+
+    /// Set supply checkpoint count for an asset
+    async fn set_native_asset_supply_checkpoint_count(
+        &mut self,
+        asset: &Hash,
+        count: u32,
+    ) -> Result<(), BlockchainError>;
+
+    /// Get supply checkpoint at index
+    async fn get_native_asset_supply_checkpoint(
+        &self,
+        asset: &Hash,
+        index: u32,
+    ) -> Result<SupplyCheckpoint, BlockchainError>;
+
+    /// Set supply checkpoint at index
+    async fn set_native_asset_supply_checkpoint(
+        &mut self,
+        asset: &Hash,
+        index: u32,
+        checkpoint: &SupplyCheckpoint,
+    ) -> Result<(), BlockchainError>;
+
+    // ===== Admin Delay Operations =====
+
+    /// Get admin delay configuration for an asset
+    async fn get_native_asset_admin_delay(
+        &self,
+        asset: &Hash,
+    ) -> Result<AdminDelay, BlockchainError>;
+
+    /// Set admin delay configuration for an asset
+    async fn set_native_asset_admin_delay(
+        &mut self,
+        asset: &Hash,
+        delay: &AdminDelay,
+    ) -> Result<(), BlockchainError>;
+
+    // ===== Timelock Operations =====
+
+    /// Get timelock minimum delay for an asset
+    async fn get_native_asset_timelock_min_delay(
+        &self,
+        asset: &Hash,
+    ) -> Result<u64, BlockchainError>;
+
+    /// Set timelock minimum delay for an asset
+    async fn set_native_asset_timelock_min_delay(
+        &mut self,
+        asset: &Hash,
+        delay: u64,
+    ) -> Result<(), BlockchainError>;
+
+    /// Get timelock operation by ID
+    async fn get_native_asset_timelock_operation(
+        &self,
+        asset: &Hash,
+        operation_id: &[u8; 32],
+    ) -> Result<Option<TimelockOperation>, BlockchainError>;
+
+    /// Set timelock operation
+    async fn set_native_asset_timelock_operation(
+        &mut self,
+        asset: &Hash,
+        operation: &TimelockOperation,
+    ) -> Result<(), BlockchainError>;
+
+    /// Delete timelock operation
+    async fn delete_native_asset_timelock_operation(
+        &mut self,
+        asset: &Hash,
+        operation_id: &[u8; 32],
+    ) -> Result<(), BlockchainError>;
 }
 
 // ===== Storage Key Builders =====
@@ -864,5 +945,47 @@ pub fn build_native_asset_delegation_checkpoint_count_key(
     );
     key.extend_from_slice(asset.as_bytes());
     key.extend_from_slice(account);
+    key
+}
+
+/// Build storage key for supply checkpoint
+pub fn build_native_asset_supply_checkpoint_key(asset: &Hash, index: u32) -> Vec<u8> {
+    let mut key = Vec::with_capacity(4 + 32 + 4);
+    key.extend_from_slice(tos_common::native_asset::NATIVE_ASSET_SUPPLY_CHECKPOINT_PREFIX);
+    key.extend_from_slice(asset.as_bytes());
+    key.extend_from_slice(&index.to_be_bytes());
+    key
+}
+
+/// Build storage key for supply checkpoint count
+pub fn build_native_asset_supply_checkpoint_count_key(asset: &Hash) -> Vec<u8> {
+    let mut key = Vec::with_capacity(4 + 32);
+    key.extend_from_slice(tos_common::native_asset::NATIVE_ASSET_SUPPLY_CHECKPOINT_COUNT_PREFIX);
+    key.extend_from_slice(asset.as_bytes());
+    key
+}
+
+/// Build storage key for admin delay
+pub fn build_native_asset_admin_delay_key(asset: &Hash) -> Vec<u8> {
+    let mut key = Vec::with_capacity(4 + 32);
+    key.extend_from_slice(tos_common::native_asset::NATIVE_ASSET_ADMIN_DELAY_PREFIX);
+    key.extend_from_slice(asset.as_bytes());
+    key
+}
+
+/// Build storage key for timelock minimum delay
+pub fn build_native_asset_timelock_min_delay_key(asset: &Hash) -> Vec<u8> {
+    let mut key = Vec::with_capacity(4 + 32);
+    key.extend_from_slice(tos_common::native_asset::NATIVE_ASSET_TIMELOCK_MIN_DELAY_PREFIX);
+    key.extend_from_slice(asset.as_bytes());
+    key
+}
+
+/// Build storage key for timelock operation
+pub fn build_native_asset_timelock_operation_key(asset: &Hash, operation_id: &[u8; 32]) -> Vec<u8> {
+    let mut key = Vec::with_capacity(4 + 32 + 32);
+    key.extend_from_slice(tos_common::native_asset::NATIVE_ASSET_TIMELOCK_OP_PREFIX);
+    key.extend_from_slice(asset.as_bytes());
+    key.extend_from_slice(operation_id);
     key
 }
