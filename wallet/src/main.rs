@@ -1318,7 +1318,7 @@ async fn setup_wallet_command_manager(
         vec![Arg::new(
             "ttl",
             ArgType::Number,
-            "Time-to-live in blocks (100-86400, default: 1000)",
+            "Time-to-live in blocks (100-86400, default: 100)",
         )],
         CommandHandler::Async(async_handler!(send_message)),
     ))?;
@@ -6330,8 +6330,8 @@ async fn list_messages(
         })?
     };
 
-    // Query messages
-    let offset = page * ELEMENTS_PER_PAGE as u32;
+    // Query messages (use saturating_mul to prevent overflow on large page values)
+    let offset = page.saturating_mul(ELEMENTS_PER_PAGE as u32);
     {
         let network_handler = wallet.get_network_handler().lock().await;
         let handler = network_handler.as_ref().ok_or_else(|| {

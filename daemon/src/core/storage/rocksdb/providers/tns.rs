@@ -182,6 +182,11 @@ impl TnsProvider for RocksStorage {
             );
         }
 
+        // Early return for limit=0 edge case
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+
         let mut messages = Vec::new();
         let mut skipped = 0u32;
         let mut collected = 0u32;

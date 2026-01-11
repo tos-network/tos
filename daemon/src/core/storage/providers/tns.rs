@@ -29,6 +29,9 @@ pub struct StoredEphemeralMessage {
     pub expiry_topoheight: TopoHeight,
 }
 
+/// Maximum encrypted content size (same as MAX_ENCRYPTED_SIZE from tns constants)
+const MAX_ENCRYPTED_SIZE: usize = 188;
+
 impl Serializer for StoredEphemeralMessage {
     fn write(&self, writer: &mut Writer) {
         self.sender_name_hash.write(writer);
@@ -36,8 +39,17 @@ impl Serializer for StoredEphemeralMessage {
         writer.write_u64(&self.message_nonce);
         writer.write_u32(&self.ttl_blocks);
         // Content length as u16 (max 188 bytes)
-        writer.write_u16(self.encrypted_content.len() as u16);
-        writer.write_bytes(&self.encrypted_content);
+        // Debug assert to catch programming errors - content should be validated before storage
+        debug_assert!(
+            self.encrypted_content.len() <= MAX_ENCRYPTED_SIZE,
+            "Encrypted content length {} exceeds max {}",
+            self.encrypted_content.len(),
+            MAX_ENCRYPTED_SIZE
+        );
+        // Saturating cast to prevent overflow/truncation in release builds
+        let len = self.encrypted_content.len().min(u16::MAX as usize) as u16;
+        writer.write_u16(len);
+        writer.write_bytes(&self.encrypted_content[..len as usize]);
         writer.write_bytes(&self.receiver_handle);
         writer.write_u64(&self.stored_topoheight);
         writer.write_u64(&self.expiry_topoheight);
@@ -49,6 +61,12 @@ impl Serializer for StoredEphemeralMessage {
         let message_nonce = reader.read_u64()?;
         let ttl_blocks = reader.read_u32()?;
         let content_len = reader.read_u16()? as usize;
+
+        // Validate content length to prevent large allocations from corrupted data
+        if content_len > MAX_ENCRYPTED_SIZE {
+            return Err(ReaderError::InvalidSize);
+        }
+
         let encrypted_content = reader.read_bytes(content_len)?;
         let receiver_handle = reader.read_bytes_32()?;
         let stored_topoheight = reader.read_u64()?;

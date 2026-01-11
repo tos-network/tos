@@ -5396,19 +5396,28 @@ async fn get_message_by_id<S: Storage>(
     let blockchain: &Arc<Blockchain<S>> = context.get()?;
 
     let storage = blockchain.get_storage().read().await;
+    let current_topoheight = blockchain.get_topo_height();
+
     let message = storage
         .get_ephemeral_message(&params.message_id)
         .await
         .context("Error while getting message")?;
 
-    let message_info = message.map(|msg| EphemeralMessageInfo {
-        message_id: Cow::Owned(params.message_id.into_owned()),
-        sender_name_hash: Cow::Owned(msg.sender_name_hash),
-        message_nonce: msg.message_nonce,
-        encrypted_content: msg.encrypted_content,
-        receiver_handle: msg.receiver_handle,
-        stored_topoheight: msg.stored_topoheight,
-        expiry_topoheight: msg.expiry_topoheight,
+    // Filter out expired messages - don't return messages past their TTL
+    let message_info = message.and_then(|msg| {
+        if msg.expiry_topoheight > current_topoheight {
+            Some(EphemeralMessageInfo {
+                message_id: Cow::Owned(params.message_id.into_owned()),
+                sender_name_hash: Cow::Owned(msg.sender_name_hash),
+                message_nonce: msg.message_nonce,
+                encrypted_content: msg.encrypted_content,
+                receiver_handle: msg.receiver_handle,
+                stored_topoheight: msg.stored_topoheight,
+                expiry_topoheight: msg.expiry_topoheight,
+            })
+        } else {
+            None // Message has expired
+        }
     });
 
     Ok(json!(GetMessageByIdResult {
