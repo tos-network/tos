@@ -4,6 +4,7 @@ use crate::core::{
         Storage, VersionedContract, VersionedContractBalance, VersionedContractData,
         VersionedMultiSig, VersionedSupply,
     },
+    BlockScheduledExecutionResults,
 };
 use async_trait::async_trait;
 use indexmap::IndexMap;
@@ -44,6 +45,9 @@ struct ContractManager {
     // Scheduled executions registered during this block
     // Key: (contract_hash, execution_topoheight)
     scheduled_executions: Vec<(Hash, TopoHeight, ScheduledExecution)>,
+    // Results from processing scheduled executions at this block
+    // Contains aggregated transfers and miner rewards
+    scheduled_execution_results: BlockScheduledExecutionResults,
 }
 
 // Chain State that can be applied to the mutable storage
@@ -935,6 +939,7 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
                 assets: HashMap::new(),
                 tracker: ContractEventTracker::default(),
                 scheduled_executions: Vec::new(),
+                scheduled_execution_results: BlockScheduledExecutionResults::default(),
             },
             block_hash,
             block,
@@ -995,6 +1000,24 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
     /// Get the number of scheduled executions registered in this block
     pub fn get_scheduled_execution_count(&self) -> usize {
         self.contract_manager.scheduled_executions.len()
+    }
+
+    /// Set the results from processing scheduled executions at this block
+    ///
+    /// This should be called after `process_scheduled_executions` to store the results
+    /// which will be applied during `apply_changes`.
+    pub fn set_scheduled_execution_results(&mut self, results: BlockScheduledExecutionResults) {
+        self.contract_manager.scheduled_execution_results = results;
+    }
+
+    /// Get the total miner rewards from scheduled executions
+    ///
+    /// This returns the sum of all miner rewards from processing scheduled executions
+    /// in this block. These should be added to the block miner's reward.
+    pub fn get_scheduled_execution_miner_rewards(&self) -> u64 {
+        self.contract_manager
+            .scheduled_execution_results
+            .total_miner_rewards
     }
 
     async fn remove_contract_module_internal(
@@ -1411,6 +1434,46 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
                     .internal_get_receiver_balance(Cow::Owned(key.clone()), Cow::Owned(asset))
                     .await?;
                 *receiver_balance += amount;
+            }
+        }
+
+        // Apply transfers from scheduled executions
+        if !self
+            .contract_manager
+            .scheduled_execution_results
+            .aggregated_transfers
+            .is_empty()
+        {
+            if log::log_enabled!(log::Level::Debug) {
+                debug!(
+                    "applying {} scheduled execution transfer destinations",
+                    self.contract_manager
+                        .scheduled_execution_results
+                        .aggregated_transfers
+                        .len()
+                );
+            }
+            for (key, assets) in self
+                .contract_manager
+                .scheduled_execution_results
+                .aggregated_transfers
+            {
+                for (asset, amount) in assets {
+                    if log::log_enabled!(log::Level::Trace) {
+                        trace!(
+                            "Applying scheduled execution transfer: {} {} to {} at topoheight {}",
+                            amount,
+                            asset,
+                            key.as_address(self.inner.storage.is_mainnet()),
+                            self.inner.topoheight
+                        );
+                    }
+                    let receiver_balance = self
+                        .inner
+                        .internal_get_receiver_balance(Cow::Owned(key.clone()), Cow::Owned(asset))
+                        .await?;
+                    *receiver_balance += amount;
+                }
             }
         }
 

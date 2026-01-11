@@ -92,8 +92,7 @@ impl Default for ScheduledExecutionConfig {
 ///
 /// # Arguments
 ///
-/// * `storage` - Scheduled execution storage provider
-/// * `provider` - Contract provider for execution context
+/// * `storage` - Storage implementing both ContractScheduledExecutionProvider and ContractProvider
 /// * `topoheight` - Current block's topoheight
 /// * `block_hash` - Current block hash
 /// * `block_height` - Current block height
@@ -103,9 +102,8 @@ impl Default for ScheduledExecutionConfig {
 /// # Returns
 ///
 /// `BlockScheduledExecutionResults` containing all execution outcomes
-pub async fn process_scheduled_executions<S, P>(
+pub async fn process_scheduled_executions<S>(
     storage: &mut S,
-    provider: &mut P,
     topoheight: TopoHeight,
     block_hash: &Hash,
     block_height: u64,
@@ -113,8 +111,7 @@ pub async fn process_scheduled_executions<S, P>(
     config: &ScheduledExecutionConfig,
 ) -> Result<BlockScheduledExecutionResults, BlockchainError>
 where
-    S: ContractScheduledExecutionProvider,
-    P: ContractProvider + Send,
+    S: ContractScheduledExecutionProvider + ContractProvider + Send,
 {
     if log::log_enabled!(log::Level::Info) {
         info!(
@@ -192,7 +189,7 @@ where
         // Execute the contract
         let exec_result = execute_scheduled(
             &execution,
-            provider,
+            storage,
             topoheight,
             block_hash,
             block_height,
@@ -424,9 +421,9 @@ where
 }
 
 /// Execute a single scheduled execution
-async fn execute_scheduled<P>(
+async fn execute_scheduled<S>(
     execution: &ScheduledExecution,
-    provider: &mut P,
+    storage: &mut S,
     topoheight: TopoHeight,
     block_hash: &Hash,
     block_height: u64,
@@ -434,10 +431,10 @@ async fn execute_scheduled<P>(
     max_gas: u64,
 ) -> Result<ExecutionOutput, BlockchainError>
 where
-    P: ContractProvider + Send,
+    S: ContractProvider + Send,
 {
     // Load contract bytecode
-    let bytecode = provider
+    let bytecode = storage
         .load_contract_module(&execution.contract, topoheight)?
         .ok_or_else(|| BlockchainError::ContractNotFound(execution.contract.clone()))?;
 
@@ -450,7 +447,7 @@ where
     // Execute the contract
     let result = TakoExecutor::execute(
         &bytecode,
-        provider,
+        storage,
         topoheight,
         &execution.contract,
         block_hash,

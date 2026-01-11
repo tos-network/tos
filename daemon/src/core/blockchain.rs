@@ -13,11 +13,12 @@ use crate::{
         hard_fork::*,
         mempool::Mempool,
         nonce_checker::NonceChecker,
+        process_scheduled_executions,
         simulator::Simulator,
         state::{ApplicableChainState, ChainState},
         storage::{DagOrderProvider, DifficultyProvider, Storage},
         tx_selector::{TxSelector, TxSelectorEntry},
-        TxCache,
+        ScheduledExecutionConfig, TxCache,
     },
     p2p::P2pServer,
     rpc::{
@@ -4266,6 +4267,21 @@ impl<S: Storage> Blockchain<S> {
                     }
                 }
 
+                // Process scheduled executions at this topoheight
+                let scheduled_execution_config = ScheduledExecutionConfig::default();
+                let scheduled_execution_results = process_scheduled_executions(
+                    chain_state.get_mut_storage(),
+                    highest_topo,
+                    &hash,
+                    block.get_height(),
+                    block.get_header().get_timestamp() / 1000, // Convert ms to seconds
+                    &scheduled_execution_config,
+                )
+                .await?;
+
+                // Store results for transfer application and miner rewards
+                chain_state.set_scheduled_execution_results(scheduled_execution_results);
+
                 let dev_fee_percentage = get_block_dev_fee(block.get_height());
                 // Dev fee are only applied on block reward
                 // Transaction fees are not affected by dev fee
@@ -4279,10 +4295,15 @@ impl<S: Storage> Blockchain<S> {
                 }
 
                 // reward the miner
-                // Miner gets the block reward + total fees + gas fee
+                // Miner gets the block reward + total fees + gas fee + scheduled execution rewards
                 let gas_fee = chain_state.get_gas_fee();
+                let scheduled_execution_rewards =
+                    chain_state.get_scheduled_execution_miner_rewards();
                 chain_state
-                    .reward_miner(block.get_miner(), miner_reward + total_fees + gas_fee)
+                    .reward_miner(
+                        block.get_miner(),
+                        miner_reward + total_fees + gas_fee + scheduled_execution_rewards,
+                    )
                     .await?;
 
                 // Fire all the contract events
