@@ -238,6 +238,60 @@ impl Serializer for Delegation {
     }
 }
 
+/// Balance checkpoint for historical balance queries
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct BalanceCheckpoint {
+    /// Block height when checkpoint was created
+    pub from_block: u64,
+    /// Balance at this checkpoint
+    pub balance: u64,
+}
+
+impl Serializer for BalanceCheckpoint {
+    fn write(&self, writer: &mut Writer) {
+        self.from_block.write(writer);
+        self.balance.write(writer);
+    }
+
+    fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
+        Ok(Self {
+            from_block: reader.read()?,
+            balance: reader.read()?,
+        })
+    }
+
+    fn size(&self) -> usize {
+        16
+    }
+}
+
+/// Delegation checkpoint for historical delegation queries
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct DelegationCheckpoint {
+    /// Block height when delegation changed
+    pub from_block: u64,
+    /// Delegatee at this checkpoint (zero = self-delegation)
+    pub delegatee: [u8; 32],
+}
+
+impl Serializer for DelegationCheckpoint {
+    fn write(&self, writer: &mut Writer) {
+        self.from_block.write(writer);
+        self.delegatee.write(writer);
+    }
+
+    fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
+        Ok(Self {
+            from_block: reader.read()?,
+            delegatee: reader.read()?,
+        })
+    }
+
+    fn size(&self) -> usize {
+        40
+    }
+}
+
 // ===== Escrow =====
 
 /// Escrow status

@@ -133,3 +133,15 @@ pub const NATIVE_ASSET_ROLE_MEMBERS_PREFIX: &[u8] = b"nari";
 
 /// Pending admin prefix (for admin proposal workflow)
 pub const NATIVE_ASSET_PENDING_ADMIN_PREFIX: &[u8] = b"napa";
+
+/// Balance checkpoint prefix (for historical balance queries)
+pub const NATIVE_ASSET_BALANCE_CHECKPOINT_PREFIX: &[u8] = b"nabc";
+
+/// Balance checkpoint count prefix
+pub const NATIVE_ASSET_BALANCE_CHECKPOINT_COUNT_PREFIX: &[u8] = b"nabC";
+
+/// Delegation checkpoint prefix (for historical delegation queries)
+pub const NATIVE_ASSET_DELEGATION_CHECKPOINT_PREFIX: &[u8] = b"nadc";
+
+/// Delegation checkpoint count prefix
+pub const NATIVE_ASSET_DELEGATION_CHECKPOINT_COUNT_PREFIX: &[u8] = b"nadC";

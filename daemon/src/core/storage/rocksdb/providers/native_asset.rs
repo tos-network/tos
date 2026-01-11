@@ -7,8 +7,11 @@ use crate::core::{
     storage::{
         providers::native_asset::{
             build_native_asset_agent_auth_key, build_native_asset_allowance_key,
-            build_native_asset_balance_key, build_native_asset_checkpoint_count_key,
-            build_native_asset_checkpoint_key, build_native_asset_delegation_key,
+            build_native_asset_balance_checkpoint_count_key,
+            build_native_asset_balance_checkpoint_key, build_native_asset_balance_key,
+            build_native_asset_checkpoint_count_key, build_native_asset_checkpoint_key,
+            build_native_asset_delegation_checkpoint_count_key,
+            build_native_asset_delegation_checkpoint_key, build_native_asset_delegation_key,
             build_native_asset_escrow_counter_key, build_native_asset_escrow_key,
             build_native_asset_freeze_key, build_native_asset_key,
             build_native_asset_lock_count_key, build_native_asset_lock_index_key,
@@ -28,8 +31,9 @@ use log::trace;
 use tos_common::{
     crypto::Hash,
     native_asset::{
-        AgentAuthorization, Allowance, Checkpoint, Delegation, Escrow, FreezeState,
-        NativeAssetData, PauseState, RoleConfig, RoleId, TokenLock,
+        AgentAuthorization, Allowance, BalanceCheckpoint, Checkpoint, Delegation,
+        DelegationCheckpoint, Escrow, FreezeState, NativeAssetData, PauseState, RoleConfig, RoleId,
+        TokenLock,
     },
 };
 
@@ -1136,5 +1140,153 @@ impl NativeAssetProvider for RocksStorage {
             Some(a) => self.insert_into_disk(Column::NativeAssets, &key, a),
             None => self.remove_from_disk(Column::NativeAssets, &key),
         }
+    }
+
+    // ===== Balance Checkpoint Operations =====
+
+    async fn get_native_asset_balance_checkpoint_count(
+        &self,
+        asset: &Hash,
+        account: &[u8; 32],
+    ) -> Result<u32, BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "get native asset balance checkpoint count {} account {:?}",
+                asset,
+                account
+            );
+        }
+        let key = build_native_asset_balance_checkpoint_count_key(asset, account);
+        self.load_optional_from_disk(Column::NativeAssets, &key)
+            .map(|v| v.unwrap_or(0))
+    }
+
+    async fn set_native_asset_balance_checkpoint_count(
+        &mut self,
+        asset: &Hash,
+        account: &[u8; 32],
+        count: u32,
+    ) -> Result<(), BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "set native asset balance checkpoint count {} account {:?} = {}",
+                asset,
+                account,
+                count
+            );
+        }
+        let key = build_native_asset_balance_checkpoint_count_key(asset, account);
+        self.insert_into_disk(Column::NativeAssets, &key, &count)
+    }
+
+    async fn get_native_asset_balance_checkpoint(
+        &self,
+        asset: &Hash,
+        account: &[u8; 32],
+        index: u32,
+    ) -> Result<BalanceCheckpoint, BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "get native asset balance checkpoint {} account {:?} index {}",
+                asset,
+                account,
+                index
+            );
+        }
+        let key = build_native_asset_balance_checkpoint_key(asset, account, index);
+        self.load_from_disk(Column::NativeAssets, &key)
+    }
+
+    async fn set_native_asset_balance_checkpoint(
+        &mut self,
+        asset: &Hash,
+        account: &[u8; 32],
+        index: u32,
+        checkpoint: &BalanceCheckpoint,
+    ) -> Result<(), BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "set native asset balance checkpoint {} account {:?} index {}",
+                asset,
+                account,
+                index
+            );
+        }
+        let key = build_native_asset_balance_checkpoint_key(asset, account, index);
+        self.insert_into_disk(Column::NativeAssets, &key, checkpoint)
+    }
+
+    // ===== Delegation Checkpoint Operations =====
+
+    async fn get_native_asset_delegation_checkpoint_count(
+        &self,
+        asset: &Hash,
+        account: &[u8; 32],
+    ) -> Result<u32, BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "get native asset delegation checkpoint count {} account {:?}",
+                asset,
+                account
+            );
+        }
+        let key = build_native_asset_delegation_checkpoint_count_key(asset, account);
+        self.load_optional_from_disk(Column::NativeAssets, &key)
+            .map(|v| v.unwrap_or(0))
+    }
+
+    async fn set_native_asset_delegation_checkpoint_count(
+        &mut self,
+        asset: &Hash,
+        account: &[u8; 32],
+        count: u32,
+    ) -> Result<(), BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "set native asset delegation checkpoint count {} account {:?} = {}",
+                asset,
+                account,
+                count
+            );
+        }
+        let key = build_native_asset_delegation_checkpoint_count_key(asset, account);
+        self.insert_into_disk(Column::NativeAssets, &key, &count)
+    }
+
+    async fn get_native_asset_delegation_checkpoint(
+        &self,
+        asset: &Hash,
+        account: &[u8; 32],
+        index: u32,
+    ) -> Result<DelegationCheckpoint, BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "get native asset delegation checkpoint {} account {:?} index {}",
+                asset,
+                account,
+                index
+            );
+        }
+        let key = build_native_asset_delegation_checkpoint_key(asset, account, index);
+        self.load_from_disk(Column::NativeAssets, &key)
+    }
+
+    async fn set_native_asset_delegation_checkpoint(
+        &mut self,
+        asset: &Hash,
+        account: &[u8; 32],
+        index: u32,
+        checkpoint: &DelegationCheckpoint,
+    ) -> Result<(), BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "set native asset delegation checkpoint {} account {:?} index {}",
+                asset,
+                account,
+                index
+            );
+        }
+        let key = build_native_asset_delegation_checkpoint_key(asset, account, index);
+        self.insert_into_disk(Column::NativeAssets, &key, checkpoint)
     }
 }

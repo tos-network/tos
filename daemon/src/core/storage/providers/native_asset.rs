@@ -7,8 +7,9 @@ use async_trait::async_trait;
 use tos_common::{
     crypto::Hash,
     native_asset::{
-        AgentAuthorization, Allowance, Checkpoint, Delegation, Escrow, FreezeState,
-        NativeAssetData, PauseState, RoleConfig, RoleId, TokenLock,
+        AgentAuthorization, Allowance, BalanceCheckpoint, Checkpoint, Delegation,
+        DelegationCheckpoint, Escrow, FreezeState, NativeAssetData, PauseState, RoleConfig, RoleId,
+        TokenLock,
     },
 };
 
@@ -504,6 +505,74 @@ pub trait NativeAssetProvider {
         asset: &Hash,
         admin: Option<&[u8; 32]>,
     ) -> Result<(), BlockchainError>;
+
+    // ===== Balance Checkpoint Operations =====
+
+    /// Get balance checkpoint count for an account
+    async fn get_native_asset_balance_checkpoint_count(
+        &self,
+        asset: &Hash,
+        account: &[u8; 32],
+    ) -> Result<u32, BlockchainError>;
+
+    /// Set balance checkpoint count for an account
+    async fn set_native_asset_balance_checkpoint_count(
+        &mut self,
+        asset: &Hash,
+        account: &[u8; 32],
+        count: u32,
+    ) -> Result<(), BlockchainError>;
+
+    /// Get balance checkpoint at index
+    async fn get_native_asset_balance_checkpoint(
+        &self,
+        asset: &Hash,
+        account: &[u8; 32],
+        index: u32,
+    ) -> Result<BalanceCheckpoint, BlockchainError>;
+
+    /// Set balance checkpoint at index
+    async fn set_native_asset_balance_checkpoint(
+        &mut self,
+        asset: &Hash,
+        account: &[u8; 32],
+        index: u32,
+        checkpoint: &BalanceCheckpoint,
+    ) -> Result<(), BlockchainError>;
+
+    // ===== Delegation Checkpoint Operations =====
+
+    /// Get delegation checkpoint count for an account
+    async fn get_native_asset_delegation_checkpoint_count(
+        &self,
+        asset: &Hash,
+        account: &[u8; 32],
+    ) -> Result<u32, BlockchainError>;
+
+    /// Set delegation checkpoint count for an account
+    async fn set_native_asset_delegation_checkpoint_count(
+        &mut self,
+        asset: &Hash,
+        account: &[u8; 32],
+        count: u32,
+    ) -> Result<(), BlockchainError>;
+
+    /// Get delegation checkpoint at index
+    async fn get_native_asset_delegation_checkpoint(
+        &self,
+        asset: &Hash,
+        account: &[u8; 32],
+        index: u32,
+    ) -> Result<DelegationCheckpoint, BlockchainError>;
+
+    /// Set delegation checkpoint at index
+    async fn set_native_asset_delegation_checkpoint(
+        &mut self,
+        asset: &Hash,
+        account: &[u8; 32],
+        index: u32,
+        checkpoint: &DelegationCheckpoint,
+    ) -> Result<(), BlockchainError>;
 }
 
 // ===== Storage Key Builders =====
@@ -741,5 +810,59 @@ pub fn build_native_asset_pending_admin_key(asset: &Hash) -> Vec<u8> {
     let mut key = Vec::with_capacity(4 + 32);
     key.extend_from_slice(tos_common::native_asset::NATIVE_ASSET_PENDING_ADMIN_PREFIX);
     key.extend_from_slice(asset.as_bytes());
+    key
+}
+
+/// Build storage key for balance checkpoint
+pub fn build_native_asset_balance_checkpoint_key(
+    asset: &Hash,
+    account: &[u8; 32],
+    index: u32,
+) -> Vec<u8> {
+    let mut key = Vec::with_capacity(4 + 32 + 32 + 4);
+    key.extend_from_slice(tos_common::native_asset::NATIVE_ASSET_BALANCE_CHECKPOINT_PREFIX);
+    key.extend_from_slice(asset.as_bytes());
+    key.extend_from_slice(account);
+    key.extend_from_slice(&index.to_be_bytes());
+    key
+}
+
+/// Build storage key for balance checkpoint count
+pub fn build_native_asset_balance_checkpoint_count_key(
+    asset: &Hash,
+    account: &[u8; 32],
+) -> Vec<u8> {
+    let mut key = Vec::with_capacity(4 + 32 + 32);
+    key.extend_from_slice(tos_common::native_asset::NATIVE_ASSET_BALANCE_CHECKPOINT_COUNT_PREFIX);
+    key.extend_from_slice(asset.as_bytes());
+    key.extend_from_slice(account);
+    key
+}
+
+/// Build storage key for delegation checkpoint
+pub fn build_native_asset_delegation_checkpoint_key(
+    asset: &Hash,
+    account: &[u8; 32],
+    index: u32,
+) -> Vec<u8> {
+    let mut key = Vec::with_capacity(4 + 32 + 32 + 4);
+    key.extend_from_slice(tos_common::native_asset::NATIVE_ASSET_DELEGATION_CHECKPOINT_PREFIX);
+    key.extend_from_slice(asset.as_bytes());
+    key.extend_from_slice(account);
+    key.extend_from_slice(&index.to_be_bytes());
+    key
+}
+
+/// Build storage key for delegation checkpoint count
+pub fn build_native_asset_delegation_checkpoint_count_key(
+    asset: &Hash,
+    account: &[u8; 32],
+) -> Vec<u8> {
+    let mut key = Vec::with_capacity(4 + 32 + 32);
+    key.extend_from_slice(
+        tos_common::native_asset::NATIVE_ASSET_DELEGATION_CHECKPOINT_COUNT_PREFIX,
+    );
+    key.extend_from_slice(asset.as_bytes());
+    key.extend_from_slice(account);
     key
 }

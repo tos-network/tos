@@ -12,9 +12,9 @@ use std::io;
 use tos_common::{
     crypto::Hash,
     native_asset::{
-        AgentAuthorization, Allowance, Delegation, Escrow, EscrowStatus, FreezeState,
-        NativeAssetData, PauseState, ReleaseCondition, RoleId, SpendingLimit, SpendingPeriod,
-        TokenLock,
+        AgentAuthorization, Allowance, BalanceCheckpoint, Delegation, DelegationCheckpoint, Escrow,
+        EscrowStatus, FreezeState, NativeAssetData, PauseState, ReleaseCondition, RoleId,
+        SpendingLimit, SpendingPeriod, TokenLock,
     },
     serializer::Serializer,
     tokio::try_block_on,
@@ -255,6 +255,43 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TosNativeAssetAdapter<'a
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)
     }
+
+    /// Create a balance checkpoint for historical balance queries
+    fn write_balance_checkpoint(
+        &mut self,
+        hash: &Hash,
+        account: &[u8; 32],
+        balance: u64,
+    ) -> Result<(), EbpfError> {
+        let checkpoint = BalanceCheckpoint {
+            from_block: self.block_height,
+            balance,
+        };
+
+        let count = try_block_on(
+            self.provider
+                .get_native_asset_balance_checkpoint_count(hash, account),
+        )
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)?;
+
+        try_block_on(self.provider.set_native_asset_balance_checkpoint(
+            hash,
+            account,
+            count,
+            &checkpoint,
+        ))
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)?;
+
+        try_block_on(self.provider.set_native_asset_balance_checkpoint_count(
+            hash,
+            account,
+            count + 1,
+        ))
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)
+    }
 }
 
 impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
@@ -444,6 +481,9 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
 
+        // Create balance checkpoint for sender
+        self.write_balance_checkpoint(&hash, from, new_from)?;
+
         // Add to recipient
         let to_balance = self.balance_of(asset, to)?;
         let new_to = to_balance
@@ -452,6 +492,9 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         try_block_on(self.provider.set_native_asset_balance(&hash, to, new_to))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
+
+        // Create balance checkpoint for recipient
+        self.write_balance_checkpoint(&hash, to, new_to)?;
 
         Ok(())
     }
@@ -499,6 +542,9 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
+
+        // Create balance checkpoint for recipient
+        self.write_balance_checkpoint(&hash, to, new_balance)?;
 
         // Update total supply
         let supply = self.total_supply(asset)?;
@@ -549,6 +595,9 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
 
+        // Create balance checkpoint for sender
+        self.write_balance_checkpoint(&hash, from, new_balance)?;
+
         // Update total supply
         let supply = self.total_supply(asset)?;
         let new_supply = supply.saturating_sub(amount);
@@ -575,7 +624,10 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
                 .set_native_asset_balance(&hash, account, new_balance),
         )
         .map_err(Self::convert_error)?
-        .map_err(Self::convert_error)
+        .map_err(Self::convert_error)?;
+
+        // Create balance checkpoint
+        self.write_balance_checkpoint(&hash, account, new_balance)
     }
 
     fn subtract_balance(
@@ -594,7 +646,10 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
                 .set_native_asset_balance(&hash, account, new_balance),
         )
         .map_err(Self::convert_error)?
-        .map_err(Self::convert_error)
+        .map_err(Self::convert_error)?;
+
+        // Create balance checkpoint
+        self.write_balance_checkpoint(&hash, account, new_balance)
     }
 
     // ========================================
@@ -726,6 +781,36 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
             self.provider
                 .set_native_asset_delegation(&hash, delegator, &delegation),
         )
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)?;
+
+        // Create delegation checkpoint for historical queries
+        let checkpoint = DelegationCheckpoint {
+            from_block: self.block_height,
+            delegatee: *delegatee,
+        };
+
+        let count = try_block_on(
+            self.provider
+                .get_native_asset_delegation_checkpoint_count(&hash, delegator),
+        )
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)?;
+
+        try_block_on(self.provider.set_native_asset_delegation_checkpoint(
+            &hash,
+            delegator,
+            count,
+            &checkpoint,
+        ))
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)?;
+
+        try_block_on(self.provider.set_native_asset_delegation_checkpoint_count(
+            &hash,
+            delegator,
+            count + 1,
+        ))
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)
     }
@@ -2150,20 +2235,117 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         &self,
         asset: &[u8; 32],
         account: &[u8; 32],
-        _block_height: u64,
+        block_height: u64,
     ) -> Result<[u8; 32], EbpfError> {
-        // Would need delegation history
-        self.get_delegate(asset, account)
+        let hash = Self::bytes_to_hash(asset);
+        let count = try_block_on(
+            self.provider
+                .get_native_asset_delegation_checkpoint_count(&hash, account),
+        )
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)?;
+
+        if count == 0 {
+            // No delegation history, return self-delegation
+            return Ok(*account);
+        }
+
+        // Binary search for the checkpoint at or before block_height
+        let mut low = 0u32;
+        let mut high = count;
+
+        while low < high {
+            let mid = (low + high) / 2;
+            let checkpoint = try_block_on(
+                self.provider
+                    .get_native_asset_delegation_checkpoint(&hash, account, mid),
+            )
+            .map_err(Self::convert_error)?
+            .map_err(Self::convert_error)?;
+
+            if checkpoint.from_block <= block_height {
+                low = mid + 1;
+            } else {
+                high = mid;
+            }
+        }
+
+        if low == 0 {
+            // No checkpoint at or before block_height, return self-delegation
+            return Ok(*account);
+        }
+
+        // Get the checkpoint at low - 1 (the last one at or before block_height)
+        let checkpoint = try_block_on(self.provider.get_native_asset_delegation_checkpoint(
+            &hash,
+            account,
+            low - 1,
+        ))
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)?;
+
+        // Return delegatee (zero means self-delegation)
+        if checkpoint.delegatee == [0u8; 32] {
+            Ok(*account)
+        } else {
+            Ok(checkpoint.delegatee)
+        }
     }
 
     fn get_past_balance(
         &self,
         asset: &[u8; 32],
         account: &[u8; 32],
-        _block_height: u64,
+        block_height: u64,
     ) -> Result<u64, EbpfError> {
-        // Would need balance history
-        self.balance_of(asset, account)
+        let hash = Self::bytes_to_hash(asset);
+        let count = try_block_on(
+            self.provider
+                .get_native_asset_balance_checkpoint_count(&hash, account),
+        )
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)?;
+
+        if count == 0 {
+            // No balance history, return current balance
+            return self.balance_of(asset, account);
+        }
+
+        // Binary search for the checkpoint at or before block_height
+        let mut low = 0u32;
+        let mut high = count;
+
+        while low < high {
+            let mid = (low + high) / 2;
+            let checkpoint = try_block_on(
+                self.provider
+                    .get_native_asset_balance_checkpoint(&hash, account, mid),
+            )
+            .map_err(Self::convert_error)?
+            .map_err(Self::convert_error)?;
+
+            if checkpoint.from_block <= block_height {
+                low = mid + 1;
+            } else {
+                high = mid;
+            }
+        }
+
+        if low == 0 {
+            // No checkpoint at or before block_height, return 0 (no balance yet)
+            return Ok(0);
+        }
+
+        // Get the checkpoint at low - 1 (the last one at or before block_height)
+        let checkpoint = try_block_on(self.provider.get_native_asset_balance_checkpoint(
+            &hash,
+            account,
+            low - 1,
+        ))
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)?;
+
+        Ok(checkpoint.balance)
     }
 
     fn get_domain(&self, asset: &[u8; 32]) -> Result<Vec<u8>, EbpfError> {
