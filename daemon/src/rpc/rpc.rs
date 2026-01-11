@@ -921,6 +921,11 @@ pub fn register_methods<S: Storage>(
         async_handler!(get_account_name_hash::<S>),
     );
 
+    // TNS Ephemeral Message methods
+    handler.register_method("get_messages", async_handler!(get_messages::<S>));
+    handler.register_method("get_message_count", async_handler!(get_message_count::<S>));
+    handler.register_method("get_message_by_id", async_handler!(get_message_by_id::<S>));
+
     if allow_mining_methods {
         handler.register_method(
             "get_block_template",
@@ -5161,9 +5166,10 @@ fn convert_committee_to_rpc(
 // ============================================================================
 
 use tos_common::api::daemon::{
-    GetAccountNameHashParams, GetAccountNameHashResult, HasRegisteredNameParams,
-    HasRegisteredNameResult, IsNameAvailableParams, IsNameAvailableResult, ResolveNameParams,
-    ResolveNameResult,
+    EphemeralMessageInfo, GetAccountNameHashParams, GetAccountNameHashResult, GetMessageByIdParams,
+    GetMessageByIdResult, GetMessageCountParams, GetMessageCountResult, GetMessagesParams,
+    GetMessagesResult, HasRegisteredNameParams, HasRegisteredNameResult, IsNameAvailableParams,
+    IsNameAvailableResult, ResolveNameParams, ResolveNameResult,
 };
 use tos_common::tns::{
     is_confusing_name, is_reserved_name, normalize_name, tns_name_hash, MAX_NAME_LENGTH,
@@ -5345,5 +5351,101 @@ async fn get_account_name_hash<S: Storage>(
 
     Ok(json!(GetAccountNameHashResult {
         name_hash: name_hash.map(Cow::Owned),
+    }))
+}
+
+// ============================================================================
+// TNS Ephemeral Message RPC Methods
+// ============================================================================
+
+/// Get ephemeral messages for a recipient
+async fn get_messages<S: Storage>(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    let params: GetMessagesParams = parse_params(body)?;
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+
+    // Limit the maximum messages per request
+    let limit = params.limit.min(100);
+
+    let storage = blockchain.get_storage().read().await;
+    let messages = storage
+        .get_messages_for_recipient(&params.recipient_name_hash, params.offset, limit)
+        .await
+        .context("Error while getting messages")?;
+
+    // Convert to API response format
+    let message_infos: Vec<EphemeralMessageInfo> = messages
+        .into_iter()
+        .map(|(msg_id, msg)| EphemeralMessageInfo {
+            message_id: Cow::Owned(msg_id),
+            sender_name_hash: Cow::Owned(msg.sender_name_hash),
+            message_nonce: msg.message_nonce,
+            encrypted_content: msg.encrypted_content,
+            receiver_handle: msg.receiver_handle,
+            stored_topoheight: msg.stored_topoheight,
+            expiry_topoheight: msg.expiry_topoheight,
+        })
+        .collect();
+
+    // Get total count for pagination info
+    // We use a larger limit to count
+    let total_messages = storage
+        .get_messages_for_recipient(&params.recipient_name_hash, 0, u32::MAX)
+        .await
+        .context("Error while counting messages")?;
+
+    Ok(json!(GetMessagesResult {
+        messages: message_infos,
+        total_count: total_messages.len() as u64,
+    }))
+}
+
+/// Get count of ephemeral messages for a recipient
+async fn get_message_count<S: Storage>(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    let params: GetMessageCountParams = parse_params(body)?;
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+
+    let storage = blockchain.get_storage().read().await;
+    let messages = storage
+        .get_messages_for_recipient(&params.recipient_name_hash, 0, u32::MAX)
+        .await
+        .context("Error while counting messages")?;
+
+    Ok(json!(GetMessageCountResult {
+        count: messages.len() as u64,
+    }))
+}
+
+/// Get a specific ephemeral message by ID
+async fn get_message_by_id<S: Storage>(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    let params: GetMessageByIdParams = parse_params(body)?;
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+
+    let storage = blockchain.get_storage().read().await;
+    let message = storage
+        .get_ephemeral_message(&params.message_id)
+        .await
+        .context("Error while getting message")?;
+
+    let message_info = message.map(|msg| EphemeralMessageInfo {
+        message_id: Cow::Owned(params.message_id.into_owned()),
+        sender_name_hash: Cow::Owned(msg.sender_name_hash),
+        message_nonce: msg.message_nonce,
+        encrypted_content: msg.encrypted_content,
+        receiver_handle: msg.receiver_handle,
+        stored_topoheight: msg.stored_topoheight,
+        expiry_topoheight: msg.expiry_topoheight,
+    });
+
+    Ok(json!(GetMessageByIdResult {
+        message: message_info,
     }))
 }
