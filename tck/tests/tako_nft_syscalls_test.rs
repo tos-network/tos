@@ -1571,7 +1571,8 @@ fn test_nft_set_token_uri() {
     );
     println!("  Owner update rejected: PASS");
 
-    // Drop adapter to release borrow on storage
+    // Drop adapter to release borrow on storage (intentional early scope end)
+    #[allow(clippy::drop_non_drop)]
     drop(adapter);
 
     // Test immutable collection (no metadata_authority)

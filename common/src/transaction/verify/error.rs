@@ -108,6 +108,8 @@ pub enum VerificationError<T> {
     MessageAlreadyExists,
     #[error("Message nonce must equal transaction nonce")]
     InvalidMessageNonce,
+    #[error("Invalid receiver handle (not a valid curve point)")]
+    InvalidReceiverHandle,
     #[error("Insufficient TNS fee: required {required}, provided {provided}")]
     InsufficientTnsFee { required: u64, provided: u64 },
 }

@@ -280,12 +280,25 @@ impl TnsProvider for RocksStorage {
             );
         }
 
-        // Process deletions in batches to prevent memory exhaustion DoS
-        // Limit batch size to prevent excessive memory use and block processing delay
+        // Process deletions in batches to prevent memory exhaustion and block processing delays
+        // CLEANUP_BATCH_SIZE: max messages per batch iteration
+        // MAX_CLEANUP_PER_CYCLE: total limit per cleanup cycle to prevent stalling block processing
         const CLEANUP_BATCH_SIZE: usize = 100;
+        const MAX_CLEANUP_PER_CYCLE: u64 = 1000;
         let mut total_deleted = 0u64;
 
         loop {
+            // Stop if we've hit the per-cycle limit to prevent block processing delays
+            if total_deleted >= MAX_CLEANUP_PER_CYCLE {
+                if log::log_enabled!(log::Level::Debug) {
+                    log::debug!(
+                        "Cleanup cycle limit reached ({} messages), deferring remaining to next cycle",
+                        total_deleted
+                    );
+                }
+                break;
+            }
+
             // Collect up to CLEANUP_BATCH_SIZE expired message IDs
             let mut batch = Vec::with_capacity(CLEANUP_BATCH_SIZE);
             for result in self

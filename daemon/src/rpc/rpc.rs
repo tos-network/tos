@@ -5333,8 +5333,11 @@ async fn get_messages<S: Storage>(
     let params: GetMessagesParams = parse_params(body)?;
     let blockchain: &Arc<Blockchain<S>> = context.get()?;
 
-    // Limit the maximum messages per request
-    let limit = params.limit.min(100);
+    // Limit the maximum messages per request and cap offset to prevent DoS
+    const MAX_LIMIT: u32 = 100;
+    const MAX_OFFSET: u32 = 10000;
+    let limit = params.limit.min(MAX_LIMIT);
+    let offset = params.offset.min(MAX_OFFSET);
 
     let storage = blockchain.get_storage().read().await;
     let current_topoheight = blockchain.get_topo_height();
@@ -5343,7 +5346,7 @@ async fn get_messages<S: Storage>(
     let messages = storage
         .get_messages_for_recipient(
             &params.recipient_name_hash,
-            params.offset,
+            offset,
             limit,
             current_topoheight,
         )

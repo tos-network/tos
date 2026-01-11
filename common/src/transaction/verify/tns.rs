@@ -1,6 +1,7 @@
 // TNS (TOS Name Service) transaction verification
 
 use crate::{
+    crypto::elgamal::CompressedHandle,
     tns::{
         calculate_message_fee, is_confusing_name, is_reserved_name, normalize_name, tns_name_hash,
         MAX_ENCRYPTED_SIZE, MAX_NAME_LENGTH, MAX_TTL, MIN_NAME_LENGTH, MIN_TTL, REGISTRATION_FEE,
@@ -119,6 +120,19 @@ pub fn verify_ephemeral_message_format<E>(
     // 4. Self-message check (no state needed)
     if payload.get_sender_name_hash() == payload.get_recipient_name_hash() {
         return Err(VerificationError::SelfMessage);
+    }
+
+    // 5. Validate receiver_handle is a valid curve point
+    // This prevents spam with undecryptable messages
+    // We construct a CompressedHandle and verify it can be decompressed to a valid curve point
+    use tos_crypto::curve25519_dalek::ristretto::CompressedRistretto;
+    let compressed = match CompressedRistretto::from_slice(payload.get_receiver_handle()) {
+        Ok(c) => c,
+        Err(_) => return Err(VerificationError::InvalidReceiverHandle),
+    };
+    let handle = CompressedHandle::new(compressed);
+    if handle.decompress().is_err() {
+        return Err(VerificationError::InvalidReceiverHandle);
     }
 
     Ok(())

@@ -6139,7 +6139,7 @@ async fn send_message(
         }
         let ttl = ttl_raw as u32;
         // Validate TTL range against protocol limits
-        if ttl < tos_common::tns::MIN_TTL || ttl > tos_common::tns::MAX_TTL {
+        if !(tos_common::tns::MIN_TTL..=tos_common::tns::MAX_TTL).contains(&ttl) {
             return Err(CommandError::InvalidArgument(format!(
                 "TTL must be between {} and {} blocks. Got: {}",
                 tos_common::tns::MIN_TTL,
