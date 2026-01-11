@@ -812,6 +812,12 @@ impl Transaction {
                 // Fee verification: minimum message fee required based on TTL
                 verify_ephemeral_message_fee::<E>(payload, self.fee)?;
 
+                // Enforce message_nonce == tx_nonce for replay protection
+                // This ensures each message uses a unique nonce tied to the account's nonce sequence
+                if payload.get_message_nonce() != self.nonce {
+                    return Err(VerificationError::InvalidMessageNonce);
+                }
+
                 // Verify sender has registered TNS name
                 let sender_name_hash = state
                     .get_account_name_hash(&self.source)
@@ -2145,6 +2151,12 @@ impl Transaction {
 
                 // Fee verification: minimum message fee required based on TTL
                 verify_ephemeral_message_fee::<E>(payload, self.fee)?;
+
+                // Enforce message_nonce == tx_nonce for replay protection
+                // This ensures each message uses a unique nonce tied to the account's nonce sequence
+                if payload.get_message_nonce() != self.nonce {
+                    return Err(VerificationError::InvalidMessageNonce);
+                }
 
                 // Verify sender has registered TNS name
                 let sender_name_hash = state

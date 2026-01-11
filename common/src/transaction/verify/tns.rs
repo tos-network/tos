@@ -138,7 +138,7 @@ pub fn compute_message_id(payload: &EphemeralMessagePayload) -> crate::crypto::H
 
 /// Verify that the transaction fee is sufficient for name registration
 ///
-/// Name registration requires a fixed fee of REGISTRATION_FEE (10 TOS)
+/// Name registration requires a fixed fee of REGISTRATION_FEE (0.1 TOS)
 pub fn verify_register_name_fee<E>(tx_fee: u64) -> Result<(), VerificationError<E>> {
     if tx_fee < REGISTRATION_FEE {
         return Err(VerificationError::InsufficientTnsFee {

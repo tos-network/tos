@@ -6313,12 +6313,13 @@ async fn list_messages(
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
 
-    // Get pagination page (validated to be non-negative)
+    // Get pagination page
     let page = if args.has_argument("page") {
         let page_raw = args.get_value("page")?.to_number()?;
-        if page_raw < 0 {
+        // Validate page fits in u32 range
+        if page_raw > u64::from(u32::MAX) {
             return Err(CommandError::InvalidArgument(
-                "Page must be a non-negative number".to_string(),
+                "Page number exceeds maximum allowed range".to_string(),
             ));
         }
         page_raw as u32
