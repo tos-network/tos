@@ -6268,8 +6268,15 @@ async fn send_message(
         tos_common::transaction::builder::TransactionTypeBuilder::EphemeralMessage(payload);
 
     let storage = wallet.get_storage().read().await;
+    // Use message_nonce as the transaction nonce to ensure they match
+    // This prevents InvalidMessageNonce errors if nonce changes between calls
     let mut state = wallet
-        .create_transaction_state_with_storage(&storage, &tx_type, &fee_builder, None)
+        .create_transaction_state_with_storage(
+            &storage,
+            &tx_type,
+            &fee_builder,
+            Some(message_nonce),
+        )
         .await
         .context("Error while creating transaction state")?;
 
