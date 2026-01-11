@@ -1276,6 +1276,66 @@ async fn setup_wallet_command_manager(
         CommandHandler::Async(async_handler!(count_contracts)),
     ))?;
 
+    // ========== TNS (TOS Name Service) Commands ==========
+
+    command_manager.add_command(Command::with_required_arguments(
+        "register_name",
+        "Register a TNS name (e.g., 'alice' for alice@tos.network)",
+        vec![Arg::new(
+            "name",
+            ArgType::String,
+            "Name to register (e.g., 'alice')",
+        )],
+        CommandHandler::Async(async_handler!(register_name)),
+    ))?;
+
+    command_manager.add_command(Command::with_required_arguments(
+        "resolve_name",
+        "Resolve a TNS name to its address",
+        vec![Arg::new(
+            "name",
+            ArgType::String,
+            "Name to resolve (e.g., 'alice' or 'alice@tos.network')",
+        )],
+        CommandHandler::Async(async_handler!(resolve_name)),
+    ))?;
+
+    command_manager.add_command(Command::with_required_arguments(
+        "send_message",
+        "Send an ephemeral message to a TNS name",
+        vec![
+            Arg::new(
+                "recipient",
+                ArgType::String,
+                "Recipient name (e.g., 'bob' or 'bob@tos.network')",
+            ),
+            Arg::new(
+                "message",
+                ArgType::String,
+                "Message content (max 140 bytes)",
+            ),
+        ],
+        CommandHandler::Async(async_handler!(send_message)),
+    ))?;
+
+    command_manager.add_command(Command::with_optional_arguments(
+        "list_messages",
+        "List ephemeral messages received by your registered name",
+        vec![Arg::new(
+            "page",
+            ArgType::Number,
+            "Page number for pagination (default: 0)",
+        )],
+        CommandHandler::Async(async_handler!(list_messages)),
+    ))?;
+
+    command_manager.add_command(Command::with_required_arguments(
+        "read_message",
+        "Read a specific ephemeral message by ID",
+        vec![Arg::new("message_id", ArgType::Hash, "Message ID to read")],
+        CommandHandler::Async(async_handler!(read_message)),
+    ))?;
+
     let mut context = command_manager.get_context().lock()?;
     context.store(wallet);
 
@@ -5777,6 +5837,465 @@ async fn count_contracts(
             }
         } else {
             manager.error("Not connected to daemon. Ensure daemon is running and accessible.");
+        }
+    }
+
+    Ok(())
+}
+
+// ========== TNS (TOS Name Service) Command Handlers ==========
+
+/// Register a TNS name
+async fn register_name(
+    manager: &CommandManager,
+    mut args: ArgumentManager,
+) -> Result<(), CommandError> {
+    manager.validate_batch_params("register_name", &args)?;
+
+    let context = manager.get_context().lock()?;
+    let wallet: &Arc<Wallet> = context.get()?;
+
+    // Get the name to register
+    let name = get_required_arg_with_example(
+        &mut args,
+        "name",
+        "register_name name=<name>",
+        "register_name name=alice",
+    )?;
+
+    // Normalize and validate the name
+    let normalized_name = tos_common::tns::normalize_name(&name).map_err(|e| {
+        CommandError::InvalidArgument(format!("Invalid name format '{}': {}", name, e))
+    })?;
+
+    // Check if name is reserved or confusing
+    if tos_common::tns::is_reserved_name(&normalized_name) {
+        return Err(CommandError::InvalidArgument(format!(
+            "Name '{}' is reserved and cannot be registered.",
+            normalized_name
+        )));
+    }
+    if tos_common::tns::is_confusing_name(&normalized_name) {
+        return Err(CommandError::InvalidArgument(format!(
+            "Name '{}' is potentially confusing and cannot be registered.",
+            normalized_name
+        )));
+    }
+
+    // Check if the name is available
+    {
+        let network_handler = wallet.get_network_handler().lock().await;
+        let handler = network_handler.as_ref().ok_or_else(|| {
+            CommandError::InvalidArgument("Wallet not connected to daemon".to_string())
+        })?;
+        let daemon_api = handler.get_api();
+
+        let availability = daemon_api
+            .is_name_available(&normalized_name)
+            .await
+            .map_err(|e| {
+                CommandError::Any(anyhow::anyhow!("Failed to check name availability: {}", e))
+            })?;
+
+        if !availability.valid_format {
+            return Err(CommandError::InvalidArgument(format!(
+                "Invalid name format: {}",
+                availability
+                    .format_error
+                    .unwrap_or_else(|| "Unknown error".to_string())
+            )));
+        }
+
+        if !availability.available {
+            return Err(CommandError::InvalidArgument(format!(
+                "Name '{}' is already registered.",
+                normalized_name
+            )));
+        }
+    }
+
+    manager.message(format!(
+        "Registering name '{}' ({}@tos.network)...",
+        normalized_name, normalized_name
+    ));
+
+    // Build the transaction
+    let payload = tos_common::transaction::RegisterNamePayload::new(normalized_name.clone());
+    let tx_type = tos_common::transaction::builder::TransactionTypeBuilder::RegisterName(payload);
+
+    let storage = wallet.get_storage().read().await;
+    let mut state = wallet
+        .create_transaction_state_with_storage(
+            &storage,
+            &tx_type,
+            &tos_common::transaction::builder::FeeBuilder::default(),
+            None,
+        )
+        .await
+        .context("Error while creating transaction state")?;
+
+    let tx_version = storage
+        .get_tx_version()
+        .await
+        .context("Error while getting tx version")?;
+
+    let builder = tos_common::transaction::builder::TransactionBuilder::new(
+        tx_version,
+        wallet.get_network().chain_id() as u8,
+        wallet.get_public_key().clone(),
+        None,
+        tx_type,
+        tos_common::transaction::builder::FeeBuilder::default(),
+    );
+
+    let tx = match builder.build(&mut state, wallet.get_keypair()) {
+        Ok(tx) => tx,
+        Err(e) => {
+            manager.error(format!("Error while creating transaction: {}", e));
+            return Ok(());
+        }
+    };
+
+    broadcast_tx(wallet, manager, tx).await;
+    manager.message(format!(
+        "Successfully submitted name registration for '{}'",
+        normalized_name
+    ));
+    Ok(())
+}
+
+/// Resolve a TNS name to an address
+async fn resolve_name(
+    manager: &CommandManager,
+    mut args: ArgumentManager,
+) -> Result<(), CommandError> {
+    manager.validate_batch_params("resolve_name", &args)?;
+
+    let context = manager.get_context().lock()?;
+    let wallet: &Arc<Wallet> = context.get()?;
+
+    // Get the name to resolve
+    let name = get_required_arg_with_example(
+        &mut args,
+        "name",
+        "resolve_name name=<name>",
+        "resolve_name name=alice",
+    )?;
+
+    // Strip @tos.network suffix if present
+    let name_part = if name.ends_with("@tos.network") {
+        &name[..name.len() - 12]
+    } else {
+        &name
+    };
+
+    manager.message(format!("Resolving name '{}'...", name_part));
+
+    {
+        let network_handler = wallet.get_network_handler().lock().await;
+        let handler = network_handler.as_ref().ok_or_else(|| {
+            CommandError::InvalidArgument("Wallet not connected to daemon".to_string())
+        })?;
+        let daemon_api = handler.get_api();
+
+        match daemon_api.resolve_name(name_part).await {
+            Ok(result) => {
+                if let Some(address) = result.address {
+                    // Address implements Display, Cow<T> also implements Display when T does
+                    manager.message(format!("{}@tos.network -> {}", name_part, address));
+                } else {
+                    manager.message(format!("Name '{}' is not registered.", name_part));
+                }
+            }
+            Err(e) => {
+                manager.error(format!("Failed to resolve name: {}", e));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Send an ephemeral message to a TNS name
+async fn send_message(
+    manager: &CommandManager,
+    mut args: ArgumentManager,
+) -> Result<(), CommandError> {
+    manager.validate_batch_params("send_message", &args)?;
+
+    let context = manager.get_context().lock()?;
+    let wallet: &Arc<Wallet> = context.get()?;
+
+    // Get recipient name
+    let recipient = get_required_arg_with_example(
+        &mut args,
+        "recipient",
+        "send_message recipient=<name> message=<text>",
+        "send_message recipient=bob message=\"Hello Bob!\"",
+    )?;
+
+    // Get message content
+    let message = get_required_arg_with_example(
+        &mut args,
+        "message",
+        "send_message recipient=<name> message=<text>",
+        "send_message recipient=bob message=\"Hello Bob!\"",
+    )?;
+
+    // Validate message size
+    if message.len() > tos_common::tns::MAX_MESSAGE_SIZE {
+        return Err(CommandError::InvalidArgument(format!(
+            "Message too long ({} bytes). Maximum is {} bytes.",
+            message.len(),
+            tos_common::tns::MAX_MESSAGE_SIZE
+        )));
+    }
+
+    // Strip @tos.network suffix if present
+    let recipient_name = if recipient.ends_with("@tos.network") {
+        &recipient[..recipient.len() - 12]
+    } else {
+        &recipient
+    };
+
+    // Check if sender has a registered name
+    let sender_name_hash = {
+        let network_handler = wallet.get_network_handler().lock().await;
+        let handler = network_handler.as_ref().ok_or_else(|| {
+            CommandError::InvalidArgument("Wallet not connected to daemon".to_string())
+        })?;
+        let daemon_api = handler.get_api();
+
+        // Check if sender has registered a name
+        let sender_name = daemon_api
+            .get_account_name_hash(&wallet.get_address())
+            .await
+            .map_err(|e| {
+                CommandError::Any(anyhow::anyhow!("Failed to get sender's name: {}", e))
+            })?;
+
+        sender_name.name_hash.ok_or_else(|| {
+            CommandError::InvalidArgument(
+                "You must register a TNS name before sending messages. Use 'register_name' first."
+                    .to_string(),
+            )
+        })?
+    };
+
+    // Resolve recipient name
+    let recipient_name_hash = {
+        let network_handler = wallet.get_network_handler().lock().await;
+        let handler = network_handler.as_ref().ok_or_else(|| {
+            CommandError::InvalidArgument("Wallet not connected to daemon".to_string())
+        })?;
+        let daemon_api = handler.get_api();
+
+        let result = daemon_api.resolve_name(recipient_name).await.map_err(|e| {
+            CommandError::Any(anyhow::anyhow!("Failed to resolve recipient: {}", e))
+        })?;
+
+        if result.address.is_none() {
+            return Err(CommandError::InvalidArgument(format!(
+                "Recipient '{}' is not registered.",
+                recipient_name
+            )));
+        }
+
+        result.name_hash.into_owned()
+    };
+
+    manager.message(format!(
+        "Sending message to {}@tos.network...",
+        recipient_name
+    ));
+
+    // For now, use simple unencrypted message (encryption would require recipient's public key)
+    // In a full implementation, we would encrypt the message content
+    let encrypted_content = message.as_bytes().to_vec();
+    let receiver_handle = [0u8; 32]; // Placeholder for actual encryption handle
+
+    // Build the transaction
+    let payload = tos_common::transaction::EphemeralMessagePayload::new(
+        sender_name_hash.into_owned(),
+        recipient_name_hash,
+        0, // nonce will be set by transaction builder
+        tos_common::tns::DEFAULT_TTL,
+        encrypted_content,
+        receiver_handle,
+    );
+    let tx_type =
+        tos_common::transaction::builder::TransactionTypeBuilder::EphemeralMessage(payload);
+
+    let storage = wallet.get_storage().read().await;
+    let mut state = wallet
+        .create_transaction_state_with_storage(
+            &storage,
+            &tx_type,
+            &tos_common::transaction::builder::FeeBuilder::default(),
+            None,
+        )
+        .await
+        .context("Error while creating transaction state")?;
+
+    let tx_version = storage
+        .get_tx_version()
+        .await
+        .context("Error while getting tx version")?;
+
+    let builder = tos_common::transaction::builder::TransactionBuilder::new(
+        tx_version,
+        wallet.get_network().chain_id() as u8,
+        wallet.get_public_key().clone(),
+        None,
+        tx_type,
+        tos_common::transaction::builder::FeeBuilder::default(),
+    );
+
+    let tx = match builder.build(&mut state, wallet.get_keypair()) {
+        Ok(tx) => tx,
+        Err(e) => {
+            manager.error(format!("Error while creating transaction: {}", e));
+            return Ok(());
+        }
+    };
+
+    broadcast_tx(wallet, manager, tx).await;
+    manager.message(format!(
+        "Successfully sent message to {}@tos.network",
+        recipient_name
+    ));
+    Ok(())
+}
+
+/// List ephemeral messages received
+async fn list_messages(
+    manager: &CommandManager,
+    mut args: ArgumentManager,
+) -> Result<(), CommandError> {
+    manager.validate_batch_params("list_messages", &args)?;
+
+    let context = manager.get_context().lock()?;
+    let wallet: &Arc<Wallet> = context.get()?;
+
+    // Get pagination page
+    let page = if args.has_argument("page") {
+        args.get_value("page")?.to_number()? as u32
+    } else {
+        0
+    };
+
+    // Get sender's registered name hash
+    let name_hash = {
+        let network_handler = wallet.get_network_handler().lock().await;
+        let handler = network_handler.as_ref().ok_or_else(|| {
+            CommandError::InvalidArgument("Wallet not connected to daemon".to_string())
+        })?;
+        let daemon_api = handler.get_api();
+
+        let result = daemon_api
+            .get_account_name_hash(&wallet.get_address())
+            .await
+            .map_err(|e| {
+                CommandError::Any(anyhow::anyhow!("Failed to get your registered name: {}", e))
+            })?;
+
+        result.name_hash.ok_or_else(|| {
+            CommandError::InvalidArgument(
+                "You don't have a registered TNS name. Use 'register_name' first.".to_string(),
+            )
+        })?
+    };
+
+    // Query messages
+    let offset = page * ELEMENTS_PER_PAGE as u32;
+    {
+        let network_handler = wallet.get_network_handler().lock().await;
+        let handler = network_handler.as_ref().ok_or_else(|| {
+            CommandError::InvalidArgument("Wallet not connected to daemon".to_string())
+        })?;
+        let daemon_api = handler.get_api();
+
+        match daemon_api
+            .get_messages(&name_hash, offset, ELEMENTS_PER_PAGE as u32)
+            .await
+        {
+            Ok(result) => {
+                if result.messages.is_empty() {
+                    manager.message("No messages found.");
+                } else {
+                    manager.message(format!(
+                        "Messages (page {}, {} total):",
+                        page, result.total_count
+                    ));
+                    for (i, msg) in result.messages.iter().enumerate() {
+                        let content = String::from_utf8_lossy(&msg.encrypted_content);
+                        manager.message(format!(
+                            "  {}. ID: {} | From: {} | Content: {}",
+                            offset as usize + i + 1,
+                            msg.message_id,
+                            msg.sender_name_hash,
+                            if content.len() > 40 {
+                                format!("{}...", &content[..40])
+                            } else {
+                                content.to_string()
+                            }
+                        ));
+                    }
+                }
+            }
+            Err(e) => {
+                manager.error(format!("Failed to get messages: {}", e));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Read a specific ephemeral message
+async fn read_message(
+    manager: &CommandManager,
+    mut args: ArgumentManager,
+) -> Result<(), CommandError> {
+    manager.validate_batch_params("read_message", &args)?;
+
+    let context = manager.get_context().lock()?;
+    let wallet: &Arc<Wallet> = context.get()?;
+
+    // Get message ID
+    let message_id = if args.has_argument("message_id") {
+        args.get_value("message_id")?.to_hash()?
+    } else {
+        return Err(CommandError::MissingArgument("message_id".to_string()));
+    };
+
+    manager.message(format!("Reading message {}...", message_id));
+
+    {
+        let network_handler = wallet.get_network_handler().lock().await;
+        let handler = network_handler.as_ref().ok_or_else(|| {
+            CommandError::InvalidArgument("Wallet not connected to daemon".to_string())
+        })?;
+        let daemon_api = handler.get_api();
+
+        match daemon_api.get_message_by_id(&message_id).await {
+            Ok(result) => {
+                if let Some(msg) = result.message {
+                    let content = String::from_utf8_lossy(&msg.encrypted_content);
+                    manager.message("Message details:");
+                    manager.message(format!("  ID: {}", msg.message_id));
+                    manager.message(format!("  From: {}", msg.sender_name_hash));
+                    manager.message(format!("  Nonce: {}", msg.message_nonce));
+                    manager.message(format!("  Stored at: block {}", msg.stored_topoheight));
+                    manager.message(format!("  Expires at: block {}", msg.expiry_topoheight));
+                    manager.message(format!("  Content: {}", content));
+                } else {
+                    manager.message(format!("Message {} not found.", message_id));
+                }
+            }
+            Err(e) => {
+                manager.error(format!("Failed to get message: {}", e));
+            }
         }
     }
 

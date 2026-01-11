@@ -18,9 +18,10 @@ use super::{
     extra_data::{ExtraDataType, PlaintextData, UnknownExtraDataFormat},
     payload::{ShieldTransferPayload, UnoTransferPayload, UnshieldTransferPayload},
     BatchReferralRewardPayload, BindReferrerPayload, BurnPayload, ContractDeposit,
-    DeployContractPayload, EnergyPayload, FeeType, InvokeConstructorPayload, InvokeContractPayload,
-    MultiSigPayload, Role, SourceCommitment, Transaction, TransactionType, TransferPayload,
-    TxVersion, EXTRA_DATA_LIMIT_SIZE, EXTRA_DATA_LIMIT_SUM_SIZE, MAX_MULTISIG_PARTICIPANTS,
+    DeployContractPayload, EnergyPayload, EphemeralMessagePayload, FeeType,
+    InvokeConstructorPayload, InvokeContractPayload, MultiSigPayload, RegisterNamePayload, Role,
+    SourceCommitment, Transaction, TransactionType, TransferPayload, TxVersion,
+    EXTRA_DATA_LIMIT_SIZE, EXTRA_DATA_LIMIT_SUM_SIZE, MAX_MULTISIG_PARTICIPANTS,
     MAX_TRANSFER_COUNT,
 };
 use crate::account::FreezeDuration;
@@ -129,6 +130,10 @@ pub enum TransactionTypeBuilder {
     Energy(EnergyBuilder),
     BindReferrer(BindReferrerPayload),
     BatchReferralReward(BatchReferralRewardPayload),
+    /// TNS: Register a human-readable name (e.g., alice@tos.network)
+    RegisterName(RegisterNamePayload),
+    /// TNS: Send an ephemeral message to a registered name
+    EphemeralMessage(EphemeralMessagePayload),
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -432,6 +437,14 @@ impl TransactionBuilder {
                 // G_vec len
                 size += 2 * RISTRETTO_COMPRESSED_SIZE * lg_n;
             }
+            TransactionTypeBuilder::RegisterName(payload) => {
+                // RegisterName payload size
+                size += payload.size();
+            }
+            TransactionTypeBuilder::EphemeralMessage(payload) => {
+                // EphemeralMessage payload size
+                size += payload.size();
+            }
         };
 
         size
@@ -683,6 +696,10 @@ impl TransactionBuilder {
                     }
                 }
             }
+            // RegisterName has no asset cost, only gas fee (registration fee is in the fee field)
+            TransactionTypeBuilder::RegisterName(_) => {}
+            // EphemeralMessage has no asset cost, only gas fee (message fee is in the fee field)
+            TransactionTypeBuilder::EphemeralMessage(_) => {}
         }
 
         if *asset == UNO_ASSET && fee_type.map(|ft| ft.is_uno()).unwrap_or(false) {
@@ -1006,6 +1023,12 @@ impl TransactionBuilder {
                     "Unshield transfers require UnoAccountState. Use build_unshield_unsigned instead."
                         .into(),
                 ));
+            }
+            TransactionTypeBuilder::RegisterName(ref payload) => {
+                TransactionType::RegisterName(payload.clone())
+            }
+            TransactionTypeBuilder::EphemeralMessage(ref payload) => {
+                TransactionType::EphemeralMessage(payload.clone())
             }
         };
 
