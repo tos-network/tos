@@ -2060,3 +2060,68 @@ pub struct RewindChainResult {
     /// All transactions that were removed from the chain
     pub txs: Vec<Hash>,
 }
+
+// ===== TNS (TOS Name Service) RPC Types =====
+
+/// Parameters for resolve_name RPC method
+#[derive(Serialize, Deserialize)]
+pub struct ResolveNameParams<'a> {
+    /// The name to resolve (e.g., "alice" or "alice@tos.network")
+    pub name: Cow<'a, str>,
+}
+
+/// Result of resolve_name RPC method
+#[derive(Serialize, Deserialize)]
+pub struct ResolveNameResult<'a> {
+    /// The address that owns this name, if registered
+    pub address: Option<Cow<'a, Address>>,
+    /// The name hash used for lookup
+    pub name_hash: Cow<'a, Hash>,
+}
+
+/// Parameters for is_name_available RPC method
+#[derive(Serialize, Deserialize)]
+pub struct IsNameAvailableParams<'a> {
+    /// The name to check availability
+    pub name: Cow<'a, str>,
+}
+
+/// Result of is_name_available RPC method
+#[derive(Serialize, Deserialize)]
+pub struct IsNameAvailableResult {
+    /// True if name is available for registration
+    pub available: bool,
+    /// Name format validation result (false if invalid format)
+    pub valid_format: bool,
+    /// Error message if format is invalid
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub format_error: Option<String>,
+}
+
+/// Parameters for has_registered_name RPC method
+#[derive(Serialize, Deserialize)]
+pub struct HasRegisteredNameParams<'a> {
+    /// The address to check
+    pub address: Cow<'a, Address>,
+}
+
+/// Result of has_registered_name RPC method
+#[derive(Serialize, Deserialize)]
+pub struct HasRegisteredNameResult {
+    /// True if the account has a registered name
+    pub has_name: bool,
+}
+
+/// Parameters for get_account_name_hash RPC method
+#[derive(Serialize, Deserialize)]
+pub struct GetAccountNameHashParams<'a> {
+    /// The address to get name hash for
+    pub address: Cow<'a, Address>,
+}
+
+/// Result of get_account_name_hash RPC method
+#[derive(Serialize, Deserialize)]
+pub struct GetAccountNameHashResult<'a> {
+    /// The name hash registered by this account, if any
+    pub name_hash: Option<Cow<'a, Hash>>,
+}

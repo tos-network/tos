@@ -909,6 +909,18 @@ pub fn register_methods<S: Storage>(
     );
     handler.register_method("list_committees", async_handler!(list_committees::<S>));
 
+    // TNS (TOS Name Service) methods
+    handler.register_method("resolve_name", async_handler!(resolve_name::<S>));
+    handler.register_method("is_name_available", async_handler!(is_name_available::<S>));
+    handler.register_method(
+        "has_registered_name",
+        async_handler!(has_registered_name::<S>),
+    );
+    handler.register_method(
+        "get_account_name_hash",
+        async_handler!(get_account_name_hash::<S>),
+    );
+
     if allow_mining_methods {
         handler.register_method(
             "get_block_template",
@@ -5142,4 +5154,196 @@ fn convert_committee_to_rpc(
         created_at: committee.created_at,
         updated_at: committee.updated_at,
     }
+}
+
+// ============================================================================
+// TNS (TOS Name Service) RPC Methods
+// ============================================================================
+
+use tos_common::api::daemon::{
+    GetAccountNameHashParams, GetAccountNameHashResult, HasRegisteredNameParams,
+    HasRegisteredNameResult, IsNameAvailableParams, IsNameAvailableResult, ResolveNameParams,
+    ResolveNameResult,
+};
+use tos_common::tns::{
+    is_confusing_name, is_reserved_name, normalize_name, tns_name_hash, MAX_NAME_LENGTH,
+    MIN_NAME_LENGTH,
+};
+
+/// Resolve a TNS name to an address
+/// Returns the address that owns the name, if registered
+async fn resolve_name<S: Storage>(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    let params: ResolveNameParams = parse_params(body)?;
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+
+    // Strip @tos.network suffix if present
+    let name_str = params.name.as_ref();
+    let name = name_str
+        .strip_suffix("@tos.network")
+        .unwrap_or(name_str)
+        .to_lowercase();
+
+    // Normalize and hash the name
+    let normalized = match normalize_name(&name) {
+        Ok(n) => n,
+        Err(_) => {
+            // Invalid name format - return empty result
+            let name_hash = tns_name_hash(&name);
+            return Ok(json!(ResolveNameResult {
+                address: None,
+                name_hash: Cow::Owned(name_hash),
+            }));
+        }
+    };
+
+    let name_hash = tns_name_hash(&normalized);
+
+    // Look up the owner in storage
+    let storage = blockchain.get_storage().read().await;
+    let owner = storage
+        .get_name_owner(&name_hash)
+        .await
+        .context("Error while looking up name owner")?;
+
+    let address = owner.map(|pk| Cow::Owned(pk.as_address(blockchain.get_network().is_mainnet())));
+
+    Ok(json!(ResolveNameResult {
+        address,
+        name_hash: Cow::Owned(name_hash),
+    }))
+}
+
+/// Check if a TNS name is available for registration
+async fn is_name_available<S: Storage>(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    let params: IsNameAvailableParams = parse_params(body)?;
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+
+    // Strip @tos.network suffix if present
+    let name_str = params.name.as_ref();
+    let name = name_str
+        .strip_suffix("@tos.network")
+        .unwrap_or(name_str)
+        .to_lowercase();
+
+    // Check format validity
+    if name.len() < MIN_NAME_LENGTH {
+        return Ok(json!(IsNameAvailableResult {
+            available: false,
+            valid_format: false,
+            format_error: Some(format!(
+                "Name too short (min {} characters)",
+                MIN_NAME_LENGTH
+            )),
+        }));
+    }
+
+    if name.len() > MAX_NAME_LENGTH {
+        return Ok(json!(IsNameAvailableResult {
+            available: false,
+            valid_format: false,
+            format_error: Some(format!(
+                "Name too long (max {} characters)",
+                MAX_NAME_LENGTH
+            )),
+        }));
+    }
+
+    if is_reserved_name(&name) {
+        return Ok(json!(IsNameAvailableResult {
+            available: false,
+            valid_format: false,
+            format_error: Some("Name is reserved".to_string()),
+        }));
+    }
+
+    if is_confusing_name(&name) {
+        return Ok(json!(IsNameAvailableResult {
+            available: false,
+            valid_format: false,
+            format_error: Some("Name contains confusing characters".to_string()),
+        }));
+    }
+
+    // Normalize the name
+    let normalized = match normalize_name(&name) {
+        Ok(n) => n,
+        Err(e) => {
+            return Ok(json!(IsNameAvailableResult {
+                available: false,
+                valid_format: false,
+                format_error: Some(format!("{:?}", e)),
+            }));
+        }
+    };
+
+    let name_hash = tns_name_hash(&normalized);
+
+    // Check if already registered
+    let storage = blockchain.get_storage().read().await;
+    let is_registered = storage
+        .is_name_registered(&name_hash)
+        .await
+        .context("Error while checking name registration")?;
+
+    Ok(json!(IsNameAvailableResult {
+        available: !is_registered,
+        valid_format: true,
+        format_error: None,
+    }))
+}
+
+/// Check if an account has a registered TNS name
+async fn has_registered_name<S: Storage>(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    let params: HasRegisteredNameParams = parse_params(body)?;
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+
+    // Validate network
+    if params.address.is_mainnet() != blockchain.get_network().is_mainnet() {
+        return Err(InternalRpcError::InvalidParamsAny(
+            BlockchainError::InvalidNetwork.into(),
+        ));
+    }
+
+    let storage = blockchain.get_storage().read().await;
+    let has_name = storage
+        .account_has_name(params.address.get_public_key())
+        .await
+        .context("Error while checking if account has name")?;
+
+    Ok(json!(HasRegisteredNameResult { has_name }))
+}
+
+/// Get the name hash registered by an account
+async fn get_account_name_hash<S: Storage>(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    let params: GetAccountNameHashParams = parse_params(body)?;
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+
+    // Validate network
+    if params.address.is_mainnet() != blockchain.get_network().is_mainnet() {
+        return Err(InternalRpcError::InvalidParamsAny(
+            BlockchainError::InvalidNetwork.into(),
+        ));
+    }
+
+    let storage = blockchain.get_storage().read().await;
+    let name_hash = storage
+        .get_account_name(params.address.get_public_key())
+        .await
+        .context("Error while getting account name hash")?;
+
+    Ok(json!(GetAccountNameHashResult {
+        name_hash: name_hash.map(Cow::Owned),
+    }))
 }
