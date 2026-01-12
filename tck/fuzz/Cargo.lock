@@ -4311,7 +4311,7 @@ dependencies = [
 [[package]]
 name = "tako-sdk"
 version = "0.2.1"
-source = "git+https://github.com/tos-network/tako?rev=d2eb759#d2eb759e3a7d0acb0efac66634a70fa48721de33"
+source = "git+https://github.com/tos-network/tako?rev=381edc0#381edc057662ac9126ff4c25cab795443d1da280"
 
 [[package]]
 name = "tap"
@@ -4592,7 +4592,7 @@ dependencies = [
 [[package]]
 name = "tos-builder"
 version = "0.1.0"
-source = "git+https://github.com/tos-network/tako?rev=d2eb759#d2eb759e3a7d0acb0efac66634a70fa48721de33"
+source = "git+https://github.com/tos-network/tako?rev=381edc0#381edc057662ac9126ff4c25cab795443d1da280"
 dependencies = [
  "anyhow",
  "log",
@@ -4604,7 +4604,7 @@ dependencies = [
 [[package]]
 name = "tos-bytecode"
 version = "0.1.0"
-source = "git+https://github.com/tos-network/tako?rev=d2eb759#d2eb759e3a7d0acb0efac66634a70fa48721de33"
+source = "git+https://github.com/tos-network/tako?rev=381edc0#381edc057662ac9126ff4c25cab795443d1da280"
 dependencies = [
  "indexmap",
  "serde",
@@ -4634,7 +4634,7 @@ dependencies = [
 [[package]]
 name = "tos-environment"
 version = "0.1.0"
-source = "git+https://github.com/tos-network/tako?rev=d2eb759#d2eb759e3a7d0acb0efac66634a70fa48721de33"
+source = "git+https://github.com/tos-network/tako?rev=381edc0#381edc057662ac9126ff4c25cab795443d1da280"
 dependencies = [
  "anyhow",
  "better_any",
@@ -4660,7 +4660,7 @@ dependencies = [
 [[package]]
 name = "tos-kernel"
 version = "0.1.0"
-source = "git+https://github.com/tos-network/tako?rev=d2eb759#d2eb759e3a7d0acb0efac66634a70fa48721de33"
+source = "git+https://github.com/tos-network/tako?rev=381edc0#381edc057662ac9126ff4c25cab795443d1da280"
 dependencies = [
  "indexmap",
  "log",
@@ -4674,7 +4674,7 @@ dependencies = [
 [[package]]
 name = "tos-poseidon"
 version = "0.1.0"
-source = "git+https://github.com/tos-network/tako?rev=d2eb759#d2eb759e3a7d0acb0efac66634a70fa48721de33"
+source = "git+https://github.com/tos-network/tako?rev=381edc0#381edc057662ac9126ff4c25cab795443d1da280"
 dependencies = [
  "ark-bn254",
  "ark-ff",
@@ -4685,7 +4685,7 @@ dependencies = [
 [[package]]
 name = "tos-precompiles"
 version = "0.2.1"
-source = "git+https://github.com/tos-network/tako?rev=d2eb759#d2eb759e3a7d0acb0efac66634a70fa48721de33"
+source = "git+https://github.com/tos-network/tako?rev=381edc0#381edc057662ac9126ff4c25cab795443d1da280"
 dependencies = [
  "bincode",
  "blst",
@@ -4703,7 +4703,7 @@ dependencies = [
 [[package]]
 name = "tos-program-runtime"
 version = "0.2.1"
-source = "git+https://github.com/tos-network/tako?rev=d2eb759#d2eb759e3a7d0acb0efac66634a70fa48721de33"
+source = "git+https://github.com/tos-network/tako?rev=381edc0#381edc057662ac9126ff4c25cab795443d1da280"
 dependencies = [
  "anyhow",
  "bincode",
@@ -4720,7 +4720,7 @@ dependencies = [
 [[package]]
 name = "tos-syscalls"
 version = "0.2.1"
-source = "git+https://github.com/tos-network/tako?rev=d2eb759#d2eb759e3a7d0acb0efac66634a70fa48721de33"
+source = "git+https://github.com/tos-network/tako?rev=381edc0#381edc057662ac9126ff4c25cab795443d1da280"
 dependencies = [
  "ark-bn254",
  "ark-ec",
@@ -4768,14 +4768,16 @@ dependencies = [
 
 [[package]]
 name = "tos-tck"
-version = "1.0.0"
+version = "0.1.13"
 dependencies = [
  "anyhow",
  "arbitrary",
  "async-trait",
+ "bincode",
  "chrono",
  "futures",
  "hex",
+ "indexmap",
  "log",
  "parking_lot 0.12.5",
  "proptest",
@@ -4784,12 +4786,17 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
+ "tempdir",
  "tempfile",
  "textwrap",
  "thiserror 1.0.69",
  "tokio",
+ "tos-crypto",
+ "tos-environment",
  "tos-kernel",
+ "tos-program-runtime",
  "tos-syscalls",
+ "tos-tbpf",
  "tos_common",
  "tos_daemon",
  "tracing",
@@ -4809,7 +4816,7 @@ dependencies = [
 [[package]]
 name = "tos-types"
 version = "0.1.0"
-source = "git+https://github.com/tos-network/tako?rev=d2eb759#d2eb759e3a7d0acb0efac66634a70fa48721de33"
+source = "git+https://github.com/tos-network/tako?rev=381edc0#381edc057662ac9126ff4c25cab795443d1da280"
 dependencies = [
  "anyhow",
  "indexmap",
@@ -4822,7 +4829,7 @@ dependencies = [
 
 [[package]]
 name = "tos_common"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "actix-rt",
  "actix-web",
@@ -4853,7 +4860,6 @@ dependencies = [
  "pin-project-lite",
  "primitive-types 0.13.1",
  "rand 0.8.5",
- "rand_core 0.9.3",
  "regex",
  "reqwest 0.11.27",
  "rustls 0.23.36",
@@ -4878,7 +4884,7 @@ dependencies = [
 
 [[package]]
 name = "tos_daemon"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "actix-web",
  "anyhow",
@@ -4905,7 +4911,6 @@ dependencies = [
  "once_cell",
  "primitive-types 0.12.2",
  "rand 0.8.5",
- "rand_core 0.9.3",
  "reqwest 0.12.28",
  "rocksdb",
  "semver",

@@ -94,3 +94,10 @@ path = "fuzz_targets/fuzz_syscall.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "fuzz_native_asset"
+path = "fuzz_targets/fuzz_native_asset.rs"
+test = false
+doc = false
+bench = false
