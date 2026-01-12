@@ -568,4 +568,159 @@ mod tests {
             Err(VerificationError::InsufficientTnsFee { .. })
         ));
     }
+
+    // ===== Edge Case Tests =====
+
+    #[test]
+    fn test_valid_ephemeral_message_min_ttl_boundary() {
+        use crate::tns::MIN_TTL;
+        let payload = make_ephemeral_message_payload(
+            MIN_TTL, // Exactly 100 blocks
+            vec![1, 2, 3],
+            Hash::zero(),
+            Hash::new([1u8; 32]),
+        );
+        assert!(verify_ephemeral_message_format::<()>(&payload).is_ok());
+    }
+
+    #[test]
+    fn test_valid_ephemeral_message_max_ttl_boundary() {
+        use crate::tns::MAX_TTL;
+        let payload = make_ephemeral_message_payload(
+            MAX_TTL, // Exactly 86400 blocks
+            vec![1, 2, 3],
+            Hash::zero(),
+            Hash::new([1u8; 32]),
+        );
+        assert!(verify_ephemeral_message_format::<()>(&payload).is_ok());
+    }
+
+    #[test]
+    fn test_valid_ephemeral_message_max_content_boundary() {
+        use crate::tns::MAX_ENCRYPTED_SIZE;
+        let content = vec![0u8; MAX_ENCRYPTED_SIZE]; // Exactly 188 bytes
+        let payload =
+            make_ephemeral_message_payload(1000, content, Hash::zero(), Hash::new([1u8; 32]));
+        assert!(verify_ephemeral_message_format::<()>(&payload).is_ok());
+    }
+
+    #[test]
+    fn test_invalid_ephemeral_message_content_one_over_max() {
+        use crate::tns::MAX_ENCRYPTED_SIZE;
+        let content = vec![0u8; MAX_ENCRYPTED_SIZE + 1]; // 189 bytes
+        let payload =
+            make_ephemeral_message_payload(1000, content, Hash::zero(), Hash::new([1u8; 32]));
+        assert!(matches!(
+            verify_ephemeral_message_format::<()>(&payload),
+            Err(VerificationError::MessageTooLarge(189))
+        ));
+    }
+
+    #[test]
+    fn test_calculate_message_fee_tier_boundaries() {
+        use crate::tns::{calculate_message_fee, BASE_MESSAGE_FEE, MIN_TTL};
+
+        // Tier 1: TTL <= 100 (MIN_TTL)
+        assert_eq!(calculate_message_fee(MIN_TTL), BASE_MESSAGE_FEE);
+        assert_eq!(calculate_message_fee(1), BASE_MESSAGE_FEE); // Below MIN_TTL
+
+        // Tier 2: 100 < TTL <= 28800 (TTL_ONE_DAY)
+        assert_eq!(calculate_message_fee(101), BASE_MESSAGE_FEE * 2);
+        assert_eq!(calculate_message_fee(28800), BASE_MESSAGE_FEE * 2);
+
+        // Tier 3: TTL > 28800
+        assert_eq!(calculate_message_fee(28801), BASE_MESSAGE_FEE * 3);
+        assert_eq!(calculate_message_fee(86400), BASE_MESSAGE_FEE * 3);
+    }
+
+    #[test]
+    fn test_ephemeral_message_fee_tier_boundaries() {
+        use crate::tns::BASE_MESSAGE_FEE;
+
+        // Tier 1 boundary: TTL = 100
+        let payload_tier1 =
+            make_ephemeral_message_payload(100, vec![1, 2, 3], Hash::zero(), Hash::new([1u8; 32]));
+        assert!(verify_ephemeral_message_fee::<()>(&payload_tier1, BASE_MESSAGE_FEE).is_ok());
+
+        // Tier 2 boundary start: TTL = 101
+        let payload_tier2_start =
+            make_ephemeral_message_payload(101, vec![1, 2, 3], Hash::zero(), Hash::new([1u8; 32]));
+        assert!(
+            verify_ephemeral_message_fee::<()>(&payload_tier2_start, BASE_MESSAGE_FEE * 2).is_ok()
+        );
+        // Tier 1 fee should be insufficient for tier 2
+        assert!(
+            verify_ephemeral_message_fee::<()>(&payload_tier2_start, BASE_MESSAGE_FEE).is_err()
+        );
+
+        // Tier 2 boundary end: TTL = 28800
+        let payload_tier2_end = make_ephemeral_message_payload(
+            28800,
+            vec![1, 2, 3],
+            Hash::zero(),
+            Hash::new([1u8; 32]),
+        );
+        assert!(
+            verify_ephemeral_message_fee::<()>(&payload_tier2_end, BASE_MESSAGE_FEE * 2).is_ok()
+        );
+
+        // Tier 3 boundary start: TTL = 28801
+        let payload_tier3 = make_ephemeral_message_payload(
+            28801,
+            vec![1, 2, 3],
+            Hash::zero(),
+            Hash::new([1u8; 32]),
+        );
+        assert!(verify_ephemeral_message_fee::<()>(&payload_tier3, BASE_MESSAGE_FEE * 3).is_ok());
+        // Tier 2 fee should be insufficient for tier 3
+        assert!(verify_ephemeral_message_fee::<()>(&payload_tier3, BASE_MESSAGE_FEE * 2).is_err());
+    }
+
+    #[test]
+    fn test_valid_ephemeral_message_single_byte_content() {
+        let payload = make_ephemeral_message_payload(
+            1000,
+            vec![1], // Minimum content: 1 byte
+            Hash::zero(),
+            Hash::new([1u8; 32]),
+        );
+        assert!(verify_ephemeral_message_format::<()>(&payload).is_ok());
+    }
+
+    #[test]
+    fn test_message_id_deterministic() {
+        let payload1 =
+            make_ephemeral_message_payload(1000, vec![1, 2, 3], Hash::zero(), Hash::new([1u8; 32]));
+        let payload2 =
+            make_ephemeral_message_payload(1000, vec![1, 2, 3], Hash::zero(), Hash::new([1u8; 32]));
+
+        // Same parameters should produce same message ID
+        assert_eq!(compute_message_id(&payload1), compute_message_id(&payload2));
+    }
+
+    #[test]
+    fn test_message_id_changes_with_nonce() {
+        let sender = Hash::zero();
+        let recipient = Hash::new([1u8; 32]);
+
+        let payload1 = EphemeralMessagePayload::new(
+            sender.clone(),
+            recipient.clone(),
+            1, // nonce 1
+            1000,
+            vec![1, 2, 3],
+            [0u8; 32],
+        );
+        let payload2 = EphemeralMessagePayload::new(
+            sender,
+            recipient,
+            2, // nonce 2
+            1000,
+            vec![1, 2, 3],
+            [0u8; 32],
+        );
+
+        // Different nonces should produce different message IDs
+        assert_ne!(compute_message_id(&payload1), compute_message_id(&payload2));
+    }
 }
