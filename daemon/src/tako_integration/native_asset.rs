@@ -2100,22 +2100,28 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
             }
         }
 
-        // Credit balance BEFORE updating status
-        // This ensures that if balance credit fails, escrow status remains Active
-        // and funds are not lost in limbo
-        if new_status == EscrowStatus::Released {
-            // Released - transfer to recipient FIRST
-            self.add_balance(asset, &escrow.recipient, escrow.amount)?;
-        } else if new_status == EscrowStatus::Cancelled {
-            // Cancelled - refund to sender FIRST
-            self.add_balance(asset, &escrow.sender, escrow.amount)?;
-        }
+        // Update escrow status FIRST to prevent double-credit risk
+        // Trade-off: If status update succeeds but credit fails, funds are stuck
+        // in a Released/Cancelled escrow. This is recoverable through admin
+        // intervention. The alternative (credit first) risks double-credit if
+        // status update fails, which is worse as it creates unauthorized funds.
+        let recipient = escrow.recipient;
+        let sender = escrow.sender;
+        let amount = escrow.amount;
 
-        // Now update escrow status
-        escrow.status = new_status;
+        escrow.status = new_status.clone();
         try_block_on(self.provider.set_native_asset_escrow(&hash, &escrow))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
+
+        // Now credit the appropriate party
+        // If this fails, escrow is already Released/Cancelled (prevents double-release)
+        // but funds are stuck - recoverable through admin force_transfer
+        if new_status == EscrowStatus::Released {
+            self.add_balance(asset, &recipient, amount)?;
+        } else if new_status == EscrowStatus::Cancelled {
+            self.add_balance(asset, &sender, amount)?;
+        }
 
         Ok(())
     }
