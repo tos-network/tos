@@ -385,6 +385,14 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
 
         let asset_id = tos_common::crypto::hash(&hasher_input);
 
+        // Check if asset already exists to prevent overwriting
+        if try_block_on(self.provider.get_native_asset(&asset_id))
+            .map_err(Self::convert_error)?
+            .is_ok()
+        {
+            return Err(Self::invalid_data_error("Asset already exists"));
+        }
+
         // Create asset data
         let name_str = String::from_utf8(name.to_vec())
             .map_err(|_| Self::invalid_data_error("Invalid name"))?;
@@ -1284,7 +1292,11 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
     fn available_balance(&self, asset: &[u8; 32], account: &[u8; 32]) -> Result<u64, EbpfError> {
         let total = self.balance_of(asset, account)?;
         let locked = self.locked_balance(asset, account)?;
-        Ok(total.saturating_sub(locked))
+        // Use checked_sub to detect invariant violations where locked > total
+        // This indicates data corruption and should not be masked
+        total.checked_sub(locked).ok_or_else(|| {
+            Self::invalid_data_error("Invariant violation: locked balance exceeds total balance")
+        })
     }
 
     fn extend_lock(
@@ -1334,8 +1346,11 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
             ));
         }
 
-        // Reduce original lock
-        token_lock.amount -= split_amount;
+        // Reduce original lock using checked arithmetic
+        token_lock.amount = token_lock
+            .amount
+            .checked_sub(split_amount)
+            .ok_or_else(|| Self::invalid_data_error("Lock amount underflow"))?;
         try_block_on(
             self.provider
                 .set_native_asset_lock(&hash, account, &token_lock),
@@ -1363,9 +1378,13 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
 
+        // Use checked arithmetic for lock ID increment
+        let next_lock_id = new_lock_id
+            .checked_add(1)
+            .ok_or_else(|| Self::invalid_data_error("Lock ID overflow"))?;
         try_block_on(
             self.provider
-                .set_native_asset_next_lock_id(&hash, account, new_lock_id + 1),
+                .set_native_asset_next_lock_id(&hash, account, next_lock_id),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
@@ -1373,9 +1392,13 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         let count = try_block_on(self.provider.get_native_asset_lock_count(&hash, account))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
+        // Use checked arithmetic for lock count
+        let new_count = count
+            .checked_add(1)
+            .ok_or_else(|| Self::invalid_data_error("Lock count overflow"))?;
         try_block_on(
             self.provider
-                .set_native_asset_lock_count(&hash, account, count + 1),
+                .set_native_asset_lock_count(&hash, account, new_count),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
@@ -1406,7 +1429,7 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
 
         let mut total_amount = first_lock.amount;
 
-        // Verify all locks have same unlock_at and accumulate amounts
+        // Verify all locks have same unlock_at and accumulate amounts using checked arithmetic
         for &lock_id in &lock_ids[1..] {
             let lock = try_block_on(self.provider.get_native_asset_lock(&hash, account, lock_id))
                 .map_err(Self::convert_error)?
@@ -1417,7 +1440,9 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
                     "All locks must have same unlock time",
                 ));
             }
-            total_amount += lock.amount;
+            total_amount = total_amount
+                .checked_add(lock.amount)
+                .ok_or_else(|| Self::invalid_data_error("Merged lock amount overflow"))?;
         }
 
         // Delete all old locks
@@ -1450,18 +1475,28 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
 
+        // Use checked arithmetic for lock ID increment
+        let next_lock_id = new_lock_id
+            .checked_add(1)
+            .ok_or_else(|| Self::invalid_data_error("Lock ID overflow"))?;
         try_block_on(
             self.provider
-                .set_native_asset_next_lock_id(&hash, account, new_lock_id + 1),
+                .set_native_asset_next_lock_id(&hash, account, next_lock_id),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
 
         // Update lock count (reduce by merged count - 1)
+        // Use checked arithmetic to catch invariant violations
         let count = try_block_on(self.provider.get_native_asset_lock_count(&hash, account))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
-        let new_count = count.saturating_sub(lock_ids.len() as u32 - 1);
+        let reduce_by = (lock_ids.len() as u32)
+            .checked_sub(1)
+            .ok_or_else(|| Self::invalid_data_error("Lock count reduction underflow"))?;
+        let new_count = count
+            .checked_sub(reduce_by)
+            .ok_or_else(|| Self::invalid_data_error("Lock count underflow"))?;
         try_block_on(
             self.provider
                 .set_native_asset_lock_count(&hash, account, new_count),
@@ -1499,35 +1534,55 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
 
         let amount = token_lock.amount;
 
-        // BUG-TOS-001 FIX: Transfer underlying balance FIRST before modifying lock state
-        // This ensures that if transfer fails (pause/freeze/balance error), lock state is unchanged
-        self.transfer(asset, from, to, amount)?;
+        // Check pause/freeze status before transferring
+        // Note: We use subtract_balance/add_balance directly instead of transfer()
+        // because transfer() checks available_balance which excludes locked tokens.
+        // When transferring a lock, we're moving LOCKED tokens, not available tokens.
+        let data = self.get_asset_data(asset)?;
+        if data.pausable && self.is_paused(asset)? {
+            return Err(Self::permission_denied_error("Asset is paused"));
+        }
+        if data.freezable && self.is_frozen(asset, from)? {
+            return Err(Self::permission_denied_error("Sender is frozen"));
+        }
+        if data.freezable && self.is_frozen(asset, to)? {
+            return Err(Self::permission_denied_error("Recipient is frozen"));
+        }
+
+        // Transfer underlying balance directly (FIRST before modifying lock state)
+        // This ensures that if transfer fails (balance error), lock state is unchanged
+        self.subtract_balance(asset, from, amount)?;
+        self.add_balance(asset, to, amount)?;
 
         // Delete from source
         try_block_on(self.provider.delete_native_asset_lock(&hash, from, lock_id))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
 
-        // Update source counts
+        // Update source counts using checked arithmetic to catch invariant violations
         let from_count = try_block_on(self.provider.get_native_asset_lock_count(&hash, from))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
-        try_block_on(self.provider.set_native_asset_lock_count(
-            &hash,
-            from,
-            from_count.saturating_sub(1),
-        ))
+        let new_from_count = from_count
+            .checked_sub(1)
+            .ok_or_else(|| Self::invalid_data_error("Source lock count underflow"))?;
+        try_block_on(
+            self.provider
+                .set_native_asset_lock_count(&hash, from, new_from_count),
+        )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
 
         let from_locked = try_block_on(self.provider.get_native_asset_locked_balance(&hash, from))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
-        try_block_on(self.provider.set_native_asset_locked_balance(
-            &hash,
-            from,
-            from_locked.saturating_sub(amount),
-        ))
+        let new_from_locked = from_locked
+            .checked_sub(amount)
+            .ok_or_else(|| Self::invalid_data_error("Source locked balance underflow"))?;
+        try_block_on(
+            self.provider
+                .set_native_asset_locked_balance(&hash, from, new_from_locked),
+        )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
 
@@ -1915,6 +1970,15 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
     ) -> Result<(), EbpfError> {
         let hash = Self::bytes_to_hash(asset);
 
+        // Check available balance (excludes locked tokens) before escrowing
+        // This prevents locked tokens from being double-used in escrows
+        let available = self.available_balance(asset, sender)?;
+        if available < amount {
+            return Err(Self::permission_denied_error(
+                "Insufficient available balance for escrow",
+            ));
+        }
+
         // Transfer tokens from sender to escrow (subtract from sender)
         self.subtract_balance(asset, sender, amount)?;
 
@@ -2000,13 +2064,36 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         let old_status = escrow.status.clone();
         let new_status = Self::u8_to_escrow_status(status);
 
-        // BUG-TOS-003 FIX: Credit balance BEFORE updating status
+        // Escrow status state machine validation:
+        // - Active can transition to Released or Cancelled
+        // - Released and Cancelled are terminal states (cannot transition)
+        match (&old_status, &new_status) {
+            (EscrowStatus::Active, EscrowStatus::Released)
+            | (EscrowStatus::Active, EscrowStatus::Cancelled) => {
+                // Valid transition - continue
+            }
+            (EscrowStatus::Released, _) => {
+                return Err(Self::invalid_data_error(
+                    "Cannot change status of released escrow",
+                ));
+            }
+            (EscrowStatus::Cancelled, _) => {
+                return Err(Self::invalid_data_error(
+                    "Cannot change status of cancelled escrow",
+                ));
+            }
+            _ => {
+                return Err(Self::invalid_data_error("Invalid escrow status transition"));
+            }
+        }
+
+        // Credit balance BEFORE updating status
         // This ensures that if balance credit fails, escrow status remains Active
         // and funds are not lost in limbo
-        if new_status == EscrowStatus::Released && old_status == EscrowStatus::Active {
+        if new_status == EscrowStatus::Released {
             // Released - transfer to recipient FIRST
             self.add_balance(asset, &escrow.recipient, escrow.amount)?;
-        } else if new_status == EscrowStatus::Cancelled && old_status == EscrowStatus::Active {
+        } else if new_status == EscrowStatus::Cancelled {
             // Cancelled - refund to sender FIRST
             self.add_balance(asset, &escrow.sender, escrow.amount)?;
         }
@@ -2128,7 +2215,10 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
     ) -> Result<u64, EbpfError> {
         let hash = Self::bytes_to_hash(asset);
         let nonce = self.get_permit_nonce(asset, owner)?;
-        let new_nonce = nonce + 1;
+        // Use checked arithmetic to prevent nonce overflow and replay attacks
+        let new_nonce = nonce
+            .checked_add(1)
+            .ok_or_else(|| Self::invalid_data_error("Permit nonce overflow"))?;
         try_block_on(
             self.provider
                 .set_native_asset_permit_nonce(&hash, owner, new_nonce),
@@ -2792,6 +2882,14 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
     ) -> Result<(), EbpfError> {
         let hash = Self::bytes_to_hash(asset);
 
+        // Validate caller has DEFAULT_ADMIN_ROLE to schedule timelock operations
+        let admin_role = tos_common::native_asset::DEFAULT_ADMIN_ROLE;
+        if !self.check_role(&hash, &admin_role, caller)? {
+            return Err(Self::permission_denied_error(
+                "Caller does not have DEFAULT_ADMIN_ROLE for timelock_schedule",
+            ));
+        }
+
         // Check if operation already exists
         let existing = try_block_on(
             self.provider
@@ -2841,10 +2939,18 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         &mut self,
         asset: &[u8; 32],
         operation_id: &[u8; 32],
-        _caller: &[u8; 32],
+        caller: &[u8; 32],
         block_height: u64,
     ) -> Result<(), EbpfError> {
         let hash = Self::bytes_to_hash(asset);
+
+        // Validate caller has DEFAULT_ADMIN_ROLE to execute timelock operations
+        let admin_role = tos_common::native_asset::DEFAULT_ADMIN_ROLE;
+        if !self.check_role(&hash, &admin_role, caller)? {
+            return Err(Self::permission_denied_error(
+                "Caller does not have DEFAULT_ADMIN_ROLE for timelock_execute",
+            ));
+        }
 
         // Get the operation
         let operation = try_block_on(
@@ -2880,10 +2986,18 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         &mut self,
         asset: &[u8; 32],
         operation_id: &[u8; 32],
-        _caller: &[u8; 32],
+        caller: &[u8; 32],
         _block_height: u64,
     ) -> Result<(), EbpfError> {
         let hash = Self::bytes_to_hash(asset);
+
+        // Validate caller has DEFAULT_ADMIN_ROLE to cancel timelock operations
+        let admin_role = tos_common::native_asset::DEFAULT_ADMIN_ROLE;
+        if !self.check_role(&hash, &admin_role, caller)? {
+            return Err(Self::permission_denied_error(
+                "Caller does not have DEFAULT_ADMIN_ROLE for timelock_cancel",
+            ));
+        }
 
         // Check if operation exists and is pending
         let operation = try_block_on(
