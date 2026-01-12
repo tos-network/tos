@@ -1983,6 +1983,10 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
             return Err(Self::invalid_data_error("Escrow already exists"));
         }
 
+        // Validate release condition FIRST before any state changes
+        // This ensures parsing errors don't leave balance deducted without escrow
+        let condition = Self::parse_release_condition(condition_type, condition_data)?;
+
         // Check available balance (excludes locked tokens) before escrowing
         // This prevents locked tokens from being double-used in escrows
         let available = self.available_balance(asset, sender)?;
@@ -1994,9 +1998,6 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
 
         // Transfer tokens from sender to escrow (subtract from sender)
         self.subtract_balance(asset, sender, amount)?;
-
-        // Convert TAKO condition_type + condition_data to TOS ReleaseCondition
-        let condition = Self::parse_release_condition(condition_type, condition_data)?;
 
         let escrow = Escrow {
             id: escrow_id,
