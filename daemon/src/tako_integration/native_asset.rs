@@ -1201,15 +1201,17 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
 
-        // Update lock count
+        // Update lock count using checked arithmetic to catch invariant violations
         let count = try_block_on(self.provider.get_native_asset_lock_count(&hash, account))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
-        try_block_on(self.provider.set_native_asset_lock_count(
-            &hash,
-            account,
-            count.saturating_sub(1),
-        ))
+        let new_count = count
+            .checked_sub(1)
+            .ok_or_else(|| Self::invalid_data_error("Lock count underflow in unlock"))?;
+        try_block_on(
+            self.provider
+                .set_native_asset_lock_count(&hash, account, new_count),
+        )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
 
@@ -1221,18 +1223,20 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
 
-        // Update locked balance
+        // Update locked balance using checked arithmetic
         let locked = try_block_on(
             self.provider
                 .get_native_asset_locked_balance(&hash, account),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
-        try_block_on(self.provider.set_native_asset_locked_balance(
-            &hash,
-            account,
-            locked.saturating_sub(amount),
-        ))
+        let new_locked = locked
+            .checked_sub(amount)
+            .ok_or_else(|| Self::invalid_data_error("Locked balance underflow in unlock"))?;
+        try_block_on(
+            self.provider
+                .set_native_asset_locked_balance(&hash, account, new_locked),
+        )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
 
@@ -1969,6 +1973,15 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         created_at: u64,
     ) -> Result<(), EbpfError> {
         let hash = Self::bytes_to_hash(asset);
+
+        // Check if escrow already exists to prevent overwriting
+        // If get_native_asset_escrow succeeds, the escrow already exists
+        if try_block_on(self.provider.get_native_asset_escrow(&hash, escrow_id))
+            .map_err(Self::convert_error)?
+            .is_ok()
+        {
+            return Err(Self::invalid_data_error("Escrow already exists"));
+        }
 
         // Check available balance (excludes locked tokens) before escrowing
         // This prevents locked tokens from being double-used in escrows
@@ -3059,10 +3072,18 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         &mut self,
         asset: &[u8; 32],
         new_delay: u64,
-        _caller: &[u8; 32],
+        caller: &[u8; 32],
         _block_height: u64,
     ) -> Result<(), EbpfError> {
         let hash = Self::bytes_to_hash(asset);
+
+        // Validate caller has DEFAULT_ADMIN_ROLE to modify timelock minimum delay
+        let admin_role = tos_common::native_asset::DEFAULT_ADMIN_ROLE;
+        if !self.check_role(&hash, &admin_role, caller)? {
+            return Err(Self::permission_denied_error(
+                "Caller does not have DEFAULT_ADMIN_ROLE for timelock_set_min_delay",
+            ));
+        }
 
         try_block_on(
             self.provider
