@@ -126,8 +126,8 @@ impl TestContext {
             name: "Integration Test Token".to_string(),
             symbol: "ITT".to_string(),
             decimals: 8,
-            total_supply: 1_000_000_00000000, // 1M tokens with 8 decimals
-            max_supply: Some(10_000_000_00000000), // 10M max
+            total_supply: 100_000_000_000_000, // 1M tokens with 8 decimals
+            max_supply: Some(1_000_000_000_000_000), // 10M max
             mintable: true,
             burnable: true,
             pausable: true,
@@ -1869,17 +1869,17 @@ async fn test_supply_operations() {
 
     // Get initial supply
     let supply = ctx.storage.get_native_asset_supply(&asset).await.unwrap();
-    assert_eq!(supply, 1_000_000_00000000);
+    assert_eq!(supply, 100_000_000_000_000);
 
     // Update supply
     ctx.storage
-        .set_native_asset_supply(&asset, 2_000_000_00000000)
+        .set_native_asset_supply(&asset, 200_000_000_000_000)
         .await
         .unwrap();
 
     // Verify updated supply
     let supply = ctx.storage.get_native_asset_supply(&asset).await.unwrap();
-    assert_eq!(supply, 2_000_000_00000000);
+    assert_eq!(supply, 200_000_000_000_000);
 
     println!("Test I.2 passed: Supply operations");
 }

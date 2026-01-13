@@ -11,7 +11,215 @@ use tos_common::{
         DelegationCheckpoint, Escrow, FreezeState, NativeAssetData, PauseState, RoleConfig, RoleId,
         SupplyCheckpoint, TimelockOperation, TokenLock,
     },
+    serializer::Serializer,
 };
+
+// ===== Atomic Batch Write Types =====
+
+/// Represents a single storage operation in a batch
+#[derive(Debug, Clone)]
+pub enum BatchOperation {
+    /// Put a key-value pair
+    Put {
+        /// Column family name
+        cf: &'static str,
+        /// Storage key
+        key: Vec<u8>,
+        /// Serialized value
+        value: Vec<u8>,
+    },
+    /// Delete a key
+    Delete {
+        /// Column family name
+        cf: &'static str,
+        /// Storage key
+        key: Vec<u8>,
+    },
+}
+
+/// A batch of storage operations to be executed atomically
+#[derive(Debug, Clone, Default)]
+pub struct StorageWriteBatch {
+    /// List of operations to execute
+    pub operations: Vec<BatchOperation>,
+}
+
+impl StorageWriteBatch {
+    /// Create a new empty batch
+    pub fn new() -> Self {
+        Self {
+            operations: Vec::new(),
+        }
+    }
+
+    /// Add a put operation to the batch
+    pub fn put(&mut self, cf: &'static str, key: Vec<u8>, value: Vec<u8>) {
+        self.operations.push(BatchOperation::Put { cf, key, value });
+    }
+
+    /// Add a delete operation to the batch
+    pub fn delete(&mut self, cf: &'static str, key: Vec<u8>) {
+        self.operations.push(BatchOperation::Delete { cf, key });
+    }
+
+    /// Check if the batch is empty
+    pub fn is_empty(&self) -> bool {
+        self.operations.is_empty()
+    }
+
+    /// Get the number of operations in the batch
+    pub fn len(&self) -> usize {
+        self.operations.len()
+    }
+
+    // ===== Helper Methods for Native Asset Operations =====
+
+    /// Add a balance update to the batch
+    pub fn put_balance(&mut self, asset: &Hash, account: &[u8; 32], balance: u64) {
+        let key = build_native_asset_balance_key(asset, account);
+        let value = balance.to_bytes();
+        self.put("NativeAssets", key, value);
+    }
+
+    /// Add a supply update to the batch
+    pub fn put_supply(&mut self, asset: &Hash, supply: u64) {
+        let key = build_native_asset_supply_key(asset);
+        let value = supply.to_bytes();
+        self.put("NativeAssets", key, value);
+    }
+
+    /// Add a balance checkpoint to the batch
+    pub fn put_balance_checkpoint(
+        &mut self,
+        asset: &Hash,
+        account: &[u8; 32],
+        index: u32,
+        checkpoint: &BalanceCheckpoint,
+    ) {
+        let key = build_native_asset_balance_checkpoint_key(asset, account, index);
+        let value = checkpoint.to_bytes();
+        self.put("NativeAssets", key, value);
+    }
+
+    /// Add a balance checkpoint count update to the batch
+    pub fn put_balance_checkpoint_count(&mut self, asset: &Hash, account: &[u8; 32], count: u32) {
+        let key = build_native_asset_balance_checkpoint_count_key(asset, account);
+        let value = count.to_bytes();
+        self.put("NativeAssets", key, value);
+    }
+
+    /// Add a supply checkpoint to the batch
+    pub fn put_supply_checkpoint(
+        &mut self,
+        asset: &Hash,
+        index: u32,
+        checkpoint: &SupplyCheckpoint,
+    ) {
+        let key = build_native_asset_supply_checkpoint_key(asset, index);
+        let value = checkpoint.to_bytes();
+        self.put("NativeAssets", key, value);
+    }
+
+    /// Add a supply checkpoint count update to the batch
+    pub fn put_supply_checkpoint_count(&mut self, asset: &Hash, count: u32) {
+        let key = build_native_asset_supply_checkpoint_count_key(asset);
+        let value = count.to_bytes();
+        self.put("NativeAssets", key, value);
+    }
+
+    /// Add a lock record to the batch
+    pub fn put_lock(&mut self, asset: &Hash, account: &[u8; 32], lock: &TokenLock) {
+        let key = build_native_asset_lock_key(asset, account, lock.id);
+        let value = lock.to_bytes();
+        self.put("NativeAssets", key, value);
+    }
+
+    /// Add a lock deletion to the batch
+    pub fn delete_lock(&mut self, asset: &Hash, account: &[u8; 32], lock_id: u64) {
+        let key = build_native_asset_lock_key(asset, account, lock_id);
+        self.delete("NativeAssets", key);
+    }
+
+    /// Add a lock count update to the batch
+    pub fn put_lock_count(&mut self, asset: &Hash, account: &[u8; 32], count: u32) {
+        let key = build_native_asset_lock_count_key(asset, account);
+        let value = count.to_bytes();
+        self.put("NativeAssets", key, value);
+    }
+
+    /// Add a locked balance update to the batch
+    pub fn put_locked_balance(&mut self, asset: &Hash, account: &[u8; 32], locked: u64) {
+        let key = build_native_asset_locked_balance_key(asset, account);
+        let value = locked.to_bytes();
+        self.put("NativeAssets", key, value);
+    }
+
+    /// Add a next lock ID update to the batch
+    pub fn put_next_lock_id(&mut self, asset: &Hash, account: &[u8; 32], next_id: u64) {
+        let key = build_native_asset_lock_next_id_key(asset, account);
+        let value = next_id.to_bytes();
+        self.put("NativeAssets", key, value);
+    }
+
+    /// Add an escrow record to the batch
+    pub fn put_escrow(&mut self, asset: &Hash, escrow: &Escrow) {
+        let key = build_native_asset_escrow_key(asset, escrow.id);
+        let value = escrow.to_bytes();
+        self.put("NativeAssets", key, value);
+    }
+
+    /// Add an escrow deletion to the batch
+    pub fn delete_escrow(&mut self, asset: &Hash, escrow_id: u64) {
+        let key = build_native_asset_escrow_key(asset, escrow_id);
+        self.delete("NativeAssets", key);
+    }
+
+    /// Add an escrow counter update to the batch
+    pub fn put_escrow_counter(&mut self, asset: &Hash, counter: u64) {
+        let key = build_native_asset_escrow_counter_key(asset);
+        let value = counter.to_bytes();
+        self.put("NativeAssets", key, value);
+    }
+
+    /// Add a delegation update to the batch
+    pub fn put_delegation(&mut self, asset: &Hash, account: &[u8; 32], delegation: &Delegation) {
+        let key = build_native_asset_delegation_key(asset, account);
+        let value = delegation.to_bytes();
+        self.put("NativeAssets", key, value);
+    }
+
+    /// Add a delegation checkpoint to the batch
+    pub fn put_delegation_checkpoint(
+        &mut self,
+        asset: &Hash,
+        account: &[u8; 32],
+        index: u32,
+        checkpoint: &DelegationCheckpoint,
+    ) {
+        let key = build_native_asset_delegation_checkpoint_key(asset, account, index);
+        let value = checkpoint.to_bytes();
+        self.put("NativeAssets", key, value);
+    }
+
+    /// Add a delegation checkpoint count update to the batch
+    pub fn put_delegation_checkpoint_count(
+        &mut self,
+        asset: &Hash,
+        account: &[u8; 32],
+        count: u32,
+    ) {
+        let key = build_native_asset_delegation_checkpoint_count_key(asset, account);
+        let value = count.to_bytes();
+        self.put("NativeAssets", key, value);
+    }
+
+    /// Add a role config update to the batch
+    pub fn put_role_config(&mut self, asset: &Hash, role: &RoleId, config: &RoleConfig) {
+        let key = build_native_asset_role_config_key(asset, role);
+        let value = config.to_bytes();
+        self.put("NativeAssets", key, value);
+    }
+}
 
 // ===== Native Asset Provider Trait =====
 
@@ -696,6 +904,27 @@ pub trait NativeAssetProvider {
         delegatee: &[u8; 32],
         delegator: &[u8; 32],
     ) -> Result<(), BlockchainError>;
+
+    // ===== Atomic Batch Operations =====
+
+    /// Execute a batch of storage operations atomically
+    ///
+    /// All operations in the batch will either succeed together or fail together.
+    /// This is critical for maintaining consistency in multi-step operations like
+    /// transfers, mints, burns, and escrow operations.
+    ///
+    /// # Arguments
+    /// * `batch` - The batch of operations to execute
+    ///
+    /// # Returns
+    /// * `Ok(())` if all operations succeeded
+    /// * `Err(BlockchainError)` if any operation failed (no changes applied)
+    async fn execute_batch(&mut self, batch: StorageWriteBatch) -> Result<(), BlockchainError>;
+
+    /// Create a new empty batch for atomic operations
+    fn create_batch(&self) -> StorageWriteBatch {
+        StorageWriteBatch::new()
+    }
 }
 
 // ===== Storage Key Builders =====
