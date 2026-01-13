@@ -2362,11 +2362,13 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         asset: &[u8; 32],
         role: &[u8; 32],
         admin_role: &[u8; 32],
+        _caller: &[u8; 32],
+        _block_height: u64,
     ) -> Result<(), EbpfError> {
         let hash = Self::bytes_to_hash(asset);
 
-        // NOTE: RBAC validation must be done at syscall level in TAKO
-        // The trait doesn't include a caller parameter for this function
+        // NOTE: RBAC validation is done at syscall level in TAKO
+        // The caller and block_height params are passed for logging/audit purposes
 
         let mut config = try_block_on(self.provider.get_native_asset_role_config(&hash, role))
             .map_err(Self::convert_error)?
@@ -2469,11 +2471,13 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         from: &[u8; 32],
         to: &[u8; 32],
         amount: u64,
+        _caller: &[u8; 32],
+        _block_height: u64,
     ) -> Result<(), EbpfError> {
         let hash = Self::bytes_to_hash(asset);
 
-        // NOTE: RBAC validation must be done at syscall level in TAKO
-        // The trait doesn't include a caller parameter for this function
+        // NOTE: RBAC validation is done at syscall level in TAKO
+        // The caller and block_height params are passed for logging/audit purposes
 
         // BUG-TOS-008 FIX: Validate amount is not zero
         if amount == 0 {
@@ -2536,11 +2540,17 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         self.write_balance_checkpoint(&hash, to, new_to)
     }
 
-    fn update_name(&mut self, asset: &[u8; 32], name: &[u8]) -> Result<(), EbpfError> {
+    fn update_name(
+        &mut self,
+        asset: &[u8; 32],
+        name: &[u8],
+        _caller: &[u8; 32],
+        _block_height: u64,
+    ) -> Result<(), EbpfError> {
         let hash = Self::bytes_to_hash(asset);
 
-        // NOTE: RBAC validation must be done at syscall level in TAKO
-        // The trait doesn't include a caller parameter for this function
+        // NOTE: RBAC validation is done at syscall level in TAKO
+        // The caller and block_height params are passed for logging/audit purposes
 
         let mut data = self.get_asset_data(asset)?;
         data.name = String::from_utf8(name.to_vec())
@@ -2550,11 +2560,17 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
             .map_err(Self::convert_error)
     }
 
-    fn update_symbol(&mut self, asset: &[u8; 32], symbol: &[u8]) -> Result<(), EbpfError> {
+    fn update_symbol(
+        &mut self,
+        asset: &[u8; 32],
+        symbol: &[u8],
+        _caller: &[u8; 32],
+        _block_height: u64,
+    ) -> Result<(), EbpfError> {
         let hash = Self::bytes_to_hash(asset);
 
-        // NOTE: RBAC validation must be done at syscall level in TAKO
-        // The trait doesn't include a caller parameter for this function
+        // NOTE: RBAC validation is done at syscall level in TAKO
+        // The caller and block_height params are passed for logging/audit purposes
 
         let mut data = self.get_asset_data(asset)?;
         data.symbol = String::from_utf8(symbol.to_vec())
@@ -2564,11 +2580,17 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
             .map_err(Self::convert_error)
     }
 
-    fn update_metadata_uri(&mut self, asset: &[u8; 32], uri: &[u8]) -> Result<(), EbpfError> {
+    fn update_metadata_uri(
+        &mut self,
+        asset: &[u8; 32],
+        uri: &[u8],
+        _caller: &[u8; 32],
+        _block_height: u64,
+    ) -> Result<(), EbpfError> {
         let hash = Self::bytes_to_hash(asset);
 
-        // NOTE: RBAC validation must be done at syscall level in TAKO
-        // The trait doesn't include a caller parameter for this function
+        // NOTE: RBAC validation is done at syscall level in TAKO
+        // The caller and block_height params are passed for logging/audit purposes
 
         let uri_str = if uri.is_empty() {
             None

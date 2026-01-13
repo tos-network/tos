@@ -14,7 +14,7 @@ build = "build.rs"
 [dependencies]
 tos-hash = { git = "https://github.com/tos-network/tos-hash", rev = "b661e5a" }
 # TOS Kernel - Simplified re-export crate in TAKO
-tos-kernel = { git = "https://github.com/tos-network/tako", rev = "e37f93b" }
+tos-kernel = { git = "https://github.com/tos-network/tako", rev = "b655d4d" }
 # TOS Crypto - Unified cryptographic primitives (curve25519-dalek, bulletproofs, merlin)
 # Features: uno = ecdlp (balance decryption) + zk-proofs (bulletproofs + merlin), vrf = VRF support
 tos-crypto = { git = "https://github.com/tos-network/tos-crypto", rev = "abb56b0", features = ["uno", "vrf"] }
