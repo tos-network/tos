@@ -12,8 +12,8 @@ use crate::core::{
             build_native_asset_checkpoint_count_key, build_native_asset_checkpoint_key,
             build_native_asset_delegation_checkpoint_count_key,
             build_native_asset_delegation_checkpoint_key, build_native_asset_delegation_key,
-            build_native_asset_escrow_counter_key, build_native_asset_escrow_key,
-            build_native_asset_freeze_key, build_native_asset_key,
+            build_native_asset_delegators_key, build_native_asset_escrow_counter_key,
+            build_native_asset_escrow_key, build_native_asset_freeze_key, build_native_asset_key,
             build_native_asset_lock_count_key, build_native_asset_lock_index_key,
             build_native_asset_lock_key, build_native_asset_lock_next_id_key,
             build_native_asset_locked_balance_key, build_native_asset_metadata_key,
@@ -23,7 +23,7 @@ use crate::core::{
             build_native_asset_role_members_key, build_native_asset_supply_checkpoint_count_key,
             build_native_asset_supply_checkpoint_key, build_native_asset_supply_key,
             build_native_asset_timelock_min_delay_key, build_native_asset_timelock_operation_key,
-            build_native_asset_user_escrows_key,
+            build_native_asset_user_escrows_key, build_native_asset_vote_power_key,
         },
         NativeAssetProvider, RocksStorage,
     },
@@ -1453,5 +1453,118 @@ impl NativeAssetProvider for RocksStorage {
         }
         let key = build_native_asset_timelock_operation_key(asset, operation_id);
         self.remove_from_disk(Column::NativeAssets, &key)
+    }
+
+    // ===== Vote Power Operations =====
+
+    async fn get_native_asset_vote_power(
+        &self,
+        asset: &Hash,
+        account: &[u8; 32],
+    ) -> Result<u64, BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "get native asset vote power {} account {:?}",
+                asset,
+                account
+            );
+        }
+        let key = build_native_asset_vote_power_key(asset, account);
+        self.load_optional_from_disk(Column::NativeAssets, &key)
+            .map(|v| v.unwrap_or(0))
+    }
+
+    async fn set_native_asset_vote_power(
+        &mut self,
+        asset: &Hash,
+        account: &[u8; 32],
+        votes: u64,
+    ) -> Result<(), BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "set native asset vote power {} account {:?} = {}",
+                asset,
+                account,
+                votes
+            );
+        }
+        let key = build_native_asset_vote_power_key(asset, account);
+        self.insert_into_disk(Column::NativeAssets, &key, &votes)
+    }
+
+    // ===== Delegators Index Operations =====
+
+    async fn get_native_asset_delegators(
+        &self,
+        asset: &Hash,
+        delegatee: &[u8; 32],
+    ) -> Result<Vec<[u8; 32]>, BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "get native asset delegators {} delegatee {:?}",
+                asset,
+                delegatee
+            );
+        }
+        let key = build_native_asset_delegators_key(asset, delegatee);
+        self.load_optional_from_disk(Column::NativeAssets, &key)
+            .map(|v| v.unwrap_or_default())
+    }
+
+    async fn add_native_asset_delegator(
+        &mut self,
+        asset: &Hash,
+        delegatee: &[u8; 32],
+        delegator: &[u8; 32],
+    ) -> Result<(), BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "add native asset delegator {} delegatee {:?} delegator {:?}",
+                asset,
+                delegatee,
+                delegator
+            );
+        }
+        let key = build_native_asset_delegators_key(asset, delegatee);
+        let mut delegators: Vec<[u8; 32]> = self
+            .load_optional_from_disk(Column::NativeAssets, &key)?
+            .unwrap_or_default();
+
+        // Prevent duplicates
+        if !delegators.contains(delegator) {
+            delegators.push(*delegator);
+            self.insert_into_disk(Column::NativeAssets, &key, &delegators)?;
+        }
+        Ok(())
+    }
+
+    async fn remove_native_asset_delegator(
+        &mut self,
+        asset: &Hash,
+        delegatee: &[u8; 32],
+        delegator: &[u8; 32],
+    ) -> Result<(), BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "remove native asset delegator {} delegatee {:?} delegator {:?}",
+                asset,
+                delegatee,
+                delegator
+            );
+        }
+        let key = build_native_asset_delegators_key(asset, delegatee);
+        let mut delegators: Vec<[u8; 32]> = self
+            .load_optional_from_disk(Column::NativeAssets, &key)?
+            .unwrap_or_default();
+
+        if let Some(pos) = delegators.iter().position(|d| d == delegator) {
+            delegators.swap_remove(pos);
+            if delegators.is_empty() {
+                self.remove_from_disk(Column::NativeAssets, &key)?;
+            } else {
+                self.insert_into_disk(Column::NativeAssets, &key, &delegators)?;
+            }
+        }
+        Ok(())
     }
 }

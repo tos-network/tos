@@ -160,3 +160,9 @@ pub const NATIVE_ASSET_TIMELOCK_OP_PREFIX: &[u8] = b"nato";
 
 /// Timelock minimum delay prefix
 pub const NATIVE_ASSET_TIMELOCK_MIN_DELAY_PREFIX: &[u8] = b"natm";
+
+/// Vote power prefix (stored vote power for governance)
+pub const NATIVE_ASSET_VOTE_POWER_PREFIX: &[u8] = b"navp";
+
+/// Delegators index prefix (reverse mapping: delegatee -> list of delegators)
+pub const NATIVE_ASSET_DELEGATORS_PREFIX: &[u8] = b"nadr";

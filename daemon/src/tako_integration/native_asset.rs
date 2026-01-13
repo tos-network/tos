@@ -357,6 +357,226 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TosNativeAssetAdapter<'a
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)
     }
+
+    // ========================================
+    // Vote Power & Checkpoint Operations (TOS-004 Fix)
+    // ========================================
+
+    /// Get stored vote power for an account (O(1) - no recalculation)
+    fn get_vote_power(&self, hash: &Hash, account: &[u8; 32]) -> Result<u64, EbpfError> {
+        try_block_on(self.provider.get_native_asset_vote_power(hash, account))
+            .map_err(Self::convert_error)?
+            .map_err(Self::convert_error)
+    }
+
+    /// Set vote power for an account
+    fn set_vote_power(
+        &mut self,
+        hash: &Hash,
+        account: &[u8; 32],
+        votes: u64,
+    ) -> Result<(), EbpfError> {
+        try_block_on(
+            self.provider
+                .set_native_asset_vote_power(hash, account, votes),
+        )
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)
+    }
+
+    /// Move vote power from one account to another (delta-based, O(1))
+    fn move_vote_power(
+        &mut self,
+        hash: &Hash,
+        from: &[u8; 32],
+        to: &[u8; 32],
+        amount: u64,
+    ) -> Result<(), EbpfError> {
+        // Skip if zero amount or same account
+        if amount == 0 || from == to {
+            return Ok(());
+        }
+
+        // Normalize zero address to skip (zero = no delegation = self)
+        let zero_addr = [0u8; 32];
+        if *from == zero_addr || *to == zero_addr {
+            return Ok(()); // Zero address has no votes to move
+        }
+
+        // Subtract from source
+        let from_votes = self.get_vote_power(hash, from)?;
+        let new_from_votes = from_votes.saturating_sub(amount);
+        self.set_vote_power(hash, from, new_from_votes)?;
+
+        // Add to destination
+        let to_votes = self.get_vote_power(hash, to)?;
+        let new_to_votes = to_votes
+            .checked_add(amount)
+            .ok_or_else(|| Self::invalid_data_error("Vote power overflow"))?;
+        self.set_vote_power(hash, to, new_to_votes)?;
+
+        Ok(())
+    }
+
+    /// Get effective vote holder (self if no delegation or zero-address delegation)
+    fn get_effective_vote_holder(
+        &self,
+        hash: &Hash,
+        account: &[u8; 32],
+    ) -> Result<[u8; 32], EbpfError> {
+        let delegation = try_block_on(self.provider.get_native_asset_delegation(hash, account))
+            .map_err(Self::convert_error)?
+            .map_err(Self::convert_error)?;
+
+        // Return delegatee if set, otherwise self
+        match delegation.delegatee {
+            Some(delegatee) if delegatee != [0u8; 32] && delegatee != *account => Ok(delegatee),
+            _ => Ok(*account),
+        }
+    }
+
+    /// Write a vote checkpoint for an account
+    /// If checkpoint already exists for current block, overwrite instead of append
+    fn write_vote_checkpoint(&mut self, hash: &Hash, account: &[u8; 32]) -> Result<(), EbpfError> {
+        // Skip zero address - zero address has no meaningful votes
+        if *account == [0u8; 32] {
+            return Ok(());
+        }
+
+        let votes = self.get_vote_power(hash, account)?;
+
+        let count = try_block_on(
+            self.provider
+                .get_native_asset_checkpoint_count(hash, account),
+        )
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)?;
+
+        use tos_common::native_asset::Checkpoint;
+
+        // Same-block checkpoint overwrite: check if last checkpoint is from current block
+        if count > 0 {
+            let last_idx = count.saturating_sub(1);
+            let last_checkpoint = try_block_on(
+                self.provider
+                    .get_native_asset_checkpoint(hash, account, last_idx),
+            )
+            .map_err(Self::convert_error)?
+            .map_err(Self::convert_error)?;
+
+            if last_checkpoint.from_block == self.block_height {
+                // Overwrite existing checkpoint for this block
+                let updated_checkpoint = Checkpoint {
+                    from_block: self.block_height,
+                    votes,
+                };
+                try_block_on(self.provider.set_native_asset_checkpoint(
+                    hash,
+                    account,
+                    last_idx,
+                    &updated_checkpoint,
+                ))
+                .map_err(Self::convert_error)?
+                .map_err(Self::convert_error)?;
+                return Ok(());
+            }
+        }
+
+        // Append new checkpoint
+        let checkpoint = Checkpoint {
+            from_block: self.block_height,
+            votes,
+        };
+
+        try_block_on(
+            self.provider
+                .set_native_asset_checkpoint(hash, account, count, &checkpoint),
+        )
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)?;
+
+        let new_count = count
+            .checked_add(1)
+            .ok_or_else(|| Self::invalid_data_error("Vote checkpoint count overflow"))?;
+        try_block_on(
+            self.provider
+                .set_native_asset_checkpoint_count(hash, account, new_count),
+        )
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)
+    }
+
+    /// Delta-based vote update for balance transfers (O(1))
+    fn update_votes_for_balance_change(
+        &mut self,
+        hash: &Hash,
+        from: &[u8; 32],
+        to: &[u8; 32],
+        amount: u64,
+    ) -> Result<(), EbpfError> {
+        // Skip no-op transfers
+        if amount == 0 || from == to {
+            return Ok(());
+        }
+
+        // Get effective vote holders (respecting delegation)
+        let from_delegatee = self.get_effective_vote_holder(hash, from)?;
+        let to_delegatee = self.get_effective_vote_holder(hash, to)?;
+
+        // If both delegate to same account, votes don't change
+        if from_delegatee == to_delegatee {
+            return Ok(());
+        }
+
+        // Move vote power from sender's delegatee to recipient's delegatee
+        self.move_vote_power(hash, &from_delegatee, &to_delegatee, amount)?;
+
+        // Write checkpoints for affected accounts
+        self.write_vote_checkpoint(hash, &from_delegatee)?;
+        if from_delegatee != to_delegatee {
+            self.write_vote_checkpoint(hash, &to_delegatee)?;
+        }
+
+        Ok(())
+    }
+
+    /// Add vote power when minting (to recipient or their delegatee)
+    fn add_vote_power_for_mint(
+        &mut self,
+        hash: &Hash,
+        to: &[u8; 32],
+        amount: u64,
+    ) -> Result<(), EbpfError> {
+        if amount == 0 {
+            return Ok(());
+        }
+
+        let vote_holder = self.get_effective_vote_holder(hash, to)?;
+        let current_votes = self.get_vote_power(hash, &vote_holder)?;
+        let new_votes = current_votes
+            .checked_add(amount)
+            .ok_or_else(|| Self::invalid_data_error("Vote power overflow"))?;
+        self.set_vote_power(hash, &vote_holder, new_votes)?;
+        self.write_vote_checkpoint(hash, &vote_holder)
+    }
+
+    /// Remove vote power when burning (from burner or their delegatee)
+    fn remove_vote_power_for_burn(
+        &mut self,
+        hash: &Hash,
+        from: &[u8; 32],
+        amount: u64,
+    ) -> Result<(), EbpfError> {
+        if amount == 0 {
+            return Ok(());
+        }
+
+        let vote_holder = self.get_effective_vote_holder(hash, from)?;
+        let current_votes = self.get_vote_power(hash, &vote_holder)?;
+        let new_votes = current_votes.saturating_sub(amount);
+        self.set_vote_power(hash, &vote_holder, new_votes)?;
+        self.write_vote_checkpoint(hash, &vote_holder)
+    }
 }
 
 impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
@@ -569,6 +789,9 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         // Create balance checkpoint for recipient
         self.write_balance_checkpoint(&hash, to, new_to)?;
 
+        // Update vote checkpoints (TOS-004 fix)
+        self.update_votes_for_balance_change(&hash, from, to, amount)?;
+
         Ok(())
     }
 
@@ -631,6 +854,9 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         // Create supply checkpoint
         self.write_supply_checkpoint(&hash, new_supply)?;
 
+        // Add vote power for minted tokens (TOS-004 fix)
+        self.add_vote_power_for_mint(&hash, to, amount)?;
+
         Ok(())
     }
 
@@ -686,6 +912,9 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         // Create supply checkpoint
         self.write_supply_checkpoint(&hash, new_supply)?;
 
+        // Remove vote power for burned tokens (TOS-004 fix)
+        self.remove_vote_power_for_burn(&hash, from, amount)?;
+
         Ok(())
     }
 
@@ -708,7 +937,10 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         .map_err(Self::convert_error)?;
 
         // Create balance checkpoint
-        self.write_balance_checkpoint(&hash, account, new_balance)
+        self.write_balance_checkpoint(&hash, account, new_balance)?;
+
+        // Add vote power (TOS-004 fix)
+        self.add_vote_power_for_mint(&hash, account, amount)
     }
 
     fn subtract_balance(
@@ -730,7 +962,10 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         .map_err(Self::convert_error)?;
 
         // Create balance checkpoint
-        self.write_balance_checkpoint(&hash, account, new_balance)
+        self.write_balance_checkpoint(&hash, account, new_balance)?;
+
+        // Remove vote power (TOS-004 fix)
+        self.remove_vote_power_for_burn(&hash, account, amount)
     }
 
     // ========================================
@@ -854,6 +1089,24 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
             return Err(Self::permission_denied_error("Governance not enabled"));
         }
 
+        // TOS-004 FIX: Get old delegatee before updating delegation
+        let old_delegatee = self.get_effective_vote_holder(&hash, delegator)?;
+
+        // Normalize new delegatee (zero = self)
+        let new_delegatee = if *delegatee == [0u8; 32] {
+            *delegator
+        } else {
+            *delegatee
+        };
+
+        // Skip if delegating to same effective delegatee
+        if old_delegatee == new_delegatee {
+            return Ok(()); // No vote movement needed
+        }
+
+        // Get delegator's balance (this is the vote power being moved)
+        let delegator_balance = self.balance_of(asset, delegator)?;
+
         let delegation = Delegation {
             delegatee: Some(*delegatee),
             from_block: self.block_height,
@@ -896,7 +1149,38 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
                 .set_native_asset_delegation_checkpoint_count(&hash, delegator, new_count),
         )
         .map_err(Self::convert_error)?
-        .map_err(Self::convert_error)
+        .map_err(Self::convert_error)?;
+
+        // TOS-004 FIX: Update reverse delegation index
+        // Remove from old delegatee's delegators list (if not self-delegation)
+        if old_delegatee != *delegator {
+            try_block_on(self.provider.remove_native_asset_delegator(
+                &hash,
+                &old_delegatee,
+                delegator,
+            ))
+            .map_err(Self::convert_error)?
+            .map_err(Self::convert_error)?;
+        }
+        // Add to new delegatee's delegators list (if not self-delegation)
+        if new_delegatee != *delegator {
+            try_block_on(self.provider.add_native_asset_delegator(
+                &hash,
+                &new_delegatee,
+                delegator,
+            ))
+            .map_err(Self::convert_error)?
+            .map_err(Self::convert_error)?;
+        }
+
+        // TOS-004 FIX: Move vote power from old delegatee to new delegatee (O(1))
+        self.move_vote_power(&hash, &old_delegatee, &new_delegatee, delegator_balance)?;
+
+        // Write vote checkpoints for affected accounts
+        self.write_vote_checkpoint(&hash, &old_delegatee)?;
+        self.write_vote_checkpoint(&hash, &new_delegatee)?;
+
+        Ok(())
     }
 
     fn get_delegate(&self, asset: &[u8; 32], account: &[u8; 32]) -> Result<[u8; 32], EbpfError> {

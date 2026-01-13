@@ -654,6 +654,48 @@ pub trait NativeAssetProvider {
         asset: &Hash,
         operation_id: &[u8; 32],
     ) -> Result<(), BlockchainError>;
+
+    // ===== Vote Power Operations =====
+
+    /// Get stored vote power for an account (O(1) - no recalculation)
+    async fn get_native_asset_vote_power(
+        &self,
+        asset: &Hash,
+        account: &[u8; 32],
+    ) -> Result<u64, BlockchainError>;
+
+    /// Set vote power for an account
+    async fn set_native_asset_vote_power(
+        &mut self,
+        asset: &Hash,
+        account: &[u8; 32],
+        votes: u64,
+    ) -> Result<(), BlockchainError>;
+
+    // ===== Delegators Index Operations (Reverse Mapping) =====
+
+    /// Get list of delegators for a delegatee
+    async fn get_native_asset_delegators(
+        &self,
+        asset: &Hash,
+        delegatee: &[u8; 32],
+    ) -> Result<Vec<[u8; 32]>, BlockchainError>;
+
+    /// Add delegator to delegatee's delegators index
+    async fn add_native_asset_delegator(
+        &mut self,
+        asset: &Hash,
+        delegatee: &[u8; 32],
+        delegator: &[u8; 32],
+    ) -> Result<(), BlockchainError>;
+
+    /// Remove delegator from delegatee's delegators index
+    async fn remove_native_asset_delegator(
+        &mut self,
+        asset: &Hash,
+        delegatee: &[u8; 32],
+        delegator: &[u8; 32],
+    ) -> Result<(), BlockchainError>;
 }
 
 // ===== Storage Key Builders =====
@@ -987,5 +1029,23 @@ pub fn build_native_asset_timelock_operation_key(asset: &Hash, operation_id: &[u
     key.extend_from_slice(tos_common::native_asset::NATIVE_ASSET_TIMELOCK_OP_PREFIX);
     key.extend_from_slice(asset.as_bytes());
     key.extend_from_slice(operation_id);
+    key
+}
+
+/// Build storage key for vote power
+pub fn build_native_asset_vote_power_key(asset: &Hash, account: &[u8; 32]) -> Vec<u8> {
+    let mut key = Vec::with_capacity(4 + 32 + 32);
+    key.extend_from_slice(tos_common::native_asset::NATIVE_ASSET_VOTE_POWER_PREFIX);
+    key.extend_from_slice(asset.as_bytes());
+    key.extend_from_slice(account);
+    key
+}
+
+/// Build storage key for delegators index (reverse mapping: delegatee -> delegators)
+pub fn build_native_asset_delegators_key(asset: &Hash, delegatee: &[u8; 32]) -> Vec<u8> {
+    let mut key = Vec::with_capacity(4 + 32 + 32);
+    key.extend_from_slice(tos_common::native_asset::NATIVE_ASSET_DELEGATORS_PREFIX);
+    key.extend_from_slice(asset.as_bytes());
+    key.extend_from_slice(delegatee);
     key
 }
