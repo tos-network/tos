@@ -404,6 +404,10 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TosNativeAssetAdapter<'a
     }
 
     /// Move vote power from one account to another (delta-based, O(1))
+    ///
+    /// Implements lazy initialization: if vote power is not yet tracked for an account
+    /// but the account has a balance, initialize vote power from the balance first.
+    /// This handles migration from pre-vote-tracking state gracefully.
     fn move_vote_power(
         &mut self,
         hash: &Hash,
@@ -422,15 +426,40 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TosNativeAssetAdapter<'a
             return Ok(()); // Zero address has no votes to move
         }
 
-        // Subtract from source (use checked_sub to detect inconsistent state)
-        let from_votes = self.get_vote_power(hash, from)?;
+        // Get from votes with lazy initialization from balance if needed
+        let mut from_votes = self.get_vote_power(hash, from)?;
+        if from_votes == 0 {
+            // Vote power not yet initialized - check if account has balance
+            let balance = try_block_on(self.provider.get_native_asset_balance(hash, from))
+                .map_err(Self::convert_error)?
+                .map_err(Self::convert_error)?;
+            if balance > 0 {
+                // Lazy init: initialize vote power from balance (migration path)
+                from_votes = balance;
+                self.set_vote_power(hash, from, balance)?;
+            }
+        }
+
+        // Subtract from source
         let new_from_votes = from_votes
             .checked_sub(amount)
             .ok_or_else(|| Self::invalid_data_error("Vote power underflow: inconsistent state"))?;
         self.set_vote_power(hash, from, new_from_votes)?;
 
+        // Get to votes with lazy initialization from balance if needed
+        let mut to_votes = self.get_vote_power(hash, to)?;
+        if to_votes == 0 {
+            let balance = try_block_on(self.provider.get_native_asset_balance(hash, to))
+                .map_err(Self::convert_error)?
+                .map_err(Self::convert_error)?;
+            if balance > 0 {
+                // Lazy init for destination as well
+                to_votes = balance;
+                self.set_vote_power(hash, to, balance)?;
+            }
+        }
+
         // Add to destination
-        let to_votes = self.get_vote_power(hash, to)?;
         let new_to_votes = to_votes
             .checked_add(amount)
             .ok_or_else(|| Self::invalid_data_error("Vote power overflow"))?;
