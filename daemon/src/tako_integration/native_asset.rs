@@ -1236,7 +1236,7 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         }
 
         // SECURITY: Forbid chain delegation to prevent vote power getting stuck at intermediate accounts
-        // If new_delegatee has already delegated to someone else, reject this delegation
+        // Check 1: If new_delegatee has already delegated to someone else, reject this delegation
         // This ensures get_effective_vote_holder's single-hop resolution is always correct
         if new_delegatee != *delegator {
             let delegatee_delegation = try_block_on(
@@ -1252,6 +1252,22 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
                         "Cannot delegate to an account that has already delegated to someone else (chain delegation not allowed)",
                     ));
                 }
+            }
+        }
+
+        // Check 2: If delegator has incoming delegations, they cannot delegate to someone else
+        // (they can only revoke their delegation by delegating to themselves)
+        // This prevents: A→B, then B→C which would strand A's votes at B
+        if new_delegatee != *delegator {
+            let incoming_delegators =
+                try_block_on(self.provider.get_native_asset_delegators(&hash, delegator))
+                    .map_err(Self::convert_error)?
+                    .map_err(Self::convert_error)?;
+
+            if !incoming_delegators.is_empty() {
+                return Err(Self::invalid_data_error(
+                    "Cannot delegate when you have incoming delegations (revoke delegations first or have delegators re-delegate)",
+                ));
             }
         }
 
@@ -2265,18 +2281,9 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
 
-        // TOS-025: If granting DEFAULT_ADMIN_ROLE, update data.admin
-        let admin_role = tos_common::native_asset::DEFAULT_ADMIN_ROLE;
-        if *role == admin_role {
-            let mut data = self.get_asset_data(asset)?;
-            // Only update if current admin is zero or if granter is current admin
-            if data.admin == [0u8; 32] || data.admin == *granted_by {
-                data.admin = *account;
-                try_block_on(self.provider.set_native_asset(&hash, &data))
-                    .map_err(Self::convert_error)?
-                    .map_err(Self::convert_error)?;
-            }
-        }
+        // NOTE: Admin transfer should use the pending-admin flow (set_pending_admin → accept_admin)
+        // grant_role only grants the role permission, it does NOT update data.admin
+        // This ensures single-admin enforcement through the proper transfer mechanism
 
         Ok(())
     }
@@ -3161,8 +3168,13 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
 
     fn get_admin(&self, asset: &[u8; 32]) -> Result<[u8; 32], EbpfError> {
         let data = self.get_asset_data(asset)?;
-        // TOS-025: Return actual admin, not creator
-        Ok(data.admin)
+        // Return admin if set, otherwise fall back to creator for legacy compatibility
+        // Legacy assets created before admin field was added will have admin = [0; 32]
+        if data.admin == [0u8; 32] {
+            Ok(data.creator)
+        } else {
+            Ok(data.admin)
+        }
     }
 
     // Note: get_creator() not in TakoNativeAssetProvider trait.
