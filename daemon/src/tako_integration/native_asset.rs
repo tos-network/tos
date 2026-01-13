@@ -2727,9 +2727,11 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
             ));
         }
 
-        // Transfer tokens from sender to escrow (subtract from sender)
-        self.subtract_balance(asset, sender, amount)?;
-
+        // SAFETY: Create escrow record FIRST, then subtract balance
+        // If balance subtraction fails after escrow creation, the escrow can be
+        // cleaned up (admin cancel) - funds are NOT lost
+        // If we did it the other way (subtract first), balance deduction without
+        // escrow record means permanently lost funds
         let escrow = Escrow {
             id: escrow_id,
             asset: hash.clone(),
@@ -2765,7 +2767,11 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
                 .add_native_asset_user_escrow(&hash, recipient, escrow_id),
         )
         .map_err(Self::convert_error)?
-        .map_err(Self::convert_error)
+        .map_err(Self::convert_error)?;
+
+        // Now subtract balance - if this fails, escrow exists but balance unchanged
+        // This is recoverable (cancel escrow), unlike the reverse which loses funds
+        self.subtract_balance(asset, sender, amount)
     }
 
     #[allow(clippy::type_complexity)]
@@ -3284,9 +3290,11 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
             return Err(Self::permission_denied_error("Signature expired"));
         }
 
-        // Verify signature
+        // Verify signature with domain separator to prevent cross-chain/cross-method replay
+        let domain = self.get_domain(asset)?;
         let message = [
-            asset.as_slice(),
+            domain.as_slice(), // Domain separator (name + version + chain_id + asset)
+            b"DelegateBySig",  // Method tag to prevent cross-method replay
             delegatee,
             delegator,
             &nonce.to_le_bytes(),
