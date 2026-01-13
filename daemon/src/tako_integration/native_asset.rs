@@ -3297,11 +3297,14 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
             return Err(Self::permission_denied_error("Invalid signature"));
         }
 
-        // Increment nonce
+        // Perform delegation FIRST (if this fails, nonce is not consumed)
+        // This prevents griefing where relayers burn nonces on failed delegations
+        self.delegate(asset, delegator, delegatee)?;
+
+        // Increment nonce only on successful delegation
         self.increment_permit_nonce(asset, delegator)?;
 
-        // Perform delegation
-        self.delegate(asset, delegator, delegatee)
+        Ok(())
     }
 
     fn get_past_delegate(
