@@ -2223,6 +2223,16 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
     ) -> Result<(), EbpfError> {
         let hash = Self::bytes_to_hash(asset);
 
+        // SECURITY: Block direct granting of DEFAULT_ADMIN_ROLE
+        // Admin role transfer must use the pending-admin flow (set_pending_admin → accept_admin)
+        // This ensures single-admin enforcement and proper transfer mechanism
+        let admin_role = tos_common::native_asset::DEFAULT_ADMIN_ROLE;
+        if *role == admin_role {
+            return Err(Self::permission_denied_error(
+                "Cannot grant DEFAULT_ADMIN_ROLE directly; use set_pending_admin and accept_admin",
+            ));
+        }
+
         // BUG-TOS-002 FIX: Validate caller has admin role for the role being granted
         // Get the admin role for this role (use default if not yet configured)
         let mut role_config = try_block_on(self.provider.get_native_asset_role_config(&hash, role))
@@ -3168,12 +3178,25 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
 
     fn get_admin(&self, asset: &[u8; 32]) -> Result<[u8; 32], EbpfError> {
         let data = self.get_asset_data(asset)?;
-        // Return admin if set, otherwise fall back to creator for legacy compatibility
-        // Legacy assets created before admin field was added will have admin = [0; 32]
-        if data.admin == [0u8; 32] {
+        let hash = Self::bytes_to_hash(asset);
+
+        // If admin is set, return it
+        if data.admin != [0u8; 32] {
+            return Ok(data.admin);
+        }
+
+        // Admin is zero - distinguish between legacy and renounced:
+        // - Legacy: admin field never set, but creator has DEFAULT_ADMIN_ROLE
+        // - Renounced: admin explicitly cleared, no one has admin role
+        let admin_role = tos_common::native_asset::DEFAULT_ADMIN_ROLE;
+        let creator_has_role = self.check_role(&hash, &admin_role, &data.creator)?;
+
+        if creator_has_role {
+            // Legacy asset: creator still has admin role, return creator for compatibility
             Ok(data.creator)
         } else {
-            Ok(data.admin)
+            // Admin was renounced or never assigned: return zero
+            Ok([0u8; 32])
         }
     }
 
