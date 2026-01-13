@@ -691,6 +691,7 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
             freezable: true,
             governance: governance_enabled,
             creator: *creator,
+            admin: *creator, // TOS-025: Initialize admin = creator
             metadata_uri: metadata_str,
             created_at: self.block_height,
         };
@@ -706,6 +707,27 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
             &admin_role,
             creator,
             self.block_height,
+        ))
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)?;
+
+        // TOS-023: Add to role member index
+        try_block_on(
+            self.provider
+                .add_native_asset_role_member(&asset_id, &admin_role, creator),
+        )
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)?;
+
+        // TOS-023: Initialize role config with member_count = 1
+        let role_config = tos_common::native_asset::RoleConfig {
+            admin_role: tos_common::native_asset::DEFAULT_ADMIN_ROLE,
+            member_count: 1,
+        };
+        try_block_on(self.provider.set_native_asset_role_config(
+            &asset_id,
+            &admin_role,
+            &role_config,
         ))
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
@@ -1826,6 +1848,14 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
 
+        // TOS-024: Add new lock ID to index
+        try_block_on(
+            self.provider
+                .add_native_asset_lock_id(&hash, account, new_lock_id),
+        )
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)?;
+
         Ok(new_lock_id)
     }
 
@@ -1875,7 +1905,7 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
                 .ok_or_else(|| Self::invalid_data_error("Merged lock amount overflow"))?;
         }
 
-        // Delete all old locks
+        // Delete all old locks and remove from index (TOS-024)
         for &lock_id in lock_ids {
             try_block_on(
                 self.provider
@@ -1883,6 +1913,12 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
             )
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
+
+            // TOS-024: Remove old lock ID from index
+            let _ = try_block_on(
+                self.provider
+                    .remove_native_asset_lock_id(&hash, account, lock_id),
+            );
         }
 
         // Create merged lock
@@ -1930,6 +1966,14 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         try_block_on(
             self.provider
                 .set_native_asset_lock_count(&hash, account, new_count),
+        )
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)?;
+
+        // TOS-024: Add new lock ID to index
+        try_block_on(
+            self.provider
+                .add_native_asset_lock_id(&hash, account, new_lock_id),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
@@ -2028,6 +2072,12 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
 
+        // TOS-024: Remove old lock ID from source index
+        let _ = try_block_on(
+            self.provider
+                .remove_native_asset_lock_id(&hash, from, lock_id),
+        );
+
         // Update source counts using checked arithmetic to catch invariant violations
         let from_count = try_block_on(self.provider.get_native_asset_lock_count(&hash, from))
             .map_err(Self::convert_error)?
@@ -2107,6 +2157,14 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
 
+        // TOS-024: Add new lock ID to destination index
+        try_block_on(
+            self.provider
+                .add_native_asset_lock_id(&hash, to, new_lock_id),
+        )
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)?;
+
         Ok(())
     }
 
@@ -2137,10 +2195,10 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         let hash = Self::bytes_to_hash(asset);
 
         // BUG-TOS-002 FIX: Validate caller has admin role for the role being granted
-        // Get the admin role for this role
-        let role_config = try_block_on(self.provider.get_native_asset_role_config(&hash, role))
+        // Get the admin role for this role (use default if not yet configured)
+        let mut role_config = try_block_on(self.provider.get_native_asset_role_config(&hash, role))
             .map_err(Self::convert_error)?
-            .map_err(Self::convert_error)?;
+            .unwrap_or_default();
 
         // Check if caller has the admin role
         let has_admin = self.check_role(&hash, &role_config.admin_role, granted_by)?;
@@ -2155,6 +2213,12 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
             return Err(Self::invalid_data_error(
                 "Cannot grant role to zero address",
             ));
+        }
+
+        // TOS-023: Check if account already has the role (prevent double-counting)
+        let already_has_role = self.check_role(&hash, role, account)?;
+        if already_has_role {
+            return Ok(()); // Already has role, no-op
         }
 
         // Grant the role
@@ -2173,7 +2237,35 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
                 .add_native_asset_role_member(&hash, role, account),
         )
         .map_err(Self::convert_error)?
-        .map_err(Self::convert_error)
+        .map_err(Self::convert_error)?;
+
+        // TOS-023: Update member_count
+        role_config.member_count = role_config
+            .member_count
+            .checked_add(1)
+            .ok_or_else(|| Self::invalid_data_error("Role member count overflow"))?;
+
+        try_block_on(
+            self.provider
+                .set_native_asset_role_config(&hash, role, &role_config),
+        )
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)?;
+
+        // TOS-025: If granting DEFAULT_ADMIN_ROLE, update data.admin
+        let admin_role = tos_common::native_asset::DEFAULT_ADMIN_ROLE;
+        if *role == admin_role {
+            let mut data = self.get_asset_data(asset)?;
+            // Only update if current admin is zero or if granter is current admin
+            if data.admin == [0u8; 32] || data.admin == *granted_by {
+                data.admin = *account;
+                try_block_on(self.provider.set_native_asset(&hash, &data))
+                    .map_err(Self::convert_error)?
+                    .map_err(Self::convert_error)?;
+            }
+        }
+
+        Ok(())
     }
 
     fn revoke_role(
@@ -2194,18 +2286,65 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         // NOTE: RBAC validation (caller has admin role) must be done at syscall level in TAKO
         // The trait doesn't include a caller parameter for this function
 
+        // TOS-023: Check if account has the role (prevent underflow)
+        let has_role = self.check_role(&hash, role, account)?;
+
+        // TOS-023: Always attempt index removal (cleans stale entries)
+        let _ = try_block_on(
+            self.provider
+                .remove_native_asset_role_member(&hash, role, account),
+        );
+
+        if !has_role {
+            return Ok(()); // Didn't have role, no further action needed
+        }
+
         // Revoke the role
         try_block_on(self.provider.revoke_native_asset_role(&hash, role, account))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
 
-        // Remove from role members index
+        // TOS-023: Update member_count
+        let mut role_config = try_block_on(self.provider.get_native_asset_role_config(&hash, role))
+            .map_err(Self::convert_error)?
+            .unwrap_or_default();
+
+        role_config.member_count = role_config.member_count.saturating_sub(1);
+
         try_block_on(
             self.provider
-                .remove_native_asset_role_member(&hash, role, account),
+                .set_native_asset_role_config(&hash, role, &role_config),
         )
         .map_err(Self::convert_error)?
-        .map_err(Self::convert_error)
+        .map_err(Self::convert_error)?;
+
+        // TOS-025: If revoking DEFAULT_ADMIN_ROLE, update data.admin
+        let admin_role = tos_common::native_asset::DEFAULT_ADMIN_ROLE;
+        if *role == admin_role {
+            let mut data = self.get_asset_data(asset)?;
+            if data.admin == *account {
+                // Find next admin from RBAC role members
+                let members = try_block_on(
+                    self.provider
+                        .get_native_asset_role_members(&hash, &admin_role),
+                )
+                .map_err(Self::convert_error)?
+                .map_err(Self::convert_error)?;
+
+                // Filter out the revoked account and find new admin
+                data.admin = members
+                    .iter()
+                    .find(|m| *m != account)
+                    .copied()
+                    .unwrap_or([0u8; 32]); // Zero address if no admins left
+
+                try_block_on(self.provider.set_native_asset(&hash, &data))
+                    .map_err(Self::convert_error)?
+                    .map_err(Self::convert_error)?;
+            }
+        }
+
+        Ok(())
     }
 
     fn get_role_admin(&self, asset: &[u8; 32], role: &[u8; 32]) -> Result<[u8; 32], EbpfError> {
@@ -2985,8 +3124,12 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
 
     fn get_admin(&self, asset: &[u8; 32]) -> Result<[u8; 32], EbpfError> {
         let data = self.get_asset_data(asset)?;
-        Ok(data.creator) // Creator is initial admin
+        // TOS-025: Return actual admin, not creator
+        Ok(data.admin)
     }
+
+    // Note: get_creator() not in TakoNativeAssetProvider trait.
+    // Creator can be obtained via get_asset_info() if needed.
 
     // ========================================
     // Phase 2.3: Role Enumeration
@@ -3250,16 +3393,98 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
             return Err(Self::permission_denied_error("Caller is not pending admin"));
         }
 
-        // Grant admin role to new admin
         let admin_role = tos_common::native_asset::DEFAULT_ADMIN_ROLE;
-        try_block_on(self.provider.grant_native_asset_role(
-            &hash,
-            &admin_role,
-            caller,
-            self.block_height,
-        ))
-        .map_err(Self::convert_error)?
-        .map_err(Self::convert_error)?;
+
+        // TOS-025: Get current admin and revoke their role (single-admin enforcement)
+        let mut data = self.get_asset_data(asset)?;
+        let old_admin = data.admin;
+
+        // Revoke old admin's role if they still have it and are different from caller
+        if old_admin != [0u8; 32] && old_admin != *caller {
+            let has_old_role = self.check_role(&hash, &admin_role, &old_admin)?;
+            if has_old_role {
+                try_block_on(self.provider.revoke_native_asset_role(
+                    &hash,
+                    &admin_role,
+                    &old_admin,
+                ))
+                .map_err(Self::convert_error)?
+                .map_err(Self::convert_error)?;
+
+                // TOS-023: Remove from role member index
+                let _ = try_block_on(self.provider.remove_native_asset_role_member(
+                    &hash,
+                    &admin_role,
+                    &old_admin,
+                ));
+
+                // TOS-023: Update member_count
+                let mut role_config = try_block_on(
+                    self.provider
+                        .get_native_asset_role_config(&hash, &admin_role),
+                )
+                .map_err(Self::convert_error)?
+                .unwrap_or_default();
+
+                role_config.member_count = role_config.member_count.saturating_sub(1);
+
+                try_block_on(self.provider.set_native_asset_role_config(
+                    &hash,
+                    &admin_role,
+                    &role_config,
+                ))
+                .map_err(Self::convert_error)?
+                .map_err(Self::convert_error)?;
+            }
+        }
+
+        // Grant admin role to new admin (if not already granted)
+        let has_new_role = self.check_role(&hash, &admin_role, caller)?;
+        if !has_new_role {
+            try_block_on(self.provider.grant_native_asset_role(
+                &hash,
+                &admin_role,
+                caller,
+                self.block_height,
+            ))
+            .map_err(Self::convert_error)?
+            .map_err(Self::convert_error)?;
+
+            // TOS-023: Add to role member index
+            try_block_on(
+                self.provider
+                    .add_native_asset_role_member(&hash, &admin_role, caller),
+            )
+            .map_err(Self::convert_error)?
+            .map_err(Self::convert_error)?;
+
+            // TOS-023: Update member_count
+            let mut role_config = try_block_on(
+                self.provider
+                    .get_native_asset_role_config(&hash, &admin_role),
+            )
+            .map_err(Self::convert_error)?
+            .unwrap_or_default();
+
+            role_config.member_count = role_config
+                .member_count
+                .checked_add(1)
+                .ok_or_else(|| Self::invalid_data_error("Role member count overflow"))?;
+
+            try_block_on(self.provider.set_native_asset_role_config(
+                &hash,
+                &admin_role,
+                &role_config,
+            ))
+            .map_err(Self::convert_error)?
+            .map_err(Self::convert_error)?;
+        }
+
+        // TOS-025: Update admin in asset data
+        data.admin = *caller;
+        try_block_on(self.provider.set_native_asset(&hash, &data))
+            .map_err(Self::convert_error)?
+            .map_err(Self::convert_error)?;
 
         // Clear pending admin
         try_block_on(self.provider.set_native_asset_pending_admin(&hash, None))

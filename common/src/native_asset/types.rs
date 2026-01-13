@@ -32,8 +32,12 @@ pub struct NativeAssetData {
     pub freezable: bool,
     /// Whether the asset supports governance (voting)
     pub governance: bool,
-    /// Creator/owner address
+    /// Original creator address (immutable)
     pub creator: [u8; 32],
+    /// Current primary admin address (mutable via admin transfer)
+    /// Updated when admin is transferred via accept_admin() or when
+    /// DEFAULT_ADMIN_ROLE is granted/revoked
+    pub admin: [u8; 32],
     /// Creation block height
     pub created_at: u64,
     /// Optional metadata URI
@@ -54,6 +58,7 @@ impl Default for NativeAssetData {
             freezable: false,
             governance: false,
             creator: [0u8; 32],
+            admin: [0u8; 32],
             created_at: 0,
             metadata_uri: None,
         }
@@ -73,25 +78,50 @@ impl Serializer for NativeAssetData {
         self.freezable.write(writer);
         self.governance.write(writer);
         writer.write_bytes(&self.creator);
+        writer.write_bytes(&self.admin);
         self.created_at.write(writer);
         self.metadata_uri.write(writer);
     }
 
     fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
+        let name = reader.read()?;
+        let symbol = reader.read()?;
+        let decimals = reader.read()?;
+        let total_supply = reader.read()?;
+        let max_supply = reader.read()?;
+        let mintable = reader.read()?;
+        let burnable = reader.read()?;
+        let pausable = reader.read()?;
+        let freezable = reader.read()?;
+        let governance = reader.read()?;
+        let creator = reader.read_bytes_32()?;
+
+        // Backward compatibility: admin field may not exist in old data
+        // If no more data, default admin to creator (migration path)
+        let admin = if reader.size() > 0 {
+            reader.read_bytes_32()?
+        } else {
+            creator
+        };
+
+        let created_at = reader.read()?;
+        let metadata_uri = reader.read()?;
+
         Ok(Self {
-            name: reader.read()?,
-            symbol: reader.read()?,
-            decimals: reader.read()?,
-            total_supply: reader.read()?,
-            max_supply: reader.read()?,
-            mintable: reader.read()?,
-            burnable: reader.read()?,
-            pausable: reader.read()?,
-            freezable: reader.read()?,
-            governance: reader.read()?,
-            creator: reader.read_bytes_32()?,
-            created_at: reader.read()?,
-            metadata_uri: reader.read()?,
+            name,
+            symbol,
+            decimals,
+            total_supply,
+            max_supply,
+            mintable,
+            burnable,
+            pausable,
+            freezable,
+            governance,
+            creator,
+            admin,
+            created_at,
+            metadata_uri,
         })
     }
 
@@ -103,6 +133,7 @@ impl Serializer for NativeAssetData {
             + self.max_supply.size()
             + 5 // bool fields
             + 32 // creator
+            + 32 // admin
             + 8 // created_at
             + self.metadata_uri.size()
     }
