@@ -403,9 +403,11 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TosNativeAssetAdapter<'a
             return Ok(()); // Zero address has no votes to move
         }
 
-        // Subtract from source
+        // Subtract from source (use checked_sub to detect inconsistent state)
         let from_votes = self.get_vote_power(hash, from)?;
-        let new_from_votes = from_votes.saturating_sub(amount);
+        let new_from_votes = from_votes
+            .checked_sub(amount)
+            .ok_or_else(|| Self::invalid_data_error("Vote power underflow: inconsistent state"))?;
         self.set_vote_power(hash, from, new_from_votes)?;
 
         // Add to destination
@@ -573,7 +575,9 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TosNativeAssetAdapter<'a
 
         let vote_holder = self.get_effective_vote_holder(hash, from)?;
         let current_votes = self.get_vote_power(hash, &vote_holder)?;
-        let new_votes = current_votes.saturating_sub(amount);
+        let new_votes = current_votes
+            .checked_sub(amount)
+            .ok_or_else(|| Self::invalid_data_error("Vote power underflow: inconsistent state"))?;
         self.set_vote_power(hash, &vote_holder, new_votes)?;
         self.write_vote_checkpoint(hash, &vote_holder)
     }
@@ -752,6 +756,19 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
             return Err(Self::permission_denied_error("Recipient is frozen"));
         }
 
+        // Block zero-address transfers to prevent vote power desync
+        let zero_addr = [0u8; 32];
+        if *to == zero_addr {
+            return Err(Self::invalid_data_error(
+                "Cannot transfer to zero address (use burn instead)",
+            ));
+        }
+        if *from == zero_addr {
+            return Err(Self::invalid_data_error(
+                "Cannot transfer from zero address",
+            ));
+        }
+
         let hash = Self::bytes_to_hash(asset);
 
         // Check available balance (total - locked)
@@ -762,11 +779,21 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
             ));
         }
 
-        // Subtract from sender
+        // Phase 1: Validation - calculate new values without state changes
         let from_balance = self.balance_of(asset, from)?;
         let new_from = from_balance
             .checked_sub(amount)
             .ok_or_else(|| Self::permission_denied_error("Insufficient balance"))?;
+
+        let to_balance = self.balance_of(asset, to)?;
+        let new_to = to_balance
+            .checked_add(amount)
+            .ok_or_else(|| Self::invalid_data_error("Balance overflow"))?;
+
+        // Phase 2: Update vote power FIRST (if this fails, no balance state modified)
+        self.update_votes_for_balance_change(&hash, from, to, amount)?;
+
+        // Phase 3: Update balances and checkpoints
         try_block_on(
             self.provider
                 .set_native_asset_balance(&hash, from, new_from),
@@ -774,23 +801,13 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
 
-        // Create balance checkpoint for sender
         self.write_balance_checkpoint(&hash, from, new_from)?;
 
-        // Add to recipient
-        let to_balance = self.balance_of(asset, to)?;
-        let new_to = to_balance
-            .checked_add(amount)
-            .ok_or_else(|| Self::invalid_data_error("Balance overflow"))?;
         try_block_on(self.provider.set_native_asset_balance(&hash, to, new_to))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
 
-        // Create balance checkpoint for recipient
         self.write_balance_checkpoint(&hash, to, new_to)?;
-
-        // Update vote checkpoints (TOS-004 fix)
-        self.update_votes_for_balance_change(&hash, from, to, amount)?;
 
         Ok(())
     }
@@ -814,24 +831,28 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
             return Err(Self::permission_denied_error("Caller is not a minter"));
         }
 
-        // Check max supply
+        // Phase 1: Validation - calculate new values without state changes
         let data = self.get_asset_data(asset)?;
+        let current_supply = self.total_supply(asset)?;
+        let new_supply = current_supply
+            .checked_add(amount)
+            .ok_or_else(|| Self::invalid_data_error("Supply overflow"))?;
+
         if let Some(max_supply) = data.max_supply {
-            let current_supply = self.total_supply(asset)?;
-            if current_supply
-                .checked_add(amount)
-                .ok_or_else(|| Self::invalid_data_error("Supply overflow"))?
-                > max_supply
-            {
+            if new_supply > max_supply {
                 return Err(Self::permission_denied_error("Would exceed max supply"));
             }
         }
 
-        // Add to recipient balance
         let balance = self.balance_of(asset, to)?;
         let new_balance = balance
             .checked_add(amount)
             .ok_or_else(|| Self::invalid_data_error("Balance overflow"))?;
+
+        // Phase 2: Update vote power FIRST (if this fails, no balance state modified)
+        self.add_vote_power_for_mint(&hash, to, amount)?;
+
+        // Phase 3: Update balances and supply
         try_block_on(
             self.provider
                 .set_native_asset_balance(&hash, to, new_balance),
@@ -839,23 +860,13 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
 
-        // Create balance checkpoint for recipient
         self.write_balance_checkpoint(&hash, to, new_balance)?;
 
-        // Update total supply
-        let supply = self.total_supply(asset)?;
-        let new_supply = supply
-            .checked_add(amount)
-            .ok_or_else(|| Self::invalid_data_error("Supply overflow"))?;
         try_block_on(self.provider.set_native_asset_supply(&hash, new_supply))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
 
-        // Create supply checkpoint
         self.write_supply_checkpoint(&hash, new_supply)?;
-
-        // Add vote power for minted tokens (TOS-004 fix)
-        self.add_vote_power_for_mint(&hash, to, amount)?;
 
         Ok(())
     }
@@ -880,16 +891,25 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
             ));
         }
 
-        // Check balance
+        // Phase 1: Validation - calculate new values without state changes
         let balance = self.balance_of(asset, from)?;
         if balance < amount {
             return Err(Self::permission_denied_error("Insufficient balance"));
         }
 
-        // Subtract from balance
         let new_balance = balance
             .checked_sub(amount)
             .ok_or_else(|| Self::permission_denied_error("Insufficient balance"))?;
+
+        let supply = self.total_supply(asset)?;
+        let new_supply = supply
+            .checked_sub(amount)
+            .ok_or_else(|| Self::invalid_data_error("Burn amount exceeds total supply"))?;
+
+        // Phase 2: Update vote power FIRST (if this fails, no balance state modified)
+        self.remove_vote_power_for_burn(&hash, from, amount)?;
+
+        // Phase 3: Update balances and supply
         try_block_on(
             self.provider
                 .set_native_asset_balance(&hash, from, new_balance),
@@ -897,23 +917,13 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
 
-        // Create balance checkpoint for sender
         self.write_balance_checkpoint(&hash, from, new_balance)?;
 
-        // BUG-TOS-006 FIX: Use checked_sub instead of saturating_sub to detect accounting bugs
-        let supply = self.total_supply(asset)?;
-        let new_supply = supply
-            .checked_sub(amount)
-            .ok_or_else(|| Self::invalid_data_error("Burn amount exceeds total supply"))?;
         try_block_on(self.provider.set_native_asset_supply(&hash, new_supply))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
 
-        // Create supply checkpoint
         self.write_supply_checkpoint(&hash, new_supply)?;
-
-        // Remove vote power for burned tokens (TOS-004 fix)
-        self.remove_vote_power_for_burn(&hash, from, amount)?;
 
         Ok(())
     }
@@ -925,10 +935,17 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         amount: u64,
     ) -> Result<(), EbpfError> {
         let hash = Self::bytes_to_hash(asset);
+
+        // Phase 1: Validation
         let balance = self.balance_of(asset, account)?;
         let new_balance = balance
             .checked_add(amount)
             .ok_or_else(|| Self::invalid_data_error("Balance overflow"))?;
+
+        // Phase 2: Update vote power FIRST
+        self.add_vote_power_for_mint(&hash, account, amount)?;
+
+        // Phase 3: Update balance
         try_block_on(
             self.provider
                 .set_native_asset_balance(&hash, account, new_balance),
@@ -936,11 +953,7 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
 
-        // Create balance checkpoint
-        self.write_balance_checkpoint(&hash, account, new_balance)?;
-
-        // Add vote power (TOS-004 fix)
-        self.add_vote_power_for_mint(&hash, account, amount)
+        self.write_balance_checkpoint(&hash, account, new_balance)
     }
 
     fn subtract_balance(
@@ -950,10 +963,17 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         amount: u64,
     ) -> Result<(), EbpfError> {
         let hash = Self::bytes_to_hash(asset);
+
+        // Phase 1: Validation
         let balance = self.balance_of(asset, account)?;
         let new_balance = balance
             .checked_sub(amount)
             .ok_or_else(|| Self::permission_denied_error("Insufficient balance"))?;
+
+        // Phase 2: Update vote power FIRST
+        self.remove_vote_power_for_burn(&hash, account, amount)?;
+
+        // Phase 3: Update balance
         try_block_on(
             self.provider
                 .set_native_asset_balance(&hash, account, new_balance),
@@ -961,11 +981,7 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
 
-        // Create balance checkpoint
-        self.write_balance_checkpoint(&hash, account, new_balance)?;
-
-        // Remove vote power (TOS-004 fix)
-        self.remove_vote_power_for_burn(&hash, account, amount)
+        self.write_balance_checkpoint(&hash, account, new_balance)
     }
 
     // ========================================
@@ -1089,7 +1105,7 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
             return Err(Self::permission_denied_error("Governance not enabled"));
         }
 
-        // TOS-004 FIX: Get old delegatee before updating delegation
+        // Phase 1: Read current state and validate
         let old_delegatee = self.get_effective_vote_holder(&hash, delegator)?;
 
         // Normalize new delegatee (zero = self)
@@ -1107,6 +1123,26 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         // Get delegator's balance (this is the vote power being moved)
         let delegator_balance = self.balance_of(asset, delegator)?;
 
+        // Pre-calculate checkpoint count
+        let count = try_block_on(
+            self.provider
+                .get_native_asset_delegation_checkpoint_count(&hash, delegator),
+        )
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)?;
+
+        let new_count = count
+            .checked_add(1)
+            .ok_or_else(|| Self::invalid_data_error("Delegation checkpoint count overflow"))?;
+
+        // Phase 2: Update vote power FIRST (if this fails, no state modified)
+        self.move_vote_power(&hash, &old_delegatee, &new_delegatee, delegator_balance)?;
+
+        // Write vote checkpoints for affected accounts
+        self.write_vote_checkpoint(&hash, &old_delegatee)?;
+        self.write_vote_checkpoint(&hash, &new_delegatee)?;
+
+        // Phase 3: Update delegation state (after vote power succeeds)
         let delegation = Delegation {
             delegatee: Some(*delegatee),
             from_block: self.block_height,
@@ -1124,13 +1160,6 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
             delegatee: *delegatee,
         };
 
-        let count = try_block_on(
-            self.provider
-                .get_native_asset_delegation_checkpoint_count(&hash, delegator),
-        )
-        .map_err(Self::convert_error)?
-        .map_err(Self::convert_error)?;
-
         try_block_on(self.provider.set_native_asset_delegation_checkpoint(
             &hash,
             delegator,
@@ -1140,10 +1169,6 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
 
-        // BUG-TOS-005 FIX: Use checked arithmetic for checkpoint count
-        let new_count = count
-            .checked_add(1)
-            .ok_or_else(|| Self::invalid_data_error("Delegation checkpoint count overflow"))?;
         try_block_on(
             self.provider
                 .set_native_asset_delegation_checkpoint_count(&hash, delegator, new_count),
@@ -1151,7 +1176,7 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
 
-        // TOS-004 FIX: Update reverse delegation index
+        // Phase 4: Update reverse delegation index
         // Remove from old delegatee's delegators list (if not self-delegation)
         if old_delegatee != *delegator {
             try_block_on(self.provider.remove_native_asset_delegator(
@@ -1172,13 +1197,6 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
         }
-
-        // TOS-004 FIX: Move vote power from old delegatee to new delegatee (O(1))
-        self.move_vote_power(&hash, &old_delegatee, &new_delegatee, delegator_balance)?;
-
-        // Write vote checkpoints for affected accounts
-        self.write_vote_checkpoint(&hash, &old_delegatee)?;
-        self.write_vote_checkpoint(&hash, &new_delegatee)?;
 
         Ok(())
     }
