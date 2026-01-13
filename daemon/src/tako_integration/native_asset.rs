@@ -1256,7 +1256,7 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         let mut high = count;
 
         while low < high {
-            let mid = (low + high) / 2;
+            let mid = low + (high - low) / 2; // Avoid overflow
             let checkpoint = try_block_on(
                 self.provider
                     .get_native_asset_checkpoint(&hash, account, mid),
@@ -1304,7 +1304,7 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         let mut high = count;
 
         while low < high {
-            let mid = (low + high) / 2;
+            let mid = low + (high - low) / 2; // Avoid overflow
             let checkpoint =
                 try_block_on(self.provider.get_native_asset_supply_checkpoint(&hash, mid))
                     .map_err(Self::convert_error)?
@@ -2162,11 +2162,35 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
             return Err(Self::invalid_data_error("Amount must be greater than zero"));
         }
 
+        // Block zero-address transfers to prevent vote power desync
+        let zero_addr = [0u8; 32];
+        if *to == zero_addr {
+            return Err(Self::invalid_data_error(
+                "Cannot transfer to zero address (use burn instead)",
+            ));
+        }
+        if *from == zero_addr {
+            return Err(Self::invalid_data_error(
+                "Cannot transfer from zero address",
+            ));
+        }
+
+        // Phase 1: Validation - calculate new values without state changes
         // Force transfer bypasses pause/freeze checks
         let from_balance = self.balance_of(asset, from)?;
         let new_from = from_balance
             .checked_sub(amount)
             .ok_or_else(|| Self::permission_denied_error("Insufficient balance"))?;
+
+        let to_balance = self.balance_of(asset, to)?;
+        let new_to = to_balance
+            .checked_add(amount)
+            .ok_or_else(|| Self::invalid_data_error("Balance overflow"))?;
+
+        // Phase 2: Update vote power FIRST (if this fails, no balance state modified)
+        self.update_votes_for_balance_change(&hash, from, to, amount)?;
+
+        // Phase 3: Update balances and checkpoints
         try_block_on(
             self.provider
                 .set_native_asset_balance(&hash, from, new_from),
@@ -2174,18 +2198,12 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
 
-        // Create balance checkpoint for sender
         self.write_balance_checkpoint(&hash, from, new_from)?;
 
-        let to_balance = self.balance_of(asset, to)?;
-        let new_to = to_balance
-            .checked_add(amount)
-            .ok_or_else(|| Self::invalid_data_error("Balance overflow"))?;
         try_block_on(self.provider.set_native_asset_balance(&hash, to, new_to))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
 
-        // Create balance checkpoint for recipient
         self.write_balance_checkpoint(&hash, to, new_to)
     }
 
@@ -2870,7 +2888,7 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         let mut high = count;
 
         while low < high {
-            let mid = (low + high) / 2;
+            let mid = low + (high - low) / 2; // Avoid overflow
             let checkpoint = try_block_on(
                 self.provider
                     .get_native_asset_delegation_checkpoint(&hash, account, mid),
@@ -2931,7 +2949,7 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         let mut high = count;
 
         while low < high {
-            let mid = (low + high) / 2;
+            let mid = low + (high - low) / 2; // Avoid overflow
             let checkpoint = try_block_on(
                 self.provider
                     .get_native_asset_balance_checkpoint(&hash, account, mid),
