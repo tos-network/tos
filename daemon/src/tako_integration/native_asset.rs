@@ -59,6 +59,18 @@ const TOS_CHAIN_ID: u64 = 1;
 /// inconsistency risk. However, true transactional atomicity requires RocksDB batch
 /// writes (see TOS-026). In the unlikely event of a crash between phases, state may
 /// become inconsistent. Future enhancement: integrate with atomic batch write system.
+///
+/// # Vote Power Migration Note
+///
+/// Vote power storage (`navp` prefix) is initialized when tokens are first minted via
+/// `add_vote_power_for_mint()`. There is NO need for migration because:
+/// - TOS mainnet has not launched yet (no existing accounts with balances)
+/// - All new accounts will have vote power correctly initialized on first mint
+/// - This code will be deployed before any tokens exist on the network
+///
+/// If TOS were to add vote checkpoints after mainnet launch, a migration would be
+/// required to initialize vote power = balance for all existing accounts. Since we
+/// are deploying this feature before launch, no such migration is necessary.
 pub struct TosNativeAssetAdapter<'a, P: NativeAssetProvider + Send + Sync + ?Sized> {
     /// TOS native asset storage provider (mutable for write operations)
     provider: &'a mut P,
@@ -1851,6 +1863,19 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         to: &[u8; 32],
         lock_id: u64,
     ) -> Result<(), EbpfError> {
+        // Block zero-address to prevent vote power issues and partial state updates
+        let zero_addr = [0u8; 32];
+        if *from == zero_addr {
+            return Err(Self::invalid_data_error(
+                "Cannot transfer lock from zero address",
+            ));
+        }
+        if *to == zero_addr {
+            return Err(Self::invalid_data_error(
+                "Cannot transfer lock to zero address",
+            ));
+        }
+
         let hash = Self::bytes_to_hash(asset);
 
         let token_lock = try_block_on(self.provider.get_native_asset_lock(&hash, from, lock_id))
@@ -2352,6 +2377,20 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         expires_at: u64,
         created_at: u64,
     ) -> Result<(), EbpfError> {
+        // Block zero-address to prevent funds getting stuck when escrow releases
+        // (add_balance rejects zero address, so released funds would be undeliverable)
+        let zero_addr = [0u8; 32];
+        if *sender == zero_addr {
+            return Err(Self::invalid_data_error(
+                "Cannot create escrow from zero address",
+            ));
+        }
+        if *recipient == zero_addr {
+            return Err(Self::invalid_data_error(
+                "Cannot create escrow to zero address",
+            ));
+        }
+
         let hash = Self::bytes_to_hash(asset);
 
         // Check if escrow already exists to prevent overwriting
