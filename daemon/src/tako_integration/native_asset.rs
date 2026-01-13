@@ -52,6 +52,13 @@ const TOS_CHAIN_ID: u64 = 1;
 /// - Detects multi-thread runtime and uses `block_in_place`
 /// - Falls back to `futures::executor::block_on` in single-thread context
 /// - Proven pattern used throughout TOS blockchain
+///
+/// # Atomicity Note
+///
+/// Operations follow a phased approach (validate → vote power → balances) to minimize
+/// inconsistency risk. However, true transactional atomicity requires RocksDB batch
+/// writes (see TOS-026). In the unlikely event of a crash between phases, state may
+/// become inconsistent. Future enhancement: integrate with atomic batch write system.
 pub struct TosNativeAssetAdapter<'a, P: NativeAssetProvider + Send + Sync + ?Sized> {
     /// TOS native asset storage provider (mutable for write operations)
     provider: &'a mut P,
@@ -823,6 +830,14 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         amount: u64,
         caller: &[u8; 32],
     ) -> Result<(), EbpfError> {
+        // Block zero-address mint to prevent vote power accumulation on unusable address
+        let zero_addr = [0u8; 32];
+        if *to == zero_addr {
+            return Err(Self::invalid_data_error(
+                "Cannot mint to zero address (use burn for token destruction)",
+            ));
+        }
+
         let hash = Self::bytes_to_hash(asset);
 
         // Check if caller has MINTER role
@@ -934,6 +949,14 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         account: &[u8; 32],
         amount: u64,
     ) -> Result<(), EbpfError> {
+        // Block zero-address to prevent vote power accumulation on unusable address
+        let zero_addr = [0u8; 32];
+        if *account == zero_addr {
+            return Err(Self::invalid_data_error(
+                "Cannot add balance to zero address",
+            ));
+        }
+
         let hash = Self::bytes_to_hash(asset);
 
         // Phase 1: Validation
