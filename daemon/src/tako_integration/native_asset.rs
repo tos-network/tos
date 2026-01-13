@@ -447,16 +447,32 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TosNativeAssetAdapter<'a
         self.set_vote_power(hash, from, new_from_votes)?;
 
         // Get to votes with lazy initialization from balance if needed
+        // IMPORTANT: Only lazy-init if the account has NOT delegated their votes.
+        // If account has delegated, their vote power being 0 is intentional (votes are at delegatee).
         let mut to_votes = self.get_vote_power(hash, to)?;
         if to_votes == 0 {
-            let balance = try_block_on(self.provider.get_native_asset_balance(hash, to))
+            // Check if this account has delegated (vote power 0 is intentional)
+            let to_delegation = try_block_on(self.provider.get_native_asset_delegation(hash, to))
                 .map_err(Self::convert_error)?
                 .map_err(Self::convert_error)?;
-            if balance > 0 {
-                // Lazy init for destination as well
-                to_votes = balance;
-                self.set_vote_power(hash, to, balance)?;
+
+            let has_delegated = match to_delegation.delegatee {
+                Some(delegatee) if delegatee != [0u8; 32] && delegatee != *to => true,
+                _ => false,
+            };
+
+            // Only lazy-init for legacy accounts that have never delegated
+            if !has_delegated {
+                let balance = try_block_on(self.provider.get_native_asset_balance(hash, to))
+                    .map_err(Self::convert_error)?
+                    .map_err(Self::convert_error)?;
+                if balance > 0 {
+                    // Lazy init for destination (legacy migration path)
+                    to_votes = balance;
+                    self.set_vote_power(hash, to, balance)?;
+                }
             }
+            // If has_delegated is true, to_votes stays 0 - votes will be added on top
         }
 
         // Add to destination
