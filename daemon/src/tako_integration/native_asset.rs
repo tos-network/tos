@@ -1855,8 +1855,34 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
             return Err(Self::permission_denied_error("Recipient is frozen"));
         }
 
-        // Transfer underlying balance directly (FIRST before modifying lock state)
-        // This ensures that if transfer fails (balance error), lock state is unchanged
+        // Phase 1: Pre-validate all calculations to prevent partial state updates
+        let from_balance = self.balance_of(asset, from)?;
+        let _new_from_balance = from_balance
+            .checked_sub(amount)
+            .ok_or_else(|| Self::permission_denied_error("Insufficient balance"))?;
+
+        let to_balance = self.balance_of(asset, to)?;
+        let _new_to_balance = to_balance
+            .checked_add(amount)
+            .ok_or_else(|| Self::invalid_data_error("Recipient balance overflow"))?;
+
+        // Also pre-validate lock count and locked balance for recipient
+        let to_locked = try_block_on(self.provider.get_native_asset_locked_balance(&hash, to))
+            .map_err(Self::convert_error)?
+            .map_err(Self::convert_error)?;
+        let _new_to_locked = to_locked
+            .checked_add(amount)
+            .ok_or_else(|| Self::invalid_data_error("Recipient locked balance overflow"))?;
+
+        let to_count = try_block_on(self.provider.get_native_asset_lock_count(&hash, to))
+            .map_err(Self::convert_error)?
+            .map_err(Self::convert_error)?;
+        let _new_to_count = to_count
+            .checked_add(1)
+            .ok_or_else(|| Self::invalid_data_error("Recipient lock count overflow"))?;
+
+        // Phase 2: Transfer underlying balance (vote power updated inside)
+        // All validations passed, now safe to mutate state
         self.subtract_balance(asset, from, amount)?;
         self.add_balance(asset, to, amount)?;
 
@@ -2176,11 +2202,22 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         }
 
         // Phase 1: Validation - calculate new values without state changes
-        // Force transfer bypasses pause/freeze checks
+        // Force transfer bypasses pause/freeze checks but respects locked balance invariant
         let from_balance = self.balance_of(asset, from)?;
         let new_from = from_balance
             .checked_sub(amount)
             .ok_or_else(|| Self::permission_denied_error("Insufficient balance"))?;
+
+        // Check that new balance doesn't go below locked balance
+        // This prevents the invariant violation: balance < locked
+        let from_locked = try_block_on(self.provider.get_native_asset_locked_balance(&hash, from))
+            .map_err(Self::convert_error)?
+            .map_err(Self::convert_error)?;
+        if new_from < from_locked {
+            return Err(Self::permission_denied_error(
+                "Force transfer would leave balance below locked amount",
+            ));
+        }
 
         let to_balance = self.balance_of(asset, to)?;
         let new_to = to_balance
