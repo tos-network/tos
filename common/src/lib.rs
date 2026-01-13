@@ -26,6 +26,9 @@ pub mod nft;
 // Native Asset System module (ERC20-like tokens)
 pub mod native_asset;
 
+// TNS (TOS Name Service) module
+pub mod tns;
+
 pub mod asset;
 pub mod config;
 pub mod context;

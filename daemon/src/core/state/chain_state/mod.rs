@@ -1174,4 +1174,28 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for ChainS
             .get_network()
             .unwrap_or(tos_common::network::Network::Mainnet)
     }
+
+    // ===== TNS (TOS Name Service) Verification Methods =====
+
+    async fn is_name_registered(&self, name_hash: &Hash) -> Result<bool, BlockchainError> {
+        self.storage.is_name_registered(name_hash).await
+    }
+
+    async fn account_has_name(
+        &self,
+        account: &'a CompressedPublicKey,
+    ) -> Result<bool, BlockchainError> {
+        self.storage.account_has_name(account).await
+    }
+
+    async fn get_account_name_hash(
+        &self,
+        account: &'a CompressedPublicKey,
+    ) -> Result<Option<Hash>, BlockchainError> {
+        self.storage.get_account_name(account).await
+    }
+
+    async fn is_message_id_used(&self, message_id: &Hash) -> Result<bool, BlockchainError> {
+        self.storage.is_message_id_used(message_id).await
+    }
 }

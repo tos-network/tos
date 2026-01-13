@@ -467,6 +467,30 @@ pub enum BlockchainError {
     // UNO (Privacy Balance) errors
     #[error("UNO (privacy balance) not implemented yet")]
     UnoNotImplemented,
+
+    // TNS (TOS Name Service) errors
+    #[error("TNS name is already registered")]
+    TnsNameAlreadyRegistered,
+    #[error("Account already has a registered name")]
+    TnsAccountAlreadyHasName,
+    #[error("TNS name not found")]
+    TnsNameNotFound,
+    #[error("Message ID already used (replay attack)")]
+    TnsMessageIdAlreadyUsed,
+    #[error("Sender does not own the name")]
+    TnsSenderNotNameOwner,
+    #[error("Recipient name not registered")]
+    TnsRecipientNotRegistered,
+    #[error("Invalid TTL value")]
+    TnsInvalidTtl,
+    #[error("Message content too large")]
+    TnsMessageTooLarge,
+    #[error("Invalid name format")]
+    TnsInvalidNameFormat,
+    #[error("Name is reserved")]
+    TnsNameReserved,
+    #[error("Invalid compressed public key")]
+    InvalidPublicKey,
 }
 
 impl BlockchainError {

@@ -166,4 +166,85 @@ impl LightAPI {
     pub fn get_daemon(&self) -> &Arc<DaemonAPI> {
         &self.daemon
     }
+
+    // ========== TNS (TOS Name Service) Methods ==========
+
+    /// Resolve a TNS name to an address
+    /// Returns None if the name is not registered
+    pub async fn resolve_name(&self, name: &str) -> Result<Option<Address>> {
+        let result = self
+            .daemon
+            .resolve_name(name)
+            .await
+            .context("Failed to resolve TNS name")?;
+        Ok(result.address.map(|a| a.into_owned()))
+    }
+
+    /// Check if a TNS name is available for registration
+    pub async fn is_name_available(&self, name: &str) -> Result<(bool, bool, Option<String>)> {
+        let result = self
+            .daemon
+            .is_name_available(name)
+            .await
+            .context("Failed to check TNS name availability")?;
+        Ok((result.available, result.valid_format, result.format_error))
+    }
+
+    /// Check if the current wallet has a registered TNS name
+    pub async fn has_registered_name(&self, address: &Address) -> Result<bool> {
+        let result = self
+            .daemon
+            .has_registered_name(address)
+            .await
+            .context("Failed to check if address has registered TNS name")?;
+        Ok(result.has_name)
+    }
+
+    /// Get the name hash registered by an account (cannot get plaintext name)
+    pub async fn get_account_name_hash(&self, address: &Address) -> Result<Option<Hash>> {
+        let result = self
+            .daemon
+            .get_account_name_hash(address)
+            .await
+            .context("Failed to get account name hash")?;
+        Ok(result.name_hash.map(|h| h.into_owned()))
+    }
+
+    // ========== TNS Ephemeral Message Methods ==========
+
+    /// Get ephemeral messages for a recipient
+    pub async fn get_messages(
+        &self,
+        recipient_name_hash: &Hash,
+        offset: u32,
+        limit: u32,
+    ) -> Result<tos_common::api::daemon::GetMessagesResult<'static>> {
+        self.daemon
+            .get_messages(recipient_name_hash, offset, limit)
+            .await
+            .context("Failed to get ephemeral messages")
+    }
+
+    /// Get the count of ephemeral messages for a recipient
+    pub async fn get_message_count(&self, recipient_name_hash: &Hash) -> Result<u64> {
+        let result = self
+            .daemon
+            .get_message_count(recipient_name_hash)
+            .await
+            .context("Failed to get message count")?;
+        Ok(result.count)
+    }
+
+    /// Get a specific ephemeral message by ID
+    pub async fn get_message_by_id(
+        &self,
+        message_id: &Hash,
+    ) -> Result<Option<tos_common::api::daemon::EphemeralMessageInfo<'static>>> {
+        let result = self
+            .daemon
+            .get_message_by_id(message_id)
+            .await
+            .context("Failed to get message by ID")?;
+        Ok(result.message)
+    }
 }

@@ -1268,6 +1268,13 @@ fn is_valid_fee_type_combination(tx_type: &TransactionType, fee_type: &FeeType) 
         (TransactionType::UnshieldTransfers(_), FeeType::TOS) => true,
         (TransactionType::UnshieldTransfers(_), FeeType::Energy) => false,
         (TransactionType::UnshieldTransfers(_), FeeType::UNO) => false,
+        // TNS (TOS Name Service) - use TOS fee type only
+        (TransactionType::RegisterName(_), FeeType::TOS) => true,
+        (TransactionType::RegisterName(_), FeeType::Energy) => false,
+        (TransactionType::RegisterName(_), FeeType::UNO) => false,
+        (TransactionType::EphemeralMessage(_), FeeType::TOS) => true,
+        (TransactionType::EphemeralMessage(_), FeeType::Energy) => false,
+        (TransactionType::EphemeralMessage(_), FeeType::UNO) => false,
     }
 }
 

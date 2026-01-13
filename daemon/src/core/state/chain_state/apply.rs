@@ -236,6 +236,30 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError>
             .get_network()
             .unwrap_or(tos_common::network::Network::Mainnet)
     }
+
+    // ===== TNS (TOS Name Service) Verification Methods =====
+
+    async fn is_name_registered(&self, name_hash: &Hash) -> Result<bool, BlockchainError> {
+        self.inner.is_name_registered(name_hash).await
+    }
+
+    async fn account_has_name(
+        &self,
+        account: &'a CompressedPublicKey,
+    ) -> Result<bool, BlockchainError> {
+        self.inner.account_has_name(account).await
+    }
+
+    async fn get_account_name_hash(
+        &self,
+        account: &'a CompressedPublicKey,
+    ) -> Result<Option<Hash>, BlockchainError> {
+        self.inner.get_account_name_hash(account).await
+    }
+
+    async fn is_message_id_used(&self, message_id: &Hash) -> Result<bool, BlockchainError> {
+        self.inner.is_message_id_used(message_id).await
+    }
 }
 
 #[async_trait]
@@ -880,6 +904,50 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for Applicable
 
     async fn is_global_committee_bootstrapped(&self) -> Result<bool, BlockchainError> {
         self.inner.storage.is_global_committee_bootstrapped().await
+    }
+
+    // ===== TNS (TOS Name Service) Apply Methods =====
+
+    async fn register_name(
+        &mut self,
+        name_hash: Hash,
+        owner: &'a CompressedPublicKey,
+    ) -> Result<(), BlockchainError> {
+        self.inner
+            .storage
+            .register_name(name_hash, owner.clone())
+            .await
+    }
+
+    async fn store_ephemeral_message(
+        &mut self,
+        message_id: Hash,
+        sender_name_hash: Hash,
+        recipient_name_hash: Hash,
+        message_nonce: u64,
+        ttl_blocks: u32,
+        encrypted_content: Vec<u8>,
+        receiver_handle: [u8; 32],
+        current_topoheight: u64,
+    ) -> Result<(), BlockchainError> {
+        use crate::core::storage::StoredEphemeralMessage;
+
+        let expiry_topoheight = current_topoheight.saturating_add(ttl_blocks as u64);
+        let message = StoredEphemeralMessage {
+            sender_name_hash,
+            recipient_name_hash,
+            message_nonce,
+            ttl_blocks,
+            encrypted_content,
+            receiver_handle,
+            stored_topoheight: current_topoheight,
+            expiry_topoheight,
+        };
+
+        self.inner
+            .storage
+            .store_ephemeral_message(message_id, message)
+            .await
     }
 }
 

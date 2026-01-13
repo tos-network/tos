@@ -791,4 +791,129 @@ impl DaemonAPI {
             .await?;
         Ok(result.level)
     }
+
+    // ========== TNS (TOS Name Service) API ==========
+
+    /// Resolve a TNS name to an address
+    pub async fn resolve_name(&self, name: &str) -> Result<ResolveNameResult<'static>> {
+        trace!("resolve_name");
+        let result: ResolveNameResult = self
+            .client
+            .call_with(
+                "resolve_name",
+                &ResolveNameParams {
+                    name: Cow::Borrowed(name),
+                },
+            )
+            .await?;
+        Ok(result)
+    }
+
+    /// Check if a TNS name is available for registration
+    pub async fn is_name_available(&self, name: &str) -> Result<IsNameAvailableResult> {
+        trace!("is_name_available");
+        let result: IsNameAvailableResult = self
+            .client
+            .call_with(
+                "is_name_available",
+                &IsNameAvailableParams {
+                    name: Cow::Borrowed(name),
+                },
+            )
+            .await?;
+        Ok(result)
+    }
+
+    /// Check if an address has a registered TNS name
+    pub async fn has_registered_name(&self, address: &Address) -> Result<HasRegisteredNameResult> {
+        trace!("has_registered_name");
+        let result: HasRegisteredNameResult = self
+            .client
+            .call_with(
+                "has_registered_name",
+                &HasRegisteredNameParams {
+                    address: Cow::Borrowed(address),
+                },
+            )
+            .await?;
+        Ok(result)
+    }
+
+    /// Get the name hash registered by an account
+    pub async fn get_account_name_hash(
+        &self,
+        address: &Address,
+    ) -> Result<GetAccountNameHashResult<'static>> {
+        trace!("get_account_name_hash");
+        let result: GetAccountNameHashResult = self
+            .client
+            .call_with(
+                "get_account_name_hash",
+                &GetAccountNameHashParams {
+                    address: Cow::Borrowed(address),
+                },
+            )
+            .await?;
+        Ok(result)
+    }
+
+    // ========== TNS Ephemeral Message API ==========
+
+    /// Get ephemeral messages for a recipient
+    pub async fn get_messages(
+        &self,
+        recipient_name_hash: &Hash,
+        offset: u32,
+        limit: u32,
+    ) -> Result<GetMessagesResult<'static>> {
+        trace!("get_messages");
+        let result: GetMessagesResult = self
+            .client
+            .call_with(
+                "get_messages",
+                &GetMessagesParams {
+                    recipient_name_hash: Cow::Borrowed(recipient_name_hash),
+                    offset,
+                    limit,
+                },
+            )
+            .await?;
+        Ok(result)
+    }
+
+    /// Get the count of ephemeral messages for a recipient
+    pub async fn get_message_count(
+        &self,
+        recipient_name_hash: &Hash,
+    ) -> Result<GetMessageCountResult> {
+        trace!("get_message_count");
+        let result: GetMessageCountResult = self
+            .client
+            .call_with(
+                "get_message_count",
+                &GetMessageCountParams {
+                    recipient_name_hash: Cow::Borrowed(recipient_name_hash),
+                },
+            )
+            .await?;
+        Ok(result)
+    }
+
+    /// Get a specific ephemeral message by ID
+    pub async fn get_message_by_id(
+        &self,
+        message_id: &Hash,
+    ) -> Result<GetMessageByIdResult<'static>> {
+        trace!("get_message_by_id");
+        let result: GetMessageByIdResult = self
+            .client
+            .call_with(
+                "get_message_by_id",
+                &GetMessageByIdParams {
+                    message_id: Cow::Borrowed(message_id),
+                },
+            )
+            .await?;
+        Ok(result)
+    }
 }

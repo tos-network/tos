@@ -2,6 +2,7 @@ mod contract;
 mod error;
 mod kyc;
 mod state;
+mod tns;
 mod zkp_cache;
 
 use std::{borrow::Cow, iter, sync::Arc};
@@ -42,6 +43,7 @@ use contract::InvokeContract;
 
 pub use error::*;
 pub use state::*;
+pub use tns::*;
 pub use zkp_cache::*;
 
 /// Prepared UNO transaction data for batch range proof verification
@@ -125,7 +127,9 @@ impl Transaction {
                     | TransactionType::EmergencySuspend(_)
                     | TransactionType::UnoTransfers(_)
                     | TransactionType::ShieldTransfers(_)
-                    | TransactionType::UnshieldTransfers(_) => true,
+                    | TransactionType::UnshieldTransfers(_)
+                    | TransactionType::RegisterName(_)
+                    | TransactionType::EphemeralMessage(_) => true,
                 }
             }
         }
@@ -774,6 +778,77 @@ impl Transaction {
                     return Err(VerificationError::TransactionExtraDataSize);
                 }
             }
+            TransactionType::RegisterName(payload) => {
+                // TNS RegisterName: stateless format validation + stateful checks
+                verify_register_name_format::<E>(payload)?;
+
+                // Fee verification: minimum registration fee required
+                verify_register_name_fee::<E>(self.fee)?;
+
+                // Stateful checks: name not taken, account doesn't have name
+                let name_hash = get_register_name_hash(payload)
+                    .ok_or_else(|| VerificationError::InvalidFormat)?;
+
+                if state
+                    .is_name_registered(&name_hash)
+                    .await
+                    .map_err(VerificationError::State)?
+                {
+                    return Err(VerificationError::NameAlreadyRegistered);
+                }
+
+                if state
+                    .account_has_name(&self.source)
+                    .await
+                    .map_err(VerificationError::State)?
+                {
+                    return Err(VerificationError::AccountAlreadyHasName);
+                }
+            }
+            TransactionType::EphemeralMessage(payload) => {
+                // TNS EphemeralMessage: stateless format validation + stateful checks
+                verify_ephemeral_message_format::<E>(payload)?;
+
+                // Fee verification: minimum message fee required based on TTL
+                verify_ephemeral_message_fee::<E>(payload, self.fee)?;
+
+                // Enforce message_nonce == tx_nonce for replay protection
+                // This ensures each message uses a unique nonce tied to the account's nonce sequence
+                if payload.get_message_nonce() != self.nonce {
+                    return Err(VerificationError::InvalidMessageNonce);
+                }
+
+                // Verify sender has registered TNS name
+                let sender_name_hash = state
+                    .get_account_name_hash(&self.source)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or(VerificationError::SenderNotRegistered)?;
+
+                // Verify sender_name_hash in payload matches actual sender's name
+                if sender_name_hash != *payload.get_sender_name_hash() {
+                    return Err(VerificationError::InvalidSender);
+                }
+
+                // Verify recipient name is registered
+                if !state
+                    .is_name_registered(payload.get_recipient_name_hash())
+                    .await
+                    .map_err(VerificationError::State)?
+                {
+                    return Err(VerificationError::RecipientNotFound);
+                }
+
+                // Replay protection: check message ID not already used
+                let message_id = compute_message_id(payload);
+                if state
+                    .is_message_id_used(&message_id)
+                    .await
+                    .map_err(VerificationError::State)?
+                {
+                    return Err(VerificationError::MessageAlreadyExists);
+                }
+            }
         };
 
         // SECURITY FIX: Verify sender has sufficient balance for all spending
@@ -905,6 +980,11 @@ impl Transaction {
                 // Spending verification is done through ZKP proofs (CommitmentEqProof)
                 // No plaintext spending to verify here
                 // Shield/Unshield: actual balance checks happen in apply()
+            }
+            TransactionType::RegisterName(_) | TransactionType::EphemeralMessage(_) => {
+                // TNS transactions: fees are paid from TOS balance
+                // Registration fee and message fee are added to TOS spending via the fee field
+                // Actual name/message verification happens in verify_register_name/verify_ephemeral_message
             }
         };
 
@@ -2038,6 +2118,77 @@ impl Transaction {
                     return Err(VerificationError::TransactionExtraDataSize);
                 }
             }
+            TransactionType::RegisterName(payload) => {
+                // TNS RegisterName: stateless format validation + stateful checks
+                verify_register_name_format::<E>(payload)?;
+
+                // Fee verification: minimum registration fee required
+                verify_register_name_fee::<E>(self.fee)?;
+
+                // Stateful checks: name not taken, account doesn't have name
+                let name_hash = get_register_name_hash(payload)
+                    .ok_or_else(|| VerificationError::InvalidFormat)?;
+
+                if state
+                    .is_name_registered(&name_hash)
+                    .await
+                    .map_err(VerificationError::State)?
+                {
+                    return Err(VerificationError::NameAlreadyRegistered);
+                }
+
+                if state
+                    .account_has_name(&self.source)
+                    .await
+                    .map_err(VerificationError::State)?
+                {
+                    return Err(VerificationError::AccountAlreadyHasName);
+                }
+            }
+            TransactionType::EphemeralMessage(payload) => {
+                // TNS EphemeralMessage: stateless format validation + stateful checks
+                verify_ephemeral_message_format::<E>(payload)?;
+
+                // Fee verification: minimum message fee required based on TTL
+                verify_ephemeral_message_fee::<E>(payload, self.fee)?;
+
+                // Enforce message_nonce == tx_nonce for replay protection
+                // This ensures each message uses a unique nonce tied to the account's nonce sequence
+                if payload.get_message_nonce() != self.nonce {
+                    return Err(VerificationError::InvalidMessageNonce);
+                }
+
+                // Verify sender has registered TNS name
+                let sender_name_hash = state
+                    .get_account_name_hash(&self.source)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or(VerificationError::SenderNotRegistered)?;
+
+                // Verify sender_name_hash in payload matches actual sender's name
+                if sender_name_hash != *payload.get_sender_name_hash() {
+                    return Err(VerificationError::InvalidSender);
+                }
+
+                // Verify recipient name is registered
+                if !state
+                    .is_name_registered(payload.get_recipient_name_hash())
+                    .await
+                    .map_err(VerificationError::State)?
+                {
+                    return Err(VerificationError::RecipientNotFound);
+                }
+
+                // Replay protection: check message ID not already used
+                let message_id = compute_message_id(payload);
+                if state
+                    .is_message_id_used(&message_id)
+                    .await
+                    .map_err(VerificationError::State)?
+                {
+                    return Err(VerificationError::MessageAlreadyExists);
+                }
+            }
         };
 
         let source_decompressed = self
@@ -2229,6 +2380,9 @@ impl Transaction {
                 // UNO/Shield/Unshield transfers are verified through ZKP proofs
                 // Logging handled during apply phase
             }
+            TransactionType::RegisterName(_) | TransactionType::EphemeralMessage(_) => {
+                // TNS transactions: verification handled in dedicated functions
+            }
         }
 
         // With plaintext balances, we don't need Bulletproofs range proofs
@@ -2375,6 +2529,10 @@ impl Transaction {
                 // Unshield transfers spend from encrypted UNO balances
                 // Spending verification is done through ZKP proofs
                 // No plaintext spending to verify here (adds to plaintext balance)
+            }
+            TransactionType::RegisterName(_) | TransactionType::EphemeralMessage(_) => {
+                // TNS transactions: registration/message fees are paid via the fee field
+                // No additional spending verification needed here
             }
         };
 
@@ -2761,6 +2919,10 @@ impl Transaction {
                 // Unshield transfers spend from encrypted UNO balances
                 // Spending verification is done through ZKP proofs
                 // No plaintext spending to verify here (adds to plaintext balance)
+            }
+            TransactionType::RegisterName(_) | TransactionType::EphemeralMessage(_) => {
+                // TNS transactions: registration/message fees are paid via the fee field
+                // No additional spending verification needed here
             }
         };
 
@@ -4304,6 +4466,51 @@ impl Transaction {
                     }
                 }
             }
+            TransactionType::RegisterName(payload) => {
+                // TNS RegisterName: store name->account mapping
+                let name_hash = get_register_name_hash(payload)
+                    .ok_or_else(|| VerificationError::InvalidFormat)?;
+
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "RegisterName applying - owner: {:?}, name_hash: {}",
+                        self.source, name_hash
+                    );
+                }
+
+                state
+                    .register_name(name_hash, &self.source)
+                    .await
+                    .map_err(VerificationError::State)?;
+            }
+            TransactionType::EphemeralMessage(payload) => {
+                // TNS EphemeralMessage: store message in ephemeral storage
+                let message_id = compute_message_id(payload);
+                let current_topoheight = state.get_verification_topoheight();
+
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "EphemeralMessage applying - message_id: {}, sender: {}, recipient: {}",
+                        message_id,
+                        payload.get_sender_name_hash(),
+                        payload.get_recipient_name_hash()
+                    );
+                }
+
+                state
+                    .store_ephemeral_message(
+                        message_id,
+                        payload.get_sender_name_hash().clone(),
+                        payload.get_recipient_name_hash().clone(),
+                        payload.get_message_nonce(),
+                        payload.get_ttl_blocks(),
+                        payload.get_encrypted_content().to_vec(),
+                        *payload.get_receiver_handle(),
+                        current_topoheight,
+                    )
+                    .await
+                    .map_err(VerificationError::State)?;
+            }
         }
 
         Ok(())
@@ -4479,6 +4686,10 @@ impl Transaction {
                 // Unshield transfers spend from encrypted UNO balances
                 // Spending verification is done through ZKP proofs
                 // No plaintext spending to verify here (adds to plaintext balance)
+            }
+            TransactionType::RegisterName(_) | TransactionType::EphemeralMessage(_) => {
+                // TNS transactions: registration/message fees are paid via the fee field
+                // No additional spending verification needed here
             }
         };
 

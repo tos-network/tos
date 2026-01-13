@@ -911,6 +911,23 @@ pub fn register_methods<S: Storage>(
     );
     handler.register_method("list_committees", async_handler!(list_committees::<S>));
 
+    // TNS (TOS Name Service) methods
+    handler.register_method("resolve_name", async_handler!(resolve_name::<S>));
+    handler.register_method("is_name_available", async_handler!(is_name_available::<S>));
+    handler.register_method(
+        "has_registered_name",
+        async_handler!(has_registered_name::<S>),
+    );
+    handler.register_method(
+        "get_account_name_hash",
+        async_handler!(get_account_name_hash::<S>),
+    );
+
+    // TNS Ephemeral Message methods
+    handler.register_method("get_messages", async_handler!(get_messages::<S>));
+    handler.register_method("get_message_count", async_handler!(get_message_count::<S>));
+    handler.register_method("get_message_by_id", async_handler!(get_message_by_id::<S>));
+
     if allow_mining_methods {
         handler.register_method(
             "get_block_template",
@@ -2452,6 +2469,10 @@ async fn get_account_history<S: Storage>(
                 | TransactionType::UnshieldTransfers(_) => {
                     // UNO/Shield/Unshield transfers involve encrypted balances
                     // This could be extended to track privacy transfer activities
+                }
+                TransactionType::RegisterName(_) | TransactionType::EphemeralMessage(_) => {
+                    // TNS transactions are tracked in dedicated TNS history endpoints
+                    // Not relevant to asset flow tracking
                 }
             }
         }
@@ -5140,4 +5161,291 @@ fn convert_committee_to_rpc(
         created_at: committee.created_at,
         updated_at: committee.updated_at,
     }
+}
+
+// ============================================================================
+// TNS (TOS Name Service) RPC Methods
+// ============================================================================
+
+use tos_common::api::daemon::{
+    EphemeralMessageInfo, GetAccountNameHashParams, GetAccountNameHashResult, GetMessageByIdParams,
+    GetMessageByIdResult, GetMessageCountParams, GetMessageCountResult, GetMessagesParams,
+    GetMessagesResult, HasRegisteredNameParams, HasRegisteredNameResult, IsNameAvailableParams,
+    IsNameAvailableResult, ResolveNameParams, ResolveNameResult,
+};
+use tos_common::tns::{normalize_name, tns_name_hash, MAX_NAME_LENGTH};
+
+/// Resolve a TNS name to an address
+/// Returns the address that owns the name, if registered
+async fn resolve_name<S: Storage>(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    let params: ResolveNameParams = parse_params(body)?;
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+
+    // Strip @tos.network suffix if present
+    let name_str = params.name.as_ref();
+    let name_input = name_str.strip_suffix("@tos.network").unwrap_or(name_str);
+
+    // Early length check to prevent DoS via oversized inputs
+    // Reject names exceeding MAX_NAME_LENGTH without processing
+    if name_input.len() > MAX_NAME_LENGTH {
+        return Ok(json!(ResolveNameResult {
+            address: None,
+            name_hash: Cow::Owned(Hash::zero()),
+        }));
+    }
+
+    // Normalize first to reject non-ASCII characters before lowercasing
+    // This prevents Unicode homoglyph attacks where non-ASCII chars casefold to ASCII
+    let normalized = match normalize_name(name_input) {
+        Ok(n) => n,
+        Err(_) => {
+            // Invalid name format - return empty result with hash of input
+            let name_hash = tns_name_hash(&name_input.to_lowercase());
+            return Ok(json!(ResolveNameResult {
+                address: None,
+                name_hash: Cow::Owned(name_hash),
+            }));
+        }
+    };
+
+    let name_hash = tns_name_hash(&normalized);
+
+    // Look up the owner in storage
+    let storage = blockchain.get_storage().read().await;
+    let owner = storage
+        .get_name_owner(&name_hash)
+        .await
+        .context("Error while looking up name owner")?;
+
+    let address = owner.map(|pk| Cow::Owned(pk.as_address(blockchain.get_network().is_mainnet())));
+
+    Ok(json!(ResolveNameResult {
+        address,
+        name_hash: Cow::Owned(name_hash),
+    }))
+}
+
+/// Check if a TNS name is available for registration
+async fn is_name_available<S: Storage>(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    use tos_common::tns::validate_name_format;
+
+    let params: IsNameAvailableParams = parse_params(body)?;
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+
+    // Strip @tos.network suffix if present
+    let name_str = params.name.as_ref();
+    let name = name_str.strip_suffix("@tos.network").unwrap_or(name_str);
+
+    // Early length check to prevent DoS via oversized inputs
+    // Reject names exceeding MAX_NAME_LENGTH without processing
+    if name.len() > MAX_NAME_LENGTH {
+        return Ok(json!(IsNameAvailableResult {
+            available: false,
+            valid_format: false,
+            format_error: Some(format!(
+                "Name too long (max {} characters)",
+                MAX_NAME_LENGTH
+            )),
+        }));
+    }
+
+    // Validate name format using the full validation rules
+    let validation = validate_name_format(name);
+    if !validation.valid {
+        return Ok(json!(IsNameAvailableResult {
+            available: false,
+            valid_format: false,
+            format_error: validation.error,
+        }));
+    }
+
+    // Get the normalized name from validation result
+    let normalized = validation.normalized.ok_or_else(|| {
+        InternalRpcError::InternalError("Validation passed but normalized name is None")
+    })?;
+
+    let name_hash = tns_name_hash(&normalized);
+
+    // Check if already registered
+    let storage = blockchain.get_storage().read().await;
+    let is_registered = storage
+        .is_name_registered(&name_hash)
+        .await
+        .context("Error while checking name registration")?;
+
+    Ok(json!(IsNameAvailableResult {
+        available: !is_registered,
+        valid_format: true,
+        format_error: None,
+    }))
+}
+
+/// Check if an account has a registered TNS name
+async fn has_registered_name<S: Storage>(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    let params: HasRegisteredNameParams = parse_params(body)?;
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+
+    // Validate network
+    if params.address.is_mainnet() != blockchain.get_network().is_mainnet() {
+        return Err(InternalRpcError::InvalidParamsAny(
+            BlockchainError::InvalidNetwork.into(),
+        ));
+    }
+
+    let storage = blockchain.get_storage().read().await;
+    let has_name = storage
+        .account_has_name(params.address.get_public_key())
+        .await
+        .context("Error while checking if account has name")?;
+
+    Ok(json!(HasRegisteredNameResult { has_name }))
+}
+
+/// Get the name hash registered by an account
+async fn get_account_name_hash<S: Storage>(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    let params: GetAccountNameHashParams = parse_params(body)?;
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+
+    // Validate network
+    if params.address.is_mainnet() != blockchain.get_network().is_mainnet() {
+        return Err(InternalRpcError::InvalidParamsAny(
+            BlockchainError::InvalidNetwork.into(),
+        ));
+    }
+
+    let storage = blockchain.get_storage().read().await;
+    let name_hash = storage
+        .get_account_name(params.address.get_public_key())
+        .await
+        .context("Error while getting account name hash")?;
+
+    Ok(json!(GetAccountNameHashResult {
+        name_hash: name_hash.map(Cow::Owned),
+    }))
+}
+
+// ============================================================================
+// TNS Ephemeral Message RPC Methods
+// ============================================================================
+
+/// Get ephemeral messages for a recipient
+async fn get_messages<S: Storage>(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    let params: GetMessagesParams = parse_params(body)?;
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+
+    // Limit the maximum messages per request and cap offset to prevent DoS
+    const MAX_LIMIT: u32 = 100;
+    const MAX_OFFSET: u32 = 10000;
+    let limit = params.limit.min(MAX_LIMIT);
+    let offset = params.offset.min(MAX_OFFSET);
+
+    let storage = blockchain.get_storage().read().await;
+    let current_topoheight = blockchain.get_topo_height();
+
+    // Get non-expired messages only
+    let messages = storage
+        .get_messages_for_recipient(
+            &params.recipient_name_hash,
+            offset,
+            limit,
+            current_topoheight,
+        )
+        .await
+        .context("Error while getting messages")?;
+
+    // Convert to API response format
+    let message_infos: Vec<EphemeralMessageInfo> = messages
+        .into_iter()
+        .map(|(msg_id, msg)| EphemeralMessageInfo {
+            message_id: Cow::Owned(msg_id),
+            sender_name_hash: Cow::Owned(msg.sender_name_hash),
+            message_nonce: msg.message_nonce,
+            encrypted_content: msg.encrypted_content,
+            receiver_handle: msg.receiver_handle,
+            stored_topoheight: msg.stored_topoheight,
+            expiry_topoheight: msg.expiry_topoheight,
+        })
+        .collect();
+
+    // Get total count for pagination info using efficient count function
+    let total_count = storage
+        .count_messages_for_recipient(&params.recipient_name_hash, current_topoheight)
+        .await
+        .context("Error while counting messages")?;
+
+    Ok(json!(GetMessagesResult {
+        messages: message_infos,
+        total_count,
+    }))
+}
+
+/// Get count of ephemeral messages for a recipient
+async fn get_message_count<S: Storage>(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    let params: GetMessageCountParams = parse_params(body)?;
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+
+    let storage = blockchain.get_storage().read().await;
+    let current_topoheight = blockchain.get_topo_height();
+    let count = storage
+        .count_messages_for_recipient(&params.recipient_name_hash, current_topoheight)
+        .await
+        .context("Error while counting messages")?;
+
+    Ok(json!(GetMessageCountResult { count }))
+}
+
+/// Get a specific ephemeral message by ID
+async fn get_message_by_id<S: Storage>(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    let params: GetMessageByIdParams = parse_params(body)?;
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+
+    let storage = blockchain.get_storage().read().await;
+    let current_topoheight = blockchain.get_topo_height();
+
+    let message = storage
+        .get_ephemeral_message(&params.message_id)
+        .await
+        .context("Error while getting message")?;
+
+    // Filter out expired messages - don't return messages past their TTL
+    let message_info = message.and_then(|msg| {
+        if msg.expiry_topoheight > current_topoheight {
+            Some(EphemeralMessageInfo {
+                message_id: Cow::Owned(params.message_id.into_owned()),
+                sender_name_hash: Cow::Owned(msg.sender_name_hash),
+                message_nonce: msg.message_nonce,
+                encrypted_content: msg.encrypted_content,
+                receiver_handle: msg.receiver_handle,
+                stored_topoheight: msg.stored_topoheight,
+                expiry_topoheight: msg.expiry_topoheight,
+            })
+        } else {
+            None // Message has expired
+        }
+    });
+
+    Ok(json!(GetMessageByIdResult {
+        message: message_info,
+    }))
 }

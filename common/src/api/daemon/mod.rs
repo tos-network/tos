@@ -2109,3 +2109,144 @@ pub struct RewindChainResult {
     /// All transactions that were removed from the chain
     pub txs: Vec<Hash>,
 }
+
+// ===== TNS (TOS Name Service) RPC Types =====
+
+/// Parameters for resolve_name RPC method
+#[derive(Serialize, Deserialize)]
+pub struct ResolveNameParams<'a> {
+    /// The name to resolve (e.g., "alice" or "alice@tos.network")
+    pub name: Cow<'a, str>,
+}
+
+/// Result of resolve_name RPC method
+#[derive(Serialize, Deserialize)]
+pub struct ResolveNameResult<'a> {
+    /// The address that owns this name, if registered
+    pub address: Option<Cow<'a, Address>>,
+    /// The name hash used for lookup
+    pub name_hash: Cow<'a, Hash>,
+}
+
+/// Parameters for is_name_available RPC method
+#[derive(Serialize, Deserialize)]
+pub struct IsNameAvailableParams<'a> {
+    /// The name to check availability
+    pub name: Cow<'a, str>,
+}
+
+/// Result of is_name_available RPC method
+#[derive(Serialize, Deserialize)]
+pub struct IsNameAvailableResult {
+    /// True if name is available for registration
+    pub available: bool,
+    /// Name format validation result (false if invalid format)
+    pub valid_format: bool,
+    /// Error message if format is invalid
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub format_error: Option<String>,
+}
+
+/// Parameters for has_registered_name RPC method
+#[derive(Serialize, Deserialize)]
+pub struct HasRegisteredNameParams<'a> {
+    /// The address to check
+    pub address: Cow<'a, Address>,
+}
+
+/// Result of has_registered_name RPC method
+#[derive(Serialize, Deserialize)]
+pub struct HasRegisteredNameResult {
+    /// True if the account has a registered name
+    pub has_name: bool,
+}
+
+/// Parameters for get_account_name_hash RPC method
+#[derive(Serialize, Deserialize)]
+pub struct GetAccountNameHashParams<'a> {
+    /// The address to get name hash for
+    pub address: Cow<'a, Address>,
+}
+
+/// Result of get_account_name_hash RPC method
+#[derive(Serialize, Deserialize)]
+pub struct GetAccountNameHashResult<'a> {
+    /// The name hash registered by this account, if any
+    pub name_hash: Option<Cow<'a, Hash>>,
+}
+
+// ===== TNS Ephemeral Message RPC Types =====
+
+/// Parameters for get_messages RPC method
+#[derive(Serialize, Deserialize)]
+pub struct GetMessagesParams<'a> {
+    /// Recipient's name hash
+    pub recipient_name_hash: Cow<'a, Hash>,
+    /// Pagination offset
+    #[serde(default)]
+    pub offset: u32,
+    /// Maximum number of messages to return (default: 50, max: 100)
+    #[serde(default = "default_message_limit")]
+    pub limit: u32,
+}
+
+fn default_message_limit() -> u32 {
+    50
+}
+
+/// A single ephemeral message in the get_messages response
+#[derive(Serialize, Deserialize)]
+pub struct EphemeralMessageInfo<'a> {
+    /// Unique message ID
+    pub message_id: Cow<'a, Hash>,
+    /// Sender's name hash
+    pub sender_name_hash: Cow<'a, Hash>,
+    /// Message nonce
+    pub message_nonce: u64,
+    /// Encrypted content
+    pub encrypted_content: Vec<u8>,
+    /// Receiver handle for decryption
+    pub receiver_handle: [u8; 32],
+    /// Topoheight when message was stored
+    pub stored_topoheight: u64,
+    /// Topoheight when message expires
+    pub expiry_topoheight: u64,
+}
+
+/// Result of get_messages RPC method
+#[derive(Serialize, Deserialize)]
+pub struct GetMessagesResult<'a> {
+    /// List of ephemeral messages
+    pub messages: Vec<EphemeralMessageInfo<'a>>,
+    /// Total number of messages for this recipient
+    pub total_count: u64,
+}
+
+/// Parameters for get_message_count RPC method
+#[derive(Serialize, Deserialize)]
+pub struct GetMessageCountParams<'a> {
+    /// Recipient's name hash
+    pub recipient_name_hash: Cow<'a, Hash>,
+}
+
+/// Result of get_message_count RPC method
+#[derive(Serialize, Deserialize)]
+pub struct GetMessageCountResult {
+    /// Number of messages for this recipient
+    pub count: u64,
+}
+
+/// Parameters for get_message_by_id RPC method
+#[derive(Serialize, Deserialize)]
+pub struct GetMessageByIdParams<'a> {
+    /// The message ID to retrieve
+    pub message_id: Cow<'a, Hash>,
+}
+
+/// Result of get_message_by_id RPC method
+#[derive(Serialize, Deserialize)]
+pub struct GetMessageByIdResult<'a> {
+    /// The message if found
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<EphemeralMessageInfo<'a>>,
+}
