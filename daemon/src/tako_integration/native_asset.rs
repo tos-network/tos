@@ -2273,6 +2273,8 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         asset: &[u8; 32],
         role: &[u8; 32],
         account: &[u8; 32],
+        _caller: &[u8; 32],
+        _block_height: u64,
     ) -> Result<(), EbpfError> {
         // Block zero-address to maintain consistency
         if *account == [0u8; 32] {
@@ -2283,8 +2285,8 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
 
         let hash = Self::bytes_to_hash(asset);
 
-        // NOTE: RBAC validation (caller has admin role) must be done at syscall level in TAKO
-        // The trait doesn't include a caller parameter for this function
+        // NOTE: RBAC validation (caller has admin role) is done at syscall level in TAKO
+        // The caller and block_height params are passed for logging/audit purposes
 
         // TOS-023: Check if account has the role (prevent underflow)
         let has_role = self.check_role(&hash, role, account)?;
@@ -3523,10 +3525,10 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         &mut self,
         asset: &[u8; 32],
         caller: &[u8; 32],
-        _block_height: u64,
+        block_height: u64,
     ) -> Result<(), EbpfError> {
         let admin_role = tos_common::native_asset::DEFAULT_ADMIN_ROLE;
-        self.revoke_role(asset, &admin_role, caller)
+        self.revoke_role(asset, &admin_role, caller, caller, block_height)
     }
 
     fn get_admin_delay(&self, asset: &[u8; 32]) -> Result<u64, EbpfError> {
