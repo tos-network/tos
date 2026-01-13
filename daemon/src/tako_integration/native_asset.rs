@@ -1030,6 +1030,15 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         spender: &[u8; 32],
         amount: u64,
     ) -> Result<(), EbpfError> {
+        // Block zero-address to maintain consistency with transfer/mint/burn behavior
+        let zero_addr = [0u8; 32];
+        if *owner == zero_addr {
+            return Err(Self::invalid_data_error("Cannot approve from zero address"));
+        }
+        if *spender == zero_addr {
+            return Err(Self::invalid_data_error("Cannot approve to zero address"));
+        }
+
         let hash = Self::bytes_to_hash(asset);
 
         if amount == 0 {
@@ -1133,6 +1142,14 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         delegator: &[u8; 32],
         delegatee: &[u8; 32],
     ) -> Result<(), EbpfError> {
+        // Block zero-address delegator to prevent creating checkpoints without vote movement
+        let zero_addr = [0u8; 32];
+        if *delegator == zero_addr {
+            return Err(Self::invalid_data_error(
+                "Cannot delegate from zero address",
+            ));
+        }
+
         let hash = Self::bytes_to_hash(asset);
 
         // Check if governance is enabled
