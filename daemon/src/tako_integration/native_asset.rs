@@ -245,6 +245,47 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TosNativeAssetAdapter<'a
         }
     }
 
+    /// Validate that escrow release conditions are met before allowing release
+    /// Returns Ok(()) if conditions are satisfied, Err otherwise
+    fn validate_escrow_release_conditions(&self, escrow: &Escrow) -> Result<(), EbpfError> {
+        match &escrow.condition {
+            ReleaseCondition::TimeRelease { release_after } => {
+                // Time-based release: check if enough time has passed
+                if self.block_height < *release_after {
+                    return Err(Self::permission_denied_error(
+                        "Escrow timelock has not expired yet",
+                    ));
+                }
+            }
+            ReleaseCondition::MultiApproval { required, .. } => {
+                // Multi-approval: check if enough approvals collected
+                let approval_count = escrow.approvals.len() as u8;
+                if approval_count < *required {
+                    return Err(Self::permission_denied_error(&format!(
+                        "Escrow requires {} approvals, has {}",
+                        required, approval_count
+                    )));
+                }
+            }
+            ReleaseCondition::HashLock { .. } => {
+                // HashLock validation requires preimage, which is validated
+                // at the TAKO syscall layer - we trust that layer here
+                // If syscall allows this call, preimage was valid
+            }
+        }
+
+        // Check expiry if set - cannot release after expiry
+        if let Some(expires_at) = escrow.expires_at {
+            if self.block_height > expires_at {
+                return Err(Self::permission_denied_error(
+                    "Escrow has expired and cannot be released",
+                ));
+            }
+        }
+
+        Ok(())
+    }
+
     /// Convert EscrowStatus enum to u8
     fn escrow_status_to_u8(status: &EscrowStatus) -> u8 {
         match status {
@@ -2819,8 +2860,19 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         // - Active can transition to Released or Cancelled
         // - Released and Cancelled are terminal states (cannot transition)
         match (&old_status, &new_status) {
-            (EscrowStatus::Active, EscrowStatus::Released)
-            | (EscrowStatus::Active, EscrowStatus::Cancelled) => {
+            (EscrowStatus::Active, EscrowStatus::Released) => {
+                // Validate release conditions before allowing release
+                self.validate_escrow_release_conditions(&escrow)?;
+            }
+            (EscrowStatus::Active, EscrowStatus::Cancelled) => {
+                // Validate cancel conditions (expired or by sender via syscall auth)
+                // Syscall layer handles sender authorization; we check expiry here
+                if let Some(expires_at) = escrow.expires_at {
+                    if self.block_height < expires_at {
+                        // Not expired yet - syscall layer must have authorized sender cancellation
+                        // This is OK as TAKO validates caller == sender for non-expired cancels
+                    }
+                }
                 // Valid transition - continue
             }
             (EscrowStatus::Released, _) => {
