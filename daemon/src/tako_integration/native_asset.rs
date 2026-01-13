@@ -905,6 +905,11 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         amount: u64,
         caller: &[u8; 32],
     ) -> Result<(), EbpfError> {
+        // Block zero-address to maintain consistency with other functions
+        if *from == [0u8; 32] {
+            return Err(Self::invalid_data_error("Cannot burn from zero address"));
+        }
+
         let hash = Self::bytes_to_hash(asset);
 
         // Check if caller has BURNER role or is the owner
@@ -997,6 +1002,13 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         account: &[u8; 32],
         amount: u64,
     ) -> Result<(), EbpfError> {
+        // Block zero-address to maintain consistency with add_balance
+        if *account == [0u8; 32] {
+            return Err(Self::invalid_data_error(
+                "Cannot subtract balance from zero address",
+            ));
+        }
+
         let hash = Self::bytes_to_hash(asset);
 
         // Phase 1: Validation
@@ -1441,6 +1453,11 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         transferable: bool,
         _current_time: u64,
     ) -> Result<u64, EbpfError> {
+        // Block zero-address to maintain consistency
+        if *account == [0u8; 32] {
+            return Err(Self::invalid_data_error("Cannot lock for zero address"));
+        }
+
         let hash = Self::bytes_to_hash(asset);
 
         // Check available balance
@@ -1533,6 +1550,11 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         account: &[u8; 32],
         lock_id: u64,
     ) -> Result<u64, EbpfError> {
+        // Block zero-address to maintain consistency
+        if *account == [0u8; 32] {
+            return Err(Self::invalid_data_error("Cannot unlock for zero address"));
+        }
+
         let hash = Self::bytes_to_hash(asset);
 
         // Get lock
@@ -1664,6 +1686,13 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         lock_id: u64,
         new_unlock_at: u64,
     ) -> Result<(), EbpfError> {
+        // Block zero-address to maintain consistency
+        if *account == [0u8; 32] {
+            return Err(Self::invalid_data_error(
+                "Cannot extend lock for zero address",
+            ));
+        }
+
         let hash = Self::bytes_to_hash(asset);
 
         let mut token_lock =
@@ -1691,6 +1720,13 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         lock_id: u64,
         split_amount: u64,
     ) -> Result<u64, EbpfError> {
+        // Block zero-address to maintain consistency
+        if *account == [0u8; 32] {
+            return Err(Self::invalid_data_error(
+                "Cannot split lock for zero address",
+            ));
+        }
+
         let hash = Self::bytes_to_hash(asset);
 
         let mut token_lock =
@@ -1770,6 +1806,13 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         account: &[u8; 32],
         lock_ids: &[u64],
     ) -> Result<u64, EbpfError> {
+        // Block zero-address to maintain consistency
+        if *account == [0u8; 32] {
+            return Err(Self::invalid_data_error(
+                "Cannot merge locks for zero address",
+            ));
+        }
+
         if lock_ids.len() < 2 {
             return Err(Self::invalid_data_error("Need at least 2 locks to merge"));
         }
@@ -2110,6 +2153,13 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         role: &[u8; 32],
         account: &[u8; 32],
     ) -> Result<(), EbpfError> {
+        // Block zero-address to maintain consistency
+        if *account == [0u8; 32] {
+            return Err(Self::invalid_data_error(
+                "Cannot revoke role from zero address",
+            ));
+        }
+
         let hash = Self::bytes_to_hash(asset);
 
         // NOTE: RBAC validation (caller has admin role) must be done at syscall level in TAKO
@@ -2211,6 +2261,13 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         caller: &[u8; 32],
         _block_height: u64,
     ) -> Result<(), EbpfError> {
+        // Block zero-address to maintain consistency
+        if *account == [0u8; 32] {
+            return Err(Self::invalid_data_error(
+                "Cannot set frozen state for zero address",
+            ));
+        }
+
         let hash = Self::bytes_to_hash(asset);
 
         // Check if caller has FREEZER role
@@ -2569,6 +2626,13 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         escrow_id: u64,
         approver: &[u8; 32],
     ) -> Result<(), EbpfError> {
+        // Block zero-address to maintain consistency
+        if *approver == [0u8; 32] {
+            return Err(Self::invalid_data_error(
+                "Cannot add escrow approval for zero address",
+            ));
+        }
+
         let hash = Self::bytes_to_hash(asset);
         let mut escrow = try_block_on(self.provider.get_native_asset_escrow(&hash, escrow_id))
             .map_err(Self::convert_error)?
