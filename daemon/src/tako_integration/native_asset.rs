@@ -2934,6 +2934,22 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
 
+        // Verify escrow uses MultiApproval and approver is authorized
+        match &escrow.condition {
+            ReleaseCondition::MultiApproval { approvers, .. } => {
+                if !approvers.contains(approver) {
+                    return Err(Self::permission_denied_error(
+                        "Approver is not in the authorized approvers list for this escrow",
+                    ));
+                }
+            }
+            _ => {
+                return Err(Self::invalid_data_error(
+                    "Escrow does not use MultiApproval release condition",
+                ));
+            }
+        }
+
         if !escrow.approvals.contains(approver) {
             escrow.approvals.push(*approver);
             try_block_on(self.provider.set_native_asset_escrow(&hash, &escrow))
