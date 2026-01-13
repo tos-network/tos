@@ -1531,10 +1531,17 @@ impl NativeAssetProvider for RocksStorage {
             .load_optional_from_disk(Column::NativeAssets, &key)?
             .unwrap_or_default();
 
-        // Prevent duplicates
-        if !delegators.contains(delegator) {
-            delegators.push(*delegator);
-            self.insert_into_disk(Column::NativeAssets, &key, &delegators)?;
+        // Use binary search for O(log n) lookup instead of O(n) contains()
+        // Maintains sorted order for deterministic iteration
+        match delegators.binary_search(delegator) {
+            Ok(_) => {
+                // Already exists, no-op
+            }
+            Err(insert_pos) => {
+                // Not found, insert at sorted position
+                delegators.insert(insert_pos, *delegator);
+                self.insert_into_disk(Column::NativeAssets, &key, &delegators)?;
+            }
         }
         Ok(())
     }
@@ -1558,8 +1565,9 @@ impl NativeAssetProvider for RocksStorage {
             .load_optional_from_disk(Column::NativeAssets, &key)?
             .unwrap_or_default();
 
-        if let Some(pos) = delegators.iter().position(|d| d == delegator) {
-            delegators.swap_remove(pos);
+        // Use binary search for O(log n) lookup instead of O(n) position()
+        if let Ok(index) = delegators.binary_search(delegator) {
+            delegators.remove(index);
             if delegators.is_empty() {
                 self.remove_from_disk(Column::NativeAssets, &key)?;
             } else {

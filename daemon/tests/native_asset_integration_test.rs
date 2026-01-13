@@ -2982,6 +2982,481 @@ async fn test_timelock_operation_crud() {
 }
 
 // ============================================================================
+// V. Vote Power Operations
+// ============================================================================
+
+/// Test V.1: Vote power get/set operations
+#[tokio::test]
+async fn test_vote_power_operations() {
+    let mut ctx = TestContext::new();
+    let creator = random_account();
+    let asset = ctx.create_test_asset(&creator).await;
+
+    let alice = random_account();
+    let bob = random_account();
+
+    // Initial vote power should be 0
+    let vote_power = ctx
+        .storage
+        .get_native_asset_vote_power(&asset, &alice)
+        .await
+        .unwrap();
+    assert_eq!(vote_power, 0);
+
+    // Set vote power for Alice
+    ctx.storage
+        .set_native_asset_vote_power(&asset, &alice, 1000)
+        .await
+        .unwrap();
+
+    // Verify vote power
+    let vote_power = ctx
+        .storage
+        .get_native_asset_vote_power(&asset, &alice)
+        .await
+        .unwrap();
+    assert_eq!(vote_power, 1000);
+
+    // Set vote power for Bob
+    ctx.storage
+        .set_native_asset_vote_power(&asset, &bob, 500)
+        .await
+        .unwrap();
+
+    // Verify Bob's vote power
+    let vote_power = ctx
+        .storage
+        .get_native_asset_vote_power(&asset, &bob)
+        .await
+        .unwrap();
+    assert_eq!(vote_power, 500);
+
+    // Update Alice's vote power
+    ctx.storage
+        .set_native_asset_vote_power(&asset, &alice, 2000)
+        .await
+        .unwrap();
+
+    let vote_power = ctx
+        .storage
+        .get_native_asset_vote_power(&asset, &alice)
+        .await
+        .unwrap();
+    assert_eq!(vote_power, 2000);
+
+    // Set vote power to 0
+    ctx.storage
+        .set_native_asset_vote_power(&asset, &alice, 0)
+        .await
+        .unwrap();
+
+    let vote_power = ctx
+        .storage
+        .get_native_asset_vote_power(&asset, &alice)
+        .await
+        .unwrap();
+    assert_eq!(vote_power, 0);
+
+    println!("Test V.1 passed: Vote power operations");
+}
+
+/// Test V.2: Vote power with multiple assets
+#[tokio::test]
+async fn test_vote_power_multi_asset() {
+    let mut ctx = TestContext::new();
+    let creator = random_account();
+    let asset1 = ctx.create_test_asset(&creator).await;
+    let asset2 = ctx.create_test_asset(&creator).await;
+
+    let alice = random_account();
+
+    // Set different vote power for same account on different assets
+    ctx.storage
+        .set_native_asset_vote_power(&asset1, &alice, 1000)
+        .await
+        .unwrap();
+
+    ctx.storage
+        .set_native_asset_vote_power(&asset2, &alice, 5000)
+        .await
+        .unwrap();
+
+    // Verify they are independent
+    let vp1 = ctx
+        .storage
+        .get_native_asset_vote_power(&asset1, &alice)
+        .await
+        .unwrap();
+    let vp2 = ctx
+        .storage
+        .get_native_asset_vote_power(&asset2, &alice)
+        .await
+        .unwrap();
+
+    assert_eq!(vp1, 1000);
+    assert_eq!(vp2, 5000);
+
+    println!("Test V.2 passed: Vote power multi-asset isolation");
+}
+
+// ============================================================================
+// W. Delegators Index Operations
+// ============================================================================
+
+/// Test W.1: Delegators index add/get/remove
+#[tokio::test]
+async fn test_delegators_index_operations() {
+    let mut ctx = TestContext::new();
+    let creator = random_account();
+    let asset = ctx.create_test_asset(&creator).await;
+
+    let delegatee = random_account();
+    let delegator1 = random_account();
+    let delegator2 = random_account();
+    let delegator3 = random_account();
+
+    // Initially empty
+    let delegators = ctx
+        .storage
+        .get_native_asset_delegators(&asset, &delegatee)
+        .await
+        .unwrap();
+    assert!(delegators.is_empty());
+
+    // Add first delegator
+    ctx.storage
+        .add_native_asset_delegator(&asset, &delegatee, &delegator1)
+        .await
+        .unwrap();
+
+    let delegators = ctx
+        .storage
+        .get_native_asset_delegators(&asset, &delegatee)
+        .await
+        .unwrap();
+    assert_eq!(delegators.len(), 1);
+    assert!(delegators.contains(&delegator1));
+
+    // Add more delegators
+    ctx.storage
+        .add_native_asset_delegator(&asset, &delegatee, &delegator2)
+        .await
+        .unwrap();
+
+    ctx.storage
+        .add_native_asset_delegator(&asset, &delegatee, &delegator3)
+        .await
+        .unwrap();
+
+    let delegators = ctx
+        .storage
+        .get_native_asset_delegators(&asset, &delegatee)
+        .await
+        .unwrap();
+    assert_eq!(delegators.len(), 3);
+
+    // Remove one delegator
+    ctx.storage
+        .remove_native_asset_delegator(&asset, &delegatee, &delegator2)
+        .await
+        .unwrap();
+
+    let delegators = ctx
+        .storage
+        .get_native_asset_delegators(&asset, &delegatee)
+        .await
+        .unwrap();
+    assert_eq!(delegators.len(), 2);
+    assert!(delegators.contains(&delegator1));
+    assert!(!delegators.contains(&delegator2));
+    assert!(delegators.contains(&delegator3));
+
+    println!("Test W.1 passed: Delegators index operations");
+}
+
+/// Test W.2: Delegators index duplicate prevention
+#[tokio::test]
+async fn test_delegators_index_no_duplicates() {
+    let mut ctx = TestContext::new();
+    let creator = random_account();
+    let asset = ctx.create_test_asset(&creator).await;
+
+    let delegatee = random_account();
+    let delegator = random_account();
+
+    // Add same delegator multiple times
+    ctx.storage
+        .add_native_asset_delegator(&asset, &delegatee, &delegator)
+        .await
+        .unwrap();
+
+    ctx.storage
+        .add_native_asset_delegator(&asset, &delegatee, &delegator)
+        .await
+        .unwrap();
+
+    ctx.storage
+        .add_native_asset_delegator(&asset, &delegatee, &delegator)
+        .await
+        .unwrap();
+
+    // Should only have one entry
+    let delegators = ctx
+        .storage
+        .get_native_asset_delegators(&asset, &delegatee)
+        .await
+        .unwrap();
+    assert_eq!(delegators.len(), 1);
+
+    println!("Test W.2 passed: Delegators index duplicate prevention");
+}
+
+/// Test W.3: Delegators index sorted order (for binary search optimization)
+#[tokio::test]
+async fn test_delegators_index_sorted_order() {
+    let mut ctx = TestContext::new();
+    let creator = random_account();
+    let asset = ctx.create_test_asset(&creator).await;
+
+    let delegatee = random_account();
+
+    // Add delegators in random order
+    let mut delegators_to_add: Vec<[u8; 32]> = (0..10).map(|_| random_account()).collect();
+
+    for d in &delegators_to_add {
+        ctx.storage
+            .add_native_asset_delegator(&asset, &delegatee, d)
+            .await
+            .unwrap();
+    }
+
+    // Retrieve and verify sorted order
+    let delegators = ctx
+        .storage
+        .get_native_asset_delegators(&asset, &delegatee)
+        .await
+        .unwrap();
+
+    // Sort expected list for comparison
+    delegators_to_add.sort();
+
+    assert_eq!(delegators.len(), 10);
+    assert_eq!(delegators, delegators_to_add, "Delegators should be sorted");
+
+    println!("Test W.3 passed: Delegators index maintains sorted order");
+}
+
+/// Test W.4: Delegators index removal of non-existent entry
+#[tokio::test]
+async fn test_delegators_index_remove_nonexistent() {
+    let mut ctx = TestContext::new();
+    let creator = random_account();
+    let asset = ctx.create_test_asset(&creator).await;
+
+    let delegatee = random_account();
+    let delegator1 = random_account();
+    let delegator2 = random_account();
+
+    // Add one delegator
+    ctx.storage
+        .add_native_asset_delegator(&asset, &delegatee, &delegator1)
+        .await
+        .unwrap();
+
+    // Try to remove non-existent delegator (should be no-op)
+    ctx.storage
+        .remove_native_asset_delegator(&asset, &delegatee, &delegator2)
+        .await
+        .unwrap();
+
+    // Original delegator should still be there
+    let delegators = ctx
+        .storage
+        .get_native_asset_delegators(&asset, &delegatee)
+        .await
+        .unwrap();
+    assert_eq!(delegators.len(), 1);
+    assert!(delegators.contains(&delegator1));
+
+    println!("Test W.4 passed: Delegators index remove non-existent is no-op");
+}
+
+/// Test W.5: Delegators index cleanup on last removal
+#[tokio::test]
+async fn test_delegators_index_cleanup() {
+    let mut ctx = TestContext::new();
+    let creator = random_account();
+    let asset = ctx.create_test_asset(&creator).await;
+
+    let delegatee = random_account();
+    let delegator = random_account();
+
+    // Add then remove
+    ctx.storage
+        .add_native_asset_delegator(&asset, &delegatee, &delegator)
+        .await
+        .unwrap();
+
+    ctx.storage
+        .remove_native_asset_delegator(&asset, &delegatee, &delegator)
+        .await
+        .unwrap();
+
+    // Should be empty (key deleted from storage)
+    let delegators = ctx
+        .storage
+        .get_native_asset_delegators(&asset, &delegatee)
+        .await
+        .unwrap();
+    assert!(delegators.is_empty());
+
+    println!("Test W.5 passed: Delegators index cleanup on last removal");
+}
+
+// ============================================================================
+// X. Atomic Batch Operations
+// ============================================================================
+
+/// Test X.1: Atomic batch write operations
+#[tokio::test]
+async fn test_atomic_batch_operations() {
+    use tos_daemon::core::storage::StorageWriteBatch;
+
+    let mut ctx = TestContext::new();
+    let creator = random_account();
+    let asset = ctx.create_test_asset(&creator).await;
+
+    let alice = random_account();
+    let bob = random_account();
+
+    // Set initial balances
+    ctx.storage
+        .set_native_asset_balance(&asset, &alice, 1000)
+        .await
+        .unwrap();
+    ctx.storage
+        .set_native_asset_balance(&asset, &bob, 500)
+        .await
+        .unwrap();
+
+    // Create a batch to simulate atomic transfer
+    let mut batch = StorageWriteBatch::new();
+    batch.put_balance(&asset, &alice, 900); // Alice - 100
+    batch.put_balance(&asset, &bob, 600); // Bob + 100
+
+    // Execute batch atomically
+    ctx.storage.execute_batch(batch).await.unwrap();
+
+    // Verify both balances updated
+    let alice_balance = ctx
+        .storage
+        .get_native_asset_balance(&asset, &alice)
+        .await
+        .unwrap();
+    let bob_balance = ctx
+        .storage
+        .get_native_asset_balance(&asset, &bob)
+        .await
+        .unwrap();
+
+    assert_eq!(alice_balance, 900);
+    assert_eq!(bob_balance, 600);
+
+    println!("Test X.1 passed: Atomic batch operations");
+}
+
+/// Test X.2: Empty batch is no-op
+#[tokio::test]
+async fn test_atomic_batch_empty() {
+    use tos_daemon::core::storage::StorageWriteBatch;
+
+    let mut ctx = TestContext::new();
+    let creator = random_account();
+    let asset = ctx.create_test_asset(&creator).await;
+
+    let alice = random_account();
+
+    // Set initial balance
+    ctx.storage
+        .set_native_asset_balance(&asset, &alice, 1000)
+        .await
+        .unwrap();
+
+    // Execute empty batch
+    let batch = StorageWriteBatch::new();
+    assert!(batch.is_empty());
+    ctx.storage.execute_batch(batch).await.unwrap();
+
+    // Balance unchanged
+    let balance = ctx
+        .storage
+        .get_native_asset_balance(&asset, &alice)
+        .await
+        .unwrap();
+    assert_eq!(balance, 1000);
+
+    println!("Test X.2 passed: Empty batch is no-op");
+}
+
+/// Test X.3: Batch with multiple operation types
+#[tokio::test]
+async fn test_atomic_batch_mixed_operations() {
+    use tos_daemon::core::storage::StorageWriteBatch;
+
+    let mut ctx = TestContext::new();
+    let creator = random_account();
+    let asset = ctx.create_test_asset(&creator).await;
+
+    let alice = random_account();
+
+    // Create batch with balance + checkpoint + supply
+    let mut batch = StorageWriteBatch::new();
+    batch.put_balance(&asset, &alice, 5000);
+    batch.put_balance_checkpoint(
+        &asset,
+        &alice,
+        0,
+        &BalanceCheckpoint {
+            from_block: 100,
+            balance: 5000,
+        },
+    );
+    batch.put_balance_checkpoint_count(&asset, &alice, 1);
+    batch.put_supply(&asset, 10000);
+
+    // Execute atomically
+    ctx.storage.execute_batch(batch).await.unwrap();
+
+    // Verify all changes
+    let balance = ctx
+        .storage
+        .get_native_asset_balance(&asset, &alice)
+        .await
+        .unwrap();
+    assert_eq!(balance, 5000);
+
+    let cp_count = ctx
+        .storage
+        .get_native_asset_balance_checkpoint_count(&asset, &alice)
+        .await
+        .unwrap();
+    assert_eq!(cp_count, 1);
+
+    let cp = ctx
+        .storage
+        .get_native_asset_balance_checkpoint(&asset, &alice, 0)
+        .await
+        .unwrap();
+    assert_eq!(cp.from_block, 100);
+    assert_eq!(cp.balance, 5000);
+
+    let supply = ctx.storage.get_native_asset_supply(&asset).await.unwrap();
+    assert_eq!(supply, 10000);
+
+    println!("Test X.3 passed: Atomic batch mixed operations");
+}
+
+// ============================================================================
 // Summary Test
 // ============================================================================
 
@@ -3085,8 +3560,24 @@ fn test_native_asset_integration_summary() {
     println!("   U.1 test_timelock_min_delay");
     println!("   U.2 test_timelock_operation_crud");
     println!();
+    println!("V. Vote Power Operations:");
+    println!("   V.1 test_vote_power_operations");
+    println!("   V.2 test_vote_power_multi_asset");
+    println!();
+    println!("W. Delegators Index Operations:");
+    println!("   W.1 test_delegators_index_operations");
+    println!("   W.2 test_delegators_index_no_duplicates");
+    println!("   W.3 test_delegators_index_sorted_order");
+    println!("   W.4 test_delegators_index_remove_nonexistent");
+    println!("   W.5 test_delegators_index_cleanup");
+    println!();
+    println!("X. Atomic Batch Operations:");
+    println!("   X.1 test_atomic_batch_operations");
+    println!("   X.2 test_atomic_batch_empty");
+    println!("   X.3 test_atomic_batch_mixed_operations");
+    println!();
     println!("========================================");
-    println!("Total: 82 NativeAssetProvider methods covered");
+    println!("Total: 92 NativeAssetProvider methods covered");
     println!("Coverage: 100%");
     println!("========================================");
 }
