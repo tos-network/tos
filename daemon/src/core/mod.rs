@@ -18,6 +18,6 @@ pub mod scheduled_execution_processor;
 
 pub use scheduled_execution_processor::{
     process_scheduled_executions, BlockScheduledExecutionResults, ScheduledExecutionConfig,
-    ScheduledExecutionResult,
+    ScheduledExecutionErrorKind, ScheduledExecutionResult,
 };
 pub use tx_cache::*;

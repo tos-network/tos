@@ -193,11 +193,12 @@ impl<'a> AccountProvider for TosAccountAdapter<'a> {
         // Instead, they are accumulated as ContractOutput::Transfer and processed after
         // contract execution completes. This ensures atomicity and proper balance checks.
         //
-        // For TAKO integration Phase 1, we implement a simplified approach:
-        // - Balance checks are performed immediately
-        // - Actual transfers are cached and applied after execution
-        //
-        // TODO [Phase 2]: Integrate with TOS's ContractOutput system for full transaction atomicity
+        // TAKO integration approach:
+        // - Balance checks are performed immediately against virtual balance (actual + pending deltas)
+        // - Transfers are cached in `pending_transfers` during execution
+        // - After execution, transfers are returned via ExecutionResult.transfers
+        // - ScheduledExecutionProcessor aggregates transfers in BlockScheduledExecutionResults
+        // - Final application to blockchain state happens in apply.rs (apply_aggregated_transfers)
 
         // EVM-compatible behavior: zero-amount transfers are no-ops
         // This matches Ethereum's CALL behavior where value=0 transfers always succeed

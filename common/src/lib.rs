@@ -23,6 +23,9 @@ pub mod kyc;
 // Native NFT System module
 pub mod nft;
 
+// Native Asset System module (ERC20-like tokens)
+pub mod native_asset;
+
 pub mod asset;
 pub mod config;
 pub mod context;

@@ -48,6 +48,24 @@ pub fn deserialize_extra_nonce<'de, 'a, D: Deserializer<'de>>(
     Ok(Cow::Owned(extra_nonce))
 }
 
+/// RPC representation of a scheduled execution result
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RPCScheduledExecutionResult<'a> {
+    /// Hash identifying this scheduled execution
+    pub execution_hash: Cow<'a, Hash>,
+    /// Contract that was executed
+    pub contract: Cow<'a, Hash>,
+    /// Whether execution succeeded
+    pub success: bool,
+    /// Compute units consumed
+    pub compute_units_used: u64,
+    /// Error message if execution failed
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<Cow<'a, str>>,
+    /// Miner reward paid from offer (70% of offer_amount)
+    pub miner_reward: u64,
+}
+
 // Structure used to map the public key to a human readable address
 #[derive(Serialize, Deserialize)]
 pub struct RPCBlockResponse<'a> {
@@ -77,6 +95,9 @@ pub struct RPCBlockResponse<'a> {
     pub txs_hashes: Cow<'a, IndexSet<Hash>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub transactions: Vec<RPCTransaction<'a>>,
+    /// Scheduled executions processed in this block (only present when topoheight is set)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub scheduled_executions: Vec<RPCScheduledExecutionResult<'a>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1343,6 +1364,12 @@ pub enum NotifyEvent {
     WatchAddressPayments {
         address: Address,
     },
+    // When a scheduled execution has been processed in a block
+    // It contains ScheduledExecutionExecutedEvent struct as value
+    ScheduledExecutionExecuted {
+        // Contract that was executed
+        contract: Hash,
+    },
 }
 
 // Value of NotifyEvent::NewBlock
@@ -1484,6 +1511,28 @@ pub struct AddressPaymentEvent<'a> {
     pub memo: Option<Cow<'a, str>>,
     /// Number of confirmations (1 = just included in block)
     pub confirmations: u64,
+}
+
+// Value of NotifyEvent::ScheduledExecutionExecuted
+#[derive(Serialize, Deserialize)]
+pub struct ScheduledExecutionExecutedEvent<'a> {
+    /// Hash identifying this scheduled execution
+    pub execution_hash: Cow<'a, Hash>,
+    /// Contract that was executed
+    pub contract: Cow<'a, Hash>,
+    /// Block hash in which this execution was processed
+    pub block_hash: Cow<'a, Hash>,
+    /// Topoheight at which execution was processed
+    pub topoheight: TopoHeight,
+    /// Whether execution succeeded
+    pub success: bool,
+    /// Compute units consumed
+    pub compute_units_used: u64,
+    /// Error message if execution failed
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<Cow<'a, str>>,
+    /// Miner reward paid from offer (70% of offer_amount)
+    pub miner_reward: u64,
 }
 
 // ============================================================================

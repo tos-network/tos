@@ -4,18 +4,45 @@
 // It processes OFFERCALL-scheduled contract executions in priority order and
 // handles gas accounting, offer payments, and execution status updates.
 
+use std::collections::HashMap;
+
 use log::{debug, error, info, trace, warn};
 use tos_common::{
     block::TopoHeight,
     contract::{
-        ContractProvider, ScheduledExecution, ScheduledExecutionStatus,
+        ContractProvider, ScheduledExecution, ScheduledExecutionStatus, TransferOutput,
         MAX_SCHEDULED_EXECUTIONS_PER_BLOCK, MAX_SCHEDULED_EXECUTION_GAS_PER_BLOCK,
     },
-    crypto::Hash,
+    crypto::{Hash, PublicKey},
 };
 
 use crate::core::{error::BlockchainError, storage::ContractScheduledExecutionProvider};
 use crate::tako_integration::{calculate_offer_miner_reward, TakoExecutor};
+
+/// Error category for scheduled execution failures
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScheduledExecutionErrorKind {
+    /// Execution completed successfully
+    None,
+    /// Contract bytecode not found
+    ContractNotFound,
+    /// Execution ran out of gas
+    OutOfGas,
+    /// Contract returned a non-zero exit code
+    ContractError,
+    /// Maximum deferrals reached, execution expired
+    Expired,
+    /// Internal system error (storage, I/O, etc.)
+    InternalError,
+    /// Unknown or uncategorized error
+    Unknown,
+}
+
+impl Default for ScheduledExecutionErrorKind {
+    fn default() -> Self {
+        Self::None
+    }
+}
 
 /// Result of processing a single scheduled execution
 #[derive(Debug)]
@@ -26,14 +53,18 @@ pub struct ScheduledExecutionResult {
     pub success: bool,
     /// Compute units used
     pub compute_units_used: u64,
-    /// Error message if failed
+    /// Error message if failed (detailed, human-readable)
     pub error: Option<String>,
+    /// Error category for programmatic handling
+    pub error_kind: ScheduledExecutionErrorKind,
     /// Miner reward from offer
     pub miner_reward: u64,
     /// Events emitted during execution
     pub events: Vec<tos_program_runtime::Event>,
     /// Log messages from execution
     pub log_messages: Vec<String>,
+    /// Transfers requested during execution
+    pub transfers: Vec<TransferOutput>,
 }
 
 /// Result of processing all scheduled executions at a topoheight
@@ -51,6 +82,9 @@ pub struct BlockScheduledExecutionResults {
     pub failure_count: u32,
     /// Number of deferred executions
     pub deferred_count: u32,
+    /// Aggregated transfers from all successful executions
+    /// Key: destination public key, Value: map of asset hash to amount
+    pub aggregated_transfers: HashMap<PublicKey, HashMap<Hash, u64>>,
 }
 
 /// Configuration for scheduled execution processing
@@ -85,8 +119,7 @@ impl Default for ScheduledExecutionConfig {
 ///
 /// # Arguments
 ///
-/// * `storage` - Scheduled execution storage provider
-/// * `provider` - Contract provider for execution context
+/// * `storage` - Storage implementing both ContractScheduledExecutionProvider and ContractProvider
 /// * `topoheight` - Current block's topoheight
 /// * `block_hash` - Current block hash
 /// * `block_height` - Current block height
@@ -96,9 +129,8 @@ impl Default for ScheduledExecutionConfig {
 /// # Returns
 ///
 /// `BlockScheduledExecutionResults` containing all execution outcomes
-pub async fn process_scheduled_executions<S, P>(
+pub async fn process_scheduled_executions<S>(
     storage: &mut S,
-    provider: &mut P,
     topoheight: TopoHeight,
     block_hash: &Hash,
     block_height: u64,
@@ -106,8 +138,7 @@ pub async fn process_scheduled_executions<S, P>(
     config: &ScheduledExecutionConfig,
 ) -> Result<BlockScheduledExecutionResults, BlockchainError>
 where
-    S: ContractScheduledExecutionProvider,
-    P: ContractProvider + Send,
+    S: ContractScheduledExecutionProvider + ContractProvider + Send,
 {
     if log::log_enabled!(log::Level::Info) {
         info!(
@@ -185,7 +216,7 @@ where
         // Execute the contract
         let exec_result = execute_scheduled(
             &execution,
-            provider,
+            storage,
             topoheight,
             block_hash,
             block_height,
@@ -228,21 +259,41 @@ where
                 }
 
                 results.success_count = results.success_count.saturating_add(1);
+
+                // Aggregate transfers from this execution
+                for transfer in &result.transfers {
+                    let asset_map = results
+                        .aggregated_transfers
+                        .entry(transfer.destination.clone())
+                        .or_default();
+                    let current = asset_map.entry(transfer.asset.clone()).or_insert(0);
+                    *current = current.saturating_add(transfer.amount);
+                }
+
                 results.results.push(ScheduledExecutionResult {
                     execution,
                     success: true,
                     compute_units_used: result.compute_units_used,
                     error: None,
+                    error_kind: ScheduledExecutionErrorKind::None,
                     miner_reward,
                     events: result.events,
                     log_messages: result.log_messages,
+                    transfers: result.transfers,
                 });
 
                 // Successful executions consume a block slot
                 execution_count = execution_count.saturating_add(1);
             }
             Err(e) => {
-                let error_msg = e.to_string();
+                // Create detailed error message with context
+                let error_msg = format!(
+                    "Scheduled execution failed: contract={}, execution_hash={}, chunk_id={}, error={}",
+                    execution.contract,
+                    execution.hash,
+                    execution.chunk_id,
+                    e
+                );
 
                 // Determine if we should defer or mark as failed
                 let should_defer = execution.defer_count < tos_common::contract::MAX_DEFER_COUNT
@@ -323,9 +374,11 @@ where
                                 success: false,
                                 compute_units_used: 0,
                                 error: Some(error_msg),
+                                error_kind: ScheduledExecutionErrorKind::InternalError,
                                 miner_reward,
                                 events: vec![],
                                 log_messages: vec![],
+                                transfers: vec![],
                             });
                         } else {
                             // Successfully deferred - does NOT consume block slot or miner reward
@@ -371,14 +424,23 @@ where
                 results.total_miner_rewards =
                     results.total_miner_rewards.saturating_add(miner_reward);
 
+                // Determine error kind based on execution status and error type
+                let error_kind = if execution.status == ScheduledExecutionStatus::Expired {
+                    ScheduledExecutionErrorKind::Expired
+                } else {
+                    categorize_error(&e)
+                };
+
                 results.results.push(ScheduledExecutionResult {
                     execution,
                     success: false,
                     compute_units_used: 0,
                     error: Some(error_msg),
+                    error_kind,
                     miner_reward,
                     events: vec![],
                     log_messages: vec![],
+                    transfers: vec![],
                 });
 
                 // Non-deferred failures consume a block slot
@@ -403,9 +465,9 @@ where
 }
 
 /// Execute a single scheduled execution
-async fn execute_scheduled<P>(
+async fn execute_scheduled<S>(
     execution: &ScheduledExecution,
-    provider: &mut P,
+    storage: &mut S,
     topoheight: TopoHeight,
     block_hash: &Hash,
     block_height: u64,
@@ -413,10 +475,10 @@ async fn execute_scheduled<P>(
     max_gas: u64,
 ) -> Result<ExecutionOutput, BlockchainError>
 where
-    P: ContractProvider + Send,
+    S: ContractProvider + Send,
 {
     // Load contract bytecode
-    let bytecode = provider
+    let bytecode = storage
         .load_contract_module(&execution.contract, topoheight)?
         .ok_or_else(|| BlockchainError::ContractNotFound(execution.contract.clone()))?;
 
@@ -429,7 +491,7 @@ where
     // Execute the contract
     let result = TakoExecutor::execute(
         &bytecode,
-        provider,
+        storage,
         topoheight,
         &execution.contract,
         block_hash,
@@ -447,6 +509,7 @@ where
         compute_units_used: result.compute_units_used,
         events: result.events,
         log_messages: result.log_messages,
+        transfers: result.transfers,
     })
 }
 
@@ -457,6 +520,7 @@ struct ExecutionOutput {
     compute_units_used: u64,
     events: Vec<tos_program_runtime::Event>,
     log_messages: Vec<String>,
+    transfers: Vec<TransferOutput>,
 }
 
 /// Check if an error is retryable (should defer rather than fail)
@@ -487,6 +551,23 @@ fn is_retryable_error(error: &BlockchainError) -> bool {
         // Contract not found might resolve if deployed in a concurrent transaction
         | BlockchainError::ContractNotFound(_)
     )
+}
+
+/// Categorize a blockchain error into an error kind for reporting
+fn categorize_error(error: &BlockchainError) -> ScheduledExecutionErrorKind {
+    match error {
+        BlockchainError::ContractNotFound(_) => ScheduledExecutionErrorKind::ContractNotFound,
+        BlockchainError::ModuleError(msg) if msg.contains("out of gas") => {
+            ScheduledExecutionErrorKind::OutOfGas
+        }
+        BlockchainError::ModuleError(_) => ScheduledExecutionErrorKind::ContractError,
+        BlockchainError::DatabaseError(_)
+        | BlockchainError::ErrorStd(_)
+        | BlockchainError::SemaphoreError(_)
+        | BlockchainError::PoisonError(_)
+        | BlockchainError::IsSyncing => ScheduledExecutionErrorKind::InternalError,
+        _ => ScheduledExecutionErrorKind::Unknown,
+    }
 }
 
 #[cfg(test)]
