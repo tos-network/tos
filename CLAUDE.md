@@ -194,7 +194,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 
 #### Types
 - `feat`: New feature
-- `fix`: Bug fix
+- `fix`: Issue fix
 - `docs`: Documentation changes
 - `refactor`: Code refactoring
 - `test`: Test additions or changes

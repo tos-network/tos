@@ -134,6 +134,7 @@ impl TestContext {
             freezable: true,
             governance: true,
             creator: *creator,
+            admin: *creator, // TOS-025: Admin starts as creator
             metadata_uri: Some("https://example.com/token.json".to_string()),
             created_at: 100,
         };
@@ -187,6 +188,7 @@ impl TestContext {
             freezable: false,
             governance: false,
             creator: *creator,
+            admin: *creator, // TOS-025: Admin starts as creator
             metadata_uri: None,
             created_at: 100,
         };

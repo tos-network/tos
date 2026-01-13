@@ -743,6 +743,7 @@ async fn test_lock_lifecycle_with_index() {
         freezable: true,
         governance: false,
         creator: account,
+        admin: account, // TOS-025: Admin starts as creator
         metadata_uri: None,
         created_at: 100,
     };

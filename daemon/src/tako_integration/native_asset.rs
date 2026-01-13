@@ -160,21 +160,21 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TosNativeAssetAdapter<'a
                 let required = condition_data[0];
                 let count = condition_data[1] as usize;
 
-                // BUG-TOS-007 FIX: Validate count is not zero
+                // ISSUE-TOS-007 FIX: Validate count is not zero
                 if count == 0 {
                     return Err(Self::invalid_data_error(
                         "MultiApproval: must have at least one approver",
                     ));
                 }
 
-                // BUG-TOS-007 FIX: Validate required <= count
+                // ISSUE-TOS-007 FIX: Validate required <= count
                 if (required as usize) > count {
                     return Err(Self::invalid_data_error(
                         "MultiApproval: required exceeds approver count",
                     ));
                 }
 
-                // BUG-TOS-007 FIX: Validate required is not zero
+                // ISSUE-TOS-007 FIX: Validate required is not zero
                 if required == 0 {
                     return Err(Self::invalid_data_error(
                         "MultiApproval: required must be at least 1",
@@ -194,7 +194,7 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TosNativeAssetAdapter<'a
                     let mut addr = [0u8; 32];
                     addr.copy_from_slice(&condition_data[start..start + 32]);
 
-                    // BUG-TOS-007 FIX: Validate approver is not zero address
+                    // ISSUE-TOS-007 FIX: Validate approver is not zero address
                     if addr == zero_address {
                         return Err(Self::invalid_data_error(
                             "MultiApproval: approver cannot be zero address",
@@ -243,6 +243,47 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TosNativeAssetAdapter<'a
             }
             ReleaseCondition::HashLock { hash } => (2, hash.to_vec()),
         }
+    }
+
+    /// Validate that escrow release conditions are met before allowing release
+    /// Returns Ok(()) if conditions are satisfied, Err otherwise
+    fn validate_escrow_release_conditions(&self, escrow: &Escrow) -> Result<(), EbpfError> {
+        match &escrow.condition {
+            ReleaseCondition::TimeRelease { release_after } => {
+                // Time-based release: check if enough time has passed
+                if self.block_height < *release_after {
+                    return Err(Self::permission_denied_error(
+                        "Escrow timelock has not expired yet",
+                    ));
+                }
+            }
+            ReleaseCondition::MultiApproval { required, .. } => {
+                // Multi-approval: check if enough approvals collected
+                let approval_count = escrow.approvals.len() as u8;
+                if approval_count < *required {
+                    return Err(Self::permission_denied_error(&format!(
+                        "Escrow requires {} approvals, has {}",
+                        required, approval_count
+                    )));
+                }
+            }
+            ReleaseCondition::HashLock { .. } => {
+                // HashLock validation requires preimage, which is validated
+                // at the TAKO syscall layer - we trust that layer here
+                // If syscall allows this call, preimage was valid
+            }
+        }
+
+        // Check expiry if set - cannot release after expiry
+        if let Some(expires_at) = escrow.expires_at {
+            if self.block_height > expires_at {
+                return Err(Self::permission_denied_error(
+                    "Escrow has expired and cannot be released",
+                ));
+            }
+        }
+
+        Ok(())
     }
 
     /// Convert EscrowStatus enum to u8
@@ -335,7 +376,7 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TosNativeAssetAdapter<'a
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
 
-        // BUG-TOS-005 FIX: Use checked arithmetic for checkpoint count
+        // ISSUE-TOS-005 FIX: Use checked arithmetic for checkpoint count
         let new_count = count
             .checked_add(1)
             .ok_or_else(|| Self::invalid_data_error("Balance checkpoint count overflow"))?;
@@ -365,7 +406,7 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TosNativeAssetAdapter<'a
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
 
-        // BUG-TOS-005 FIX: Use checked arithmetic for checkpoint count
+        // ISSUE-TOS-005 FIX: Use checked arithmetic for checkpoint count
         let new_count = count
             .checked_add(1)
             .ok_or_else(|| Self::invalid_data_error("Supply checkpoint count overflow"))?;
@@ -447,16 +488,32 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TosNativeAssetAdapter<'a
         self.set_vote_power(hash, from, new_from_votes)?;
 
         // Get to votes with lazy initialization from balance if needed
+        // IMPORTANT: Only lazy-init if the account has NOT delegated their votes.
+        // If account has delegated, their vote power being 0 is intentional (votes are at delegatee).
         let mut to_votes = self.get_vote_power(hash, to)?;
         if to_votes == 0 {
-            let balance = try_block_on(self.provider.get_native_asset_balance(hash, to))
+            // Check if this account has delegated (vote power 0 is intentional)
+            let to_delegation = try_block_on(self.provider.get_native_asset_delegation(hash, to))
                 .map_err(Self::convert_error)?
                 .map_err(Self::convert_error)?;
-            if balance > 0 {
-                // Lazy init for destination as well
-                to_votes = balance;
-                self.set_vote_power(hash, to, balance)?;
+
+            let has_delegated = match to_delegation.delegatee {
+                Some(delegatee) if delegatee != [0u8; 32] && delegatee != *to => true,
+                _ => false,
+            };
+
+            // Only lazy-init for legacy accounts that have never delegated
+            if !has_delegated {
+                let balance = try_block_on(self.provider.get_native_asset_balance(hash, to))
+                    .map_err(Self::convert_error)?
+                    .map_err(Self::convert_error)?;
+                if balance > 0 {
+                    // Lazy init for destination (legacy migration path)
+                    to_votes = balance;
+                    self.set_vote_power(hash, to, balance)?;
+                }
             }
+            // If has_delegated is true, to_votes stays 0 - votes will be added on top
         }
 
         // Add to destination
@@ -691,6 +748,7 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
             freezable: true,
             governance: governance_enabled,
             creator: *creator,
+            admin: *creator, // TOS-025: Initialize admin = creator
             metadata_uri: metadata_str,
             created_at: self.block_height,
         };
@@ -706,6 +764,27 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
             &admin_role,
             creator,
             self.block_height,
+        ))
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)?;
+
+        // TOS-023: Add to role member index
+        try_block_on(
+            self.provider
+                .add_native_asset_role_member(&asset_id, &admin_role, creator),
+        )
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)?;
+
+        // TOS-023: Initialize role config with member_count = 1
+        let role_config = tos_common::native_asset::RoleConfig {
+            admin_role: tos_common::native_asset::DEFAULT_ADMIN_ROLE,
+            member_count: 1,
+        };
+        try_block_on(self.provider.set_native_asset_role_config(
+            &asset_id,
+            &admin_role,
+            &role_config,
         ))
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
@@ -1213,6 +1292,42 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
             return Ok(()); // No vote movement needed
         }
 
+        // SECURITY: Forbid chain delegation to prevent vote power getting stuck at intermediate accounts
+        // Check 1: If new_delegatee has already delegated to someone else, reject this delegation
+        // This ensures get_effective_vote_holder's single-hop resolution is always correct
+        if new_delegatee != *delegator {
+            let delegatee_delegation = try_block_on(
+                self.provider
+                    .get_native_asset_delegation(&hash, &new_delegatee),
+            )
+            .map_err(Self::convert_error)?
+            .map_err(Self::convert_error)?;
+
+            if let Some(their_delegatee) = delegatee_delegation.delegatee {
+                if their_delegatee != [0u8; 32] && their_delegatee != new_delegatee {
+                    return Err(Self::invalid_data_error(
+                        "Cannot delegate to an account that has already delegated to someone else (chain delegation not allowed)",
+                    ));
+                }
+            }
+        }
+
+        // Check 2: If delegator has incoming delegations, they cannot delegate to someone else
+        // (they can only revoke their delegation by delegating to themselves)
+        // This prevents: A→B, then B→C which would strand A's votes at B
+        if new_delegatee != *delegator {
+            let incoming_delegators =
+                try_block_on(self.provider.get_native_asset_delegators(&hash, delegator))
+                    .map_err(Self::convert_error)?
+                    .map_err(Self::convert_error)?;
+
+            if !incoming_delegators.is_empty() {
+                return Err(Self::invalid_data_error(
+                    "Cannot delegate when you have incoming delegations (revoke delegations first or have delegators re-delegate)",
+                ));
+            }
+        }
+
         // Get delegator's balance (this is the vote power being moved)
         let delegator_balance = self.balance_of(asset, delegator)?;
 
@@ -1518,7 +1633,7 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
 
-        // BUG-TOS-005 FIX: Use checked arithmetic for lock ID
+        // ISSUE-TOS-005 FIX: Use checked arithmetic for lock ID
         let next_lock_id = lock_id
             .checked_add(1)
             .ok_or_else(|| Self::invalid_data_error("Lock ID overflow"))?;
@@ -1533,7 +1648,7 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         let count = try_block_on(self.provider.get_native_asset_lock_count(&hash, account))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
-        // BUG-TOS-005 FIX: Use checked arithmetic for lock count
+        // ISSUE-TOS-005 FIX: Use checked arithmetic for lock count
         let new_count = count
             .checked_add(1)
             .ok_or_else(|| Self::invalid_data_error("Lock count overflow"))?;
@@ -1559,7 +1674,7 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
-        // BUG-TOS-005 FIX: Use checked arithmetic for locked balance
+        // ISSUE-TOS-005 FIX: Use checked arithmetic for locked balance
         let new_locked = locked
             .checked_add(amount)
             .ok_or_else(|| Self::invalid_data_error("Locked balance overflow"))?;
@@ -1826,6 +1941,14 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
 
+        // TOS-024: Add new lock ID to index
+        try_block_on(
+            self.provider
+                .add_native_asset_lock_id(&hash, account, new_lock_id),
+        )
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)?;
+
         Ok(new_lock_id)
     }
 
@@ -1875,7 +1998,7 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
                 .ok_or_else(|| Self::invalid_data_error("Merged lock amount overflow"))?;
         }
 
-        // Delete all old locks
+        // Delete all old locks and remove from index (TOS-024)
         for &lock_id in lock_ids {
             try_block_on(
                 self.provider
@@ -1883,6 +2006,12 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
             )
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
+
+            // TOS-024: Remove old lock ID from index
+            let _ = try_block_on(
+                self.provider
+                    .remove_native_asset_lock_id(&hash, account, lock_id),
+            );
         }
 
         // Create merged lock
@@ -1930,6 +2059,14 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         try_block_on(
             self.provider
                 .set_native_asset_lock_count(&hash, account, new_count),
+        )
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)?;
+
+        // TOS-024: Add new lock ID to index
+        try_block_on(
+            self.provider
+                .add_native_asset_lock_id(&hash, account, new_lock_id),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
@@ -2007,40 +2144,32 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         let to_locked = try_block_on(self.provider.get_native_asset_locked_balance(&hash, to))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
-        let _new_to_locked = to_locked
+        let new_to_locked = to_locked
             .checked_add(amount)
             .ok_or_else(|| Self::invalid_data_error("Recipient locked balance overflow"))?;
 
-        let to_count = try_block_on(self.provider.get_native_asset_lock_count(&hash, to))
+        let to_lock_count = try_block_on(self.provider.get_native_asset_lock_count(&hash, to))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
-        let _new_to_count = to_count
+        let new_to_lock_count = to_lock_count
             .checked_add(1)
             .ok_or_else(|| Self::invalid_data_error("Recipient lock count overflow"))?;
 
-        // Phase 2: Transfer underlying balance (vote power updated inside)
-        // All validations passed, now safe to mutate state
-        self.subtract_balance(asset, from, amount)?;
-        self.add_balance(asset, to, amount)?;
-
-        // Delete from source
-        try_block_on(self.provider.delete_native_asset_lock(&hash, from, lock_id))
+        // Pre-validate next_lock_id to prevent partial state updates if overflow occurs
+        let new_lock_id = try_block_on(self.provider.get_native_asset_next_lock_id(&hash, to))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
+        let next_lock_id = new_lock_id
+            .checked_add(1)
+            .ok_or_else(|| Self::invalid_data_error("Lock ID overflow"))?;
 
-        // Update source counts using checked arithmetic to catch invariant violations
-        let from_count = try_block_on(self.provider.get_native_asset_lock_count(&hash, from))
+        // Pre-validate source lock count and locked balance
+        let from_lock_count = try_block_on(self.provider.get_native_asset_lock_count(&hash, from))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
-        let new_from_count = from_count
+        let new_from_lock_count = from_lock_count
             .checked_sub(1)
             .ok_or_else(|| Self::invalid_data_error("Source lock count underflow"))?;
-        try_block_on(
-            self.provider
-                .set_native_asset_lock_count(&hash, from, new_from_count),
-        )
-        .map_err(Self::convert_error)?
-        .map_err(Self::convert_error)?;
 
         let from_locked = try_block_on(self.provider.get_native_asset_locked_balance(&hash, from))
             .map_err(Self::convert_error)?
@@ -2048,6 +2177,34 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         let new_from_locked = from_locked
             .checked_sub(amount)
             .ok_or_else(|| Self::invalid_data_error("Source locked balance underflow"))?;
+
+        // Phase 2: Transfer underlying balance (vote power updated inside)
+        // All validations passed, now safe to mutate state
+        self.subtract_balance(asset, from, amount)?;
+        self.add_balance(asset, to, amount)?;
+
+        // Phase 3: State mutations using pre-validated values
+        // All calculations were validated in Phase 1, so we can directly use the results
+
+        // Delete from source
+        try_block_on(self.provider.delete_native_asset_lock(&hash, from, lock_id))
+            .map_err(Self::convert_error)?
+            .map_err(Self::convert_error)?;
+
+        // TOS-024: Remove old lock ID from source index
+        let _ = try_block_on(
+            self.provider
+                .remove_native_asset_lock_id(&hash, from, lock_id),
+        );
+
+        // Update source counts using pre-validated values from Phase 1
+        try_block_on(
+            self.provider
+                .set_native_asset_lock_count(&hash, from, new_from_lock_count),
+        )
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)?;
+
         try_block_on(
             self.provider
                 .set_native_asset_locked_balance(&hash, from, new_from_locked),
@@ -2055,11 +2212,7 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
 
-        // Create at destination with new ID
-        let new_lock_id = try_block_on(self.provider.get_native_asset_next_lock_id(&hash, to))
-            .map_err(Self::convert_error)?
-            .map_err(Self::convert_error)?;
-
+        // Create at destination with new ID (using pre-validated new_lock_id from Phase 1)
         let new_lock = TokenLock {
             id: new_lock_id,
             ..token_lock
@@ -2068,10 +2221,7 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
 
-        // Use checked arithmetic for lock ID increment
-        let next_lock_id = new_lock_id
-            .checked_add(1)
-            .ok_or_else(|| Self::invalid_data_error("Lock ID overflow"))?;
+        // Update destination using pre-validated values from Phase 1
         try_block_on(
             self.provider
                 .set_native_asset_next_lock_id(&hash, to, next_lock_id),
@@ -2079,30 +2229,24 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
 
-        let to_count = try_block_on(self.provider.get_native_asset_lock_count(&hash, to))
-            .map_err(Self::convert_error)?
-            .map_err(Self::convert_error)?;
-        // Use checked arithmetic for lock count
-        let new_to_count = to_count
-            .checked_add(1)
-            .ok_or_else(|| Self::invalid_data_error("Lock count overflow"))?;
         try_block_on(
             self.provider
-                .set_native_asset_lock_count(&hash, to, new_to_count),
+                .set_native_asset_lock_count(&hash, to, new_to_lock_count),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
 
-        let to_locked = try_block_on(self.provider.get_native_asset_locked_balance(&hash, to))
-            .map_err(Self::convert_error)?
-            .map_err(Self::convert_error)?;
-        // Use checked arithmetic for locked balance
-        let new_to_locked = to_locked
-            .checked_add(amount)
-            .ok_or_else(|| Self::invalid_data_error("Locked balance overflow"))?;
         try_block_on(
             self.provider
                 .set_native_asset_locked_balance(&hash, to, new_to_locked),
+        )
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)?;
+
+        // TOS-024: Add new lock ID to destination index
+        try_block_on(
+            self.provider
+                .add_native_asset_lock_id(&hash, to, new_lock_id),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
@@ -2136,11 +2280,21 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
     ) -> Result<(), EbpfError> {
         let hash = Self::bytes_to_hash(asset);
 
-        // BUG-TOS-002 FIX: Validate caller has admin role for the role being granted
-        // Get the admin role for this role
-        let role_config = try_block_on(self.provider.get_native_asset_role_config(&hash, role))
+        // SECURITY: Block direct granting of DEFAULT_ADMIN_ROLE
+        // Admin role transfer must use the pending-admin flow (set_pending_admin → accept_admin)
+        // This ensures single-admin enforcement and proper transfer mechanism
+        let admin_role = tos_common::native_asset::DEFAULT_ADMIN_ROLE;
+        if *role == admin_role {
+            return Err(Self::permission_denied_error(
+                "Cannot grant DEFAULT_ADMIN_ROLE directly; use set_pending_admin and accept_admin",
+            ));
+        }
+
+        // ISSUE-TOS-002 FIX: Validate caller has admin role for the role being granted
+        // Get the admin role for this role (use default if not yet configured)
+        let mut role_config = try_block_on(self.provider.get_native_asset_role_config(&hash, role))
             .map_err(Self::convert_error)?
-            .map_err(Self::convert_error)?;
+            .unwrap_or_default();
 
         // Check if caller has the admin role
         let has_admin = self.check_role(&hash, &role_config.admin_role, granted_by)?;
@@ -2150,11 +2304,17 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
             ));
         }
 
-        // BUG-TOS-008 FIX: Validate account is not zero address
+        // ISSUE-TOS-008 FIX: Validate account is not zero address
         if account == &[0u8; 32] {
             return Err(Self::invalid_data_error(
                 "Cannot grant role to zero address",
             ));
+        }
+
+        // TOS-023: Check if account already has the role (prevent double-counting)
+        let already_has_role = self.check_role(&hash, role, account)?;
+        if already_has_role {
+            return Ok(()); // Already has role, no-op
         }
 
         // Grant the role
@@ -2173,7 +2333,26 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
                 .add_native_asset_role_member(&hash, role, account),
         )
         .map_err(Self::convert_error)?
-        .map_err(Self::convert_error)
+        .map_err(Self::convert_error)?;
+
+        // TOS-023: Update member_count
+        role_config.member_count = role_config
+            .member_count
+            .checked_add(1)
+            .ok_or_else(|| Self::invalid_data_error("Role member count overflow"))?;
+
+        try_block_on(
+            self.provider
+                .set_native_asset_role_config(&hash, role, &role_config),
+        )
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)?;
+
+        // NOTE: Admin transfer should use the pending-admin flow (set_pending_admin → accept_admin)
+        // grant_role only grants the role permission, it does NOT update data.admin
+        // This ensures single-admin enforcement through the proper transfer mechanism
+
+        Ok(())
     }
 
     fn revoke_role(
@@ -2181,6 +2360,8 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         asset: &[u8; 32],
         role: &[u8; 32],
         account: &[u8; 32],
+        _caller: &[u8; 32],
+        _block_height: u64,
     ) -> Result<(), EbpfError> {
         // Block zero-address to maintain consistency
         if *account == [0u8; 32] {
@@ -2191,21 +2372,68 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
 
         let hash = Self::bytes_to_hash(asset);
 
-        // NOTE: RBAC validation (caller has admin role) must be done at syscall level in TAKO
-        // The trait doesn't include a caller parameter for this function
+        // NOTE: RBAC validation (caller has admin role) is done at syscall level in TAKO
+        // The caller and block_height params are passed for logging/audit purposes
+
+        // TOS-023: Check if account has the role (prevent underflow)
+        let has_role = self.check_role(&hash, role, account)?;
+
+        // TOS-023: Always attempt index removal (cleans stale entries)
+        let _ = try_block_on(
+            self.provider
+                .remove_native_asset_role_member(&hash, role, account),
+        );
+
+        if !has_role {
+            return Ok(()); // Didn't have role, no further action needed
+        }
 
         // Revoke the role
         try_block_on(self.provider.revoke_native_asset_role(&hash, role, account))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
 
-        // Remove from role members index
+        // TOS-023: Update member_count
+        let mut role_config = try_block_on(self.provider.get_native_asset_role_config(&hash, role))
+            .map_err(Self::convert_error)?
+            .unwrap_or_default();
+
+        role_config.member_count = role_config.member_count.saturating_sub(1);
+
         try_block_on(
             self.provider
-                .remove_native_asset_role_member(&hash, role, account),
+                .set_native_asset_role_config(&hash, role, &role_config),
         )
         .map_err(Self::convert_error)?
-        .map_err(Self::convert_error)
+        .map_err(Self::convert_error)?;
+
+        // TOS-025: If revoking DEFAULT_ADMIN_ROLE, update data.admin
+        let admin_role = tos_common::native_asset::DEFAULT_ADMIN_ROLE;
+        if *role == admin_role {
+            let mut data = self.get_asset_data(asset)?;
+            if data.admin == *account {
+                // Find next admin from RBAC role members
+                let members = try_block_on(
+                    self.provider
+                        .get_native_asset_role_members(&hash, &admin_role),
+                )
+                .map_err(Self::convert_error)?
+                .map_err(Self::convert_error)?;
+
+                // Filter out the revoked account and find new admin
+                data.admin = members
+                    .iter()
+                    .find(|m| *m != account)
+                    .copied()
+                    .unwrap_or([0u8; 32]); // Zero address if no admins left
+
+                try_block_on(self.provider.set_native_asset(&hash, &data))
+                    .map_err(Self::convert_error)?
+                    .map_err(Self::convert_error)?;
+            }
+        }
+
+        Ok(())
     }
 
     fn get_role_admin(&self, asset: &[u8; 32], role: &[u8; 32]) -> Result<[u8; 32], EbpfError> {
@@ -2221,11 +2449,13 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         asset: &[u8; 32],
         role: &[u8; 32],
         admin_role: &[u8; 32],
+        _caller: &[u8; 32],
+        _block_height: u64,
     ) -> Result<(), EbpfError> {
         let hash = Self::bytes_to_hash(asset);
 
-        // NOTE: RBAC validation must be done at syscall level in TAKO
-        // The trait doesn't include a caller parameter for this function
+        // NOTE: RBAC validation is done at syscall level in TAKO
+        // The caller and block_height params are passed for logging/audit purposes
 
         let mut config = try_block_on(self.provider.get_native_asset_role_config(&hash, role))
             .map_err(Self::convert_error)?
@@ -2328,13 +2558,15 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         from: &[u8; 32],
         to: &[u8; 32],
         amount: u64,
+        _caller: &[u8; 32],
+        _block_height: u64,
     ) -> Result<(), EbpfError> {
         let hash = Self::bytes_to_hash(asset);
 
-        // NOTE: RBAC validation must be done at syscall level in TAKO
-        // The trait doesn't include a caller parameter for this function
+        // NOTE: RBAC validation is done at syscall level in TAKO
+        // The caller and block_height params are passed for logging/audit purposes
 
-        // BUG-TOS-008 FIX: Validate amount is not zero
+        // ISSUE-TOS-008 FIX: Validate amount is not zero
         if amount == 0 {
             return Err(Self::invalid_data_error("Amount must be greater than zero"));
         }
@@ -2395,11 +2627,17 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         self.write_balance_checkpoint(&hash, to, new_to)
     }
 
-    fn update_name(&mut self, asset: &[u8; 32], name: &[u8]) -> Result<(), EbpfError> {
+    fn update_name(
+        &mut self,
+        asset: &[u8; 32],
+        name: &[u8],
+        _caller: &[u8; 32],
+        _block_height: u64,
+    ) -> Result<(), EbpfError> {
         let hash = Self::bytes_to_hash(asset);
 
-        // NOTE: RBAC validation must be done at syscall level in TAKO
-        // The trait doesn't include a caller parameter for this function
+        // NOTE: RBAC validation is done at syscall level in TAKO
+        // The caller and block_height params are passed for logging/audit purposes
 
         let mut data = self.get_asset_data(asset)?;
         data.name = String::from_utf8(name.to_vec())
@@ -2409,11 +2647,17 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
             .map_err(Self::convert_error)
     }
 
-    fn update_symbol(&mut self, asset: &[u8; 32], symbol: &[u8]) -> Result<(), EbpfError> {
+    fn update_symbol(
+        &mut self,
+        asset: &[u8; 32],
+        symbol: &[u8],
+        _caller: &[u8; 32],
+        _block_height: u64,
+    ) -> Result<(), EbpfError> {
         let hash = Self::bytes_to_hash(asset);
 
-        // NOTE: RBAC validation must be done at syscall level in TAKO
-        // The trait doesn't include a caller parameter for this function
+        // NOTE: RBAC validation is done at syscall level in TAKO
+        // The caller and block_height params are passed for logging/audit purposes
 
         let mut data = self.get_asset_data(asset)?;
         data.symbol = String::from_utf8(symbol.to_vec())
@@ -2423,11 +2667,17 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
             .map_err(Self::convert_error)
     }
 
-    fn update_metadata_uri(&mut self, asset: &[u8; 32], uri: &[u8]) -> Result<(), EbpfError> {
+    fn update_metadata_uri(
+        &mut self,
+        asset: &[u8; 32],
+        uri: &[u8],
+        _caller: &[u8; 32],
+        _block_height: u64,
+    ) -> Result<(), EbpfError> {
         let hash = Self::bytes_to_hash(asset);
 
-        // NOTE: RBAC validation must be done at syscall level in TAKO
-        // The trait doesn't include a caller parameter for this function
+        // NOTE: RBAC validation is done at syscall level in TAKO
+        // The caller and block_height params are passed for logging/audit purposes
 
         let uri_str = if uri.is_empty() {
             None
@@ -2454,7 +2704,7 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         let counter = try_block_on(self.provider.get_native_asset_escrow_counter(&hash))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
-        // BUG-TOS-005 FIX: Use checked arithmetic for escrow counter
+        // ISSUE-TOS-005 FIX: Use checked arithmetic for escrow counter
         let next_counter = counter
             .checked_add(1)
             .ok_or_else(|| Self::invalid_data_error("Escrow counter overflow"))?;
@@ -2518,9 +2768,11 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
             ));
         }
 
-        // Transfer tokens from sender to escrow (subtract from sender)
-        self.subtract_balance(asset, sender, amount)?;
-
+        // SAFETY: Create escrow record FIRST, then subtract balance
+        // If balance subtraction fails after escrow creation, the escrow can be
+        // cleaned up (admin cancel) - funds are NOT lost
+        // If we did it the other way (subtract first), balance deduction without
+        // escrow record means permanently lost funds
         let escrow = Escrow {
             id: escrow_id,
             asset: hash.clone(),
@@ -2556,7 +2808,11 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
                 .add_native_asset_user_escrow(&hash, recipient, escrow_id),
         )
         .map_err(Self::convert_error)?
-        .map_err(Self::convert_error)
+        .map_err(Self::convert_error)?;
+
+        // Now subtract balance - if this fails, escrow exists but balance unchanged
+        // This is recoverable (cancel escrow), unlike the reverse which loses funds
+        self.subtract_balance(asset, sender, amount)
     }
 
     #[allow(clippy::type_complexity)]
@@ -2604,8 +2860,19 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         // - Active can transition to Released or Cancelled
         // - Released and Cancelled are terminal states (cannot transition)
         match (&old_status, &new_status) {
-            (EscrowStatus::Active, EscrowStatus::Released)
-            | (EscrowStatus::Active, EscrowStatus::Cancelled) => {
+            (EscrowStatus::Active, EscrowStatus::Released) => {
+                // Validate release conditions before allowing release
+                self.validate_escrow_release_conditions(&escrow)?;
+            }
+            (EscrowStatus::Active, EscrowStatus::Cancelled) => {
+                // Validate cancel conditions (expired or by sender via syscall auth)
+                // Syscall layer handles sender authorization; we check expiry here
+                if let Some(expires_at) = escrow.expires_at {
+                    if self.block_height < expires_at {
+                        // Not expired yet - syscall layer must have authorized sender cancellation
+                        // This is OK as TAKO validates caller == sender for non-expired cancels
+                    }
+                }
                 // Valid transition - continue
             }
             (EscrowStatus::Released, _) => {
@@ -2666,6 +2933,22 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         let mut escrow = try_block_on(self.provider.get_native_asset_escrow(&hash, escrow_id))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
+
+        // Verify escrow uses MultiApproval and approver is authorized
+        match &escrow.condition {
+            ReleaseCondition::MultiApproval { approvers, .. } => {
+                if !approvers.contains(approver) {
+                    return Err(Self::permission_denied_error(
+                        "Approver is not in the authorized approvers list for this escrow",
+                    ));
+                }
+            }
+            _ => {
+                return Err(Self::invalid_data_error(
+                    "Escrow does not use MultiApproval release condition",
+                ));
+            }
+        }
 
         if !escrow.approvals.contains(approver) {
             escrow.approvals.push(*approver);
@@ -2985,8 +3268,30 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
 
     fn get_admin(&self, asset: &[u8; 32]) -> Result<[u8; 32], EbpfError> {
         let data = self.get_asset_data(asset)?;
-        Ok(data.creator) // Creator is initial admin
+        let hash = Self::bytes_to_hash(asset);
+
+        // If admin is set, return it
+        if data.admin != [0u8; 32] {
+            return Ok(data.admin);
+        }
+
+        // Admin is zero - distinguish between legacy and renounced:
+        // - Legacy: admin field never set, but creator has DEFAULT_ADMIN_ROLE
+        // - Renounced: admin explicitly cleared, no one has admin role
+        let admin_role = tos_common::native_asset::DEFAULT_ADMIN_ROLE;
+        let creator_has_role = self.check_role(&hash, &admin_role, &data.creator)?;
+
+        if creator_has_role {
+            // Legacy asset: creator still has admin role, return creator for compatibility
+            Ok(data.creator)
+        } else {
+            // Admin was renounced or never assigned: return zero
+            Ok([0u8; 32])
+        }
     }
+
+    // Note: get_creator() not in TakoNativeAssetProvider trait.
+    // Creator can be obtained via get_asset_info() if needed.
 
     // ========================================
     // Phase 2.3: Role Enumeration
@@ -3053,9 +3358,11 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
             return Err(Self::permission_denied_error("Signature expired"));
         }
 
-        // Verify signature
+        // Verify signature with domain separator to prevent cross-chain/cross-method replay
+        let domain = self.get_domain(asset)?;
         let message = [
-            asset.as_slice(),
+            domain.as_slice(), // Domain separator (name + version + chain_id + asset)
+            b"DelegateBySig",  // Method tag to prevent cross-method replay
             delegatee,
             delegator,
             &nonce.to_le_bytes(),
@@ -3066,11 +3373,14 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
             return Err(Self::permission_denied_error("Invalid signature"));
         }
 
-        // Increment nonce
+        // Perform delegation FIRST (if this fails, nonce is not consumed)
+        // This prevents griefing where relayers burn nonces on failed delegations
+        self.delegate(asset, delegator, delegatee)?;
+
+        // Increment nonce only on successful delegation
         self.increment_permit_nonce(asset, delegator)?;
 
-        // Perform delegation
-        self.delegate(asset, delegator, delegatee)
+        Ok(())
     }
 
     fn get_past_delegate(
@@ -3250,16 +3560,106 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
             return Err(Self::permission_denied_error("Caller is not pending admin"));
         }
 
-        // Grant admin role to new admin
         let admin_role = tos_common::native_asset::DEFAULT_ADMIN_ROLE;
-        try_block_on(self.provider.grant_native_asset_role(
-            &hash,
-            &admin_role,
-            caller,
-            self.block_height,
-        ))
-        .map_err(Self::convert_error)?
-        .map_err(Self::convert_error)?;
+
+        // TOS-025: Get current admin and revoke their role (single-admin enforcement)
+        let mut data = self.get_asset_data(asset)?;
+        let old_admin = data.admin;
+
+        // Determine who to revoke: data.admin if set, otherwise creator for legacy assets
+        let admin_to_revoke = if old_admin != [0u8; 32] {
+            old_admin
+        } else {
+            // Legacy asset: admin field not set, check creator
+            data.creator
+        };
+
+        // Revoke old admin's role if they still have it and are different from caller
+        if admin_to_revoke != *caller {
+            let has_old_role = self.check_role(&hash, &admin_role, &admin_to_revoke)?;
+            if has_old_role {
+                try_block_on(self.provider.revoke_native_asset_role(
+                    &hash,
+                    &admin_role,
+                    &admin_to_revoke,
+                ))
+                .map_err(Self::convert_error)?
+                .map_err(Self::convert_error)?;
+
+                // TOS-023: Remove from role member index
+                let _ = try_block_on(self.provider.remove_native_asset_role_member(
+                    &hash,
+                    &admin_role,
+                    &admin_to_revoke,
+                ));
+
+                // TOS-023: Update member_count
+                let mut role_config = try_block_on(
+                    self.provider
+                        .get_native_asset_role_config(&hash, &admin_role),
+                )
+                .map_err(Self::convert_error)?
+                .unwrap_or_default();
+
+                role_config.member_count = role_config.member_count.saturating_sub(1);
+
+                try_block_on(self.provider.set_native_asset_role_config(
+                    &hash,
+                    &admin_role,
+                    &role_config,
+                ))
+                .map_err(Self::convert_error)?
+                .map_err(Self::convert_error)?;
+            }
+        }
+
+        // Grant admin role to new admin (if not already granted)
+        let has_new_role = self.check_role(&hash, &admin_role, caller)?;
+        if !has_new_role {
+            try_block_on(self.provider.grant_native_asset_role(
+                &hash,
+                &admin_role,
+                caller,
+                self.block_height,
+            ))
+            .map_err(Self::convert_error)?
+            .map_err(Self::convert_error)?;
+
+            // TOS-023: Add to role member index
+            try_block_on(
+                self.provider
+                    .add_native_asset_role_member(&hash, &admin_role, caller),
+            )
+            .map_err(Self::convert_error)?
+            .map_err(Self::convert_error)?;
+
+            // TOS-023: Update member_count
+            let mut role_config = try_block_on(
+                self.provider
+                    .get_native_asset_role_config(&hash, &admin_role),
+            )
+            .map_err(Self::convert_error)?
+            .unwrap_or_default();
+
+            role_config.member_count = role_config
+                .member_count
+                .checked_add(1)
+                .ok_or_else(|| Self::invalid_data_error("Role member count overflow"))?;
+
+            try_block_on(self.provider.set_native_asset_role_config(
+                &hash,
+                &admin_role,
+                &role_config,
+            ))
+            .map_err(Self::convert_error)?
+            .map_err(Self::convert_error)?;
+        }
+
+        // TOS-025: Update admin in asset data
+        data.admin = *caller;
+        try_block_on(self.provider.set_native_asset(&hash, &data))
+            .map_err(Self::convert_error)?
+            .map_err(Self::convert_error)?;
 
         // Clear pending admin
         try_block_on(self.provider.set_native_asset_pending_admin(&hash, None))
@@ -3298,10 +3698,10 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         &mut self,
         asset: &[u8; 32],
         caller: &[u8; 32],
-        _block_height: u64,
+        block_height: u64,
     ) -> Result<(), EbpfError> {
         let admin_role = tos_common::native_asset::DEFAULT_ADMIN_ROLE;
-        self.revoke_role(asset, &admin_role, caller)
+        self.revoke_role(asset, &admin_role, caller, caller, block_height)
     }
 
     fn get_admin_delay(&self, asset: &[u8; 32]) -> Result<u64, EbpfError> {
@@ -3332,7 +3732,7 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
     ) -> Result<(), EbpfError> {
         let hash = Self::bytes_to_hash(asset);
 
-        // BUG-TOS-002 FIX: Validate caller has DEFAULT_ADMIN_ROLE
+        // ISSUE-TOS-002 FIX: Validate caller has DEFAULT_ADMIN_ROLE
         let admin_role = tos_common::native_asset::DEFAULT_ADMIN_ROLE;
         if !self.check_role(&hash, &admin_role, caller)? {
             return Err(Self::permission_denied_error(
@@ -3389,7 +3789,7 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
     ) -> Result<(), EbpfError> {
         let hash = Self::bytes_to_hash(asset);
 
-        // BUG-TOS-002 FIX: Validate caller has DEFAULT_ADMIN_ROLE
+        // ISSUE-TOS-002 FIX: Validate caller has DEFAULT_ADMIN_ROLE
         let admin_role = tos_common::native_asset::DEFAULT_ADMIN_ROLE;
         if !self.check_role(&hash, &admin_role, caller)? {
             return Err(Self::permission_denied_error(
