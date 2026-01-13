@@ -1,11 +1,11 @@
-//! BUG-074 Regression Tests: TAKO Contract Storage Cache Persistence
+//! ISSUE-074 Regression Tests: TAKO Contract Storage Cache Persistence
 //!
 //! These tests verify that:
 //! 1. TAKO executor returns cache with storage writes
 //! 2. merge_overlay_storage_only() correctly merges storage
 //! 3. Cache is NOT merged on execution failure
 //!
-//! Related: /Users/tomisetsu/memo/21-NewEnergy/bugs/BUG-074-tako-cache-not-persisted.md
+//! Related: /Users/tomisetsu/memo/21-NewEnergy/bugs/ISSUE-074-tako-cache-not-persisted.md
 
 #![allow(clippy::disallowed_methods)]
 
@@ -125,7 +125,7 @@ fn test_success_cache_contains_storage_writes() {
     let tx_hash = Hash::zero();
     let tx_sender = Hash::zero();
 
-    println!("\n=== BUG-074 Test: Cache Contains Storage Writes ===");
+    println!("\n=== ISSUE-074 Test: Cache Contains Storage Writes ===");
 
     // Execute counter contract (writes to storage)
     let result = TakoExecutor::execute(
@@ -149,10 +149,10 @@ fn test_success_cache_contains_storage_writes() {
                 exec_result.return_value
             );
 
-            // Verify cache is returned (BUG-074 fix)
+            // Verify cache is returned (ISSUE-074 fix)
             assert!(
                 !exec_result.cache.storage.is_empty(),
-                "BUG-074: Cache should contain storage writes from counter contract"
+                "ISSUE-074: Cache should contain storage writes from counter contract"
             );
 
             println!(
@@ -175,7 +175,7 @@ fn test_success_cache_contains_storage_writes() {
             );
             println!("✓ Cache contains 'count' key");
 
-            println!("\n✅ BUG-074 Test PASSED: Cache contains storage writes");
+            println!("\n✅ ISSUE-074 Test PASSED: Cache contains storage writes");
         }
         Err(e) => {
             panic!("Counter execution failed: {e}");
@@ -190,7 +190,7 @@ fn test_success_cache_contains_storage_writes() {
 /// Test that merge_overlay_storage_only only merges storage field
 #[test]
 fn test_merge_overlay_storage_only() {
-    println!("\n=== BUG-074 Test: merge_overlay_storage_only ===");
+    println!("\n=== ISSUE-074 Test: merge_overlay_storage_only ===");
 
     // Create chain_state cache (simulates deposits)
     let mut chain_cache = ContractCache::new();
@@ -238,13 +238,13 @@ fn test_merge_overlay_storage_only() {
     );
     println!("✓ Balances were NOT merged (correct behavior)");
 
-    println!("\n✅ BUG-074 Test PASSED: merge_overlay_storage_only works correctly");
+    println!("\n✅ ISSUE-074 Test PASSED: merge_overlay_storage_only works correctly");
 }
 
 /// Test merge_overlay_storage_only with multiple storage entries
 #[test]
 fn test_merge_overlay_multiple_entries() {
-    println!("\n=== BUG-074 Test: Merge Multiple Storage Entries ===");
+    println!("\n=== ISSUE-074 Test: Merge Multiple Storage Entries ===");
 
     let mut chain_cache = ContractCache::new();
 
@@ -310,7 +310,7 @@ fn test_merge_overlay_multiple_entries() {
 
     println!("✓ All storage entries merged correctly");
     println!("✓ Existing key was overwritten");
-    println!("\n✅ BUG-074 Test PASSED: Multiple entries merge correctly");
+    println!("\n✅ ISSUE-074 Test PASSED: Multiple entries merge correctly");
 }
 
 // ============================================================================
@@ -320,7 +320,7 @@ fn test_merge_overlay_multiple_entries() {
 /// Test that execution failure still returns cache (but caller won't merge it)
 #[test]
 fn test_failure_cache_not_merged_on_nonzero_exit() {
-    println!("\n=== BUG-074 Test: Failure Rollback Semantics ===");
+    println!("\n=== ISSUE-074 Test: Failure Rollback Semantics ===");
 
     // Create a scenario that simulates what invoke_contract does
     let mut chain_cache = ContractCache::new();
@@ -365,13 +365,13 @@ fn test_failure_cache_not_merged_on_nonzero_exit() {
 
     println!("✓ Chain cache storage is empty (correct)");
     println!("✓ Deposits preserved for refund");
-    println!("\n✅ BUG-074 Test PASSED: Failure rollback semantics correct");
+    println!("\n✅ ISSUE-074 Test PASSED: Failure rollback semantics correct");
 }
 
 /// Test ContractExecutionResult.cache field in error path
 #[test]
 fn test_execution_error_cache_is_none() {
-    println!("\n=== BUG-074 Test: Execution Error Cache is None ===");
+    println!("\n=== ISSUE-074 Test: Execution Error Cache is None ===");
 
     // Simulate what contract.rs does on execution error
     let execution_result = tos_common::contract::ContractExecutionResult {
@@ -394,7 +394,7 @@ fn test_execution_error_cache_is_none() {
 
     println!("✓ cache is None on execution error");
     println!("✓ exit_code is None on execution error");
-    println!("\n✅ BUG-074 Test PASSED: Error path sets cache to None");
+    println!("\n✅ ISSUE-074 Test PASSED: Error path sets cache to None");
 }
 
 // ============================================================================
@@ -411,7 +411,7 @@ fn test_tako_executor_returns_cache() {
     let mut provider = MockProvider;
     let contract_hash = Hash::zero();
 
-    println!("\n=== BUG-074 Test: TakoExecutor Returns Cache ===");
+    println!("\n=== ISSUE-074 Test: TakoExecutor Returns Cache ===");
 
     // Use execute_simple which also returns ExecutionResult with cache
     let result = TakoExecutor::execute_simple(&bytecode, &mut provider, 100, &contract_hash);
@@ -429,10 +429,10 @@ fn test_tako_executor_returns_cache() {
             // Counter contract writes to storage, so cache should not be empty
             assert!(
                 !exec_result.cache.storage.is_empty(),
-                "BUG-074: TakoExecutor should return cache with storage writes"
+                "ISSUE-074: TakoExecutor should return cache with storage writes"
             );
 
-            println!("\n✅ BUG-074 Test PASSED: TakoExecutor returns cache correctly");
+            println!("\n✅ ISSUE-074 Test PASSED: TakoExecutor returns cache correctly");
         }
         Err(e) => {
             panic!("Execution failed: {e}");
@@ -443,7 +443,7 @@ fn test_tako_executor_returns_cache() {
 /// Test storage delete operation is captured in cache
 #[test]
 fn test_storage_delete_in_cache() {
-    println!("\n=== BUG-074 Test: Storage Delete Captured in Cache ===");
+    println!("\n=== ISSUE-074 Test: Storage Delete Captured in Cache ===");
 
     let mut cache = ContractCache::new();
 
@@ -468,5 +468,5 @@ fn test_storage_delete_in_cache() {
     println!("✓ Storage delete captured correctly");
     println!("  - Key exists in cache: true");
     println!("  - Value is None: true");
-    println!("\n✅ BUG-074 Test PASSED: Storage delete captured in cache");
+    println!("\n✅ ISSUE-074 Test PASSED: Storage delete captured in cache");
 }

@@ -1,4 +1,4 @@
-//! BUG-073 Regression Tests: Contract Execution Atomic Rollback
+//! ISSUE-073 Regression Tests: Contract Execution Atomic Rollback
 //!
 //! These tests verify that contract execution failures result in atomic rollback:
 //! 1. Non-zero exit_code: deposits refunded, storage unchanged
@@ -138,7 +138,7 @@ impl ContractStorage for MockProvider {
 /// Expected: is_success = false, cache should NOT be merged
 #[test]
 fn test_contract_failure_nonzero_exit_code() {
-    println!("\n=== BUG-073 Test: Non-zero Exit Code Rollback ===");
+    println!("\n=== ISSUE-073 Test: Non-zero Exit Code Rollback ===");
 
     // Simulate execution result with non-zero exit code
     let execution_result = ContractExecutionResult {
@@ -198,13 +198,13 @@ fn test_contract_failure_nonzero_exit_code() {
     println!("✓ Storage not merged (atomic rollback)");
     println!("✓ Deposits preserved for refund");
     println!("✓ Gas consumed: {}", execution_result.gas_used);
-    println!("\n✅ BUG-073 Test PASSED: Non-zero exit code triggers rollback");
+    println!("\n✅ ISSUE-073 Test PASSED: Non-zero exit code triggers rollback");
 }
 
 /// Test storage writes are rolled back on non-zero exit
 #[test]
 fn test_storage_rollback_on_failure() {
-    println!("\n=== BUG-073 Test: Storage Writes Rolled Back ===");
+    println!("\n=== ISSUE-073 Test: Storage Writes Rolled Back ===");
 
     // Simulate: contract wrote to storage, then returned non-zero
     let mut vm_cache = ContractCache::new();
@@ -247,7 +247,7 @@ fn test_storage_rollback_on_failure() {
     println!("✓ VM cache had storage writes");
     println!("✓ exit_code={:?} (failure)", execution_result.exit_code);
     println!("✓ Storage writes NOT merged to chain cache");
-    println!("\n✅ BUG-073 Test PASSED: Storage writes rolled back on failure");
+    println!("\n✅ ISSUE-073 Test PASSED: Storage writes rolled back on failure");
 }
 
 // ============================================================================
@@ -260,7 +260,7 @@ fn test_storage_rollback_on_failure() {
 /// Expected: cache=None, gas_used=max_gas, deposits refunded
 #[test]
 fn test_contract_failure_executor_error() {
-    println!("\n=== BUG-073 Test: Executor Error Rollback ===");
+    println!("\n=== ISSUE-073 Test: Executor Error Rollback ===");
 
     let max_gas = 100_000u64;
 
@@ -299,13 +299,13 @@ fn test_contract_failure_executor_error() {
     println!("✓ cache = None (no state to merge)");
     println!("✓ gas_used = max_gas = {} (no free invoke)", max_gas);
     println!("✓ is_success = false");
-    println!("\n✅ BUG-073 Test PASSED: Executor error handled correctly");
+    println!("\n✅ ISSUE-073 Test PASSED: Executor error handled correctly");
 }
 
 /// Test invalid bytecode triggers executor error path
 #[test]
 fn test_invalid_bytecode_triggers_error() {
-    println!("\n=== BUG-073 Test: Invalid Bytecode Error ===");
+    println!("\n=== ISSUE-073 Test: Invalid Bytecode Error ===");
 
     let invalid_bytecode = b"not valid ELF bytecode";
     let mut provider = MockProvider::new();
@@ -323,7 +323,7 @@ fn test_invalid_bytecode_triggers_error() {
     // In real contract.rs, this Err is converted to:
     // ContractExecutionResult { exit_code: None, gas_used: max_gas, cache: None, ... }
     println!("✓ Error would be converted to failure result in invoke_contract()");
-    println!("\n✅ BUG-073 Test PASSED: Invalid bytecode triggers error path");
+    println!("\n✅ ISSUE-073 Test PASSED: Invalid bytecode triggers error path");
 }
 
 // ============================================================================
@@ -336,7 +336,7 @@ fn test_invalid_bytecode_triggers_error() {
 /// Expected: No execution, deposits refunded
 #[test]
 fn test_contract_not_available() {
-    println!("\n=== BUG-073 Test: Contract Not Available ===");
+    println!("\n=== ISSUE-073 Test: Contract Not Available ===");
 
     let provider = MockProvider::with_no_contract();
 
@@ -373,7 +373,7 @@ fn test_contract_not_available() {
     println!("✓ No execution attempted");
     println!("✓ Deposits preserved for refund");
     println!("✓ No storage changes");
-    println!("\n✅ BUG-073 Test PASSED: Contract not available handled correctly");
+    println!("\n✅ ISSUE-073 Test PASSED: Contract not available handled correctly");
 }
 
 // ============================================================================
@@ -386,7 +386,7 @@ fn test_contract_not_available() {
 /// Expected: Each call consumes gas, attacker pays for failed calls
 #[test]
 fn test_gas_attack_prevention() {
-    println!("\n=== BUG-073 Test: Gas Attack Prevention ===");
+    println!("\n=== ISSUE-073 Test: Gas Attack Prevention ===");
 
     let max_gas = 100_000u64;
 
@@ -438,7 +438,7 @@ fn test_gas_attack_prevention() {
     );
     println!("✓ Both scenarios consume gas (no free invoke)");
     println!("✓ Gas distribution: 30% burned, 70% to miners, 0% refund");
-    println!("\n✅ BUG-073 Test PASSED: Free invoke attack prevented");
+    println!("\n✅ ISSUE-073 Test PASSED: Free invoke attack prevented");
 }
 
 // ============================================================================
@@ -448,7 +448,7 @@ fn test_gas_attack_prevention() {
 /// Test that deposits are refunded on any failure
 #[test]
 fn test_deposit_refund_on_failure() {
-    println!("\n=== BUG-073 Test: Deposit Refund Semantics ===");
+    println!("\n=== ISSUE-073 Test: Deposit Refund Semantics ===");
 
     // Simulate chain_state.cache with deposits
     let mut chain_cache = ContractCache::new();
@@ -482,15 +482,15 @@ fn test_deposit_refund_on_failure() {
     println!("✓ Deposit asset: {:?}", deposit_asset);
     println!("✓ Deposit amount preserved: {}", amount);
     println!("✓ Ready for refund_deposits() call");
-    println!("\n✅ BUG-073 Test PASSED: Deposit refund semantics correct");
+    println!("\n✅ ISSUE-073 Test PASSED: Deposit refund semantics correct");
 }
 
 /// Test overflow safety in refund (mathematically impossible but checked)
 #[test]
 fn test_refund_overflow_safety() {
-    println!("\n=== BUG-073 Test: Refund Overflow Safety ===");
+    println!("\n=== ISSUE-073 Test: Refund Overflow Safety ===");
 
-    // The overflow proof from BUG-073 document:
+    // The overflow proof from ISSUE-073 document:
     // B_refund + D_total = S_initial (sender's original balance)
     // Since S_initial <= u64::MAX, overflow is impossible
 
@@ -518,7 +518,7 @@ fn test_refund_overflow_safety() {
     println!("✓ After deduction: {}", balance_after_deduction);
     println!("✓ After refund: {}", balance_after_refund);
     println!("✓ Overflow impossible: refund restores original balance");
-    println!("\n✅ BUG-073 Test PASSED: Refund overflow safety verified");
+    println!("\n✅ ISSUE-073 Test PASSED: Refund overflow safety verified");
 }
 
 // ============================================================================
@@ -531,7 +531,7 @@ fn test_refund_overflow_safety() {
 /// Expected: Events not persisted, transfers not applied, deposits refunded
 #[test]
 fn test_events_transfers_not_persisted_on_failure() {
-    println!("\n=== BUG-073 Test: Events/Transfers Not Persisted on Failure ===");
+    println!("\n=== ISSUE-073 Test: Events/Transfers Not Persisted on Failure ===");
 
     // Simulate execution result with events and transfers but non-zero exit code
     let execution_result = ContractExecutionResult {
@@ -636,13 +636,13 @@ fn test_events_transfers_not_persisted_on_failure() {
 
     println!("✓ Critical invariant: events gated by is_success check");
     println!("✓ Critical invariant: transfers converted to outputs only on success");
-    println!("\n✅ BUG-073 Test PASSED: Events/transfers not persisted on failure");
+    println!("\n✅ ISSUE-073 Test PASSED: Events/transfers not persisted on failure");
 }
 
 /// Test the exact code path from contract.rs for transfers on failure
 #[test]
 fn test_transfers_cleared_on_failure() {
-    println!("\n=== BUG-073 Test: Transfers Cleared on Failure ===");
+    println!("\n=== ISSUE-073 Test: Transfers Cleared on Failure ===");
 
     // This test mirrors the exact logic in contract.rs:238-284
 
@@ -684,5 +684,5 @@ fn test_transfers_cleared_on_failure() {
     println!("✓ Transfers NOT converted to outputs on failure");
     println!("✓ outputs.clear() called on failure branch");
     println!("✓ Only RefundDeposits added to outputs");
-    println!("\n✅ BUG-073 Test PASSED: Transfers cleared on failure");
+    println!("\n✅ ISSUE-073 Test PASSED: Transfers cleared on failure");
 }

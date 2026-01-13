@@ -19,7 +19,7 @@
 //! - Threshold/Limit Attack Tests (Category 4)
 //! - Status Authorization Tests (Category 5)
 //! - Input Validation Tests (Category 6)
-//! - Potential Remaining Bug Tests
+//! - Potential Remaining Issue Tests
 
 use std::collections::HashMap;
 use tos_common::{
@@ -1183,7 +1183,7 @@ mod input_validation_tests {
 }
 
 // ============================================================================
-// POTENTIAL REMAINING BUG TESTS
+// POTENTIAL REMAINING ISSUE TESTS
 // ============================================================================
 
 mod potential_remaining_bugs {
@@ -4016,7 +4016,7 @@ fn test_adversarial_test_suite_summary() {
     println!("  - Renew not allowed for revoked KYC");
     println!();
 
-    println!("Category 7: Potential Remaining Bugs (3 tests)");
+    println!("Category 7: Potential Remaining Issues (3 tests)");
     println!("  - Empty member list protection");
     println!("  - Zero timestamp handling");
     println!("  - MAX_APPROVALS constant");

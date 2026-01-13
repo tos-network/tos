@@ -1907,16 +1907,16 @@ mod tests {
     }
 
     // ============================================================================
-    // ROUND 15 BUG FIX TESTS: Role Heterogeneity & Observer/Approver Distinction
+    // ROUND 15 ISSUE FIX TESTS: Role Heterogeneity & Observer/Approver Distinction
     // ============================================================================
     // These tests address gaps identified in security review Round 14-15:
-    // - Bug #35: Threshold validation counts observers but approval excludes them
-    // - Bug #36: UpdateCommittee thresholds validated against active members, not approvers
-    // - Bug #37: UpdateMemberRole lacks approver-count safety checks
+    // - Issue #35: Threshold validation counts observers but approval excludes them
+    // - Issue #36: UpdateCommittee thresholds validated against active members, not approvers
+    // - Issue #37: UpdateMemberRole lacks approver-count safety checks
 
     #[test]
     fn test_bootstrap_committee_with_observers_threshold_uses_approver_count() {
-        // Bug #35: Bootstrap with observers should validate threshold against approver_count
+        // Issue #35: Bootstrap with observers should validate threshold against approver_count
         // 5 total members: 3 approvers (Chair, Member, Member) + 2 observers
         // threshold=4 should FAIL because only 3 can approve
         let members: Vec<CommitteeMemberInit> = vec![
@@ -1977,7 +1977,7 @@ mod tests {
 
     #[test]
     fn test_update_threshold_with_observers_uses_approver_count() {
-        // Bug #36: UpdateThreshold should use approver_count, not member_count
+        // Issue #36: UpdateThreshold should use approver_count, not member_count
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
@@ -2013,7 +2013,7 @@ mod tests {
 
     #[test]
     fn test_update_threshold_with_observers_valid() {
-        // Bug #36: Valid threshold update when accounting for observers
+        // Issue #36: Valid threshold update when accounting for observers
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
@@ -2043,7 +2043,7 @@ mod tests {
 
     #[test]
     fn test_update_kyc_threshold_with_observers_exceeds_approvers() {
-        // Bug #36: UpdateKycThreshold should also use approver_count
+        // Issue #36: UpdateKycThreshold should also use approver_count
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
@@ -2080,12 +2080,12 @@ mod tests {
     }
 
     // ============================================================================
-    // Bug #37: UpdateMemberRole Safety Tests
+    // Issue #37: UpdateMemberRole Safety Tests
     // ============================================================================
 
     #[test]
     fn test_update_member_role_to_observer_breaks_governance_threshold() {
-        // Bug #37: Changing member to Observer should check if it breaks threshold
+        // Issue #37: Changing member to Observer should check if it breaks threshold
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
@@ -2124,7 +2124,7 @@ mod tests {
 
     #[test]
     fn test_update_member_role_to_observer_breaks_kyc_threshold() {
-        // Bug #37: Changing member to Observer should also check KYC threshold
+        // Issue #37: Changing member to Observer should also check KYC threshold
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
@@ -2163,7 +2163,7 @@ mod tests {
 
     #[test]
     fn test_update_member_role_to_observer_valid() {
-        // Bug #37: Valid role change when enough approvers remain
+        // Issue #37: Valid role change when enough approvers remain
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
