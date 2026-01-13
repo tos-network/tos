@@ -1235,6 +1235,26 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
             return Ok(()); // No vote movement needed
         }
 
+        // SECURITY: Forbid chain delegation to prevent vote power getting stuck at intermediate accounts
+        // If new_delegatee has already delegated to someone else, reject this delegation
+        // This ensures get_effective_vote_holder's single-hop resolution is always correct
+        if new_delegatee != *delegator {
+            let delegatee_delegation = try_block_on(
+                self.provider
+                    .get_native_asset_delegation(&hash, &new_delegatee),
+            )
+            .map_err(Self::convert_error)?
+            .map_err(Self::convert_error)?;
+
+            if let Some(their_delegatee) = delegatee_delegation.delegatee {
+                if their_delegatee != [0u8; 32] && their_delegatee != new_delegatee {
+                    return Err(Self::invalid_data_error(
+                        "Cannot delegate to an account that has already delegated to someone else (chain delegation not allowed)",
+                    ));
+                }
+            }
+        }
+
         // Get delegator's balance (this is the vote power being moved)
         let delegator_balance = self.balance_of(asset, delegator)?;
 
@@ -2051,21 +2071,47 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         let to_locked = try_block_on(self.provider.get_native_asset_locked_balance(&hash, to))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
-        let _new_to_locked = to_locked
+        let new_to_locked = to_locked
             .checked_add(amount)
             .ok_or_else(|| Self::invalid_data_error("Recipient locked balance overflow"))?;
 
-        let to_count = try_block_on(self.provider.get_native_asset_lock_count(&hash, to))
+        let to_lock_count = try_block_on(self.provider.get_native_asset_lock_count(&hash, to))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
-        let _new_to_count = to_count
+        let new_to_lock_count = to_lock_count
             .checked_add(1)
             .ok_or_else(|| Self::invalid_data_error("Recipient lock count overflow"))?;
+
+        // Pre-validate next_lock_id to prevent partial state updates if overflow occurs
+        let new_lock_id = try_block_on(self.provider.get_native_asset_next_lock_id(&hash, to))
+            .map_err(Self::convert_error)?
+            .map_err(Self::convert_error)?;
+        let next_lock_id = new_lock_id
+            .checked_add(1)
+            .ok_or_else(|| Self::invalid_data_error("Lock ID overflow"))?;
+
+        // Pre-validate source lock count and locked balance
+        let from_lock_count = try_block_on(self.provider.get_native_asset_lock_count(&hash, from))
+            .map_err(Self::convert_error)?
+            .map_err(Self::convert_error)?;
+        let new_from_lock_count = from_lock_count
+            .checked_sub(1)
+            .ok_or_else(|| Self::invalid_data_error("Source lock count underflow"))?;
+
+        let from_locked = try_block_on(self.provider.get_native_asset_locked_balance(&hash, from))
+            .map_err(Self::convert_error)?
+            .map_err(Self::convert_error)?;
+        let new_from_locked = from_locked
+            .checked_sub(amount)
+            .ok_or_else(|| Self::invalid_data_error("Source locked balance underflow"))?;
 
         // Phase 2: Transfer underlying balance (vote power updated inside)
         // All validations passed, now safe to mutate state
         self.subtract_balance(asset, from, amount)?;
         self.add_balance(asset, to, amount)?;
+
+        // Phase 3: State mutations using pre-validated values
+        // All calculations were validated in Phase 1, so we can directly use the results
 
         // Delete from source
         try_block_on(self.provider.delete_native_asset_lock(&hash, from, lock_id))
@@ -2078,26 +2124,14 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
                 .remove_native_asset_lock_id(&hash, from, lock_id),
         );
 
-        // Update source counts using checked arithmetic to catch invariant violations
-        let from_count = try_block_on(self.provider.get_native_asset_lock_count(&hash, from))
-            .map_err(Self::convert_error)?
-            .map_err(Self::convert_error)?;
-        let new_from_count = from_count
-            .checked_sub(1)
-            .ok_or_else(|| Self::invalid_data_error("Source lock count underflow"))?;
+        // Update source counts using pre-validated values from Phase 1
         try_block_on(
             self.provider
-                .set_native_asset_lock_count(&hash, from, new_from_count),
+                .set_native_asset_lock_count(&hash, from, new_from_lock_count),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
 
-        let from_locked = try_block_on(self.provider.get_native_asset_locked_balance(&hash, from))
-            .map_err(Self::convert_error)?
-            .map_err(Self::convert_error)?;
-        let new_from_locked = from_locked
-            .checked_sub(amount)
-            .ok_or_else(|| Self::invalid_data_error("Source locked balance underflow"))?;
         try_block_on(
             self.provider
                 .set_native_asset_locked_balance(&hash, from, new_from_locked),
@@ -2105,11 +2139,7 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
 
-        // Create at destination with new ID
-        let new_lock_id = try_block_on(self.provider.get_native_asset_next_lock_id(&hash, to))
-            .map_err(Self::convert_error)?
-            .map_err(Self::convert_error)?;
-
+        // Create at destination with new ID (using pre-validated new_lock_id from Phase 1)
         let new_lock = TokenLock {
             id: new_lock_id,
             ..token_lock
@@ -2118,10 +2148,7 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
 
-        // Use checked arithmetic for lock ID increment
-        let next_lock_id = new_lock_id
-            .checked_add(1)
-            .ok_or_else(|| Self::invalid_data_error("Lock ID overflow"))?;
+        // Update destination using pre-validated values from Phase 1
         try_block_on(
             self.provider
                 .set_native_asset_next_lock_id(&hash, to, next_lock_id),
@@ -2129,27 +2156,13 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
 
-        let to_count = try_block_on(self.provider.get_native_asset_lock_count(&hash, to))
-            .map_err(Self::convert_error)?
-            .map_err(Self::convert_error)?;
-        // Use checked arithmetic for lock count
-        let new_to_count = to_count
-            .checked_add(1)
-            .ok_or_else(|| Self::invalid_data_error("Lock count overflow"))?;
         try_block_on(
             self.provider
-                .set_native_asset_lock_count(&hash, to, new_to_count),
+                .set_native_asset_lock_count(&hash, to, new_to_lock_count),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
 
-        let to_locked = try_block_on(self.provider.get_native_asset_locked_balance(&hash, to))
-            .map_err(Self::convert_error)?
-            .map_err(Self::convert_error)?;
-        // Use checked arithmetic for locked balance
-        let new_to_locked = to_locked
-            .checked_add(amount)
-            .ok_or_else(|| Self::invalid_data_error("Locked balance overflow"))?;
         try_block_on(
             self.provider
                 .set_native_asset_locked_balance(&hash, to, new_to_locked),
