@@ -17,7 +17,7 @@ use log::{debug, info, trace};
 use rocksdb::{
     BlockBasedOptions, Cache, ColumnFamilyDescriptor, DBCompactionStyle, DBCompressionType,
     DBWithThreadMode, Direction, Env, IteratorMode as InternalIteratorMode, MultiThreaded, Options,
-    ReadOptions, SliceTransform, WaitForCompactOptions,
+    ReadOptions, SliceTransform, WaitForCompactOptions, WriteBatch,
 };
 use serde::{Deserialize, Serialize};
 use strum::IntoEnumIterator;
@@ -219,6 +219,46 @@ impl RocksStorage {
         key: K,
     ) -> Result<(), BlockchainError> {
         Self::remove_from_disk_internal(&self.db, self.snapshot.as_mut(), column, key)
+    }
+
+    /// Execute a batch of write operations atomically
+    ///
+    /// All operations in the batch will either succeed together or fail together.
+    /// Uses RocksDB's WriteBatch for atomicity guarantees.
+    ///
+    /// # Arguments
+    /// * `operations` - Iterator of (column_name, key, optional_value) tuples
+    ///   - If value is Some, it's a put operation
+    ///   - If value is None, it's a delete operation
+    pub(super) fn write_batch<'a, I>(&mut self, operations: I) -> Result<(), BlockchainError>
+    where
+        I: IntoIterator<Item = (&'a str, &'a [u8], Option<&'a [u8]>)>,
+    {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("write_batch");
+        }
+
+        let mut batch = WriteBatch::default();
+
+        for (cf_name, key, value) in operations {
+            // Get column family handle by name
+            let cf = self
+                .db
+                .cf_handle(cf_name)
+                .with_context(|| format!("Column family {} not found", cf_name))?;
+
+            match value {
+                Some(v) => batch.put_cf(&cf, key, v),
+                None => batch.delete_cf(&cf, key),
+            }
+        }
+
+        // Atomic write - all or nothing
+        self.db
+            .write(batch)
+            .context("Error while executing write batch")?;
+
+        Ok(())
     }
 
     pub fn contains_data<K: AsRef<[u8]>>(

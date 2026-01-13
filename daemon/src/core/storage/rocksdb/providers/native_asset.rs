@@ -23,7 +23,7 @@ use crate::core::{
             build_native_asset_role_members_key, build_native_asset_supply_checkpoint_count_key,
             build_native_asset_supply_checkpoint_key, build_native_asset_supply_key,
             build_native_asset_timelock_min_delay_key, build_native_asset_timelock_operation_key,
-            build_native_asset_user_escrows_key,
+            build_native_asset_user_escrows_key, BatchOperation, StorageWriteBatch,
         },
         NativeAssetProvider, RocksStorage,
     },
@@ -1453,5 +1453,31 @@ impl NativeAssetProvider for RocksStorage {
         }
         let key = build_native_asset_timelock_operation_key(asset, operation_id);
         self.remove_from_disk(Column::NativeAssets, &key)
+    }
+
+    // ===== Atomic Batch Operations =====
+
+    async fn execute_batch(&mut self, batch: StorageWriteBatch) -> Result<(), BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("execute_batch with {} operations", batch.len());
+        }
+
+        if batch.is_empty() {
+            return Ok(());
+        }
+
+        // Convert BatchOperation to the format expected by write_batch
+        let operations: Vec<_> = batch
+            .operations
+            .iter()
+            .map(|op| match op {
+                BatchOperation::Put { cf, key, value } => {
+                    (*cf, key.as_slice(), Some(value.as_slice()))
+                }
+                BatchOperation::Delete { cf, key } => (*cf, key.as_slice(), None),
+            })
+            .collect();
+
+        self.write_batch(operations)
     }
 }
