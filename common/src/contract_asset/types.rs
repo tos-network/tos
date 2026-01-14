@@ -101,9 +101,6 @@ impl Serializer for ContractAssetData {
         let governance = reader.read()?;
         let creator = reader.read_bytes_32()?;
 
-        // Backward compatibility:
-        // - New layout writes a tag before admin.
-        // - Old layout writes admin without a tag.
         let remaining = reader.size();
         let tag = reader.read_bytes_ref(ADMIN_FIELD_TAG.len())?;
         if tag != ADMIN_FIELD_TAG {
