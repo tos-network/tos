@@ -1,7 +1,7 @@
 use crate::core::{
     error::BlockchainError,
     storage::{
-        rocksdb::{AssetId, Column, ContractId},
+        rocksdb::{Column, ContractId},
         ContractAssetExtProvider, RocksStorage,
     },
 };
@@ -366,26 +366,26 @@ fn decode_value(key: &TokenKey, bytes: &[u8]) -> Result<TokenValue, BlockchainEr
 impl RocksStorage {
     fn build_contract_asset_ext_key(
         contract_id: ContractId,
-        asset_id: AssetId,
+        asset: &Hash,
         subkey: &[u8],
     ) -> Vec<u8> {
-        let mut buf = Vec::with_capacity(16 + subkey.len());
+        let mut buf = Vec::with_capacity(40 + subkey.len());
         buf.extend_from_slice(&contract_id.to_be_bytes());
-        buf.extend_from_slice(&asset_id.to_be_bytes());
+        buf.extend_from_slice(asset.as_bytes());
         buf.extend_from_slice(subkey);
         buf
     }
 
     fn build_versioned_contract_asset_ext_key(
         contract_id: ContractId,
-        asset_id: AssetId,
+        asset: &Hash,
         topoheight: TopoHeight,
         subkey: &[u8],
     ) -> Vec<u8> {
-        let mut buf = Vec::with_capacity(24 + subkey.len());
+        let mut buf = Vec::with_capacity(48 + subkey.len());
         buf.extend_from_slice(&topoheight.to_be_bytes());
         buf.extend_from_slice(&contract_id.to_be_bytes());
-        buf.extend_from_slice(&asset_id.to_be_bytes());
+        buf.extend_from_slice(asset.as_bytes());
         buf.extend_from_slice(subkey);
         buf
     }
@@ -409,18 +409,15 @@ impl ContractAssetExtProvider for RocksStorage {
         let Some(contract_id) = self.get_optional_contract_id(contract)? else {
             return Ok(None);
         };
-        let asset_id = match self.get_optional_asset_id(asset_from_key(key))? {
-            Some(id) => id,
-            None => return Ok(None),
-        };
+        let asset = asset_from_key(key);
         let subkey = encode_subkey(key)?;
-        let pointer_key = Self::build_contract_asset_ext_key(contract_id, asset_id, &subkey);
+        let pointer_key = Self::build_contract_asset_ext_key(contract_id, asset, &subkey);
         let mut prev_topo =
             self.load_optional_from_disk(Column::ContractsAssetExt, &pointer_key)?;
 
         while let Some(topo) = prev_topo {
             let versioned_key =
-                Self::build_versioned_contract_asset_ext_key(contract_id, asset_id, topo, &subkey);
+                Self::build_versioned_contract_asset_ext_key(contract_id, asset, topo, &subkey);
             let versioned: Versioned<Vec<u8>> =
                 self.load_from_disk(Column::VersionedContractsAssetExt, &versioned_key)?;
             if topo <= topoheight {
@@ -448,18 +445,14 @@ impl ContractAssetExtProvider for RocksStorage {
             );
         }
         let contract_id = self.get_contract_id(contract)?;
-        let asset_id = self.get_asset_id(asset_from_key(key))?;
+        let asset = asset_from_key(key);
         let subkey = encode_subkey(key)?;
-        let pointer_key = Self::build_contract_asset_ext_key(contract_id, asset_id, &subkey);
+        let pointer_key = Self::build_contract_asset_ext_key(contract_id, asset, &subkey);
         let previous = self.load_optional_from_disk(Column::ContractsAssetExt, &pointer_key)?;
         let encoded = encode_value(key, value)?;
         let versioned = Versioned::new(encoded, previous);
-        let versioned_key = Self::build_versioned_contract_asset_ext_key(
-            contract_id,
-            asset_id,
-            topoheight,
-            &subkey,
-        );
+        let versioned_key =
+            Self::build_versioned_contract_asset_ext_key(contract_id, asset, topoheight, &subkey);
 
         self.insert_into_disk(
             Column::ContractsAssetExt,
@@ -487,17 +480,13 @@ impl ContractAssetExtProvider for RocksStorage {
             );
         }
         let contract_id = self.get_contract_id(contract)?;
-        let asset_id = self.get_asset_id(asset_from_key(key))?;
+        let asset = asset_from_key(key);
         let subkey = encode_subkey(key)?;
-        let pointer_key = Self::build_contract_asset_ext_key(contract_id, asset_id, &subkey);
+        let pointer_key = Self::build_contract_asset_ext_key(contract_id, asset, &subkey);
         let previous = self.load_optional_from_disk(Column::ContractsAssetExt, &pointer_key)?;
         let versioned = Versioned::new(Vec::<u8>::new(), previous);
-        let versioned_key = Self::build_versioned_contract_asset_ext_key(
-            contract_id,
-            asset_id,
-            topoheight,
-            &subkey,
-        );
+        let versioned_key =
+            Self::build_versioned_contract_asset_ext_key(contract_id, asset, topoheight, &subkey);
 
         self.insert_into_disk(
             Column::ContractsAssetExt,
