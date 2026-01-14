@@ -44,6 +44,8 @@ pub struct ContractAssetData {
     pub metadata_uri: Option<String>,
 }
 
+const ADMIN_FIELD_TAG: u8 = 0xFF;
+
 impl Default for ContractAssetData {
     fn default() -> Self {
         Self {
@@ -78,6 +80,7 @@ impl Serializer for ContractAssetData {
         self.freezable.write(writer);
         self.governance.write(writer);
         writer.write_bytes(&self.creator);
+        writer.write_u8(ADMIN_FIELD_TAG);
         writer.write_bytes(&self.admin);
         self.created_at.write(writer);
         self.metadata_uri.write(writer);
@@ -96,15 +99,9 @@ impl Serializer for ContractAssetData {
         let governance = reader.read()?;
         let creator = reader.read_bytes_32()?;
 
-        // Backward compatibility: detect whether the optional admin field exists.
-        // Probe the remaining bytes with a temporary reader to avoid corrupting old layouts.
-        let remaining = &reader.bytes()[reader.total_read()..];
-        let mut probe = Reader::new(remaining);
-        let has_admin = probe.read_bytes_32().is_ok()
-            && probe.read::<u64>().is_ok()
-            && Option::<String>::read(&mut probe).is_ok()
-            && probe.size() == 0;
-        let admin = if has_admin {
+        // Backward compatibility: new layouts write a tag byte before admin.
+        let admin = if reader.size() > 0 && reader.bytes()[reader.total_read()] == ADMIN_FIELD_TAG {
+            reader.read_u8()?;
             reader.read_bytes_32()?
         } else {
             creator
@@ -139,6 +136,7 @@ impl Serializer for ContractAssetData {
             + self.max_supply.size()
             + 5 // bool fields
             + 32 // creator
+            + 1 // admin tag
             + 32 // admin
             + 8 // created_at
             + self.metadata_uri.size()
