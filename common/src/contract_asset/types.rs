@@ -117,9 +117,25 @@ impl Serializer for ContractAssetData {
                     .map_err(|_| ReaderError::InvalidSize)?,
             ) as usize;
             let min_payload_len = 32 + 8 + 1;
-            if payload_len + ADMIN_FIELD_TAG.len() + 4 == remaining
-                && payload_len >= min_payload_len
-            {
+            let payload_total = payload_len + ADMIN_FIELD_TAG.len() + 4;
+            let mut tag_valid = payload_total == remaining && payload_len >= min_payload_len;
+            if tag_valid {
+                let payload_start = len_end;
+                let payload_end = payload_start + payload_len;
+                if payload_end <= reader.bytes().len() {
+                    let mut payload_reader =
+                        Reader::new(&reader.bytes()[payload_start..payload_end]);
+                    let read_ok = payload_reader.read_bytes_32().is_ok()
+                        && payload_reader.read::<u64>().is_ok()
+                        && payload_reader.read::<Option<String>>().is_ok()
+                        && payload_reader.size() == 0;
+                    tag_valid = read_ok;
+                } else {
+                    tag_valid = false;
+                }
+            }
+
+            if tag_valid {
                 reader.read_bytes_ref(ADMIN_FIELD_TAG.len())?;
                 reader.read_u32()?;
                 reader.read_bytes_32()?

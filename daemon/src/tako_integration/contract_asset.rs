@@ -845,9 +845,15 @@ impl<'a, P: ContractAssetProvider + ?Sized> TakoContractAssetProvider
 
     fn metadata_uri(&self, asset: &[u8; 32]) -> Result<Option<String>, EbpfError> {
         let hash = Self::bytes_to_hash(asset);
-        try_block_on(self.provider.get_contract_asset_metadata_uri(&hash))
+        let stored = try_block_on(self.provider.get_contract_asset_metadata_uri(&hash))
             .map_err(Self::convert_error)?
-            .map_err(Self::convert_error)
+            .map_err(Self::convert_error)?;
+        if stored.is_some() {
+            return Ok(stored);
+        }
+
+        let data = self.get_asset_data(asset)?;
+        Ok(data.metadata_uri)
     }
 
     // ========================================
