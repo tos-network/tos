@@ -118,7 +118,7 @@ impl Serializer for ContractAssetData {
             ) as usize;
             let min_payload_len = 32 + 8 + 1;
             let payload_total = payload_len + ADMIN_FIELD_TAG.len() + 4;
-            let mut tag_valid = payload_total == remaining && payload_len >= min_payload_len;
+            let mut tag_valid = payload_total <= remaining && payload_len >= min_payload_len;
             if tag_valid {
                 let payload_start = len_end;
                 let payload_end = payload_start + payload_len;
@@ -143,8 +143,7 @@ impl Serializer for ContractAssetData {
                 let mut legacy_reader = Reader::new(&reader.bytes()[start..start + remaining]);
                 let legacy_ok = legacy_reader.read_bytes_32().is_ok()
                     && legacy_reader.read::<u64>().is_ok()
-                    && legacy_reader.read::<Option<String>>().is_ok()
-                    && legacy_reader.size() == 0;
+                    && legacy_reader.read::<Option<String>>().is_ok();
                 if legacy_ok {
                     reader.read_bytes_32()?
                 } else if remaining <= 32 + 8 {

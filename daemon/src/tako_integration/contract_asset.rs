@@ -2711,7 +2711,9 @@ impl<'a, P: ContractAssetProvider + ?Sized> TakoContractAssetProvider
         let metadata = try_block_on(self.provider.get_contract_asset_metadata_uri(&hash))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
-        data.metadata_uri = metadata;
+        if let Some(value) = metadata {
+            data.metadata_uri = Some(value);
+        }
         data.name = String::from_utf8(name.to_vec())
             .map_err(|_| Self::invalid_data_error("Invalid name"))?;
         try_block_on(self.provider.set_contract_asset(&hash, &data))
@@ -2738,7 +2740,9 @@ impl<'a, P: ContractAssetProvider + ?Sized> TakoContractAssetProvider
         let metadata = try_block_on(self.provider.get_contract_asset_metadata_uri(&hash))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
-        data.metadata_uri = metadata;
+        if let Some(value) = metadata {
+            data.metadata_uri = Some(value);
+        }
         data.symbol = String::from_utf8(symbol.to_vec())
             .map_err(|_| Self::invalid_data_error("Invalid symbol"))?;
         try_block_on(self.provider.set_contract_asset(&hash, &data))
