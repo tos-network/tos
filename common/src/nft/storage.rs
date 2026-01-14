@@ -105,6 +105,11 @@ pub fn mint_count_key(collection: &Hash, user: &PublicKey) -> Vec<u8> {
     key
 }
 
+/// Generate storage key for collection nonce
+pub fn collection_nonce_key() -> Vec<u8> {
+    prefixes::COLLECTION_NONCE.to_vec()
+}
+
 /// Generate storage key for Token Bound Account
 pub fn tba_key(collection: &Hash, token_id: u64) -> Vec<u8> {
     let mut key = Vec::with_capacity(prefixes::TBA.len() + 32 + 8);

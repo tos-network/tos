@@ -16,11 +16,13 @@
 // - storage: Storage key prefixes and helpers
 // - operations: Core operation logic (create, mint, transfer, burn, query)
 
+mod cache;
 mod error;
 pub mod operations;
 mod storage;
 mod types;
 
+pub use cache::*;
 pub use error::*;
 pub use operations::*;
 pub use storage::*;

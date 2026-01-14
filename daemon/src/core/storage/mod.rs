@@ -14,6 +14,7 @@ use tos_common::{
     contract::ContractProvider as ContractInfoProvider,
     crypto::Hash,
     immutable::Immutable,
+    nft::NftStorageProvider,
     transaction::Transaction,
 };
 
@@ -50,6 +51,8 @@ pub trait Storage:
     + ReferralProvider
     + KycProvider
     + CommitteeProvider
+    + NftProvider
+    + NftStorageProvider
     + UnoBalanceProvider
     + TnsProvider
     + Sync

@@ -31,6 +31,7 @@ use crate::{
         proofs::{BatchCollector, ProofVerificationError, BP_GENS, BULLET_PROOF_SIZE, PC_GENS},
         Hash, ProtocolTranscript,
     },
+    nft::NftStorageProvider,
     serializer::Serializer,
     tokio::spawn_blocking_safe,
     transaction::{
@@ -2764,7 +2765,12 @@ impl Transaction {
 
     // Apply the transaction to the state
     // Arc is required around Self to be shared easily into the VM if needed
-    async fn apply<'a, P: ContractProvider + Send, E, B: BlockchainApplyState<'a, P, E>>(
+    async fn apply<
+        'a,
+        P: ContractProvider + NftStorageProvider + Send,
+        E,
+        B: BlockchainApplyState<'a, P, E>,
+    >(
         self: &'a Arc<Self>,
         tx_hash: &'a Hash,
         state: &mut B,
@@ -4523,7 +4529,7 @@ impl Transaction {
     /// before calling add_sender_output.
     pub async fn apply_without_verify<
         'a,
-        P: ContractProvider + Send,
+        P: ContractProvider + NftStorageProvider + Send,
         E,
         B: BlockchainApplyState<'a, P, E>,
     >(
@@ -4736,7 +4742,7 @@ impl Transaction {
     /// This function delegates to apply_without_verify which handles balance deduction.
     pub async fn apply_with_partial_verify<
         'a,
-        P: ContractProvider + Send,
+        P: ContractProvider + NftStorageProvider + Send,
         E,
         B: BlockchainApplyState<'a, P, E>,
     >(

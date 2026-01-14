@@ -5,6 +5,7 @@ mod contract;
 mod dag_order;
 mod energy;
 mod multisig;
+mod nft;
 mod nonce;
 mod registrations;
 mod scheduled_execution;
@@ -21,6 +22,7 @@ pub use contract::*;
 pub use dag_order::*;
 pub use energy::*;
 pub use multisig::*;
+pub use nft::*;
 pub use nonce::*;
 pub use registrations::*;
 pub use scheduled_execution::*;
@@ -41,6 +43,7 @@ pub trait VersionedProvider:
     + VersionedCacheProvider
     + VersionedDagOrderProvider
     + VersionedEnergyProvider
+    + VersionedNftProvider
     + VersionedScheduledExecutionProvider
 {
     // Delete versioned data at topoheight
@@ -69,6 +72,7 @@ pub trait VersionedProvider:
             .await?;
         self.delete_versioned_energy_at_topoheight(topoheight)
             .await?;
+        self.delete_versioned_nft_at_topoheight(topoheight).await?;
 
         // Delete scheduled executions registered at this topoheight
         self.delete_scheduled_executions_registered_at_topoheight(topoheight)
@@ -116,6 +120,8 @@ pub trait VersionedProvider:
             .await?;
         self.delete_versioned_energy_below_topoheight(topoheight, keep_last)
             .await?;
+        self.delete_versioned_nft_below_topoheight(topoheight, keep_last)
+            .await?;
 
         // Delete scheduled executions registered below this topoheight
         self.delete_scheduled_executions_registered_below_topoheight(topoheight)
@@ -155,6 +161,8 @@ pub trait VersionedProvider:
         self.delete_versioned_assets_above_topoheight(topoheight)
             .await?;
         self.delete_versioned_energy_above_topoheight(topoheight)
+            .await?;
+        self.delete_versioned_nft_above_topoheight(topoheight)
             .await?;
 
         // Delete scheduled executions registered above this topoheight

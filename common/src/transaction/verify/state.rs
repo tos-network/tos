@@ -11,6 +11,7 @@ use crate::{
         elgamal::{Ciphertext, CompressedPublicKey},
         Hash,
     },
+    nft::NftCache,
     transaction::{ContractDeposit, MultiSigPayload, Reference, Transaction},
 };
 use async_trait::async_trait;
@@ -256,6 +257,7 @@ pub trait BlockchainApplyState<'a, P: ContractProvider, E>:
         &mut self,
         hash: &Hash,
         cache: ContractCache,
+        nft_cache: NftCache,
         tracker: ContractEventTracker,
         assets: HashMap<Hash, Option<AssetChanges>>,
     ) -> Result<(), E>;

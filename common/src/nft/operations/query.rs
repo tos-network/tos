@@ -20,7 +20,7 @@ use super::NftStorage;
 /// # Returns
 /// - `Ok(PublicKey)`: Owner's public key
 /// - `Err(NftError)`: Error code
-pub fn owner_of<S: NftStorage>(
+pub fn owner_of<S: NftStorage + ?Sized>(
     storage: &S,
     collection: &Hash,
     token_id: u64,
@@ -49,7 +49,11 @@ pub fn owner_of<S: NftStorage>(
 ///
 /// # Returns
 /// - `Ok(bool)`: Whether the NFT exists
-pub fn exists<S: NftStorage>(storage: &S, collection: &Hash, token_id: u64) -> NftResult<bool> {
+pub fn exists<S: NftStorage + ?Sized>(
+    storage: &S,
+    collection: &Hash,
+    token_id: u64,
+) -> NftResult<bool> {
     if token_id == 0 {
         return Ok(false);
     }
@@ -71,7 +75,7 @@ pub fn exists<S: NftStorage>(storage: &S, collection: &Hash, token_id: u64) -> N
 /// # Returns
 /// - `Ok(u64)`: Number of NFTs owned
 /// - `Err(NftError)`: Error code
-pub fn balance_of<S: NftStorage>(
+pub fn balance_of<S: NftStorage + ?Sized>(
     storage: &S,
     collection: &Hash,
     owner: &PublicKey,
@@ -96,7 +100,10 @@ pub fn balance_of<S: NftStorage>(
 /// # Returns
 /// - `Ok(u64)`: Current total supply
 /// - `Err(NftError)`: Error code
-pub fn get_collection_supply<S: NftStorage>(storage: &S, collection: &Hash) -> NftResult<u64> {
+pub fn get_collection_supply<S: NftStorage + ?Sized>(
+    storage: &S,
+    collection: &Hash,
+) -> NftResult<u64> {
     let col = storage
         .get_collection(collection)
         .ok_or(NftError::CollectionNotFound)?;
@@ -113,7 +120,7 @@ pub fn get_collection_supply<S: NftStorage>(storage: &S, collection: &Hash) -> N
 /// # Returns
 /// - `Ok(Option<u64>)`: Maximum supply (None = unlimited)
 /// - `Err(NftError)`: Error code
-pub fn get_collection_max_supply<S: NftStorage>(
+pub fn get_collection_max_supply<S: NftStorage + ?Sized>(
     storage: &S,
     collection: &Hash,
 ) -> NftResult<Option<u64>> {
@@ -137,7 +144,10 @@ pub fn get_collection_max_supply<S: NftStorage>(
 /// # Returns
 /// - `Ok(NftCollection)`: Full collection data
 /// - `Err(NftError)`: Error code
-pub fn get_collection<S: NftStorage>(storage: &S, collection: &Hash) -> NftResult<NftCollection> {
+pub fn get_collection<S: NftStorage + ?Sized>(
+    storage: &S,
+    collection: &Hash,
+) -> NftResult<NftCollection> {
     storage
         .get_collection(collection)
         .ok_or(NftError::CollectionNotFound)
@@ -157,7 +167,11 @@ pub fn get_collection<S: NftStorage>(storage: &S, collection: &Hash) -> NftResul
 /// # Returns
 /// - `Ok(Nft)`: Full NFT data
 /// - `Err(NftError)`: Error code
-pub fn get_nft<S: NftStorage>(storage: &S, collection: &Hash, token_id: u64) -> NftResult<Nft> {
+pub fn get_nft<S: NftStorage + ?Sized>(
+    storage: &S,
+    collection: &Hash,
+    token_id: u64,
+) -> NftResult<Nft> {
     if token_id == 0 {
         return Err(NftError::TokenNotFound);
     }
@@ -181,7 +195,7 @@ pub fn get_nft<S: NftStorage>(storage: &S, collection: &Hash, token_id: u64) -> 
 /// # Returns
 /// - `Ok(Option<PublicKey>)`: Approved address if any
 /// - `Err(NftError)`: Error code
-pub fn get_approved<S: NftStorage>(
+pub fn get_approved<S: NftStorage + ?Sized>(
     storage: &S,
     collection: &Hash,
     token_id: u64,
@@ -207,7 +221,7 @@ pub fn get_approved<S: NftStorage>(
 ///
 /// # Returns
 /// - `Ok(bool)`: Whether the operator is approved
-pub fn is_approved_for_all<S: NftStorage>(
+pub fn is_approved_for_all<S: NftStorage + ?Sized>(
     storage: &S,
     owner: &PublicKey,
     collection: &Hash,
@@ -234,7 +248,7 @@ pub fn is_approved_for_all<S: NftStorage>(
 ///
 /// # Returns
 /// - `Ok(u64)`: Number of NFTs minted
-pub fn get_mint_count<S: NftStorage>(
+pub fn get_mint_count<S: NftStorage + ?Sized>(
     storage: &S,
     collection: &Hash,
     user: &PublicKey,
@@ -260,7 +274,11 @@ pub fn get_mint_count<S: NftStorage>(
 /// # Returns
 /// - `Ok(bool)`: Whether the NFT is frozen
 /// - `Err(NftError)`: Error code
-pub fn is_frozen<S: NftStorage>(storage: &S, collection: &Hash, token_id: u64) -> NftResult<bool> {
+pub fn is_frozen<S: NftStorage + ?Sized>(
+    storage: &S,
+    collection: &Hash,
+    token_id: u64,
+) -> NftResult<bool> {
     if token_id == 0 {
         return Err(NftError::TokenNotFound);
     }
@@ -281,7 +299,10 @@ pub fn is_frozen<S: NftStorage>(storage: &S, collection: &Hash, token_id: u64) -
 /// # Returns
 /// - `Ok(bool)`: Whether the collection is paused
 /// - `Err(NftError)`: Error code
-pub fn is_collection_paused<S: NftStorage>(storage: &S, collection: &Hash) -> NftResult<bool> {
+pub fn is_collection_paused<S: NftStorage + ?Sized>(
+    storage: &S,
+    collection: &Hash,
+) -> NftResult<bool> {
     let col = storage
         .get_collection(collection)
         .ok_or(NftError::CollectionNotFound)?;

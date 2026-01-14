@@ -8,6 +8,7 @@ use crate::{
     config::{TOS_ASSET, TX_GAS_BURN_PERCENT},
     contract::ContractProvider,
     crypto::Hash,
+    nft::{NftCacheStorage, NftStorageProvider},
     transaction::{ContractDeposit, Transaction},
 };
 
@@ -84,7 +85,7 @@ impl Transaction {
     /// * `Err(_)` - System error (state access failure)
     pub(super) async fn invoke_contract<
         'a,
-        P: ContractProvider + Send,
+        P: ContractProvider + NftStorageProvider + Send,
         E,
         B: BlockchainApplyState<'a, P, E>,
     >(
@@ -145,7 +146,7 @@ impl Transaction {
         let executor = state.get_contract_executor();
 
         // Get the contract environment for state access
-        let (contract_environment, chain_state) = state
+        let (contract_environment, mut chain_state) = state
             .get_contract_environment_for(contract, deposits, tx_hash)
             .await
             .map_err(VerificationError::State)?;
@@ -179,6 +180,8 @@ impl Transaction {
         // Instead, treat execution errors as failed executions with max_gas consumed.
         let execution_result = {
             let provider = contract_environment.provider;
+            let mut nft_storage =
+                NftCacheStorage::new(provider, topoheight, &mut chain_state.nft_cache);
             let tx_sender_hash = Hash::new(*self.get_source().as_bytes());
             match executor
                 .execute(
@@ -193,6 +196,7 @@ impl Transaction {
                     &tx_sender_hash,
                     max_gas,
                     parameters,
+                    Some(&mut nft_storage),
                 )
                 .await
             {
@@ -279,8 +283,9 @@ impl Transaction {
             }
             let tracker = chain_state.tracker;
             let assets = chain_state.assets;
+            let nft_cache = chain_state.nft_cache;
             state
-                .merge_contract_changes(contract, cache, tracker, assets)
+                .merge_contract_changes(contract, cache, nft_cache, tracker, assets)
                 .await
                 .map_err(VerificationError::State)?;
 

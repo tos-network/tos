@@ -37,9 +37,9 @@ use tos_tbpf::{
 };
 
 use super::{
-    token_provider::ContractTokenProvider, NoOpNftStorage, SVMFeatureSet, TakoExecutionError,
-    TosAccountAdapter, TosContractAssetAdapter, TosContractLoaderAdapter, TosNftAdapter,
-    TosReferralAdapter, TosStorageAdapter,
+    token_provider::ContractTokenProvider, SVMFeatureSet, TakoExecutionError, TosAccountAdapter,
+    TosContractAssetAdapter, TosContractLoaderAdapter, TosNftAdapter, TosReferralAdapter,
+    TosStorageAdapter,
 };
 use crate::core::storage::ReferralProvider;
 use crate::vrf::VrfData;
@@ -177,7 +177,7 @@ impl TakoExecutor {
     #[allow(clippy::too_many_arguments)]
     pub fn execute(
         bytecode: &[u8],
-        provider: &mut (dyn tos_common::contract::ContractProvider + Send),
+        provider: &(dyn tos_common::contract::ContractProvider + Send),
         topoheight: TopoHeight,
         contract_hash: &Hash,
         block_hash: &Hash,
@@ -224,7 +224,7 @@ impl TakoExecutor {
     #[allow(clippy::too_many_arguments)]
     pub fn execute_with_vrf(
         bytecode: &[u8],
-        provider: &mut (dyn tos_common::contract::ContractProvider + Send),
+        provider: &(dyn tos_common::contract::ContractProvider + Send),
         topoheight: TopoHeight,
         contract_hash: &Hash,
         block_hash: &Hash,
@@ -234,6 +234,7 @@ impl TakoExecutor {
         tx_sender: &Hash,
         input_data: &[u8],
         compute_budget: Option<u64>,
+        nft_provider: Option<&mut (dyn NftStorage + Send)>,
         vrf_data: Option<&VrfData>,
         miner_public_key: Option<&[u8; 32]>,
     ) -> Result<ExecutionResult, TakoExecutionError> {
@@ -251,6 +252,7 @@ impl TakoExecutor {
             compute_budget,
             &SVMFeatureSet::production(),
             None, // No referral provider
+            nft_provider,
             vrf_data,
             miner_public_key,
         )
@@ -274,7 +276,7 @@ impl TakoExecutor {
     #[allow(clippy::too_many_arguments)]
     pub fn execute_with_referral(
         bytecode: &[u8],
-        provider: &mut (dyn tos_common::contract::ContractProvider + Send),
+        provider: &(dyn tos_common::contract::ContractProvider + Send),
         topoheight: TopoHeight,
         contract_hash: &Hash,
         block_hash: &Hash,
@@ -300,6 +302,7 @@ impl TakoExecutor {
             compute_budget,
             &SVMFeatureSet::production(),
             Some(referral_provider),
+            None, // No NFT provider
             None, // VRF data not available in this method
             None, // Miner public key not available
         )
@@ -366,7 +369,7 @@ impl TakoExecutor {
     #[allow(clippy::too_many_arguments)]
     pub fn execute_with_features(
         bytecode: &[u8],
-        provider: &mut (dyn tos_common::contract::ContractProvider + Send),
+        provider: &(dyn tos_common::contract::ContractProvider + Send),
         topoheight: TopoHeight,
         contract_hash: &Hash,
         block_hash: &Hash,
@@ -393,6 +396,7 @@ impl TakoExecutor {
             compute_budget,
             feature_set,
             None, // No referral provider
+            None, // No NFT provider
             None, // No VRF data
             None, // No miner public key
         )
@@ -417,7 +421,7 @@ impl TakoExecutor {
     #[allow(clippy::too_many_arguments)]
     pub fn execute_with_features_and_referral(
         bytecode: &[u8],
-        provider: &mut (dyn tos_common::contract::ContractProvider + Send),
+        provider: &(dyn tos_common::contract::ContractProvider + Send),
         topoheight: TopoHeight,
         contract_hash: &Hash,
         block_hash: &Hash,
@@ -429,10 +433,11 @@ impl TakoExecutor {
         compute_budget: Option<u64>,
         feature_set: &SVMFeatureSet,
         referral_provider: Option<&mut (dyn ReferralProvider + Send + Sync)>,
+        nft_provider: Option<&mut (dyn NftStorage + Send)>,
         vrf_data: Option<&VrfData>, // VRF data for verifiable randomness
         miner_public_key: Option<&[u8; 32]>, // Block producer's key for VRF identity binding
     ) -> Result<ExecutionResult, TakoExecutionError> {
-        Self::execute_with_all_providers::<NoOpNftStorage>(
+        Self::execute_with_all_providers(
             bytecode,
             provider,
             topoheight,
@@ -446,7 +451,7 @@ impl TakoExecutor {
             compute_budget,
             feature_set,
             referral_provider,
-            None, // No NFT provider
+            nft_provider,
             true, // Contract asset syscalls enabled
             vrf_data,
             miner_public_key,
@@ -482,9 +487,9 @@ impl TakoExecutor {
     /// - Role management (grant_role, revoke_role, has_role)
     /// - Advanced features (escrow, permit, agent operations)
     #[allow(clippy::too_many_arguments)]
-    pub fn execute_with_all_providers<N: NftStorage>(
+    pub fn execute_with_all_providers(
         bytecode: &[u8],
-        provider: &mut (dyn tos_common::contract::ContractProvider + Send),
+        provider: &(dyn tos_common::contract::ContractProvider + Send),
         topoheight: TopoHeight,
         contract_hash: &Hash,
         block_hash: &Hash,
@@ -496,9 +501,9 @@ impl TakoExecutor {
         compute_budget: Option<u64>,
         feature_set: &SVMFeatureSet,
         referral_provider: Option<&mut (dyn ReferralProvider + Send + Sync)>,
-        nft_provider: Option<&mut N>,        // NFT storage provider
-        contract_assets_enabled: bool,       // Contract asset syscalls enabled
-        vrf_data: Option<&VrfData>,          // VRF data for verifiable randomness
+        nft_provider: Option<&mut (dyn NftStorage + Send)>, // NFT storage provider
+        contract_assets_enabled: bool,                      // Contract asset syscalls enabled
+        vrf_data: Option<&VrfData>,                         // VRF data for verifiable randomness
         miner_public_key: Option<&[u8; 32]>, // Block producer's key for VRF identity binding
     ) -> Result<ExecutionResult, TakoExecutionError> {
         use log::{debug, error, info, warn};
@@ -965,7 +970,7 @@ impl TakoExecutor {
     /// the full `execute()` method with proper blockchain state.
     pub fn execute_simple<P: ContractProvider + Send>(
         bytecode: &[u8],
-        provider: &mut P,
+        provider: &P,
         topoheight: TopoHeight,
         contract_hash: &Hash,
     ) -> Result<ExecutionResult, TakoExecutionError> {

@@ -41,12 +41,12 @@ use tos_tbpf::error::EbpfError;
 ///
 /// Unlike the referral adapter, NFT storage is synchronous, so no
 /// async/sync conversion is needed.
-pub struct TosNftAdapter<'a, S: NftStorage> {
+pub struct TosNftAdapter<'a, S: NftStorage + ?Sized> {
     /// TOS NFT storage provider (mutable for write operations)
     storage: &'a mut S,
 }
 
-impl<'a, S: NftStorage> TosNftAdapter<'a, S> {
+impl<'a, S: NftStorage + ?Sized> TosNftAdapter<'a, S> {
     /// Create a new NFT adapter
     ///
     /// # Arguments
@@ -132,7 +132,7 @@ impl<'a, S: NftStorage> TosNftAdapter<'a, S> {
     }
 }
 
-impl<'a, S: NftStorage> TakoNftProvider for TosNftAdapter<'a, S> {
+impl<'a, S: NftStorage + ?Sized> TakoNftProvider for TosNftAdapter<'a, S> {
     fn create_collection(
         &mut self,
         creator: &[u8; 32],

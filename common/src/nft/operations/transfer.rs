@@ -23,7 +23,7 @@ use super::{check_nft_permission, NftStorage, RuntimeContext};
 /// # Returns
 /// - `Ok(())`: Success
 /// - `Err(NftError)`: Error code
-pub fn transfer<S: NftStorage>(
+pub fn transfer<S: NftStorage + ?Sized>(
     storage: &mut S,
     ctx: &RuntimeContext,
     collection: &Hash,
@@ -235,7 +235,7 @@ pub fn safe_transfer<S: NftStorage, C: ContractChecker>(
 /// # Returns
 /// - `Ok(())`: All transfers succeeded
 /// - `Err(NftError)`: First error encountered
-pub fn batch_transfer<S: NftStorage>(
+pub fn batch_transfer<S: NftStorage + ?Sized>(
     storage: &mut S,
     ctx: &RuntimeContext,
     collection: &Hash,

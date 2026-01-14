@@ -121,7 +121,7 @@ pub async fn execute_test_contract_with_input(
 
     let mut result = TakoExecutor::execute(
         bytecode,
-        &mut *storage_write,
+        &*storage_write,
         topoheight,
         contract_hash,
         &Hash::zero(),   // block_hash

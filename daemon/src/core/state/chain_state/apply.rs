@@ -27,6 +27,7 @@ use tos_common::{
         elgamal::{Ciphertext, CompressedPublicKey},
         Hash, PublicKey,
     },
+    nft::NftCache,
     transaction::{
         verify::{BlockchainApplyState, BlockchainVerificationState, ContractEnvironment},
         ContractDeposit, MultiSigPayload, Reference,
@@ -42,6 +43,8 @@ struct ContractManager {
     caches: HashMap<Hash, ContractCache>,
     // global assets cache
     assets: HashMap<Hash, Option<AssetChanges>>,
+    // global NFT cache
+    nft_cache: NftCache,
     tracker: ContractEventTracker,
     // Scheduled executions registered during this block
     // Key: (contract_hash, execution_topoheight)
@@ -388,6 +391,7 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for Applicable
             random: None,
             tx_hash,
             cache,
+            nft_cache: self.contract_manager.nft_cache.clone(),
             outputs: Vec::new(),
             // Event trackers
             tracker: self.contract_manager.tracker.clone(),
@@ -410,11 +414,13 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for Applicable
         &mut self,
         hash: &Hash,
         cache: ContractCache,
+        nft_cache: NftCache,
         tracker: ContractEventTracker,
         assets: HashMap<Hash, Option<AssetChanges>>,
     ) -> Result<(), BlockchainError> {
         // Insert or update cache
         self.contract_manager.caches.insert(hash.clone(), cache);
+        self.contract_manager.nft_cache = nft_cache;
 
         self.contract_manager.tracker = tracker;
         self.contract_manager.assets = assets;
@@ -1006,6 +1012,7 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
                 outputs: HashMap::new(),
                 caches: HashMap::new(),
                 assets: HashMap::new(),
+                nft_cache: NftCache::default(),
                 tracker: ContractEventTracker::default(),
                 scheduled_executions: Vec::new(),
                 scheduled_execution_results: BlockScheduledExecutionResults::default(),
@@ -1511,6 +1518,168 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
                                 )
                                 .await?;
                         }
+                    }
+                }
+            }
+        }
+
+        debug!("Storing NFT cache changes");
+        let nft_cache = std::mem::take(&mut self.contract_manager.nft_cache);
+        for (collection, (state, value)) in nft_cache.collections {
+            if state.should_be_stored() {
+                match value {
+                    Some(collection_data) => {
+                        self.inner
+                            .storage
+                            .set_last_nft_collection_to(
+                                &collection,
+                                self.inner.topoheight,
+                                &collection_data,
+                            )
+                            .await?;
+                    }
+                    None => {
+                        self.inner
+                            .storage
+                            .delete_nft_collection(&collection, self.inner.topoheight)
+                            .await?;
+                    }
+                }
+            }
+        }
+
+        for ((collection, token_id), (state, value)) in nft_cache.tokens {
+            if state.should_be_stored() {
+                match value {
+                    Some(token) => {
+                        self.inner
+                            .storage
+                            .set_last_nft_token_to(
+                                &collection,
+                                token_id,
+                                self.inner.topoheight,
+                                &token,
+                            )
+                            .await?;
+                    }
+                    None => {
+                        self.inner
+                            .storage
+                            .delete_nft_token(&collection, token_id, self.inner.topoheight)
+                            .await?;
+                    }
+                }
+            }
+        }
+
+        for ((collection, owner), (state, balance)) in nft_cache.owner_balances {
+            if state.should_be_stored() {
+                self.inner
+                    .storage
+                    .set_last_nft_owner_balance_to(
+                        &collection,
+                        &owner,
+                        self.inner.topoheight,
+                        balance,
+                    )
+                    .await?;
+            }
+        }
+
+        for ((owner, collection, operator), (state, approved)) in nft_cache.operator_approvals {
+            if state.should_be_stored() {
+                self.inner
+                    .storage
+                    .set_last_nft_operator_approval_to(
+                        &owner,
+                        &collection,
+                        &operator,
+                        self.inner.topoheight,
+                        approved,
+                    )
+                    .await?;
+            }
+        }
+
+        for ((collection, user), (state, count)) in nft_cache.mint_counts {
+            if state.should_be_stored() {
+                self.inner
+                    .storage
+                    .set_last_nft_mint_count_to(&collection, &user, self.inner.topoheight, count)
+                    .await?;
+            }
+        }
+
+        if let Some((state, nonce)) = nft_cache.collection_nonce {
+            if state.should_be_stored() {
+                self.inner
+                    .storage
+                    .set_last_nft_collection_nonce_to(self.inner.topoheight, nonce)
+                    .await?;
+            }
+        }
+
+        for ((collection, token_id), (state, value)) in nft_cache.tbas {
+            if state.should_be_stored() {
+                match value {
+                    Some(tba) => {
+                        self.inner
+                            .storage
+                            .set_last_nft_tba_to(&collection, token_id, self.inner.topoheight, &tba)
+                            .await?;
+                    }
+                    None => {
+                        self.inner
+                            .storage
+                            .delete_nft_tba(&collection, token_id, self.inner.topoheight)
+                            .await?;
+                    }
+                }
+            }
+        }
+
+        for (listing_id, (state, value)) in nft_cache.rental_listings {
+            if state.should_be_stored() {
+                match value {
+                    Some(listing) => {
+                        self.inner
+                            .storage
+                            .set_last_nft_rental_listing_to(
+                                &listing_id,
+                                self.inner.topoheight,
+                                &listing,
+                            )
+                            .await?;
+                    }
+                    None => {
+                        self.inner
+                            .storage
+                            .delete_nft_rental_listing(&listing_id, self.inner.topoheight)
+                            .await?;
+                    }
+                }
+            }
+        }
+
+        for ((collection, token_id), (state, value)) in nft_cache.active_rentals {
+            if state.should_be_stored() {
+                match value {
+                    Some(rental) => {
+                        self.inner
+                            .storage
+                            .set_last_nft_active_rental_to(
+                                &collection,
+                                token_id,
+                                self.inner.topoheight,
+                                &rental,
+                            )
+                            .await?;
+                    }
+                    None => {
+                        self.inner
+                            .storage
+                            .delete_nft_active_rental(&collection, token_id, self.inner.topoheight)
+                            .await?;
                     }
                 }
             }

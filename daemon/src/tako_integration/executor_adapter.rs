@@ -22,6 +22,7 @@ use tos_common::{
     block::TopoHeight,
     contract::{ContractEvent, ContractExecutionResult, ContractExecutor, ContractProvider},
     crypto::Hash,
+    nft::NftStorage,
 };
 
 use super::{ExecutionResult, TakoExecutor};
@@ -212,7 +213,7 @@ impl ContractExecutor for TakoContractExecutor {
     async fn execute(
         &self,
         bytecode: &[u8],
-        provider: &mut (dyn ContractProvider + Send),
+        provider: &(dyn ContractProvider + Send),
         topoheight: TopoHeight,
         contract_hash: &Hash,
         block_hash: &Hash,
@@ -222,6 +223,7 @@ impl ContractExecutor for TakoContractExecutor {
         tx_sender: &Hash,
         max_gas: u64,
         parameters: Option<Vec<u8>>,
+        nft_provider: Option<&mut (dyn NftStorage + Send)>,
     ) -> anyhow::Result<ContractExecutionResult> {
         if log::log_enabled!(log::Level::Debug) {
             debug!(
@@ -265,6 +267,7 @@ impl ContractExecutor for TakoContractExecutor {
             tx_sender,
             &input_data,
             Some(max_gas),
+            nft_provider,
             vrf_data.as_ref(),
             miner_public_key.as_ref(),
         )?;

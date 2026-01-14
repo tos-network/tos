@@ -19,6 +19,7 @@ use crate::{
         PublicKey,
         Signature,
     },
+    nft::NftCache,
     serializer::Serializer,
     transaction::ContractDeposit,
     versioned_type::VersionedState,
@@ -84,6 +85,8 @@ pub struct ChainState<'a> {
     // The contract cache
     // If the contract was called already, we may have a cache with data
     pub cache: ContractCache,
+    // Global NFT cache for this execution (cloned from chain state)
+    pub nft_cache: NftCache,
     // The contract outputss
     // This is similar to an event log
     pub outputs: Vec<ContractOutput>,

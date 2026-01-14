@@ -65,7 +65,7 @@ impl MintParams {
 /// # Returns
 /// - `Ok(u64)`: The new token ID
 /// - `Err(NftError)`: Error code
-pub fn mint<S: NftStorage>(
+pub fn mint<S: NftStorage + ?Sized>(
     storage: &mut S,
     ctx: &RuntimeContext,
     params: MintParams,
@@ -149,7 +149,7 @@ pub fn mint<S: NftStorage>(
 }
 
 /// Update mint count if the mint authority tracks per-user mints
-fn update_mint_count_if_needed<S: NftStorage>(
+fn update_mint_count_if_needed<S: NftStorage + ?Sized>(
     storage: &mut S,
     mint_authority: &MintAuthority,
     collection_id: &Hash,
@@ -213,7 +213,7 @@ pub struct BatchMintParams {
 /// # Returns
 /// - `Ok(Vec<u64>)`: List of new token IDs
 /// - `Err(NftError)`: Error code (entire batch fails)
-pub fn batch_mint<S: NftStorage>(
+pub fn batch_mint<S: NftStorage + ?Sized>(
     storage: &mut S,
     ctx: &RuntimeContext,
     params: BatchMintParams,

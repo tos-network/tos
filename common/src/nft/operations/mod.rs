@@ -119,7 +119,7 @@ impl RuntimeContext {
 
 /// Check if the caller has permission to operate on an NFT
 /// Returns Ok(()) if authorized, Err with appropriate error code otherwise
-pub fn check_nft_permission<S: NftStorage>(
+pub fn check_nft_permission<S: NftStorage + ?Sized>(
     storage: &S,
     nft: &Nft,
     caller: &PublicKey,

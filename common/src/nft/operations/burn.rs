@@ -22,7 +22,7 @@ use super::{check_nft_permission, NftStorage, RuntimeContext};
 /// # Returns
 /// - `Ok(())`: Success
 /// - `Err(NftError)`: Error code
-pub fn burn<S: NftStorage>(
+pub fn burn<S: NftStorage + ?Sized>(
     storage: &mut S,
     ctx: &RuntimeContext,
     collection: &Hash,
@@ -93,7 +93,7 @@ pub fn burn<S: NftStorage>(
 /// # Returns
 /// - `Ok(())`: All burns succeeded
 /// - `Err(NftError)`: First error encountered
-pub fn batch_burn<S: NftStorage>(
+pub fn batch_burn<S: NftStorage + ?Sized>(
     storage: &mut S,
     ctx: &RuntimeContext,
     collection: &Hash,
