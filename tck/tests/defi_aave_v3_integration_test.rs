@@ -1,8 +1,8 @@
 #![allow(clippy::disallowed_methods)]
 
 use anyhow::Result;
-use std::cell::RefCell;
 use std::collections::HashMap;
+use std::sync::RwLock;
 use tos_common::{
     asset::AssetData,
     block::TopoHeight,
@@ -15,13 +15,13 @@ use tos_kernel::ValueCell;
 /// Mock provider with actual HashMap storage
 struct MockProvider {
     /// In-memory storage: key → value
-    storage: RefCell<HashMap<Vec<u8>, Vec<u8>>>,
+    storage: RwLock<HashMap<Vec<u8>, Vec<u8>>>,
 }
 
 impl MockProvider {
     fn new() -> Self {
         Self {
-            storage: RefCell::new(HashMap::new()),
+            storage: RwLock::new(HashMap::new()),
         }
     }
 }
@@ -92,7 +92,7 @@ impl ContractStorage for MockProvider {
             return Ok(None);
         };
 
-        let storage = self.storage.borrow();
+        let storage = self.storage.read().unwrap();
 
         match storage.get(key_bytes.as_slice()) {
             Some(value) => {
@@ -119,7 +119,7 @@ impl ContractStorage for MockProvider {
             return Ok(None);
         };
 
-        let storage = self.storage.borrow();
+        let storage = self.storage.read().unwrap();
 
         if storage.contains_key(key_bytes.as_slice()) {
             Ok(Some(100))
@@ -135,7 +135,7 @@ impl ContractStorage for MockProvider {
             return Ok(false);
         };
 
-        let storage = self.storage.borrow();
+        let storage = self.storage.read().unwrap();
         Ok(storage.contains_key(key_bytes.as_slice()))
     }
 

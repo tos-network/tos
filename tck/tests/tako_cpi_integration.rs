@@ -241,6 +241,7 @@ async fn test_cpi_basic_invocation() {
             &Hash::zero(), // tx_sender
             2_000_000,     // max_gas (2M compute units for CPI)
             None,          // parameters
+            None,          // nft_provider
         )
         .await;
 
@@ -355,6 +356,7 @@ async fn test_callee_standalone() {
             &Hash::zero(),
             &Hash::zero(),
             200_000,
+            None,
             None,
         )
         .await

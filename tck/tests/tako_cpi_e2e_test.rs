@@ -203,6 +203,7 @@ async fn test_cpi_e2e_basic_invocation() {
             &Hash::zero(), // tx_sender
             2_000_000,     // max_gas (2M compute units for CPI)
             None,          // parameters
+            None,          // nft_provider
         )
         .await;
 
@@ -309,6 +310,7 @@ async fn test_cpi_e2e_storage_operations() {
                 &Hash::zero(),
                 200_000,
                 None,
+                None,
             )
             .await
             .expect("Execution should succeed");
@@ -388,6 +390,7 @@ async fn test_cpi_e2e_compute_budget_tracking() {
                 &Hash::zero(),
                 budget,
                 None,
+                None,
             )
             .await;
 
@@ -454,6 +457,7 @@ async fn test_cpi_e2e_performance_metrics() {
             &Hash::zero(),
             &Hash::zero(),
             2_000_000,
+            None,
             None,
         )
         .await;

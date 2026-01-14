@@ -6,8 +6,8 @@
 #![allow(clippy::disallowed_methods)]
 
 use anyhow::Result;
-use std::cell::RefCell;
 use std::collections::HashMap;
+use std::sync::RwLock;
 use tos_common::{
     asset::AssetData,
     block::TopoHeight,
@@ -19,27 +19,27 @@ use tos_kernel::ValueCell;
 /// Mock provider with actual HashMap storage
 pub struct MockProvider {
     /// In-memory storage: key → value
-    storage: RefCell<HashMap<Vec<u8>, Vec<u8>>>,
+    storage: RwLock<HashMap<Vec<u8>, Vec<u8>>>,
 }
 
 impl MockProvider {
     /// Create a new MockProvider with empty storage
     pub fn new() -> Self {
         Self {
-            storage: RefCell::new(HashMap::new()),
+            storage: RwLock::new(HashMap::new()),
         }
     }
 
     /// Clear all storage (useful for test isolation)
     #[allow(dead_code)]
     pub fn clear(&self) {
-        self.storage.borrow_mut().clear();
+        self.storage.write().unwrap().clear();
     }
 
     /// Get number of stored keys (useful for debugging)
     #[allow(dead_code)]
     pub fn storage_size(&self) -> usize {
-        self.storage.borrow().len()
+        self.storage.read().unwrap().len()
     }
 }
 
@@ -127,7 +127,7 @@ impl ContractStorage for MockProvider {
             return Ok(None);
         };
 
-        let storage = self.storage.borrow();
+        let storage = self.storage.read().unwrap();
 
         match storage.get(key_bytes.as_slice()) {
             Some(value) => {
@@ -159,7 +159,7 @@ impl ContractStorage for MockProvider {
             return Ok(None);
         };
 
-        let storage = self.storage.borrow();
+        let storage = self.storage.read().unwrap();
 
         if storage.contains_key(key_bytes.as_slice()) {
             Ok(Some(100))
@@ -176,7 +176,7 @@ impl ContractStorage for MockProvider {
             return Ok(false);
         };
 
-        let storage = self.storage.borrow();
+        let storage = self.storage.read().unwrap();
         Ok(storage.contains_key(key_bytes.as_slice()))
     }
 
@@ -197,7 +197,7 @@ impl MockProvider {
     /// This simulates the storage_write syscall behavior.
     /// Called internally by TAKO VM when contract calls storage_write.
     pub fn write_storage(&self, key: &[u8], value: &[u8]) -> Result<()> {
-        let mut storage = self.storage.borrow_mut();
+        let mut storage = self.storage.write().unwrap();
         storage.insert(key.to_vec(), value.to_vec());
         Ok(())
     }
@@ -206,7 +206,7 @@ impl MockProvider {
     ///
     /// This simulates the storage_delete syscall behavior.
     pub fn delete_storage(&self, key: &[u8]) -> Result<()> {
-        let mut storage = self.storage.borrow_mut();
+        let mut storage = self.storage.write().unwrap();
         storage.remove(key);
         Ok(())
     }
@@ -215,7 +215,7 @@ impl MockProvider {
     ///
     /// Returns None if key doesn't exist, Some(value) if it does.
     pub fn read_storage(&self, key: &[u8]) -> Option<Vec<u8>> {
-        let storage = self.storage.borrow();
+        let storage = self.storage.read().unwrap();
         storage.get(key).cloned()
     }
 }
