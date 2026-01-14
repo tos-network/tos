@@ -325,7 +325,7 @@ impl ContractExecutor for TakoContractExecutor {
             events: contract_events,
 
             // VM cache overlay containing storage writes
-            // Will be merged on success via merge_overlay_storage_only()
+            // Will be merged on success via merge_overlay_storage_and_tokens()
             cache: Some(cache),
         })
     }

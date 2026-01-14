@@ -223,7 +223,7 @@ impl StorageWriteBatch {
 
 // ===== Native Asset Provider Trait =====
 
-#[async_trait]
+#[async_trait(?Send)]
 pub trait NativeAssetProvider {
     // ===== Asset Data Operations =====
 

@@ -17,10 +17,17 @@
 
 pub mod constants;
 pub mod error;
+pub mod overlay;
 pub mod roles;
 pub mod types;
 
 pub use constants::*;
 pub use error::*;
+pub use overlay::{NativeAssetKey, NativeAssetValue};
 pub use roles::*;
 pub use types::*;
+
+// Token naming aliases for contract-scoped token domain.
+pub type TokenKey = NativeAssetKey;
+pub type TokenValue = NativeAssetValue;
+pub type TokenData = NativeAssetData;

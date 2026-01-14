@@ -71,14 +71,14 @@ const TOS_CHAIN_ID: u64 = 1;
 /// If TOS were to add vote checkpoints after mainnet launch, a migration would be
 /// required to initialize vote power = balance for all existing accounts. Since we
 /// are deploying this feature before launch, no such migration is necessary.
-pub struct TosNativeAssetAdapter<'a, P: NativeAssetProvider + Send + Sync + ?Sized> {
+pub struct TosNativeAssetAdapter<'a, P: NativeAssetProvider + ?Sized> {
     /// TOS native asset storage provider (mutable for write operations)
     provider: &'a mut P,
     /// Current block height for timestamp-based operations
     block_height: u64,
 }
 
-impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TosNativeAssetAdapter<'a, P> {
+impl<'a, P: NativeAssetProvider + ?Sized> TosNativeAssetAdapter<'a, P> {
     /// Create a new native asset adapter
     ///
     /// # Arguments
@@ -688,7 +688,7 @@ impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TosNativeAssetAdapter<'a
     }
 }
 
-impl<'a, P: NativeAssetProvider + Send + Sync + ?Sized> TakoNativeAssetProvider
+impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider
     for TosNativeAssetAdapter<'a, P>
 {
     // ========================================

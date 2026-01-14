@@ -7,6 +7,7 @@ mod kyc;
 mod loader;
 mod native_asset;
 mod nft;
+mod token_provider;
 pub mod precompile_cost;
 mod precompile_verifier;
 mod referral;

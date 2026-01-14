@@ -1,4 +1,5 @@
 mod balance;
+mod asset_ext;
 mod data;
 mod event;
 mod output;
@@ -13,6 +14,7 @@ use tos_common::{block::TopoHeight, crypto::Hash, versioned_type::Versioned};
 use tos_kernel::Module;
 
 pub use balance::*;
+pub use asset_ext::*;
 pub use data::*;
 pub use event::*;
 pub use output::*;

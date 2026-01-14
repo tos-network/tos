@@ -42,7 +42,7 @@ use tos_common::{
 
 use super::super::Column;
 
-#[async_trait]
+#[async_trait(?Send)]
 impl NativeAssetProvider for RocksStorage {
     // ===== Asset Data Operations =====
 
