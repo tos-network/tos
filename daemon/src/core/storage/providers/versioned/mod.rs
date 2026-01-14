@@ -35,6 +35,7 @@ pub trait VersionedProvider:
     + VersionedRegistrationsProvider
     + VersionedContractDataProvider
     + VersionedContractBalanceProvider
+    + VersionedContractAssetExtProvider
     + VersionedAssetProvider
     + VersionedAssetsSupplyProvider
     + VersionedCacheProvider
@@ -61,6 +62,8 @@ pub trait VersionedProvider:
         self.delete_versioned_contracts_at_topoheight(topoheight)
             .await?;
         self.delete_versioned_contract_data_at_topoheight(topoheight)
+            .await?;
+        self.delete_versioned_contract_asset_ext_at_topoheight(topoheight)
             .await?;
         self.delete_versioned_assets_supply_at_topoheight(topoheight)
             .await?;
@@ -104,6 +107,8 @@ pub trait VersionedProvider:
             .await?;
         self.delete_versioned_contract_balances_below_topoheight(topoheight, keep_last)
             .await?;
+        self.delete_versioned_contract_asset_ext_below_topoheight(topoheight, keep_last)
+            .await?;
 
         self.delete_versioned_assets_supply_below_topoheight(topoheight, keep_last)
             .await?;
@@ -141,6 +146,8 @@ pub trait VersionedProvider:
         self.delete_versioned_contract_data_above_topoheight(topoheight)
             .await?;
         self.delete_versioned_contract_balances_above_topoheight(topoheight)
+            .await?;
+        self.delete_versioned_contract_asset_ext_above_topoheight(topoheight)
             .await?;
 
         self.delete_versioned_assets_supply_above_topoheight(topoheight)
