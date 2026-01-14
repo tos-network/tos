@@ -761,6 +761,12 @@ impl<'a, P: ContractAssetProvider + ?Sized> TakoContractAssetProvider
         try_block_on(self.provider.set_contract_asset(&asset_id, &data))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
+        try_block_on(
+            self.provider
+                .set_contract_asset_metadata_uri(&asset_id, data.metadata_uri.as_deref()),
+        )
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)?;
 
         // Grant DEFAULT_ADMIN_ROLE to creator
         let admin_role = tos_common::contract_asset::DEFAULT_ADMIN_ROLE;
@@ -2724,6 +2730,7 @@ impl<'a, P: ContractAssetProvider + ?Sized> TakoContractAssetProvider
         // NOTE: RBAC validation is done at syscall level in TAKO
         // The caller and block_height params are passed for logging/audit purposes
 
+        let mut data = self.get_asset_data(asset)?;
         let uri_str = if uri.is_empty() {
             None
         } else {
@@ -2732,6 +2739,10 @@ impl<'a, P: ContractAssetProvider + ?Sized> TakoContractAssetProvider
                     .map_err(|_| Self::invalid_data_error("Invalid metadata URI"))?,
             )
         };
+        data.metadata_uri = uri_str.clone();
+        try_block_on(self.provider.set_contract_asset(&hash, &data))
+            .map_err(Self::convert_error)?
+            .map_err(Self::convert_error)?;
         try_block_on(
             self.provider
                 .set_contract_asset_metadata_uri(&hash, uri_str.as_deref()),

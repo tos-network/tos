@@ -552,14 +552,20 @@ impl TakoExecutor {
         let mut nft_adapter = nft_provider.map(TosNftAdapter::new);
 
         // 3c. Create contract asset adapter
-        // Always use the contract-scoped token cache to preserve atomicity on failure.
+        // Use the contract-scoped token cache to preserve atomicity on failure,
+        // but only when the caller enables contract asset syscalls.
+        let has_contract_assets = contract_asset_provider.is_some();
         let _ = contract_asset_provider;
-        let mut contract_token_provider = Some(ContractTokenProvider::new(
-            provider,
-            contract_hash,
-            topoheight,
-            &mut cache.tokens,
-        ));
+        let mut contract_token_provider = if has_contract_assets {
+            Some(ContractTokenProvider::new(
+                provider,
+                contract_hash,
+                topoheight,
+                &mut cache.tokens,
+            ))
+        } else {
+            None
+        };
         let mut contract_asset_adapter = contract_token_provider.as_mut().map(|provider| {
             Box::new(TosContractAssetAdapter::new(provider, block_height))
                 as Box<dyn TakoContractAssetProvider>
