@@ -446,8 +446,8 @@ impl TakoExecutor {
             compute_budget,
             feature_set,
             referral_provider,
-            None,  // No NFT provider
-            false, // Contract asset syscalls disabled
+            None, // No NFT provider
+            true, // Contract asset syscalls enabled
             vrf_data,
             miner_public_key,
         )
