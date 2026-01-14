@@ -105,61 +105,23 @@ impl Serializer for ContractAssetData {
         // - New layout writes a tag before admin.
         // - Old layout writes admin without a tag.
         let remaining = reader.size();
-        let start = reader.total_read();
-        let has_tag = remaining >= ADMIN_FIELD_TAG.len() + 4
-            && reader.bytes()[start..start + ADMIN_FIELD_TAG.len()] == ADMIN_FIELD_TAG[..];
-        let admin = if has_tag {
-            let len_start = start + ADMIN_FIELD_TAG.len();
-            let len_end = len_start + 4;
-            let payload_len = u32::from_be_bytes(
-                reader.bytes()[len_start..len_end]
-                    .try_into()
-                    .map_err(|_| ReaderError::InvalidSize)?,
-            ) as usize;
-            let min_payload_len = 32 + 8 + 1;
-            let payload_total = payload_len + ADMIN_FIELD_TAG.len() + 4;
-            let mut tag_valid = payload_total <= remaining && payload_len >= min_payload_len;
-            if tag_valid {
-                let payload_start = len_end;
-                let payload_end = payload_start + payload_len;
-                if payload_end <= reader.bytes().len() {
-                    let mut payload_reader =
-                        Reader::new(&reader.bytes()[payload_start..payload_end]);
-                    let read_ok = payload_reader.read_bytes_32().is_ok()
-                        && payload_reader.read::<u64>().is_ok()
-                        && payload_reader.read::<Option<String>>().is_ok()
-                        && payload_reader.size() == 0;
-                    tag_valid = read_ok;
-                } else {
-                    tag_valid = false;
-                }
-            }
-
-            if tag_valid {
-                reader.read_bytes_ref(ADMIN_FIELD_TAG.len())?;
-                reader.read_u32()?;
-                reader.read_bytes_32()?
-            } else {
-                let mut legacy_reader = Reader::new(&reader.bytes()[start..start + remaining]);
-                let legacy_ok = legacy_reader.read_bytes_32().is_ok()
-                    && legacy_reader.read::<u64>().is_ok()
-                    && legacy_reader.read::<Option<String>>().is_ok();
-                if legacy_ok {
-                    reader.read_bytes_32()?
-                } else if remaining <= 32 + 8 {
-                    creator
-                } else {
-                    return Err(ReaderError::InvalidSize);
-                }
-            }
-        } else if remaining > 32 + 8 {
-            reader.read_bytes_32()?
-        } else {
-            creator
-        };
+        let tag = reader.read_bytes_ref(ADMIN_FIELD_TAG.len())?;
+        if tag != ADMIN_FIELD_TAG {
+            return Err(ReaderError::InvalidValue);
+        }
+        let payload_len = reader.read_u32()? as usize;
+        let min_payload_len = 32 + 8 + 1;
+        let payload_total = payload_len + ADMIN_FIELD_TAG.len() + 4;
+        if payload_len < min_payload_len || payload_total != remaining {
+            return Err(ReaderError::InvalidSize);
+        }
+        let admin = reader.read_bytes_32()?;
 
         let created_at = reader.read()?;
         let metadata_uri = reader.read()?;
+        if reader.size() != 0 {
+            return Err(ReaderError::InvalidSize);
+        }
 
         Ok(Self {
             name,
