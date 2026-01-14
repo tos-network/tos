@@ -41,7 +41,7 @@ use super::{
     TosAccountAdapter, TosContractAssetAdapter, TosContractLoaderAdapter, TosNftAdapter,
     TosReferralAdapter, TosStorageAdapter,
 };
-use crate::core::storage::{ContractAssetProvider, ReferralProvider};
+use crate::core::storage::ReferralProvider;
 use crate::vrf::VrfData;
 use tos_common::nft::operations::NftStorage;
 
@@ -446,8 +446,8 @@ impl TakoExecutor {
             compute_budget,
             feature_set,
             referral_provider,
-            None, // No NFT provider
-            None, // No contract asset provider
+            None,  // No NFT provider
+            false, // Contract asset syscalls disabled
             vrf_data,
             miner_public_key,
         )
@@ -472,7 +472,7 @@ impl TakoExecutor {
     ///
     /// # Contract Asset System Access
     ///
-    /// When `contract_asset_provider` is provided, contracts can access the contract asset
+    /// When contract asset syscalls are enabled, contracts can access the contract asset
     /// system via syscalls for:
     /// - Asset creation and management (create_asset, asset_exists)
     /// - Token operations (transfer, mint, burn)
@@ -496,9 +496,9 @@ impl TakoExecutor {
         compute_budget: Option<u64>,
         feature_set: &SVMFeatureSet,
         referral_provider: Option<&mut (dyn ReferralProvider + Send + Sync)>,
-        nft_provider: Option<&mut N>, // NFT storage provider
-        contract_asset_provider: Option<&mut dyn ContractAssetProvider>, // Contract asset provider
-        vrf_data: Option<&VrfData>,   // VRF data for verifiable randomness
+        nft_provider: Option<&mut N>,        // NFT storage provider
+        contract_assets_enabled: bool,       // Contract asset syscalls enabled
+        vrf_data: Option<&VrfData>,          // VRF data for verifiable randomness
         miner_public_key: Option<&[u8; 32]>, // Block producer's key for VRF identity binding
     ) -> Result<ExecutionResult, TakoExecutionError> {
         use log::{debug, error, info, warn};
@@ -554,9 +554,7 @@ impl TakoExecutor {
         // 3c. Create contract asset adapter
         // Use the contract-scoped token cache to preserve atomicity on failure,
         // but only when the caller enables contract asset syscalls.
-        let has_contract_assets = contract_asset_provider.is_some();
-        let _ = contract_asset_provider;
-        let mut contract_token_provider = if has_contract_assets {
+        let mut contract_token_provider = if contract_assets_enabled {
             Some(ContractTokenProvider::new(
                 provider,
                 contract_hash,

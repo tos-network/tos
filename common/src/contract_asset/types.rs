@@ -139,10 +139,8 @@ impl Serializer for ContractAssetData {
                 reader.read_bytes_ref(ADMIN_FIELD_TAG.len())?;
                 reader.read_u32()?;
                 reader.read_bytes_32()?
-            } else if remaining > 32 + 8 {
-                reader.read_bytes_32()?
             } else {
-                creator
+                return Err(ReaderError::InvalidSize);
             }
         } else if remaining > 32 + 8 {
             reader.read_bytes_32()?
