@@ -285,9 +285,6 @@ fn encode_value(key: &TokenKey, value: &TokenValue) -> Result<Vec<u8>, Blockchai
         (TokenKey::TimelockOperation { .. }, TokenValue::TimelockOperation(operation)) => {
             operation.to_bytes()
         }
-        (TokenKey::TimelockOperation { .. }, TokenValue::TimelockOperationOpt(Some(operation))) => {
-            operation.to_bytes()
-        }
         (TokenKey::MetadataUri(_), TokenValue::MetadataUri(uri)) => uri.to_bytes(),
         (_, TokenValue::Deleted) => Vec::new(),
         _ => return Err(BlockchainError::UnsupportedOperation),
@@ -359,6 +356,10 @@ fn decode_value(key: &TokenKey, bytes: &[u8]) -> Result<TokenValue, BlockchainEr
         }
         TokenKey::MetadataUri(_) => TokenValue::MetadataUri(Option::<String>::read(&mut reader)?),
     };
+
+    if reader.size() != 0 {
+        return Err(BlockchainError::CorruptedData);
+    }
 
     Ok(value)
 }

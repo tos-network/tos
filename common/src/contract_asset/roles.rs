@@ -10,16 +10,26 @@ use crate::serializer::{Reader, ReaderError, Serializer, Writer};
 /// Role identifier (32 bytes for flexibility)
 pub type RoleId = [u8; 32];
 
-/// Create a RoleId from a string name (hash of the name)
+/// Create a RoleId from a string name (predefined roles map to constants)
 pub fn role_id_from_name(name: &str) -> RoleId {
-    use blake3::Hasher;
-    let mut hasher = Hasher::new();
-    hasher.update(b"NATIVE_ASSET_ROLE:");
-    hasher.update(name.as_bytes());
-    let result = hasher.finalize();
-    let mut id = [0u8; 32];
-    id.copy_from_slice(result.as_bytes());
-    id
+    let normalized = name.trim().to_ascii_uppercase();
+    match normalized.as_str() {
+        "DEFAULT_ADMIN" | "DEFAULT_ADMIN_ROLE" => DEFAULT_ADMIN_ROLE,
+        "MINTER" | "MINTER_ROLE" => MINTER_ROLE,
+        "BURNER" | "BURNER_ROLE" => BURNER_ROLE,
+        "PAUSER" | "PAUSER_ROLE" => PAUSER_ROLE,
+        "FREEZER" | "FREEZER_ROLE" => FREEZER_ROLE,
+        _ => {
+            use blake3::Hasher;
+            let mut hasher = Hasher::new();
+            hasher.update(b"NATIVE_ASSET_ROLE:");
+            hasher.update(normalized.as_bytes());
+            let result = hasher.finalize();
+            let mut id = [0u8; 32];
+            id.copy_from_slice(result.as_bytes());
+            id
+        }
+    }
 }
 
 // Predefined roles - use hash of role name for consistency

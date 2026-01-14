@@ -115,7 +115,34 @@ impl<'a> ContractTokenProvider<'a> {
     }
 
     async fn delete_cached_value(&self, key: TokenKey) -> Result<(), BlockchainError> {
-        self.set_cached_value(key, TokenValue::Deleted).await
+        let cached_state = self.with_cache(|cache| cache.get(&key).map(|(state, _)| *state));
+        if let Some(state) = cached_state {
+            if state.is_new() {
+                self.with_cache(|cache| {
+                    cache.remove(&key);
+                });
+                return Ok(());
+            }
+            let mut updated_state = state;
+            updated_state.mark_updated();
+            self.with_cache(|cache| {
+                cache.insert(key, (updated_state, TokenValue::Deleted));
+            });
+            return Ok(());
+        }
+
+        let fetched = self
+            .provider
+            .get_contract_token_ext(self.contract_hash, &key, self.topoheight)
+            .map_err(Self::map_anyhow)?;
+        if let Some((topo, value)) = fetched {
+            if !matches!(value, TokenValue::Deleted) {
+                self.with_cache(|cache| {
+                    cache.insert(key, (VersionedState::Updated(topo), TokenValue::Deleted));
+                });
+            }
+        }
+        Ok(())
     }
 }
 
@@ -1255,7 +1282,6 @@ impl ContractAssetProvider for ContractTokenProvider<'_> {
         };
         match self.get_cached_value(&key).await? {
             Some(TokenValue::TimelockOperation(value)) => Ok(Some(value)),
-            Some(TokenValue::TimelockOperationOpt(value)) => Ok(value),
             _ => Ok(None),
         }
     }

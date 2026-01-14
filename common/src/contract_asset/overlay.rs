@@ -172,7 +172,6 @@ pub enum ContractAssetValue {
     // ===== Optional values =====
     PendingAdmin(Option<[u8; 32]>),
     MetadataUri(Option<String>),
-    TimelockOperationOpt(Option<TimelockOperation>),
 
     // ===== Index values (lists) =====
     LockIds(Vec<u64>),
