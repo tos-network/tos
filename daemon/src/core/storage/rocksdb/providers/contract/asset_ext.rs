@@ -464,33 +464,38 @@ impl ContractAssetExtProvider for RocksStorage {
         let asset = asset_from_key(key);
         let subkey = encode_subkey(key)?;
         let pointer_key = Self::build_contract_asset_ext_key(contract_id, asset, &subkey);
-        if let Some(result) =
+        let new_result =
             self.load_contract_asset_ext_chain(pointer_key, topoheight, key, |topo| {
                 Self::build_versioned_contract_asset_ext_key(contract_id, asset, topo, &subkey)
-            })?
-        {
-            return Ok(Some(result));
-        }
+            })?;
 
-        if let Some(asset_id) = self.get_optional_asset_id(asset)? {
+        let legacy_result = if let Some(asset_id) = self.get_optional_asset_id(asset)? {
             let legacy_pointer_key =
                 Self::build_contract_asset_ext_legacy_key(contract_id, asset_id, &subkey);
-            return self.load_contract_asset_ext_chain(
-                legacy_pointer_key,
-                topoheight,
-                key,
-                |topo| {
-                    Self::build_versioned_contract_asset_ext_legacy_key(
-                        contract_id,
-                        asset_id,
-                        topo,
-                        &subkey,
-                    )
-                },
-            );
-        }
+            self.load_contract_asset_ext_chain(legacy_pointer_key, topoheight, key, |topo| {
+                Self::build_versioned_contract_asset_ext_legacy_key(
+                    contract_id,
+                    asset_id,
+                    topo,
+                    &subkey,
+                )
+            })?
+        } else {
+            None
+        };
 
-        Ok(None)
+        Ok(match (new_result, legacy_result) {
+            (Some(newer), Some(legacy)) => {
+                if legacy.0 > newer.0 {
+                    Some(legacy)
+                } else {
+                    Some(newer)
+                }
+            }
+            (Some(newer), None) => Some(newer),
+            (None, Some(legacy)) => Some(legacy),
+            (None, None) => None,
+        })
     }
 
     async fn set_last_contract_asset_ext_to(
