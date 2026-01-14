@@ -289,7 +289,7 @@ fn encode_value(key: &TokenKey, value: &TokenValue) -> Result<Vec<u8>, Blockchai
             operation.to_bytes()
         }
         (TokenKey::MetadataUri(_), TokenValue::MetadataUri(uri)) => uri.to_bytes(),
-        (_, TokenValue::Deleted) => return Err(BlockchainError::UnsupportedOperation),
+        (_, TokenValue::Deleted) => Vec::new(),
         _ => return Err(BlockchainError::UnsupportedOperation),
     };
 
@@ -297,6 +297,9 @@ fn encode_value(key: &TokenKey, value: &TokenValue) -> Result<Vec<u8>, Blockchai
 }
 
 fn decode_value(key: &TokenKey, bytes: &[u8]) -> Result<TokenValue, BlockchainError> {
+    if bytes.is_empty() {
+        return Ok(TokenValue::Deleted);
+    }
     let mut reader = Reader::new(bytes);
     let value = match key {
         TokenKey::Asset(_) => TokenValue::Asset(ContractAssetData::read(&mut reader)?),
@@ -474,11 +477,37 @@ impl ContractAssetExtProvider for RocksStorage {
         &mut self,
         contract: &Hash,
         key: &TokenKey,
+        topoheight: TopoHeight,
     ) -> Result<(), BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "delete contract asset ext {} at topoheight {}",
+                contract,
+                topoheight
+            );
+        }
         let contract_id = self.get_contract_id(contract)?;
         let asset_id = self.get_asset_id(asset_from_key(key))?;
         let subkey = encode_subkey(key)?;
         let pointer_key = Self::build_contract_asset_ext_key(contract_id, asset_id, &subkey);
-        self.remove_from_disk(Column::ContractsAssetExt, &pointer_key)
+        let previous = self.load_optional_from_disk(Column::ContractsAssetExt, &pointer_key)?;
+        let versioned = Versioned::new(Vec::<u8>::new(), previous);
+        let versioned_key = Self::build_versioned_contract_asset_ext_key(
+            contract_id,
+            asset_id,
+            topoheight,
+            &subkey,
+        );
+
+        self.insert_into_disk(
+            Column::ContractsAssetExt,
+            &pointer_key,
+            &topoheight.to_be_bytes(),
+        )?;
+        self.insert_into_disk(
+            Column::VersionedContractsAssetExt,
+            &versioned_key,
+            &versioned,
+        )
     }
 }

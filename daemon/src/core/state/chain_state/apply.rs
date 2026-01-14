@@ -1497,7 +1497,7 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
                         TokenValue::Deleted => {
                             self.inner
                                 .storage
-                                .delete_contract_asset_ext(&contract, &key)
+                                .delete_contract_asset_ext(&contract, &key, self.inner.topoheight)
                                 .await?;
                         }
                         value => {

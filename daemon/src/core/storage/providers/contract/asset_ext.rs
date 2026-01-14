@@ -27,5 +27,6 @@ pub trait ContractAssetExtProvider {
         &mut self,
         contract: &Hash,
         key: &TokenKey,
+        topoheight: TopoHeight,
     ) -> Result<(), BlockchainError>;
 }

@@ -78,7 +78,10 @@ impl<'a> ContractTokenProvider<'a> {
                     (VersionedState::FetchedAt(topo), value.clone()),
                 );
             });
-            return Ok(Some(value));
+            return match value {
+                TokenValue::Deleted => Ok(None),
+                other => Ok(Some(other)),
+            };
         }
 
         Ok(None)
