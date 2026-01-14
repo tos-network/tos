@@ -1307,8 +1307,22 @@ impl ContractAssetProvider for ContractTokenProvider<'_> {
         delegator: &[u8; 32],
     ) -> Result<(), BlockchainError> {
         let mut delegators = self.get_contract_asset_delegators(asset, delegatee).await?;
-        if !delegators.contains(delegator) {
-            delegators.push(*delegator);
+        let was_sorted = delegators.windows(2).all(|w| w[0] <= w[1]);
+        delegators.sort_unstable();
+        match delegators.binary_search(delegator) {
+            Ok(_) => {
+                if !was_sorted {
+                    let key = TokenKey::Delegators {
+                        asset: asset.clone(),
+                        delegatee: *delegatee,
+                    };
+                    return self
+                        .set_cached_value(key, TokenValue::Delegators(delegators))
+                        .await;
+                }
+                return Ok(());
+            }
+            Err(insert_pos) => delegators.insert(insert_pos, *delegator),
         }
         let key = TokenKey::Delegators {
             asset: asset.clone(),
@@ -1325,7 +1339,25 @@ impl ContractAssetProvider for ContractTokenProvider<'_> {
         delegator: &[u8; 32],
     ) -> Result<(), BlockchainError> {
         let mut delegators = self.get_contract_asset_delegators(asset, delegatee).await?;
-        delegators.retain(|d| d != delegator);
+        let was_sorted = delegators.windows(2).all(|w| w[0] <= w[1]);
+        delegators.sort_unstable();
+        match delegators.binary_search(delegator) {
+            Ok(pos) => {
+                delegators.remove(pos);
+            }
+            Err(_) => {
+                if !was_sorted {
+                    let key = TokenKey::Delegators {
+                        asset: asset.clone(),
+                        delegatee: *delegatee,
+                    };
+                    return self
+                        .set_cached_value(key, TokenValue::Delegators(delegators))
+                        .await;
+                }
+                return Ok(());
+            }
+        }
         let key = TokenKey::Delegators {
             asset: asset.clone(),
             delegatee: *delegatee,
