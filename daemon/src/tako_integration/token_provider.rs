@@ -1309,9 +1309,14 @@ impl ContractAssetProvider for ContractTokenProvider<'_> {
         let mut delegators = self.get_contract_asset_delegators(asset, delegatee).await?;
         let was_sorted = delegators.windows(2).all(|w| w[0] <= w[1]);
         delegators.sort_unstable();
+        let had_duplicates = {
+            let original_len = delegators.len();
+            delegators.dedup();
+            delegators.len() != original_len
+        };
         match delegators.binary_search(delegator) {
             Ok(_) => {
-                if !was_sorted {
+                if !was_sorted || had_duplicates {
                     let key = TokenKey::Delegators {
                         asset: asset.clone(),
                         delegatee: *delegatee,
@@ -1341,12 +1346,17 @@ impl ContractAssetProvider for ContractTokenProvider<'_> {
         let mut delegators = self.get_contract_asset_delegators(asset, delegatee).await?;
         let was_sorted = delegators.windows(2).all(|w| w[0] <= w[1]);
         delegators.sort_unstable();
+        let had_duplicates = {
+            let original_len = delegators.len();
+            delegators.dedup();
+            delegators.len() != original_len
+        };
         match delegators.binary_search(delegator) {
             Ok(pos) => {
                 delegators.remove(pos);
             }
             Err(_) => {
-                if !was_sorted {
+                if !was_sorted || had_duplicates {
                     let key = TokenKey::Delegators {
                         asset: asset.clone(),
                         delegatee: *delegatee,
