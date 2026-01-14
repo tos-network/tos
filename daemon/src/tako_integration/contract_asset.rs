@@ -448,10 +448,6 @@ impl<'a, P: ContractAssetProvider + ?Sized> TosContractAssetAdapter<'a, P> {
     }
 
     /// Move vote power from one account to another (delta-based, O(1))
-    ///
-    /// Implements lazy initialization: if vote power is not yet tracked for an account
-    /// but the account has a balance, initialize vote power from the balance first.
-    /// This handles migration from pre-vote-tracking state gracefully.
     fn move_vote_power(
         &mut self,
         hash: &Hash,
@@ -470,19 +466,7 @@ impl<'a, P: ContractAssetProvider + ?Sized> TosContractAssetAdapter<'a, P> {
             return Ok(()); // Zero address has no votes to move
         }
 
-        // Get from votes with lazy initialization from balance if needed
-        let mut from_votes = self.get_vote_power(hash, from)?;
-        if from_votes == 0 {
-            // Vote power not yet initialized - check if account has balance
-            let balance = try_block_on(self.provider.get_contract_asset_balance(hash, from))
-                .map_err(Self::convert_error)?
-                .map_err(Self::convert_error)?;
-            if balance > 0 {
-                // Lazy init: initialize vote power from balance (migration path)
-                from_votes = balance;
-                self.set_vote_power(hash, from, balance)?;
-            }
-        }
+        let from_votes = self.get_vote_power(hash, from)?;
 
         // Subtract from source
         let new_from_votes = from_votes
@@ -490,34 +474,7 @@ impl<'a, P: ContractAssetProvider + ?Sized> TosContractAssetAdapter<'a, P> {
             .ok_or_else(|| Self::invalid_data_error("Vote power underflow: inconsistent state"))?;
         self.set_vote_power(hash, from, new_from_votes)?;
 
-        // Get to votes with lazy initialization from balance if needed
-        // IMPORTANT: Only lazy-init if the account has NOT delegated their votes.
-        // If account has delegated, their vote power being 0 is intentional (votes are at delegatee).
-        let mut to_votes = self.get_vote_power(hash, to)?;
-        if to_votes == 0 {
-            // Check if this account has delegated (vote power 0 is intentional)
-            let to_delegation = try_block_on(self.provider.get_contract_asset_delegation(hash, to))
-                .map_err(Self::convert_error)?
-                .map_err(Self::convert_error)?;
-
-            let has_delegated = match to_delegation.delegatee {
-                Some(delegatee) if delegatee != [0u8; 32] && delegatee != *to => true,
-                _ => false,
-            };
-
-            // Only lazy-init for legacy accounts that have never delegated
-            if !has_delegated {
-                let balance = try_block_on(self.provider.get_contract_asset_balance(hash, to))
-                    .map_err(Self::convert_error)?
-                    .map_err(Self::convert_error)?;
-                if balance > 0 {
-                    // Lazy init for destination (legacy migration path)
-                    to_votes = balance;
-                    self.set_vote_power(hash, to, balance)?;
-                }
-            }
-            // If has_delegated is true, to_votes stays 0 - votes will be added on top
-        }
+        let to_votes = self.get_vote_power(hash, to)?;
 
         // Add to destination
         let new_to_votes = to_votes
@@ -3359,26 +3316,7 @@ impl<'a, P: ContractAssetProvider + ?Sized> TakoContractAssetProvider
 
     fn get_admin(&self, asset: &[u8; 32]) -> Result<[u8; 32], EbpfError> {
         let data = self.get_asset_data(asset)?;
-        let hash = Self::bytes_to_hash(asset);
-
-        // If admin is set, return it
-        if data.admin != [0u8; 32] {
-            return Ok(data.admin);
-        }
-
-        // Admin is zero - distinguish between legacy and renounced:
-        // - Legacy: admin field never set, but creator has DEFAULT_ADMIN_ROLE
-        // - Renounced: admin explicitly cleared, no one has admin role
-        let admin_role = tos_common::contract_asset::DEFAULT_ADMIN_ROLE;
-        let creator_has_role = self.check_role(&hash, &admin_role, &data.creator)?;
-
-        if creator_has_role {
-            // Legacy asset: creator still has admin role, return creator for compatibility
-            Ok(data.creator)
-        } else {
-            // Admin was renounced or never assigned: return zero
-            Ok([0u8; 32])
-        }
+        Ok(data.admin)
     }
 
     // Note: get_creator() not in TakoContractAssetProvider trait.
@@ -3657,22 +3595,14 @@ impl<'a, P: ContractAssetProvider + ?Sized> TakoContractAssetProvider
         let mut data = self.get_asset_data(asset)?;
         let old_admin = data.admin;
 
-        // Determine who to revoke: data.admin if set, otherwise creator for legacy assets
-        let admin_to_revoke = if old_admin != [0u8; 32] {
-            old_admin
-        } else {
-            // Legacy asset: admin field not set, check creator
-            data.creator
-        };
-
         // Revoke old admin's role if they still have it and are different from caller
-        if admin_to_revoke != *caller {
-            let has_old_role = self.check_role(&hash, &admin_role, &admin_to_revoke)?;
+        if old_admin != [0u8; 32] && old_admin != *caller {
+            let has_old_role = self.check_role(&hash, &admin_role, &old_admin)?;
             if has_old_role {
                 try_block_on(self.provider.revoke_contract_asset_role(
                     &hash,
                     &admin_role,
-                    &admin_to_revoke,
+                    &old_admin,
                 ))
                 .map_err(Self::convert_error)?
                 .map_err(Self::convert_error)?;
@@ -3681,7 +3611,7 @@ impl<'a, P: ContractAssetProvider + ?Sized> TakoContractAssetProvider
                 let _ = try_block_on(self.provider.remove_contract_asset_role_member(
                     &hash,
                     &admin_role,
-                    &admin_to_revoke,
+                    &old_admin,
                 ));
 
                 // TOS-023: Update member_count

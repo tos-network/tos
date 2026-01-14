@@ -14,7 +14,7 @@ use tos_common::{
     serializer::Serializer,
 };
 
-const CONTRACT_ASSETS_CF: &str = "native_assets";
+const CONTRACT_ASSETS_CF: &str = "contract_assets";
 
 // ===== Atomic Batch Write Types =====
 
