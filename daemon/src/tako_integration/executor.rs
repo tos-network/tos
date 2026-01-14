@@ -552,27 +552,18 @@ impl TakoExecutor {
         let mut nft_adapter = nft_provider.map(TosNftAdapter::new);
 
         // 3c. Create contract asset adapter
-        // Default to contract-scoped token cache when no provider is supplied.
-        let mut contract_token_provider: Option<ContractTokenProvider<'_>> = None;
-        let mut contract_asset_adapter: Option<Box<dyn TakoContractAssetProvider>> =
-            match contract_asset_provider {
-                Some(provider) => Some(Box::new(TosContractAssetAdapter::new(
-                    provider,
-                    block_height,
-                ))),
-                None => {
-                    contract_token_provider = Some(ContractTokenProvider::new(
-                        provider,
-                        contract_hash,
-                        topoheight,
-                        &mut cache.tokens,
-                    ));
-                    contract_token_provider.as_mut().map(|provider| {
-                        Box::new(TosContractAssetAdapter::new(provider, block_height))
-                            as Box<dyn TakoContractAssetProvider>
-                    })
-                }
-            };
+        // Always use the contract-scoped token cache to preserve atomicity on failure.
+        let _ = contract_asset_provider;
+        let mut contract_token_provider = Some(ContractTokenProvider::new(
+            provider,
+            contract_hash,
+            topoheight,
+            &mut cache.tokens,
+        ));
+        let mut contract_asset_adapter = contract_token_provider.as_mut().map(|provider| {
+            Box::new(TosContractAssetAdapter::new(provider, block_height))
+                as Box<dyn TakoContractAssetProvider>
+        });
 
         // 4. Create TBPF loader with syscalls (needed for InvokeContext creation)
         // Note: JIT compilation is enabled via the "jit" feature in Cargo.toml
