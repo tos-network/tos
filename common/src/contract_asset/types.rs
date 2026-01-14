@@ -96,9 +96,15 @@ impl Serializer for ContractAssetData {
         let governance = reader.read()?;
         let creator = reader.read_bytes_32()?;
 
-        // Backward compatibility: admin field may not exist in old data
-        // If no more data, default admin to creator (migration path)
-        let admin = if reader.size() > 0 {
+        // Backward compatibility: detect whether the optional admin field exists.
+        // Probe the remaining bytes with a temporary reader to avoid corrupting old layouts.
+        let remaining = &reader.bytes()[reader.total_read()..];
+        let mut probe = Reader::new(remaining);
+        let has_admin = probe.read_bytes_32().is_ok()
+            && probe.read::<u64>().is_ok()
+            && Option::<String>::read(&mut probe).is_ok()
+            && probe.size() == 0;
+        let admin = if has_admin {
             reader.read_bytes_32()?
         } else {
             creator

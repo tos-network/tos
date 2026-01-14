@@ -192,6 +192,7 @@ pub enum Column {
 
     // Contract asset data: asset_hash -> ContractAssetData
     // {prefix}{asset_hash (32 bytes)} => {ContractAssetData}
+    #[strum(serialize = "native_assets")]
     ContractAssets,
 
     // ===== TNS (TOS Name Service) =====
