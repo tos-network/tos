@@ -80,7 +80,9 @@ impl Serializer for ContractAssetData {
         self.freezable.write(writer);
         self.governance.write(writer);
         writer.write_bytes(&self.creator);
+        let payload_len = 32 + 8 + self.metadata_uri.size();
         writer.write_bytes(ADMIN_FIELD_TAG);
+        writer.write_u32(&(payload_len as u32));
         writer.write_bytes(&self.admin);
         self.created_at.write(writer);
         self.metadata_uri.write(writer);
@@ -103,12 +105,26 @@ impl Serializer for ContractAssetData {
         // - New layout writes a tag before admin.
         // - Old layout writes admin without a tag.
         let remaining = reader.size();
-        let has_tag = remaining >= ADMIN_FIELD_TAG.len()
-            && reader.bytes()[reader.total_read()..reader.total_read() + ADMIN_FIELD_TAG.len()]
-                == ADMIN_FIELD_TAG[..];
+        let start = reader.total_read();
+        let has_tag = remaining >= ADMIN_FIELD_TAG.len() + 4
+            && reader.bytes()[start..start + ADMIN_FIELD_TAG.len()] == ADMIN_FIELD_TAG[..];
         let admin = if has_tag {
-            reader.read_bytes_ref(ADMIN_FIELD_TAG.len())?;
-            reader.read_bytes_32()?
+            let len_start = start + ADMIN_FIELD_TAG.len();
+            let len_end = len_start + 4;
+            let payload_len = u32::from_be_bytes(
+                reader.bytes()[len_start..len_end]
+                    .try_into()
+                    .map_err(|_| ReaderError::InvalidSize)?,
+            ) as usize;
+            if payload_len + ADMIN_FIELD_TAG.len() + 4 == remaining {
+                reader.read_bytes_ref(ADMIN_FIELD_TAG.len())?;
+                reader.read_u32()?;
+                reader.read_bytes_32()?
+            } else if remaining > 32 + 8 {
+                reader.read_bytes_32()?
+            } else {
+                creator
+            }
         } else if remaining > 32 + 8 {
             reader.read_bytes_32()?
         } else {
@@ -145,6 +161,7 @@ impl Serializer for ContractAssetData {
             + 5 // bool fields
             + 32 // creator
             + ADMIN_FIELD_TAG.len() // admin tag
+            + 4 // payload length
             + 32 // admin
             + 8 // created_at
             + self.metadata_uri.size()
