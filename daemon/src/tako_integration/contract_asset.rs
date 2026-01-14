@@ -1,7 +1,7 @@
-// Native Asset Adapter: TOS NativeAssetProvider → TAKO NativeAssetProvider
+// Contract Asset Adapter: TOS ContractAssetProvider → TAKO ContractAssetProvider
 //
-// This module bridges TOS's async NativeAssetProvider with TAKO's synchronous
-// NativeAssetProvider trait, enabling smart contracts to access native assets
+// This module bridges TOS's async ContractAssetProvider with TAKO's synchronous
+// ContractAssetProvider trait, enabling smart contracts to access contract assets
 // (ERC20-like fungible tokens) via syscalls.
 //
 // Uses `try_block_on()` pattern for async/sync conversion, following the
@@ -10,27 +10,27 @@
 use std::io;
 
 use tos_common::{
-    crypto::Hash,
-    native_asset::{
-        AgentAuthorization, Allowance, BalanceCheckpoint, Delegation, DelegationCheckpoint, Escrow,
-        EscrowStatus, FreezeState, NativeAssetData, PauseState, ReleaseCondition, RoleId,
-        SpendingLimit, SpendingPeriod, SupplyCheckpoint, TimelockOperation, TimelockStatus,
+    contract_asset::{
+        AgentAuthorization, Allowance, BalanceCheckpoint, ContractAssetData, Delegation,
+        DelegationCheckpoint, Escrow, EscrowStatus, FreezeState, PauseState, ReleaseCondition,
+        RoleId, SpendingLimit, SpendingPeriod, SupplyCheckpoint, TimelockOperation, TimelockStatus,
         TokenLock,
     },
+    crypto::Hash,
     serializer::Serializer,
     tokio::try_block_on,
 };
-// TAKO's NativeAssetProvider trait (aliased to avoid conflict with TOS's provider)
-use tos_program_runtime::storage::NativeAssetProvider as TakoNativeAssetProvider;
+// TAKO's ContractAssetProvider trait (aliased to avoid conflict with TOS's provider)
+use tos_program_runtime::storage::ContractAssetProvider as TakoContractAssetProvider;
 use tos_tbpf::error::EbpfError;
 
-// TOS's async NativeAssetProvider trait
-use crate::core::storage::NativeAssetProvider;
+// TOS's async ContractAssetProvider trait
+use crate::core::storage::ContractAssetProvider;
 
 /// Chain ID for TOS network (used for domain separator in permits)
 const TOS_CHAIN_ID: u64 = 1;
 
-/// Adapter that wraps TOS's async NativeAssetProvider to implement TAKO's NativeAssetProvider
+/// Adapter that wraps TOS's async ContractAssetProvider to implement TAKO's ContractAssetProvider
 ///
 /// # Architecture
 ///
@@ -39,9 +39,9 @@ const TOS_CHAIN_ID: u64 = 1;
 ///     ↓
 /// InvokeContext::asset_transfer()
 ///     ↓
-/// TosNativeAssetAdapter::transfer() [TakoNativeAssetProvider]
+/// TosContractAssetAdapter::transfer() [TakoContractAssetProvider]
 ///     ↓
-/// try_block_on(NativeAssetProvider methods) [async → sync]
+/// try_block_on(ContractAssetProvider methods) [async → sync]
 ///     ↓
 /// RocksDB storage operations
 /// ```
@@ -71,19 +71,19 @@ const TOS_CHAIN_ID: u64 = 1;
 /// If TOS were to add vote checkpoints after mainnet launch, a migration would be
 /// required to initialize vote power = balance for all existing accounts. Since we
 /// are deploying this feature before launch, no such migration is necessary.
-pub struct TosNativeAssetAdapter<'a, P: NativeAssetProvider + ?Sized> {
-    /// TOS native asset storage provider (mutable for write operations)
+pub struct TosContractAssetAdapter<'a, P: ContractAssetProvider + ?Sized> {
+    /// TOS contract asset storage provider (mutable for write operations)
     provider: &'a mut P,
     /// Current block height for timestamp-based operations
     block_height: u64,
 }
 
-impl<'a, P: NativeAssetProvider + ?Sized> TosNativeAssetAdapter<'a, P> {
-    /// Create a new native asset adapter
+impl<'a, P: ContractAssetProvider + ?Sized> TosContractAssetAdapter<'a, P> {
+    /// Create a new contract asset adapter
     ///
     /// # Arguments
     ///
-    /// * `provider` - TOS native asset storage provider
+    /// * `provider` - TOS contract asset storage provider
     /// * `block_height` - Current block height for timestamp operations
     pub fn new(provider: &'a mut P, block_height: u64) -> Self {
         Self {
@@ -106,7 +106,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TosNativeAssetAdapter<'a, P> {
     fn convert_error<E: std::fmt::Display>(err: E) -> EbpfError {
         EbpfError::SyscallError(Box::new(io::Error::new(
             io::ErrorKind::Other,
-            format!("Native asset error: {}", err),
+            format!("Contract asset error: {}", err),
         )))
     }
 
@@ -329,9 +329,9 @@ impl<'a, P: NativeAssetProvider + ?Sized> TosNativeAssetAdapter<'a, P> {
     }
 
     /// Get asset or return error if not found
-    fn get_asset_data(&self, asset: &[u8; 32]) -> Result<NativeAssetData, EbpfError> {
+    fn get_asset_data(&self, asset: &[u8; 32]) -> Result<ContractAssetData, EbpfError> {
         let hash = Self::bytes_to_hash(asset);
-        try_block_on(self.provider.get_native_asset(&hash))
+        try_block_on(self.provider.get_contract_asset(&hash))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)
     }
@@ -343,7 +343,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TosNativeAssetAdapter<'a, P> {
         role: &RoleId,
         caller: &[u8; 32],
     ) -> Result<bool, EbpfError> {
-        try_block_on(self.provider.has_native_asset_role(asset, role, caller))
+        try_block_on(self.provider.has_contract_asset_role(asset, role, caller))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)
     }
@@ -362,12 +362,12 @@ impl<'a, P: NativeAssetProvider + ?Sized> TosNativeAssetAdapter<'a, P> {
 
         let count = try_block_on(
             self.provider
-                .get_native_asset_balance_checkpoint_count(hash, account),
+                .get_contract_asset_balance_checkpoint_count(hash, account),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
 
-        try_block_on(self.provider.set_native_asset_balance_checkpoint(
+        try_block_on(self.provider.set_contract_asset_balance_checkpoint(
             hash,
             account,
             count,
@@ -382,7 +382,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TosNativeAssetAdapter<'a, P> {
             .ok_or_else(|| Self::invalid_data_error("Balance checkpoint count overflow"))?;
         try_block_on(
             self.provider
-                .set_native_asset_balance_checkpoint_count(hash, account, new_count),
+                .set_contract_asset_balance_checkpoint_count(hash, account, new_count),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)
@@ -395,13 +395,16 @@ impl<'a, P: NativeAssetProvider + ?Sized> TosNativeAssetAdapter<'a, P> {
             supply,
         };
 
-        let count = try_block_on(self.provider.get_native_asset_supply_checkpoint_count(hash))
-            .map_err(Self::convert_error)?
-            .map_err(Self::convert_error)?;
+        let count = try_block_on(
+            self.provider
+                .get_contract_asset_supply_checkpoint_count(hash),
+        )
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)?;
 
         try_block_on(
             self.provider
-                .set_native_asset_supply_checkpoint(hash, count, &checkpoint),
+                .set_contract_asset_supply_checkpoint(hash, count, &checkpoint),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
@@ -412,7 +415,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TosNativeAssetAdapter<'a, P> {
             .ok_or_else(|| Self::invalid_data_error("Supply checkpoint count overflow"))?;
         try_block_on(
             self.provider
-                .set_native_asset_supply_checkpoint_count(hash, new_count),
+                .set_contract_asset_supply_checkpoint_count(hash, new_count),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)
@@ -424,7 +427,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TosNativeAssetAdapter<'a, P> {
 
     /// Get stored vote power for an account (O(1) - no recalculation)
     fn get_vote_power(&self, hash: &Hash, account: &[u8; 32]) -> Result<u64, EbpfError> {
-        try_block_on(self.provider.get_native_asset_vote_power(hash, account))
+        try_block_on(self.provider.get_contract_asset_vote_power(hash, account))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)
     }
@@ -438,7 +441,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TosNativeAssetAdapter<'a, P> {
     ) -> Result<(), EbpfError> {
         try_block_on(
             self.provider
-                .set_native_asset_vote_power(hash, account, votes),
+                .set_contract_asset_vote_power(hash, account, votes),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)
@@ -471,7 +474,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TosNativeAssetAdapter<'a, P> {
         let mut from_votes = self.get_vote_power(hash, from)?;
         if from_votes == 0 {
             // Vote power not yet initialized - check if account has balance
-            let balance = try_block_on(self.provider.get_native_asset_balance(hash, from))
+            let balance = try_block_on(self.provider.get_contract_asset_balance(hash, from))
                 .map_err(Self::convert_error)?
                 .map_err(Self::convert_error)?;
             if balance > 0 {
@@ -493,7 +496,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TosNativeAssetAdapter<'a, P> {
         let mut to_votes = self.get_vote_power(hash, to)?;
         if to_votes == 0 {
             // Check if this account has delegated (vote power 0 is intentional)
-            let to_delegation = try_block_on(self.provider.get_native_asset_delegation(hash, to))
+            let to_delegation = try_block_on(self.provider.get_contract_asset_delegation(hash, to))
                 .map_err(Self::convert_error)?
                 .map_err(Self::convert_error)?;
 
@@ -504,7 +507,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TosNativeAssetAdapter<'a, P> {
 
             // Only lazy-init for legacy accounts that have never delegated
             if !has_delegated {
-                let balance = try_block_on(self.provider.get_native_asset_balance(hash, to))
+                let balance = try_block_on(self.provider.get_contract_asset_balance(hash, to))
                     .map_err(Self::convert_error)?
                     .map_err(Self::convert_error)?;
                 if balance > 0 {
@@ -531,7 +534,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TosNativeAssetAdapter<'a, P> {
         hash: &Hash,
         account: &[u8; 32],
     ) -> Result<[u8; 32], EbpfError> {
-        let delegation = try_block_on(self.provider.get_native_asset_delegation(hash, account))
+        let delegation = try_block_on(self.provider.get_contract_asset_delegation(hash, account))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
 
@@ -554,19 +557,19 @@ impl<'a, P: NativeAssetProvider + ?Sized> TosNativeAssetAdapter<'a, P> {
 
         let count = try_block_on(
             self.provider
-                .get_native_asset_checkpoint_count(hash, account),
+                .get_contract_asset_checkpoint_count(hash, account),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
 
-        use tos_common::native_asset::Checkpoint;
+        use tos_common::contract_asset::Checkpoint;
 
         // Same-block checkpoint overwrite: check if last checkpoint is from current block
         if count > 0 {
             let last_idx = count.saturating_sub(1);
             let last_checkpoint = try_block_on(
                 self.provider
-                    .get_native_asset_checkpoint(hash, account, last_idx),
+                    .get_contract_asset_checkpoint(hash, account, last_idx),
             )
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
@@ -577,7 +580,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TosNativeAssetAdapter<'a, P> {
                     from_block: self.block_height,
                     votes,
                 };
-                try_block_on(self.provider.set_native_asset_checkpoint(
+                try_block_on(self.provider.set_contract_asset_checkpoint(
                     hash,
                     account,
                     last_idx,
@@ -595,10 +598,12 @@ impl<'a, P: NativeAssetProvider + ?Sized> TosNativeAssetAdapter<'a, P> {
             votes,
         };
 
-        try_block_on(
-            self.provider
-                .set_native_asset_checkpoint(hash, account, count, &checkpoint),
-        )
+        try_block_on(self.provider.set_contract_asset_checkpoint(
+            hash,
+            account,
+            count,
+            &checkpoint,
+        ))
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
 
@@ -607,7 +612,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TosNativeAssetAdapter<'a, P> {
             .ok_or_else(|| Self::invalid_data_error("Vote checkpoint count overflow"))?;
         try_block_on(
             self.provider
-                .set_native_asset_checkpoint_count(hash, account, new_count),
+                .set_contract_asset_checkpoint_count(hash, account, new_count),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)
@@ -688,7 +693,9 @@ impl<'a, P: NativeAssetProvider + ?Sized> TosNativeAssetAdapter<'a, P> {
     }
 }
 
-impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeAssetAdapter<'a, P> {
+impl<'a, P: ContractAssetProvider + ?Sized> TakoContractAssetProvider
+    for TosContractAssetAdapter<'a, P>
+{
     // ========================================
     // Asset Creation (Phase 1)
     // ========================================
@@ -713,7 +720,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         let asset_id = tos_common::crypto::hash(&hasher_input);
 
         // Check if asset already exists to prevent overwriting
-        if try_block_on(self.provider.get_native_asset(&asset_id))
+        if try_block_on(self.provider.get_contract_asset(&asset_id))
             .map_err(Self::convert_error)?
             .is_ok()
         {
@@ -734,7 +741,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
             )
         };
 
-        let data = NativeAssetData {
+        let data = ContractAssetData {
             name: name_str,
             symbol: symbol_str,
             decimals,
@@ -751,13 +758,13 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
             created_at: self.block_height,
         };
 
-        try_block_on(self.provider.set_native_asset(&asset_id, &data))
+        try_block_on(self.provider.set_contract_asset(&asset_id, &data))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
 
         // Grant DEFAULT_ADMIN_ROLE to creator
-        let admin_role = tos_common::native_asset::DEFAULT_ADMIN_ROLE;
-        try_block_on(self.provider.grant_native_asset_role(
+        let admin_role = tos_common::contract_asset::DEFAULT_ADMIN_ROLE;
+        try_block_on(self.provider.grant_contract_asset_role(
             &asset_id,
             &admin_role,
             creator,
@@ -769,17 +776,17 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         // TOS-023: Add to role member index
         try_block_on(
             self.provider
-                .add_native_asset_role_member(&asset_id, &admin_role, creator),
+                .add_contract_asset_role_member(&asset_id, &admin_role, creator),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
 
         // TOS-023: Initialize role config with member_count = 1
-        let role_config = tos_common::native_asset::RoleConfig {
-            admin_role: tos_common::native_asset::DEFAULT_ADMIN_ROLE,
+        let role_config = tos_common::contract_asset::RoleConfig {
+            admin_role: tos_common::contract_asset::DEFAULT_ADMIN_ROLE,
             member_count: 1,
         };
-        try_block_on(self.provider.set_native_asset_role_config(
+        try_block_on(self.provider.set_contract_asset_role_config(
             &asset_id,
             &admin_role,
             &role_config,
@@ -796,21 +803,21 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
 
     fn asset_exists(&self, asset: &[u8; 32]) -> Result<bool, EbpfError> {
         let hash = Self::bytes_to_hash(asset);
-        try_block_on(self.provider.has_native_asset(&hash))
+        try_block_on(self.provider.has_contract_asset(&hash))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)
     }
 
     fn balance_of(&self, asset: &[u8; 32], account: &[u8; 32]) -> Result<u64, EbpfError> {
         let hash = Self::bytes_to_hash(asset);
-        try_block_on(self.provider.get_native_asset_balance(&hash, account))
+        try_block_on(self.provider.get_contract_asset_balance(&hash, account))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)
     }
 
     fn total_supply(&self, asset: &[u8; 32]) -> Result<u64, EbpfError> {
         let hash = Self::bytes_to_hash(asset);
-        try_block_on(self.provider.get_native_asset_supply(&hash))
+        try_block_on(self.provider.get_contract_asset_supply(&hash))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)
     }
@@ -832,7 +839,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
 
     fn metadata_uri(&self, asset: &[u8; 32]) -> Result<Option<String>, EbpfError> {
         let hash = Self::bytes_to_hash(asset);
-        try_block_on(self.provider.get_native_asset_metadata_uri(&hash))
+        try_block_on(self.provider.get_contract_asset_metadata_uri(&hash))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)
     }
@@ -843,7 +850,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
 
     fn is_paused(&self, asset: &[u8; 32]) -> Result<bool, EbpfError> {
         let hash = Self::bytes_to_hash(asset);
-        let state = try_block_on(self.provider.get_native_asset_pause_state(&hash))
+        let state = try_block_on(self.provider.get_contract_asset_pause_state(&hash))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
         Ok(state.is_paused)
@@ -851,9 +858,12 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
 
     fn is_frozen(&self, asset: &[u8; 32], account: &[u8; 32]) -> Result<bool, EbpfError> {
         let hash = Self::bytes_to_hash(asset);
-        let state = try_block_on(self.provider.get_native_asset_freeze_state(&hash, account))
-            .map_err(Self::convert_error)?
-            .map_err(Self::convert_error)?;
+        let state = try_block_on(
+            self.provider
+                .get_contract_asset_freeze_state(&hash, account),
+        )
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)?;
         Ok(state.is_frozen)
     }
 
@@ -921,14 +931,14 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         // Phase 3: Update balances and checkpoints
         try_block_on(
             self.provider
-                .set_native_asset_balance(&hash, from, new_from),
+                .set_contract_asset_balance(&hash, from, new_from),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
 
         self.write_balance_checkpoint(&hash, from, new_from)?;
 
-        try_block_on(self.provider.set_native_asset_balance(&hash, to, new_to))
+        try_block_on(self.provider.set_contract_asset_balance(&hash, to, new_to))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
 
@@ -959,7 +969,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         let hash = Self::bytes_to_hash(asset);
 
         // Check if caller has MINTER role
-        let minter_role = tos_common::native_asset::MINTER_ROLE;
+        let minter_role = tos_common::contract_asset::MINTER_ROLE;
         if !self.check_role(&hash, &minter_role, caller)? {
             return Err(Self::permission_denied_error("Caller is not a minter"));
         }
@@ -988,14 +998,14 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         // Phase 3: Update balances and supply
         try_block_on(
             self.provider
-                .set_native_asset_balance(&hash, to, new_balance),
+                .set_contract_asset_balance(&hash, to, new_balance),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
 
         self.write_balance_checkpoint(&hash, to, new_balance)?;
 
-        try_block_on(self.provider.set_native_asset_supply(&hash, new_supply))
+        try_block_on(self.provider.set_contract_asset_supply(&hash, new_supply))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
 
@@ -1019,7 +1029,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         let hash = Self::bytes_to_hash(asset);
 
         // Check if caller has BURNER role or is the owner
-        let burner_role = tos_common::native_asset::BURNER_ROLE;
+        let burner_role = tos_common::contract_asset::BURNER_ROLE;
         let is_burner = self.check_role(&hash, &burner_role, caller)?;
         let is_owner = from == caller;
 
@@ -1050,14 +1060,14 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         // Phase 3: Update balances and supply
         try_block_on(
             self.provider
-                .set_native_asset_balance(&hash, from, new_balance),
+                .set_contract_asset_balance(&hash, from, new_balance),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
 
         self.write_balance_checkpoint(&hash, from, new_balance)?;
 
-        try_block_on(self.provider.set_native_asset_supply(&hash, new_supply))
+        try_block_on(self.provider.set_contract_asset_supply(&hash, new_supply))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
 
@@ -1094,7 +1104,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         // Phase 3: Update balance
         try_block_on(
             self.provider
-                .set_native_asset_balance(&hash, account, new_balance),
+                .set_contract_asset_balance(&hash, account, new_balance),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
@@ -1129,7 +1139,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         // Phase 3: Update balance
         try_block_on(
             self.provider
-                .set_native_asset_balance(&hash, account, new_balance),
+                .set_contract_asset_balance(&hash, account, new_balance),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
@@ -1163,7 +1173,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
             // Revoke approval
             try_block_on(
                 self.provider
-                    .delete_native_asset_allowance(&hash, owner, spender),
+                    .delete_contract_asset_allowance(&hash, owner, spender),
             )
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
@@ -1174,7 +1184,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
             };
             try_block_on(
                 self.provider
-                    .set_native_asset_allowance(&hash, owner, spender, &allowance),
+                    .set_contract_asset_allowance(&hash, owner, spender, &allowance),
             )
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
@@ -1192,7 +1202,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         let hash = Self::bytes_to_hash(asset);
         let allowance = try_block_on(
             self.provider
-                .get_native_asset_allowance(&hash, owner, spender),
+                .get_contract_asset_allowance(&hash, owner, spender),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
@@ -1224,7 +1234,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
             if new_allowance == 0 {
                 try_block_on(
                     self.provider
-                        .delete_native_asset_allowance(&hash, from, spender),
+                        .delete_contract_asset_allowance(&hash, from, spender),
                 )
                 .map_err(Self::convert_error)?
                 .map_err(Self::convert_error)?;
@@ -1235,7 +1245,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
                 };
                 try_block_on(
                     self.provider
-                        .set_native_asset_allowance(&hash, from, spender, &allowance),
+                        .set_contract_asset_allowance(&hash, from, spender, &allowance),
                 )
                 .map_err(Self::convert_error)?
                 .map_err(Self::convert_error)?;
@@ -1296,7 +1306,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         if new_delegatee != *delegator {
             let delegatee_delegation = try_block_on(
                 self.provider
-                    .get_native_asset_delegation(&hash, &new_delegatee),
+                    .get_contract_asset_delegation(&hash, &new_delegatee),
             )
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
@@ -1314,10 +1324,12 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         // (they can only revoke their delegation by delegating to themselves)
         // This prevents: A→B, then B→C which would strand A's votes at B
         if new_delegatee != *delegator {
-            let incoming_delegators =
-                try_block_on(self.provider.get_native_asset_delegators(&hash, delegator))
-                    .map_err(Self::convert_error)?
-                    .map_err(Self::convert_error)?;
+            let incoming_delegators = try_block_on(
+                self.provider
+                    .get_contract_asset_delegators(&hash, delegator),
+            )
+            .map_err(Self::convert_error)?
+            .map_err(Self::convert_error)?;
 
             if !incoming_delegators.is_empty() {
                 return Err(Self::invalid_data_error(
@@ -1332,7 +1344,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         // Pre-calculate checkpoint count
         let count = try_block_on(
             self.provider
-                .get_native_asset_delegation_checkpoint_count(&hash, delegator),
+                .get_contract_asset_delegation_checkpoint_count(&hash, delegator),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
@@ -1355,7 +1367,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         };
         try_block_on(
             self.provider
-                .set_native_asset_delegation(&hash, delegator, &delegation),
+                .set_contract_asset_delegation(&hash, delegator, &delegation),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
@@ -1366,7 +1378,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
             delegatee: *delegatee,
         };
 
-        try_block_on(self.provider.set_native_asset_delegation_checkpoint(
+        try_block_on(self.provider.set_contract_asset_delegation_checkpoint(
             &hash,
             delegator,
             count,
@@ -1377,7 +1389,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
 
         try_block_on(
             self.provider
-                .set_native_asset_delegation_checkpoint_count(&hash, delegator, new_count),
+                .set_contract_asset_delegation_checkpoint_count(&hash, delegator, new_count),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
@@ -1385,7 +1397,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         // Phase 4: Update reverse delegation index
         // Remove from old delegatee's delegators list (if not self-delegation)
         if old_delegatee != *delegator {
-            try_block_on(self.provider.remove_native_asset_delegator(
+            try_block_on(self.provider.remove_contract_asset_delegator(
                 &hash,
                 &old_delegatee,
                 delegator,
@@ -1395,7 +1407,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         }
         // Add to new delegatee's delegators list (if not self-delegation)
         if new_delegatee != *delegator {
-            try_block_on(self.provider.add_native_asset_delegator(
+            try_block_on(self.provider.add_contract_asset_delegator(
                 &hash,
                 &new_delegatee,
                 delegator,
@@ -1409,7 +1421,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
 
     fn get_delegate(&self, asset: &[u8; 32], account: &[u8; 32]) -> Result<[u8; 32], EbpfError> {
         let hash = Self::bytes_to_hash(asset);
-        let delegation = try_block_on(self.provider.get_native_asset_delegation(&hash, account))
+        let delegation = try_block_on(self.provider.get_contract_asset_delegation(&hash, account))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
         // Return delegatee or zero address if no delegation
@@ -1420,7 +1432,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         let hash = Self::bytes_to_hash(asset);
         let count = try_block_on(
             self.provider
-                .get_native_asset_checkpoint_count(&hash, account),
+                .get_contract_asset_checkpoint_count(&hash, account),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
@@ -1429,7 +1441,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
             return Ok(0);
         }
 
-        let checkpoint = try_block_on(self.provider.get_native_asset_checkpoint(
+        let checkpoint = try_block_on(self.provider.get_contract_asset_checkpoint(
             &hash,
             account,
             count - 1,
@@ -1448,7 +1460,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         let hash = Self::bytes_to_hash(asset);
         let count = try_block_on(
             self.provider
-                .get_native_asset_checkpoint_count(&hash, account),
+                .get_contract_asset_checkpoint_count(&hash, account),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
@@ -1465,7 +1477,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
             let mid = low + (high - low) / 2; // Avoid overflow
             let checkpoint = try_block_on(
                 self.provider
-                    .get_native_asset_checkpoint(&hash, account, mid),
+                    .get_contract_asset_checkpoint(&hash, account, mid),
             )
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
@@ -1481,7 +1493,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
             return Ok(0);
         }
 
-        let checkpoint = try_block_on(self.provider.get_native_asset_checkpoint(
+        let checkpoint = try_block_on(self.provider.get_contract_asset_checkpoint(
             &hash,
             account,
             low - 1,
@@ -1495,7 +1507,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         let hash = Self::bytes_to_hash(asset);
         let count = try_block_on(
             self.provider
-                .get_native_asset_supply_checkpoint_count(&hash),
+                .get_contract_asset_supply_checkpoint_count(&hash),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
@@ -1511,10 +1523,12 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
 
         while low < high {
             let mid = low + (high - low) / 2; // Avoid overflow
-            let checkpoint =
-                try_block_on(self.provider.get_native_asset_supply_checkpoint(&hash, mid))
-                    .map_err(Self::convert_error)?
-                    .map_err(Self::convert_error)?;
+            let checkpoint = try_block_on(
+                self.provider
+                    .get_contract_asset_supply_checkpoint(&hash, mid),
+            )
+            .map_err(Self::convert_error)?
+            .map_err(Self::convert_error)?;
 
             if checkpoint.from_block <= timepoint {
                 low = mid + 1;
@@ -1531,7 +1545,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         // Get the checkpoint at low - 1 (the last one at or before timepoint)
         let checkpoint = try_block_on(
             self.provider
-                .get_native_asset_supply_checkpoint(&hash, low - 1),
+                .get_contract_asset_supply_checkpoint(&hash, low - 1),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
@@ -1543,7 +1557,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         let hash = Self::bytes_to_hash(asset);
         let count = try_block_on(
             self.provider
-                .get_native_asset_checkpoint_count(&hash, account),
+                .get_contract_asset_checkpoint_count(&hash, account),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
@@ -1559,7 +1573,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         let hash = Self::bytes_to_hash(asset);
         let count = try_block_on(
             self.provider
-                .get_native_asset_checkpoint_count(&hash, account),
+                .get_contract_asset_checkpoint_count(&hash, account),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
@@ -1568,7 +1582,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
             return Err(Self::not_found_error("Checkpoint index out of bounds"));
         }
 
-        let checkpoint = try_block_on(self.provider.get_native_asset_checkpoint(
+        let checkpoint = try_block_on(self.provider.get_contract_asset_checkpoint(
             &hash,
             account,
             index as u32,
@@ -1611,9 +1625,12 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         }
 
         // Get next lock ID
-        let lock_id = try_block_on(self.provider.get_native_asset_next_lock_id(&hash, account))
-            .map_err(Self::convert_error)?
-            .map_err(Self::convert_error)?;
+        let lock_id = try_block_on(
+            self.provider
+                .get_contract_asset_next_lock_id(&hash, account),
+        )
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)?;
 
         // Create lock
         let token_lock = TokenLock {
@@ -1626,7 +1643,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         };
         try_block_on(
             self.provider
-                .set_native_asset_lock(&hash, account, &token_lock),
+                .set_contract_asset_lock(&hash, account, &token_lock),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
@@ -1637,13 +1654,13 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
             .ok_or_else(|| Self::invalid_data_error("Lock ID overflow"))?;
         try_block_on(
             self.provider
-                .set_native_asset_next_lock_id(&hash, account, next_lock_id),
+                .set_contract_asset_next_lock_id(&hash, account, next_lock_id),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
 
         // Update lock count
-        let count = try_block_on(self.provider.get_native_asset_lock_count(&hash, account))
+        let count = try_block_on(self.provider.get_contract_asset_lock_count(&hash, account))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
         // ISSUE-TOS-005 FIX: Use checked arithmetic for lock count
@@ -1652,7 +1669,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
             .ok_or_else(|| Self::invalid_data_error("Lock count overflow"))?;
         try_block_on(
             self.provider
-                .set_native_asset_lock_count(&hash, account, new_count),
+                .set_contract_asset_lock_count(&hash, account, new_count),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
@@ -1660,7 +1677,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         // Add to lock index
         try_block_on(
             self.provider
-                .add_native_asset_lock_id(&hash, account, lock_id),
+                .add_contract_asset_lock_id(&hash, account, lock_id),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
@@ -1668,7 +1685,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         // Update locked balance
         let locked = try_block_on(
             self.provider
-                .get_native_asset_locked_balance(&hash, account),
+                .get_contract_asset_locked_balance(&hash, account),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
@@ -1678,7 +1695,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
             .ok_or_else(|| Self::invalid_data_error("Locked balance overflow"))?;
         try_block_on(
             self.provider
-                .set_native_asset_locked_balance(&hash, account, new_locked),
+                .set_contract_asset_locked_balance(&hash, account, new_locked),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
@@ -1700,9 +1717,12 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         let hash = Self::bytes_to_hash(asset);
 
         // Get lock
-        let token_lock = try_block_on(self.provider.get_native_asset_lock(&hash, account, lock_id))
-            .map_err(Self::convert_error)?
-            .map_err(Self::convert_error)?;
+        let token_lock = try_block_on(
+            self.provider
+                .get_contract_asset_lock(&hash, account, lock_id),
+        )
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)?;
 
         // Check if unlockable
         if self.block_height < token_lock.unlock_at {
@@ -1714,13 +1734,13 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         // Delete lock
         try_block_on(
             self.provider
-                .delete_native_asset_lock(&hash, account, lock_id),
+                .delete_contract_asset_lock(&hash, account, lock_id),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
 
         // Update lock count using checked arithmetic to catch invariant violations
-        let count = try_block_on(self.provider.get_native_asset_lock_count(&hash, account))
+        let count = try_block_on(self.provider.get_contract_asset_lock_count(&hash, account))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
         let new_count = count
@@ -1728,7 +1748,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
             .ok_or_else(|| Self::invalid_data_error("Lock count underflow in unlock"))?;
         try_block_on(
             self.provider
-                .set_native_asset_lock_count(&hash, account, new_count),
+                .set_contract_asset_lock_count(&hash, account, new_count),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
@@ -1736,7 +1756,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         // Remove from lock index
         try_block_on(
             self.provider
-                .remove_native_asset_lock_id(&hash, account, lock_id),
+                .remove_contract_asset_lock_id(&hash, account, lock_id),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
@@ -1744,7 +1764,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         // Update locked balance using checked arithmetic
         let locked = try_block_on(
             self.provider
-                .get_native_asset_locked_balance(&hash, account),
+                .get_contract_asset_locked_balance(&hash, account),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
@@ -1753,7 +1773,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
             .ok_or_else(|| Self::invalid_data_error("Locked balance underflow in unlock"))?;
         try_block_on(
             self.provider
-                .set_native_asset_locked_balance(&hash, account, new_locked),
+                .set_contract_asset_locked_balance(&hash, account, new_locked),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
@@ -1768,9 +1788,12 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         lock_id: u64,
     ) -> Result<(u64, u64, bool, [u8; 32], u64), EbpfError> {
         let hash = Self::bytes_to_hash(asset);
-        let token_lock = try_block_on(self.provider.get_native_asset_lock(&hash, account, lock_id))
-            .map_err(Self::convert_error)?
-            .map_err(Self::convert_error)?;
+        let token_lock = try_block_on(
+            self.provider
+                .get_contract_asset_lock(&hash, account, lock_id),
+        )
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)?;
         Ok((
             token_lock.amount,
             token_lock.unlock_at,
@@ -1788,7 +1811,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         limit: u64,
     ) -> Result<Vec<u64>, EbpfError> {
         let hash = Self::bytes_to_hash(asset);
-        let all_locks = try_block_on(self.provider.get_native_asset_lock_ids(&hash, account))
+        let all_locks = try_block_on(self.provider.get_contract_asset_lock_ids(&hash, account))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
 
@@ -1805,7 +1828,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         let hash = Self::bytes_to_hash(asset);
         try_block_on(
             self.provider
-                .get_native_asset_locked_balance(&hash, account),
+                .get_contract_asset_locked_balance(&hash, account),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)
@@ -1837,10 +1860,12 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
 
         let hash = Self::bytes_to_hash(asset);
 
-        let mut token_lock =
-            try_block_on(self.provider.get_native_asset_lock(&hash, account, lock_id))
-                .map_err(Self::convert_error)?
-                .map_err(Self::convert_error)?;
+        let mut token_lock = try_block_on(
+            self.provider
+                .get_contract_asset_lock(&hash, account, lock_id),
+        )
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)?;
 
         if new_unlock_at <= token_lock.unlock_at {
             return Err(Self::invalid_data_error("New unlock time must be greater"));
@@ -1849,7 +1874,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         token_lock.unlock_at = new_unlock_at;
         try_block_on(
             self.provider
-                .set_native_asset_lock(&hash, account, &token_lock),
+                .set_contract_asset_lock(&hash, account, &token_lock),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)
@@ -1871,10 +1896,12 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
 
         let hash = Self::bytes_to_hash(asset);
 
-        let mut token_lock =
-            try_block_on(self.provider.get_native_asset_lock(&hash, account, lock_id))
-                .map_err(Self::convert_error)?
-                .map_err(Self::convert_error)?;
+        let mut token_lock = try_block_on(
+            self.provider
+                .get_contract_asset_lock(&hash, account, lock_id),
+        )
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)?;
 
         if split_amount >= token_lock.amount {
             return Err(Self::invalid_data_error(
@@ -1889,15 +1916,18 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
             .ok_or_else(|| Self::invalid_data_error("Lock amount underflow"))?;
         try_block_on(
             self.provider
-                .set_native_asset_lock(&hash, account, &token_lock),
+                .set_contract_asset_lock(&hash, account, &token_lock),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
 
         // Create new lock
-        let new_lock_id = try_block_on(self.provider.get_native_asset_next_lock_id(&hash, account))
-            .map_err(Self::convert_error)?
-            .map_err(Self::convert_error)?;
+        let new_lock_id = try_block_on(
+            self.provider
+                .get_contract_asset_next_lock_id(&hash, account),
+        )
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)?;
 
         let new_lock = TokenLock {
             id: new_lock_id,
@@ -1909,7 +1939,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         };
         try_block_on(
             self.provider
-                .set_native_asset_lock(&hash, account, &new_lock),
+                .set_contract_asset_lock(&hash, account, &new_lock),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
@@ -1920,12 +1950,12 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
             .ok_or_else(|| Self::invalid_data_error("Lock ID overflow"))?;
         try_block_on(
             self.provider
-                .set_native_asset_next_lock_id(&hash, account, next_lock_id),
+                .set_contract_asset_next_lock_id(&hash, account, next_lock_id),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
 
-        let count = try_block_on(self.provider.get_native_asset_lock_count(&hash, account))
+        let count = try_block_on(self.provider.get_contract_asset_lock_count(&hash, account))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
         // Use checked arithmetic for lock count
@@ -1934,7 +1964,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
             .ok_or_else(|| Self::invalid_data_error("Lock count overflow"))?;
         try_block_on(
             self.provider
-                .set_native_asset_lock_count(&hash, account, new_count),
+                .set_contract_asset_lock_count(&hash, account, new_count),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
@@ -1942,7 +1972,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         // TOS-024: Add new lock ID to index
         try_block_on(
             self.provider
-                .add_native_asset_lock_id(&hash, account, new_lock_id),
+                .add_contract_asset_lock_id(&hash, account, new_lock_id),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
@@ -1970,7 +2000,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         let hash = Self::bytes_to_hash(asset);
 
         // Get first lock for reference
-        let first_lock = try_block_on(self.provider.get_native_asset_lock(
+        let first_lock = try_block_on(self.provider.get_contract_asset_lock(
             &hash,
             account,
             lock_ids[0],
@@ -1982,9 +2012,12 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
 
         // Verify all locks have same unlock_at and accumulate amounts using checked arithmetic
         for &lock_id in &lock_ids[1..] {
-            let lock = try_block_on(self.provider.get_native_asset_lock(&hash, account, lock_id))
-                .map_err(Self::convert_error)?
-                .map_err(Self::convert_error)?;
+            let lock = try_block_on(
+                self.provider
+                    .get_contract_asset_lock(&hash, account, lock_id),
+            )
+            .map_err(Self::convert_error)?
+            .map_err(Self::convert_error)?;
 
             if lock.unlock_at != first_lock.unlock_at {
                 return Err(Self::invalid_data_error(
@@ -2000,7 +2033,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         for &lock_id in lock_ids {
             try_block_on(
                 self.provider
-                    .delete_native_asset_lock(&hash, account, lock_id),
+                    .delete_contract_asset_lock(&hash, account, lock_id),
             )
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
@@ -2008,14 +2041,17 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
             // TOS-024: Remove old lock ID from index
             let _ = try_block_on(
                 self.provider
-                    .remove_native_asset_lock_id(&hash, account, lock_id),
+                    .remove_contract_asset_lock_id(&hash, account, lock_id),
             );
         }
 
         // Create merged lock
-        let new_lock_id = try_block_on(self.provider.get_native_asset_next_lock_id(&hash, account))
-            .map_err(Self::convert_error)?
-            .map_err(Self::convert_error)?;
+        let new_lock_id = try_block_on(
+            self.provider
+                .get_contract_asset_next_lock_id(&hash, account),
+        )
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)?;
 
         let new_lock = TokenLock {
             id: new_lock_id,
@@ -2027,7 +2063,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         };
         try_block_on(
             self.provider
-                .set_native_asset_lock(&hash, account, &new_lock),
+                .set_contract_asset_lock(&hash, account, &new_lock),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
@@ -2038,14 +2074,14 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
             .ok_or_else(|| Self::invalid_data_error("Lock ID overflow"))?;
         try_block_on(
             self.provider
-                .set_native_asset_next_lock_id(&hash, account, next_lock_id),
+                .set_contract_asset_next_lock_id(&hash, account, next_lock_id),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
 
         // Update lock count (reduce by merged count - 1)
         // Use checked arithmetic to catch invariant violations
-        let count = try_block_on(self.provider.get_native_asset_lock_count(&hash, account))
+        let count = try_block_on(self.provider.get_contract_asset_lock_count(&hash, account))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
         let reduce_by = (lock_ids.len() as u32)
@@ -2056,7 +2092,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
             .ok_or_else(|| Self::invalid_data_error("Lock count underflow"))?;
         try_block_on(
             self.provider
-                .set_native_asset_lock_count(&hash, account, new_count),
+                .set_contract_asset_lock_count(&hash, account, new_count),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
@@ -2064,7 +2100,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         // TOS-024: Add new lock ID to index
         try_block_on(
             self.provider
-                .add_native_asset_lock_id(&hash, account, new_lock_id),
+                .add_contract_asset_lock_id(&hash, account, new_lock_id),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
@@ -2074,7 +2110,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
 
     fn lock_count(&self, asset: &[u8; 32], account: &[u8; 32]) -> Result<u64, EbpfError> {
         let hash = Self::bytes_to_hash(asset);
-        let count = try_block_on(self.provider.get_native_asset_lock_count(&hash, account))
+        let count = try_block_on(self.provider.get_contract_asset_lock_count(&hash, account))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
         Ok(count as u64)
@@ -2102,7 +2138,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
 
         let hash = Self::bytes_to_hash(asset);
 
-        let token_lock = try_block_on(self.provider.get_native_asset_lock(&hash, from, lock_id))
+        let token_lock = try_block_on(self.provider.get_contract_asset_lock(&hash, from, lock_id))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
 
@@ -2139,14 +2175,14 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
             .ok_or_else(|| Self::invalid_data_error("Recipient balance overflow"))?;
 
         // Also pre-validate lock count and locked balance for recipient
-        let to_locked = try_block_on(self.provider.get_native_asset_locked_balance(&hash, to))
+        let to_locked = try_block_on(self.provider.get_contract_asset_locked_balance(&hash, to))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
         let new_to_locked = to_locked
             .checked_add(amount)
             .ok_or_else(|| Self::invalid_data_error("Recipient locked balance overflow"))?;
 
-        let to_lock_count = try_block_on(self.provider.get_native_asset_lock_count(&hash, to))
+        let to_lock_count = try_block_on(self.provider.get_contract_asset_lock_count(&hash, to))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
         let new_to_lock_count = to_lock_count
@@ -2154,7 +2190,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
             .ok_or_else(|| Self::invalid_data_error("Recipient lock count overflow"))?;
 
         // Pre-validate next_lock_id to prevent partial state updates if overflow occurs
-        let new_lock_id = try_block_on(self.provider.get_native_asset_next_lock_id(&hash, to))
+        let new_lock_id = try_block_on(self.provider.get_contract_asset_next_lock_id(&hash, to))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
         let next_lock_id = new_lock_id
@@ -2162,16 +2198,18 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
             .ok_or_else(|| Self::invalid_data_error("Lock ID overflow"))?;
 
         // Pre-validate source lock count and locked balance
-        let from_lock_count = try_block_on(self.provider.get_native_asset_lock_count(&hash, from))
-            .map_err(Self::convert_error)?
-            .map_err(Self::convert_error)?;
+        let from_lock_count =
+            try_block_on(self.provider.get_contract_asset_lock_count(&hash, from))
+                .map_err(Self::convert_error)?
+                .map_err(Self::convert_error)?;
         let new_from_lock_count = from_lock_count
             .checked_sub(1)
             .ok_or_else(|| Self::invalid_data_error("Source lock count underflow"))?;
 
-        let from_locked = try_block_on(self.provider.get_native_asset_locked_balance(&hash, from))
-            .map_err(Self::convert_error)?
-            .map_err(Self::convert_error)?;
+        let from_locked =
+            try_block_on(self.provider.get_contract_asset_locked_balance(&hash, from))
+                .map_err(Self::convert_error)?
+                .map_err(Self::convert_error)?;
         let new_from_locked = from_locked
             .checked_sub(amount)
             .ok_or_else(|| Self::invalid_data_error("Source locked balance underflow"))?;
@@ -2185,27 +2223,30 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         // All calculations were validated in Phase 1, so we can directly use the results
 
         // Delete from source
-        try_block_on(self.provider.delete_native_asset_lock(&hash, from, lock_id))
-            .map_err(Self::convert_error)?
-            .map_err(Self::convert_error)?;
+        try_block_on(
+            self.provider
+                .delete_contract_asset_lock(&hash, from, lock_id),
+        )
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)?;
 
         // TOS-024: Remove old lock ID from source index
         let _ = try_block_on(
             self.provider
-                .remove_native_asset_lock_id(&hash, from, lock_id),
+                .remove_contract_asset_lock_id(&hash, from, lock_id),
         );
 
         // Update source counts using pre-validated values from Phase 1
         try_block_on(
             self.provider
-                .set_native_asset_lock_count(&hash, from, new_from_lock_count),
+                .set_contract_asset_lock_count(&hash, from, new_from_lock_count),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
 
         try_block_on(
             self.provider
-                .set_native_asset_locked_balance(&hash, from, new_from_locked),
+                .set_contract_asset_locked_balance(&hash, from, new_from_locked),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
@@ -2215,28 +2256,28 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
             id: new_lock_id,
             ..token_lock
         };
-        try_block_on(self.provider.set_native_asset_lock(&hash, to, &new_lock))
+        try_block_on(self.provider.set_contract_asset_lock(&hash, to, &new_lock))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
 
         // Update destination using pre-validated values from Phase 1
         try_block_on(
             self.provider
-                .set_native_asset_next_lock_id(&hash, to, next_lock_id),
+                .set_contract_asset_next_lock_id(&hash, to, next_lock_id),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
 
         try_block_on(
             self.provider
-                .set_native_asset_lock_count(&hash, to, new_to_lock_count),
+                .set_contract_asset_lock_count(&hash, to, new_to_lock_count),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
 
         try_block_on(
             self.provider
-                .set_native_asset_locked_balance(&hash, to, new_to_locked),
+                .set_contract_asset_locked_balance(&hash, to, new_to_locked),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
@@ -2244,7 +2285,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         // TOS-024: Add new lock ID to destination index
         try_block_on(
             self.provider
-                .add_native_asset_lock_id(&hash, to, new_lock_id),
+                .add_contract_asset_lock_id(&hash, to, new_lock_id),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
@@ -2263,7 +2304,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         account: &[u8; 32],
     ) -> Result<bool, EbpfError> {
         let hash = Self::bytes_to_hash(asset);
-        try_block_on(self.provider.has_native_asset_role(&hash, role, account))
+        try_block_on(self.provider.has_contract_asset_role(&hash, role, account))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)
     }
@@ -2281,7 +2322,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         // SECURITY: Block direct granting of DEFAULT_ADMIN_ROLE
         // Admin role transfer must use the pending-admin flow (set_pending_admin → accept_admin)
         // This ensures single-admin enforcement and proper transfer mechanism
-        let admin_role = tos_common::native_asset::DEFAULT_ADMIN_ROLE;
+        let admin_role = tos_common::contract_asset::DEFAULT_ADMIN_ROLE;
         if *role == admin_role {
             return Err(Self::permission_denied_error(
                 "Cannot grant DEFAULT_ADMIN_ROLE directly; use set_pending_admin and accept_admin",
@@ -2290,9 +2331,10 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
 
         // ISSUE-TOS-002 FIX: Validate caller has admin role for the role being granted
         // Get the admin role for this role (use default if not yet configured)
-        let mut role_config = try_block_on(self.provider.get_native_asset_role_config(&hash, role))
-            .map_err(Self::convert_error)?
-            .unwrap_or_default();
+        let mut role_config =
+            try_block_on(self.provider.get_contract_asset_role_config(&hash, role))
+                .map_err(Self::convert_error)?
+                .unwrap_or_default();
 
         // Check if caller has the admin role
         let has_admin = self.check_role(&hash, &role_config.admin_role, granted_by)?;
@@ -2316,7 +2358,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         }
 
         // Grant the role
-        try_block_on(self.provider.grant_native_asset_role(
+        try_block_on(self.provider.grant_contract_asset_role(
             &hash,
             role,
             account,
@@ -2328,7 +2370,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         // Add to role members index
         try_block_on(
             self.provider
-                .add_native_asset_role_member(&hash, role, account),
+                .add_contract_asset_role_member(&hash, role, account),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
@@ -2341,7 +2383,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
 
         try_block_on(
             self.provider
-                .set_native_asset_role_config(&hash, role, &role_config),
+                .set_contract_asset_role_config(&hash, role, &role_config),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
@@ -2379,7 +2421,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         // TOS-023: Always attempt index removal (cleans stale entries)
         let _ = try_block_on(
             self.provider
-                .remove_native_asset_role_member(&hash, role, account),
+                .remove_contract_asset_role_member(&hash, role, account),
         );
 
         if !has_role {
@@ -2387,33 +2429,37 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         }
 
         // Revoke the role
-        try_block_on(self.provider.revoke_native_asset_role(&hash, role, account))
-            .map_err(Self::convert_error)?
-            .map_err(Self::convert_error)?;
+        try_block_on(
+            self.provider
+                .revoke_contract_asset_role(&hash, role, account),
+        )
+        .map_err(Self::convert_error)?
+        .map_err(Self::convert_error)?;
 
         // TOS-023: Update member_count
-        let mut role_config = try_block_on(self.provider.get_native_asset_role_config(&hash, role))
-            .map_err(Self::convert_error)?
-            .unwrap_or_default();
+        let mut role_config =
+            try_block_on(self.provider.get_contract_asset_role_config(&hash, role))
+                .map_err(Self::convert_error)?
+                .unwrap_or_default();
 
         role_config.member_count = role_config.member_count.saturating_sub(1);
 
         try_block_on(
             self.provider
-                .set_native_asset_role_config(&hash, role, &role_config),
+                .set_contract_asset_role_config(&hash, role, &role_config),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
 
         // TOS-025: If revoking DEFAULT_ADMIN_ROLE, update data.admin
-        let admin_role = tos_common::native_asset::DEFAULT_ADMIN_ROLE;
+        let admin_role = tos_common::contract_asset::DEFAULT_ADMIN_ROLE;
         if *role == admin_role {
             let mut data = self.get_asset_data(asset)?;
             if data.admin == *account {
                 // Find next admin from RBAC role members
                 let members = try_block_on(
                     self.provider
-                        .get_native_asset_role_members(&hash, &admin_role),
+                        .get_contract_asset_role_members(&hash, &admin_role),
                 )
                 .map_err(Self::convert_error)?
                 .map_err(Self::convert_error)?;
@@ -2425,7 +2471,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
                     .copied()
                     .unwrap_or([0u8; 32]); // Zero address if no admins left
 
-                try_block_on(self.provider.set_native_asset(&hash, &data))
+                try_block_on(self.provider.set_contract_asset(&hash, &data))
                     .map_err(Self::convert_error)?
                     .map_err(Self::convert_error)?;
             }
@@ -2436,7 +2482,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
 
     fn get_role_admin(&self, asset: &[u8; 32], role: &[u8; 32]) -> Result<[u8; 32], EbpfError> {
         let hash = Self::bytes_to_hash(asset);
-        let config = try_block_on(self.provider.get_native_asset_role_config(&hash, role))
+        let config = try_block_on(self.provider.get_contract_asset_role_config(&hash, role))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
         Ok(config.admin_role)
@@ -2455,7 +2501,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         // NOTE: RBAC validation is done at syscall level in TAKO
         // The caller and block_height params are passed for logging/audit purposes
 
-        let mut config = try_block_on(self.provider.get_native_asset_role_config(&hash, role))
+        let mut config = try_block_on(self.provider.get_contract_asset_role_config(&hash, role))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
 
@@ -2463,7 +2509,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
 
         try_block_on(
             self.provider
-                .set_native_asset_role_config(&hash, role, &config),
+                .set_contract_asset_role_config(&hash, role, &config),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)
@@ -2471,7 +2517,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
 
     fn get_role_member_count(&self, asset: &[u8; 32], role: &[u8; 32]) -> Result<u32, EbpfError> {
         let hash = Self::bytes_to_hash(asset);
-        let config = try_block_on(self.provider.get_native_asset_role_config(&hash, role))
+        let config = try_block_on(self.provider.get_contract_asset_role_config(&hash, role))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
         Ok(config.member_count)
@@ -2491,7 +2537,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         let hash = Self::bytes_to_hash(asset);
 
         // Check if caller has PAUSER role
-        let pauser_role = tos_common::native_asset::PAUSER_ROLE;
+        let pauser_role = tos_common::contract_asset::PAUSER_ROLE;
         if !self.check_role(&hash, &pauser_role, caller)? {
             return Err(Self::permission_denied_error("Caller is not a pauser"));
         }
@@ -2505,7 +2551,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
                 None
             },
         };
-        try_block_on(self.provider.set_native_asset_pause_state(&hash, &state))
+        try_block_on(self.provider.set_contract_asset_pause_state(&hash, &state))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)
     }
@@ -2528,7 +2574,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         let hash = Self::bytes_to_hash(asset);
 
         // Check if caller has FREEZER role
-        let freezer_role = tos_common::native_asset::FREEZER_ROLE;
+        let freezer_role = tos_common::contract_asset::FREEZER_ROLE;
         if !self.check_role(&hash, &freezer_role, caller)? {
             return Err(Self::permission_denied_error("Caller is not a freezer"));
         }
@@ -2544,7 +2590,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         };
         try_block_on(
             self.provider
-                .set_native_asset_freeze_state(&hash, account, &state),
+                .set_contract_asset_freeze_state(&hash, account, &state),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)
@@ -2591,9 +2637,10 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
 
         // Check that new balance doesn't go below locked balance
         // This prevents the invariant violation: balance < locked
-        let from_locked = try_block_on(self.provider.get_native_asset_locked_balance(&hash, from))
-            .map_err(Self::convert_error)?
-            .map_err(Self::convert_error)?;
+        let from_locked =
+            try_block_on(self.provider.get_contract_asset_locked_balance(&hash, from))
+                .map_err(Self::convert_error)?
+                .map_err(Self::convert_error)?;
         if new_from < from_locked {
             return Err(Self::permission_denied_error(
                 "Force transfer would leave balance below locked amount",
@@ -2611,14 +2658,14 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         // Phase 3: Update balances and checkpoints
         try_block_on(
             self.provider
-                .set_native_asset_balance(&hash, from, new_from),
+                .set_contract_asset_balance(&hash, from, new_from),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
 
         self.write_balance_checkpoint(&hash, from, new_from)?;
 
-        try_block_on(self.provider.set_native_asset_balance(&hash, to, new_to))
+        try_block_on(self.provider.set_contract_asset_balance(&hash, to, new_to))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
 
@@ -2640,7 +2687,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         let mut data = self.get_asset_data(asset)?;
         data.name = String::from_utf8(name.to_vec())
             .map_err(|_| Self::invalid_data_error("Invalid name"))?;
-        try_block_on(self.provider.set_native_asset(&hash, &data))
+        try_block_on(self.provider.set_contract_asset(&hash, &data))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)
     }
@@ -2660,7 +2707,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         let mut data = self.get_asset_data(asset)?;
         data.symbol = String::from_utf8(symbol.to_vec())
             .map_err(|_| Self::invalid_data_error("Invalid symbol"))?;
-        try_block_on(self.provider.set_native_asset(&hash, &data))
+        try_block_on(self.provider.set_contract_asset(&hash, &data))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)
     }
@@ -2687,7 +2734,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         };
         try_block_on(
             self.provider
-                .set_native_asset_metadata_uri(&hash, uri_str.as_deref()),
+                .set_contract_asset_metadata_uri(&hash, uri_str.as_deref()),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)
@@ -2699,7 +2746,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
 
     fn next_escrow_id(&mut self, asset: &[u8; 32]) -> Result<u64, EbpfError> {
         let hash = Self::bytes_to_hash(asset);
-        let counter = try_block_on(self.provider.get_native_asset_escrow_counter(&hash))
+        let counter = try_block_on(self.provider.get_contract_asset_escrow_counter(&hash))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
         // ISSUE-TOS-005 FIX: Use checked arithmetic for escrow counter
@@ -2708,7 +2755,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
             .ok_or_else(|| Self::invalid_data_error("Escrow counter overflow"))?;
         try_block_on(
             self.provider
-                .set_native_asset_escrow_counter(&hash, next_counter),
+                .set_contract_asset_escrow_counter(&hash, next_counter),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
@@ -2745,8 +2792,8 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         let hash = Self::bytes_to_hash(asset);
 
         // Check if escrow already exists to prevent overwriting
-        // If get_native_asset_escrow succeeds, the escrow already exists
-        if try_block_on(self.provider.get_native_asset_escrow(&hash, escrow_id))
+        // If get_contract_asset_escrow succeeds, the escrow already exists
+        if try_block_on(self.provider.get_contract_asset_escrow(&hash, escrow_id))
             .map_err(Self::convert_error)?
             .is_ok()
         {
@@ -2788,14 +2835,14 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
             created_at,
             metadata: None,
         };
-        try_block_on(self.provider.set_native_asset_escrow(&hash, &escrow))
+        try_block_on(self.provider.set_contract_asset_escrow(&hash, &escrow))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
 
         // Add to user escrow index for sender
         try_block_on(
             self.provider
-                .add_native_asset_user_escrow(&hash, sender, escrow_id),
+                .add_contract_asset_user_escrow(&hash, sender, escrow_id),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
@@ -2803,7 +2850,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         // Add to user escrow index for recipient
         try_block_on(
             self.provider
-                .add_native_asset_user_escrow(&hash, recipient, escrow_id),
+                .add_contract_asset_user_escrow(&hash, recipient, escrow_id),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
@@ -2820,7 +2867,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         escrow_id: u64,
     ) -> Result<Option<([u8; 32], [u8; 32], u64, u8, u8, Vec<u8>, u32, u64, u64)>, EbpfError> {
         let hash = Self::bytes_to_hash(asset);
-        let escrow = try_block_on(self.provider.get_native_asset_escrow(&hash, escrow_id))
+        let escrow = try_block_on(self.provider.get_contract_asset_escrow(&hash, escrow_id))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
 
@@ -2847,7 +2894,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         status: u8,
     ) -> Result<(), EbpfError> {
         let hash = Self::bytes_to_hash(asset);
-        let mut escrow = try_block_on(self.provider.get_native_asset_escrow(&hash, escrow_id))
+        let mut escrow = try_block_on(self.provider.get_contract_asset_escrow(&hash, escrow_id))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
 
@@ -2898,7 +2945,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         let amount = escrow.amount;
 
         escrow.status = new_status.clone();
-        try_block_on(self.provider.set_native_asset_escrow(&hash, &escrow))
+        try_block_on(self.provider.set_contract_asset_escrow(&hash, &escrow))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
 
@@ -2928,7 +2975,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         }
 
         let hash = Self::bytes_to_hash(asset);
-        let mut escrow = try_block_on(self.provider.get_native_asset_escrow(&hash, escrow_id))
+        let mut escrow = try_block_on(self.provider.get_contract_asset_escrow(&hash, escrow_id))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
 
@@ -2950,7 +2997,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
 
         if !escrow.approvals.contains(approver) {
             escrow.approvals.push(*approver);
-            try_block_on(self.provider.set_native_asset_escrow(&hash, &escrow))
+            try_block_on(self.provider.set_contract_asset_escrow(&hash, &escrow))
                 .map_err(Self::convert_error)?
                 .map_err(Self::convert_error)?;
         }
@@ -2965,13 +3012,13 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         approver: &[u8; 32],
     ) -> Result<bool, EbpfError> {
         let hash = Self::bytes_to_hash(asset);
-        let mut escrow = try_block_on(self.provider.get_native_asset_escrow(&hash, escrow_id))
+        let mut escrow = try_block_on(self.provider.get_contract_asset_escrow(&hash, escrow_id))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
 
         if let Some(pos) = escrow.approvals.iter().position(|a| a == approver) {
             escrow.approvals.remove(pos);
-            try_block_on(self.provider.set_native_asset_escrow(&hash, &escrow))
+            try_block_on(self.provider.set_contract_asset_escrow(&hash, &escrow))
                 .map_err(Self::convert_error)?
                 .map_err(Self::convert_error)?;
             Ok(true)
@@ -2987,7 +3034,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         approver: &[u8; 32],
     ) -> Result<bool, EbpfError> {
         let hash = Self::bytes_to_hash(asset);
-        let escrow = try_block_on(self.provider.get_native_asset_escrow(&hash, escrow_id))
+        let escrow = try_block_on(self.provider.get_contract_asset_escrow(&hash, escrow_id))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
         Ok(escrow.approvals.contains(approver))
@@ -2999,7 +3046,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         escrow_id: u64,
     ) -> Result<Vec<[u8; 32]>, EbpfError> {
         let hash = Self::bytes_to_hash(asset);
-        let escrow = try_block_on(self.provider.get_native_asset_escrow(&hash, escrow_id))
+        let escrow = try_block_on(self.provider.get_contract_asset_escrow(&hash, escrow_id))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
         Ok(escrow.approvals)
@@ -3007,7 +3054,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
 
     fn get_user_escrows(&self, asset: &[u8; 32], user: &[u8; 32]) -> Result<Vec<u64>, EbpfError> {
         let hash = Self::bytes_to_hash(asset);
-        try_block_on(self.provider.get_native_asset_user_escrows(&hash, user))
+        try_block_on(self.provider.get_contract_asset_user_escrows(&hash, user))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)
     }
@@ -3021,7 +3068,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         let hash = Self::bytes_to_hash(asset);
         try_block_on(
             self.provider
-                .add_native_asset_user_escrow(&hash, user, escrow_id),
+                .add_contract_asset_user_escrow(&hash, user, escrow_id),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)
@@ -3033,7 +3080,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
 
     fn get_permit_nonce(&self, asset: &[u8; 32], owner: &[u8; 32]) -> Result<u64, EbpfError> {
         let hash = Self::bytes_to_hash(asset);
-        try_block_on(self.provider.get_native_asset_permit_nonce(&hash, owner))
+        try_block_on(self.provider.get_contract_asset_permit_nonce(&hash, owner))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)
     }
@@ -3051,7 +3098,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
             .ok_or_else(|| Self::invalid_data_error("Permit nonce overflow"))?;
         try_block_on(
             self.provider
-                .set_native_asset_permit_nonce(&hash, owner, new_nonce),
+                .set_contract_asset_permit_nonce(&hash, owner, new_nonce),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
@@ -3097,7 +3144,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         let hash = Self::bytes_to_hash(asset);
         let has_auth = try_block_on(
             self.provider
-                .has_native_asset_agent_auth(&hash, owner, agent),
+                .has_contract_asset_agent_auth(&hash, owner, agent),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
@@ -3108,7 +3155,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
 
         let auth = try_block_on(
             self.provider
-                .get_native_asset_agent_auth(&hash, owner, agent),
+                .get_contract_asset_agent_auth(&hash, owner, agent),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
@@ -3163,7 +3210,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
             expires_at,
             created_at: self.block_height,
         };
-        try_block_on(self.provider.set_native_asset_agent_auth(&hash, &auth))
+        try_block_on(self.provider.set_contract_asset_agent_auth(&hash, &auth))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)
     }
@@ -3177,7 +3224,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         let hash = Self::bytes_to_hash(asset);
         try_block_on(
             self.provider
-                .delete_native_asset_agent_auth(&hash, owner, agent),
+                .delete_contract_asset_agent_auth(&hash, owner, agent),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)
@@ -3189,7 +3236,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         owner: &[u8; 32],
     ) -> Result<Vec<[u8; 32]>, EbpfError> {
         let hash = Self::bytes_to_hash(asset);
-        try_block_on(self.provider.get_native_asset_owner_agents(&hash, owner))
+        try_block_on(self.provider.get_contract_asset_owner_agents(&hash, owner))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)
     }
@@ -3203,7 +3250,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         let hash = Self::bytes_to_hash(asset);
         try_block_on(
             self.provider
-                .add_native_asset_owner_agent(&hash, owner, agent),
+                .add_contract_asset_owner_agent(&hash, owner, agent),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)
@@ -3218,7 +3265,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         let hash = Self::bytes_to_hash(asset);
         try_block_on(
             self.provider
-                .remove_native_asset_owner_agent(&hash, owner, agent),
+                .remove_contract_asset_owner_agent(&hash, owner, agent),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)
@@ -3233,7 +3280,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         let hash = Self::bytes_to_hash(asset);
         let auth = try_block_on(
             self.provider
-                .get_native_asset_agent_auth(&hash, owner, agent),
+                .get_contract_asset_agent_auth(&hash, owner, agent),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
@@ -3250,12 +3297,12 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         let hash = Self::bytes_to_hash(asset);
         let mut auth = try_block_on(
             self.provider
-                .get_native_asset_agent_auth(&hash, owner, agent),
+                .get_contract_asset_agent_auth(&hash, owner, agent),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
         auth.allowed_recipients = recipients.to_vec();
-        try_block_on(self.provider.set_native_asset_agent_auth(&hash, &auth))
+        try_block_on(self.provider.set_contract_asset_agent_auth(&hash, &auth))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)
     }
@@ -3276,7 +3323,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         // Admin is zero - distinguish between legacy and renounced:
         // - Legacy: admin field never set, but creator has DEFAULT_ADMIN_ROLE
         // - Renounced: admin explicitly cleared, no one has admin role
-        let admin_role = tos_common::native_asset::DEFAULT_ADMIN_ROLE;
+        let admin_role = tos_common::contract_asset::DEFAULT_ADMIN_ROLE;
         let creator_has_role = self.check_role(&hash, &admin_role, &data.creator)?;
 
         if creator_has_role {
@@ -3288,7 +3335,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         }
     }
 
-    // Note: get_creator() not in TakoNativeAssetProvider trait.
+    // Note: get_creator() not in TakoContractAssetProvider trait.
     // Creator can be obtained via get_asset_info() if needed.
 
     // ========================================
@@ -3304,7 +3351,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         let hash = Self::bytes_to_hash(asset);
         try_block_on(
             self.provider
-                .get_native_asset_role_member(&hash, role, index as u32),
+                .get_contract_asset_role_member(&hash, role, index as u32),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)
@@ -3316,7 +3363,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         role: &[u8; 32],
     ) -> Result<Vec<[u8; 32]>, EbpfError> {
         let hash = Self::bytes_to_hash(asset);
-        try_block_on(self.provider.get_native_asset_role_members(&hash, role))
+        try_block_on(self.provider.get_contract_asset_role_members(&hash, role))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)
     }
@@ -3390,7 +3437,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         let hash = Self::bytes_to_hash(asset);
         let count = try_block_on(
             self.provider
-                .get_native_asset_delegation_checkpoint_count(&hash, account),
+                .get_contract_asset_delegation_checkpoint_count(&hash, account),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
@@ -3408,7 +3455,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
             let mid = low + (high - low) / 2; // Avoid overflow
             let checkpoint = try_block_on(
                 self.provider
-                    .get_native_asset_delegation_checkpoint(&hash, account, mid),
+                    .get_contract_asset_delegation_checkpoint(&hash, account, mid),
             )
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
@@ -3426,7 +3473,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         }
 
         // Get the checkpoint at low - 1 (the last one at or before block_height)
-        let checkpoint = try_block_on(self.provider.get_native_asset_delegation_checkpoint(
+        let checkpoint = try_block_on(self.provider.get_contract_asset_delegation_checkpoint(
             &hash,
             account,
             low - 1,
@@ -3451,7 +3498,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         let hash = Self::bytes_to_hash(asset);
         let count = try_block_on(
             self.provider
-                .get_native_asset_balance_checkpoint_count(&hash, account),
+                .get_contract_asset_balance_checkpoint_count(&hash, account),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
@@ -3469,7 +3516,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
             let mid = low + (high - low) / 2; // Avoid overflow
             let checkpoint = try_block_on(
                 self.provider
-                    .get_native_asset_balance_checkpoint(&hash, account, mid),
+                    .get_contract_asset_balance_checkpoint(&hash, account, mid),
             )
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
@@ -3487,7 +3534,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         }
 
         // Get the checkpoint at low - 1 (the last one at or before block_height)
-        let checkpoint = try_block_on(self.provider.get_native_asset_balance_checkpoint(
+        let checkpoint = try_block_on(self.provider.get_contract_asset_balance_checkpoint(
             &hash,
             account,
             low - 1,
@@ -3525,14 +3572,14 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         let hash = Self::bytes_to_hash(asset);
 
         // Check if caller is current admin
-        let admin_role = tos_common::native_asset::DEFAULT_ADMIN_ROLE;
+        let admin_role = tos_common::contract_asset::DEFAULT_ADMIN_ROLE;
         if !self.check_role(&hash, &admin_role, caller)? {
             return Err(Self::permission_denied_error("Caller is not admin"));
         }
 
         try_block_on(
             self.provider
-                .set_native_asset_pending_admin(&hash, Some(new_admin)),
+                .set_contract_asset_pending_admin(&hash, Some(new_admin)),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)
@@ -3547,7 +3594,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         let hash = Self::bytes_to_hash(asset);
 
         // Get pending admin
-        let pending = try_block_on(self.provider.get_native_asset_pending_admin(&hash))
+        let pending = try_block_on(self.provider.get_contract_asset_pending_admin(&hash))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
 
@@ -3558,7 +3605,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
             return Err(Self::permission_denied_error("Caller is not pending admin"));
         }
 
-        let admin_role = tos_common::native_asset::DEFAULT_ADMIN_ROLE;
+        let admin_role = tos_common::contract_asset::DEFAULT_ADMIN_ROLE;
 
         // TOS-025: Get current admin and revoke their role (single-admin enforcement)
         let mut data = self.get_asset_data(asset)?;
@@ -3576,7 +3623,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         if admin_to_revoke != *caller {
             let has_old_role = self.check_role(&hash, &admin_role, &admin_to_revoke)?;
             if has_old_role {
-                try_block_on(self.provider.revoke_native_asset_role(
+                try_block_on(self.provider.revoke_contract_asset_role(
                     &hash,
                     &admin_role,
                     &admin_to_revoke,
@@ -3585,7 +3632,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
                 .map_err(Self::convert_error)?;
 
                 // TOS-023: Remove from role member index
-                let _ = try_block_on(self.provider.remove_native_asset_role_member(
+                let _ = try_block_on(self.provider.remove_contract_asset_role_member(
                     &hash,
                     &admin_role,
                     &admin_to_revoke,
@@ -3594,14 +3641,14 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
                 // TOS-023: Update member_count
                 let mut role_config = try_block_on(
                     self.provider
-                        .get_native_asset_role_config(&hash, &admin_role),
+                        .get_contract_asset_role_config(&hash, &admin_role),
                 )
                 .map_err(Self::convert_error)?
                 .unwrap_or_default();
 
                 role_config.member_count = role_config.member_count.saturating_sub(1);
 
-                try_block_on(self.provider.set_native_asset_role_config(
+                try_block_on(self.provider.set_contract_asset_role_config(
                     &hash,
                     &admin_role,
                     &role_config,
@@ -3614,7 +3661,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         // Grant admin role to new admin (if not already granted)
         let has_new_role = self.check_role(&hash, &admin_role, caller)?;
         if !has_new_role {
-            try_block_on(self.provider.grant_native_asset_role(
+            try_block_on(self.provider.grant_contract_asset_role(
                 &hash,
                 &admin_role,
                 caller,
@@ -3626,7 +3673,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
             // TOS-023: Add to role member index
             try_block_on(
                 self.provider
-                    .add_native_asset_role_member(&hash, &admin_role, caller),
+                    .add_contract_asset_role_member(&hash, &admin_role, caller),
             )
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
@@ -3634,7 +3681,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
             // TOS-023: Update member_count
             let mut role_config = try_block_on(
                 self.provider
-                    .get_native_asset_role_config(&hash, &admin_role),
+                    .get_contract_asset_role_config(&hash, &admin_role),
             )
             .map_err(Self::convert_error)?
             .unwrap_or_default();
@@ -3644,7 +3691,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
                 .checked_add(1)
                 .ok_or_else(|| Self::invalid_data_error("Role member count overflow"))?;
 
-            try_block_on(self.provider.set_native_asset_role_config(
+            try_block_on(self.provider.set_contract_asset_role_config(
                 &hash,
                 &admin_role,
                 &role_config,
@@ -3655,12 +3702,12 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
 
         // TOS-025: Update admin in asset data
         data.admin = *caller;
-        try_block_on(self.provider.set_native_asset(&hash, &data))
+        try_block_on(self.provider.set_contract_asset(&hash, &data))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
 
         // Clear pending admin
-        try_block_on(self.provider.set_native_asset_pending_admin(&hash, None))
+        try_block_on(self.provider.set_contract_asset_pending_admin(&hash, None))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)
     }
@@ -3674,19 +3721,19 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         let hash = Self::bytes_to_hash(asset);
 
         // Check if caller is current admin
-        let admin_role = tos_common::native_asset::DEFAULT_ADMIN_ROLE;
+        let admin_role = tos_common::contract_asset::DEFAULT_ADMIN_ROLE;
         if !self.check_role(&hash, &admin_role, caller)? {
             return Err(Self::permission_denied_error("Caller is not admin"));
         }
 
-        try_block_on(self.provider.set_native_asset_pending_admin(&hash, None))
+        try_block_on(self.provider.set_contract_asset_pending_admin(&hash, None))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)
     }
 
     fn get_pending_admin(&self, asset: &[u8; 32]) -> Result<[u8; 32], EbpfError> {
         let hash = Self::bytes_to_hash(asset);
-        let pending = try_block_on(self.provider.get_native_asset_pending_admin(&hash))
+        let pending = try_block_on(self.provider.get_contract_asset_pending_admin(&hash))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
         Ok(pending.unwrap_or([0u8; 32]))
@@ -3698,13 +3745,13 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         caller: &[u8; 32],
         block_height: u64,
     ) -> Result<(), EbpfError> {
-        let admin_role = tos_common::native_asset::DEFAULT_ADMIN_ROLE;
+        let admin_role = tos_common::contract_asset::DEFAULT_ADMIN_ROLE;
         self.revoke_role(asset, &admin_role, caller, caller, block_height)
     }
 
     fn get_admin_delay(&self, asset: &[u8; 32]) -> Result<u64, EbpfError> {
         let hash = Self::bytes_to_hash(asset);
-        let admin_delay = try_block_on(self.provider.get_native_asset_admin_delay(&hash))
+        let admin_delay = try_block_on(self.provider.get_contract_asset_admin_delay(&hash))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
 
@@ -3731,7 +3778,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         let hash = Self::bytes_to_hash(asset);
 
         // ISSUE-TOS-002 FIX: Validate caller has DEFAULT_ADMIN_ROLE
-        let admin_role = tos_common::native_asset::DEFAULT_ADMIN_ROLE;
+        let admin_role = tos_common::contract_asset::DEFAULT_ADMIN_ROLE;
         if !self.check_role(&hash, &admin_role, caller)? {
             return Err(Self::permission_denied_error(
                 "Caller does not have DEFAULT_ADMIN_ROLE for change_admin_delay",
@@ -3739,7 +3786,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         }
 
         // Get current admin delay config
-        let mut admin_delay = try_block_on(self.provider.get_native_asset_admin_delay(&hash))
+        let mut admin_delay = try_block_on(self.provider.get_contract_asset_admin_delay(&hash))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
 
@@ -3764,7 +3811,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
 
         try_block_on(
             self.provider
-                .set_native_asset_admin_delay(&hash, &admin_delay),
+                .set_contract_asset_admin_delay(&hash, &admin_delay),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)
@@ -3772,7 +3819,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
 
     fn get_pending_admin_delay(&self, asset: &[u8; 32]) -> Result<u64, EbpfError> {
         let hash = Self::bytes_to_hash(asset);
-        let admin_delay = try_block_on(self.provider.get_native_asset_admin_delay(&hash))
+        let admin_delay = try_block_on(self.provider.get_contract_asset_admin_delay(&hash))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
 
@@ -3788,7 +3835,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         let hash = Self::bytes_to_hash(asset);
 
         // ISSUE-TOS-002 FIX: Validate caller has DEFAULT_ADMIN_ROLE
-        let admin_role = tos_common::native_asset::DEFAULT_ADMIN_ROLE;
+        let admin_role = tos_common::contract_asset::DEFAULT_ADMIN_ROLE;
         if !self.check_role(&hash, &admin_role, caller)? {
             return Err(Self::permission_denied_error(
                 "Caller does not have DEFAULT_ADMIN_ROLE for cancel_admin_delay_change",
@@ -3796,7 +3843,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         }
 
         // Get current admin delay config
-        let mut admin_delay = try_block_on(self.provider.get_native_asset_admin_delay(&hash))
+        let mut admin_delay = try_block_on(self.provider.get_contract_asset_admin_delay(&hash))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
 
@@ -3806,7 +3853,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
 
         try_block_on(
             self.provider
-                .set_native_asset_admin_delay(&hash, &admin_delay),
+                .set_contract_asset_admin_delay(&hash, &admin_delay),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)
@@ -3830,7 +3877,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         let hash = Self::bytes_to_hash(asset);
 
         // Validate caller has DEFAULT_ADMIN_ROLE to schedule timelock operations
-        let admin_role = tos_common::native_asset::DEFAULT_ADMIN_ROLE;
+        let admin_role = tos_common::contract_asset::DEFAULT_ADMIN_ROLE;
         if !self.check_role(&hash, &admin_role, caller)? {
             return Err(Self::permission_denied_error(
                 "Caller does not have DEFAULT_ADMIN_ROLE for timelock_schedule",
@@ -3840,7 +3887,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         // Check if operation already exists
         let existing = try_block_on(
             self.provider
-                .get_native_asset_timelock_operation(&hash, operation_id),
+                .get_contract_asset_timelock_operation(&hash, operation_id),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
@@ -3850,7 +3897,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         }
 
         // Enforce minimum delay
-        let min_delay = try_block_on(self.provider.get_native_asset_timelock_min_delay(&hash))
+        let min_delay = try_block_on(self.provider.get_contract_asset_timelock_min_delay(&hash))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
 
@@ -3876,7 +3923,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
 
         try_block_on(
             self.provider
-                .set_native_asset_timelock_operation(&hash, &operation),
+                .set_contract_asset_timelock_operation(&hash, &operation),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)
@@ -3892,7 +3939,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         let hash = Self::bytes_to_hash(asset);
 
         // Validate caller has DEFAULT_ADMIN_ROLE to execute timelock operations
-        let admin_role = tos_common::native_asset::DEFAULT_ADMIN_ROLE;
+        let admin_role = tos_common::contract_asset::DEFAULT_ADMIN_ROLE;
         if !self.check_role(&hash, &admin_role, caller)? {
             return Err(Self::permission_denied_error(
                 "Caller does not have DEFAULT_ADMIN_ROLE for timelock_execute",
@@ -3902,7 +3949,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         // Get the operation
         let operation = try_block_on(
             self.provider
-                .get_native_asset_timelock_operation(&hash, operation_id),
+                .get_contract_asset_timelock_operation(&hash, operation_id),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?
@@ -3923,7 +3970,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
 
         try_block_on(
             self.provider
-                .set_native_asset_timelock_operation(&hash, &updated_operation),
+                .set_contract_asset_timelock_operation(&hash, &updated_operation),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)
@@ -3939,7 +3986,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         let hash = Self::bytes_to_hash(asset);
 
         // Validate caller has DEFAULT_ADMIN_ROLE to cancel timelock operations
-        let admin_role = tos_common::native_asset::DEFAULT_ADMIN_ROLE;
+        let admin_role = tos_common::contract_asset::DEFAULT_ADMIN_ROLE;
         if !self.check_role(&hash, &admin_role, caller)? {
             return Err(Self::permission_denied_error(
                 "Caller does not have DEFAULT_ADMIN_ROLE for timelock_cancel",
@@ -3949,7 +3996,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         // Check if operation exists and is pending
         let operation = try_block_on(
             self.provider
-                .get_native_asset_timelock_operation(&hash, operation_id),
+                .get_contract_asset_timelock_operation(&hash, operation_id),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?
@@ -3964,7 +4011,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         // Delete the operation
         try_block_on(
             self.provider
-                .delete_native_asset_timelock_operation(&hash, operation_id),
+                .delete_contract_asset_timelock_operation(&hash, operation_id),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)
@@ -3979,7 +4026,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
 
         let operation = try_block_on(
             self.provider
-                .get_native_asset_timelock_operation(&hash, operation_id),
+                .get_contract_asset_timelock_operation(&hash, operation_id),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
@@ -3997,7 +4044,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
     fn timelock_get_min_delay(&self, asset: &[u8; 32]) -> Result<u64, EbpfError> {
         let hash = Self::bytes_to_hash(asset);
 
-        try_block_on(self.provider.get_native_asset_timelock_min_delay(&hash))
+        try_block_on(self.provider.get_contract_asset_timelock_min_delay(&hash))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)
     }
@@ -4012,7 +4059,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
         let hash = Self::bytes_to_hash(asset);
 
         // Validate caller has DEFAULT_ADMIN_ROLE to modify timelock minimum delay
-        let admin_role = tos_common::native_asset::DEFAULT_ADMIN_ROLE;
+        let admin_role = tos_common::contract_asset::DEFAULT_ADMIN_ROLE;
         if !self.check_role(&hash, &admin_role, caller)? {
             return Err(Self::permission_denied_error(
                 "Caller does not have DEFAULT_ADMIN_ROLE for timelock_set_min_delay",
@@ -4021,7 +4068,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
 
         try_block_on(
             self.provider
-                .set_native_asset_timelock_min_delay(&hash, new_delay),
+                .set_contract_asset_timelock_min_delay(&hash, new_delay),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)
@@ -4036,7 +4083,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
 
         let operation = try_block_on(
             self.provider
-                .get_native_asset_timelock_operation(&hash, operation_id),
+                .get_contract_asset_timelock_operation(&hash, operation_id),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
@@ -4053,7 +4100,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
 
         let operation = try_block_on(
             self.provider
-                .get_native_asset_timelock_operation(&hash, operation_id),
+                .get_contract_asset_timelock_operation(&hash, operation_id),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
@@ -4070,7 +4117,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
 
         let operation = try_block_on(
             self.provider
-                .get_native_asset_timelock_operation(&hash, operation_id),
+                .get_contract_asset_timelock_operation(&hash, operation_id),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
@@ -4088,7 +4135,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
 
         let operation = try_block_on(
             self.provider
-                .get_native_asset_timelock_operation(&hash, operation_id),
+                .get_contract_asset_timelock_operation(&hash, operation_id),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;
@@ -4107,7 +4154,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeA
 
         let operation = try_block_on(
             self.provider
-                .get_native_asset_timelock_operation(&hash, operation_id),
+                .get_contract_asset_timelock_operation(&hash, operation_id),
         )
         .map_err(Self::convert_error)?
         .map_err(Self::convert_error)?;

@@ -188,11 +188,11 @@ pub enum Column {
     // {parent_committee_id (32 bytes)} => {Vec<Hash>}
     ChildCommittees,
 
-    // ===== Native Asset System =====
+    // ===== Contract Asset System =====
 
-    // Native asset data: asset_hash -> NativeAssetData
-    // {prefix}{asset_hash (32 bytes)} => {NativeAssetData}
-    NativeAssets,
+    // Contract asset data: asset_hash -> ContractAssetData
+    // {prefix}{asset_hash (32 bytes)} => {ContractAssetData}
+    ContractAssets,
 
     // ===== TNS (TOS Name Service) =====
 

@@ -63,11 +63,11 @@ use tos_tbpf::error::EbpfError;
 /// let topoheight = 100;
 /// let adapter = TosAccountAdapter::new(&provider, topoheight);
 ///
-/// // Get balance of an account (native asset)
+/// // Get balance of an account (contract asset)
 /// let account_address = [1u8; 32];
 /// let balance = adapter.get_balance(&account_address).ok();
 ///
-/// // Transfer from contract to user (native asset)
+/// // Transfer from contract to user (contract asset)
 /// let contract_address = [2u8; 32];
 /// let user_address = [3u8; 32];
 /// let mut adapter = TosAccountAdapter::new(&provider, topoheight);
@@ -78,8 +78,8 @@ pub struct TosAccountAdapter<'a> {
     provider: &'a (dyn ContractProvider + Send),
     /// Current topoheight (for versioned reads)
     topoheight: TopoHeight,
-    /// Native asset hash (TOS uses Hash::zero() for native tokens)
-    native_asset: Hash,
+    /// Contract asset hash (TOS uses Hash::zero() for native tokens)
+    contract_asset: Hash,
     /// Transfers staged during the current execution
     pending_transfers: Vec<TransferOutput>,
     /// Balance deltas for accounts during the current execution
@@ -99,7 +99,7 @@ impl<'a> TosAccountAdapter<'a> {
         Self {
             provider,
             topoheight,
-            native_asset: Hash::zero(), // TOS native asset
+            contract_asset: Hash::zero(), // TOS contract asset
             pending_transfers: Vec::new(),
             balance_deltas: HashMap::new(),
         }
@@ -120,7 +120,7 @@ impl<'a> TosAccountAdapter<'a> {
         Self {
             provider,
             topoheight,
-            native_asset: asset,
+            contract_asset: asset,
             pending_transfers: Vec::new(),
             balance_deltas: HashMap::new(),
         }
@@ -148,7 +148,7 @@ impl<'a> AccountProvider for TosAccountAdapter<'a> {
 
         let actual_balance = self
             .provider
-            .get_account_balance_for_asset(&pubkey, &self.native_asset, self.topoheight)
+            .get_account_balance_for_asset(&pubkey, &self.contract_asset, self.topoheight)
             .map_err(|e| {
                 EbpfError::SyscallError(Box::new(std::io::Error::new(
                     std::io::ErrorKind::Other,
@@ -212,7 +212,7 @@ impl<'a> AccountProvider for TosAccountAdapter<'a> {
         // Get actual balance from provider
         let actual_balance = self
             .provider
-            .get_account_balance_for_asset(&from_pubkey, &self.native_asset, self.topoheight)
+            .get_account_balance_for_asset(&from_pubkey, &self.contract_asset, self.topoheight)
             .map_err(|e| {
                 EbpfError::SyscallError(Box::new(std::io::Error::new(
                     std::io::ErrorKind::Other,
@@ -305,7 +305,7 @@ impl<'a> AccountProvider for TosAccountAdapter<'a> {
         self.pending_transfers.push(TransferOutput {
             destination: to_pubkey,
             amount,
-            asset: self.native_asset.clone(),
+            asset: self.contract_asset.clone(),
         });
 
         Ok(())

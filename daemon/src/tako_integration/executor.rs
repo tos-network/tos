@@ -24,7 +24,7 @@ use tos_common::{
     crypto::Hash,
 };
 use tos_program_runtime::{
-    invoke_context::InvokeContext, storage::NativeAssetProvider as TakoNativeAssetProvider,
+    invoke_context::InvokeContext, storage::ContractAssetProvider as TakoContractAssetProvider,
 };
 use tos_tbpf::{
     aligned_memory::AlignedMemory,
@@ -38,10 +38,10 @@ use tos_tbpf::{
 
 use super::{
     token_provider::ContractTokenProvider, NoOpNftStorage, SVMFeatureSet, TakoExecutionError,
-    TosAccountAdapter, TosContractLoaderAdapter, TosNativeAssetAdapter, TosNftAdapter,
+    TosAccountAdapter, TosContractAssetAdapter, TosContractLoaderAdapter, TosNftAdapter,
     TosReferralAdapter, TosStorageAdapter,
 };
-use crate::core::storage::{NativeAssetProvider, ReferralProvider};
+use crate::core::storage::{ContractAssetProvider, ReferralProvider};
 use crate::vrf::VrfData;
 use tos_common::nft::operations::NftStorage;
 
@@ -447,7 +447,7 @@ impl TakoExecutor {
             feature_set,
             referral_provider,
             None, // No NFT provider
-            None, // No native asset provider
+            None, // No contract asset provider
             vrf_data,
             miner_public_key,
         )
@@ -458,7 +458,7 @@ impl TakoExecutor {
     /// This is the most comprehensive execution method, supporting all provider types:
     /// - Referral provider for accessing the native referral system
     /// - NFT provider for accessing the native NFT system
-    /// - Native asset provider for accessing the native asset system
+    /// - Contract asset provider for accessing the contract asset system
     /// - VRF data for verifiable randomness
     ///
     /// # NFT System Access
@@ -470,9 +470,9 @@ impl TakoExecutor {
     /// - Ownership queries (owner_of, balance_of)
     /// - Approval management (approve, set_approval_for_all)
     ///
-    /// # Native Asset System Access
+    /// # Contract Asset System Access
     ///
-    /// When `native_asset_provider` is provided, contracts can access the native asset
+    /// When `contract_asset_provider` is provided, contracts can access the contract asset
     /// system via syscalls for:
     /// - Asset creation and management (create_asset, asset_exists)
     /// - Token operations (transfer, mint, burn)
@@ -497,7 +497,7 @@ impl TakoExecutor {
         feature_set: &SVMFeatureSet,
         referral_provider: Option<&mut (dyn ReferralProvider + Send + Sync)>,
         nft_provider: Option<&mut N>, // NFT storage provider
-        native_asset_provider: Option<&mut dyn NativeAssetProvider>, // Native asset provider
+        contract_asset_provider: Option<&mut dyn ContractAssetProvider>, // Contract asset provider
         vrf_data: Option<&VrfData>,   // VRF data for verifiable randomness
         miner_public_key: Option<&[u8; 32]>, // Block producer's key for VRF identity binding
     ) -> Result<ExecutionResult, TakoExecutionError> {
@@ -551,14 +551,15 @@ impl TakoExecutor {
         // NFT adapter bridges TAKO's NftProvider trait with TOS's NftStorage operations
         let mut nft_adapter = nft_provider.map(TosNftAdapter::new);
 
-        // 3c. Create native asset adapter
+        // 3c. Create contract asset adapter
         // Default to contract-scoped token cache when no provider is supplied.
         let mut contract_token_provider: Option<ContractTokenProvider<'_>> = None;
-        let mut native_asset_adapter: Option<Box<dyn TakoNativeAssetProvider>> =
-            match native_asset_provider {
-                Some(provider) => {
-                    Some(Box::new(TosNativeAssetAdapter::new(provider, block_height)))
-                }
+        let mut contract_asset_adapter: Option<Box<dyn TakoContractAssetProvider>> =
+            match contract_asset_provider {
+                Some(provider) => Some(Box::new(TosContractAssetAdapter::new(
+                    provider,
+                    block_height,
+                ))),
                 None => {
                     contract_token_provider = Some(ContractTokenProvider::new(
                         provider,
@@ -567,8 +568,8 @@ impl TakoExecutor {
                         &mut cache.tokens,
                     ));
                     contract_token_provider.as_mut().map(|provider| {
-                        Box::new(TosNativeAssetAdapter::new(provider, block_height))
-                            as Box<dyn TakoNativeAssetProvider>
+                        Box::new(TosContractAssetAdapter::new(provider, block_height))
+                            as Box<dyn TakoContractAssetProvider>
                     })
                 }
             };
@@ -694,12 +695,12 @@ impl TakoExecutor {
             }
         }
 
-        // 7e. Wire native asset provider (if available)
-        // Enables contracts to access native asset system via asset syscalls
-        if let Some(ref mut adapter) = native_asset_adapter {
+        // 7e. Wire contract asset provider (if available)
+        // Enables contracts to access contract asset system via asset syscalls
+        if let Some(ref mut adapter) = contract_asset_adapter {
             invoke_context.set_asset_provider(adapter.as_mut());
             if log::log_enabled!(log::Level::Debug) {
-                debug!("Native asset provider wired to InvokeContext");
+                debug!("Contract asset provider wired to InvokeContext");
             }
         }
 
@@ -803,7 +804,7 @@ impl TakoExecutor {
             // Get transfers (precompiles don't typically do transfers)
             let transfers = accounts.take_pending_transfers();
 
-            drop(native_asset_adapter);
+            drop(contract_asset_adapter);
             drop(contract_token_provider);
 
             return Ok(ExecutionResult {
@@ -929,7 +930,7 @@ impl TakoExecutor {
                         HEAP_SIZE / 1024
                     );
                 }
-                drop(native_asset_adapter);
+                drop(contract_asset_adapter);
                 drop(contract_token_provider);
 
                 Ok(ExecutionResult {

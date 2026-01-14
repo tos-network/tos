@@ -1,17 +1,17 @@
-use crate::crypto::Hash;
-use crate::native_asset::{
-    AdminDelay, AgentAuthorization, Allowance, BalanceCheckpoint, Checkpoint, Delegation,
-    DelegationCheckpoint, Escrow, FreezeState, NativeAssetData, PauseState, RoleConfig, RoleId,
+use crate::contract_asset::{
+    AdminDelay, AgentAuthorization, Allowance, BalanceCheckpoint, Checkpoint, ContractAssetData,
+    Delegation, DelegationCheckpoint, Escrow, FreezeState, PauseState, RoleConfig, RoleId,
     SupplyCheckpoint, TimelockOperation, TokenLock,
 };
+use crate::crypto::Hash;
 use std::collections::HashMap;
 
 /// Key types for overlay storage
 ///
-/// Each variant represents a unique storage key in the native asset system.
+/// Each variant represents a unique storage key in the contract asset system.
 /// Keys are designed to be hashable and comparable for use in HashMap.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum NativeAssetKey {
+pub enum ContractAssetKey {
     // ===== Asset-level keys =====
     /// Asset metadata (name, symbol, decimals, etc.)
     Asset(Hash),
@@ -134,9 +134,9 @@ pub enum NativeAssetKey {
 /// Each variant wraps the underlying data type stored at a key.
 /// The `Deleted` variant marks a key as deleted (tombstone).
 #[derive(Debug, Clone)]
-pub enum NativeAssetValue {
+pub enum ContractAssetValue {
     // ===== Primitive values =====
-    Asset(NativeAssetData),
+    Asset(ContractAssetData),
     Balance(u64),
     Supply(u64),
     VotePower(u64),
@@ -186,17 +186,17 @@ pub enum NativeAssetValue {
     Deleted,
 }
 
-/// Overlay cache for native asset operations
+/// Overlay cache for contract asset operations
 ///
 /// Provides an in-memory cache that accumulates writes during contract execution.
 /// On success, changes are preserved. On failure, they are dropped.
 #[derive(Debug, Clone, Default)]
-pub struct NativeAssetOverlay {
+pub struct ContractAssetOverlay {
     /// Changes to be applied (key → value)
-    pub changes: HashMap<NativeAssetKey, NativeAssetValue>,
+    pub changes: HashMap<ContractAssetKey, ContractAssetValue>,
 }
 
-impl NativeAssetOverlay {
+impl ContractAssetOverlay {
     /// Create a new empty overlay
     pub fn new() -> Self {
         Self {
@@ -215,23 +215,23 @@ impl NativeAssetOverlay {
     }
 
     /// Get a value from the overlay (returns None if not in overlay)
-    pub fn get(&self, key: &NativeAssetKey) -> Option<&NativeAssetValue> {
+    pub fn get(&self, key: &ContractAssetKey) -> Option<&ContractAssetValue> {
         self.changes.get(key)
     }
 
     /// Set a value in the overlay
-    pub fn set(&mut self, key: NativeAssetKey, value: NativeAssetValue) {
+    pub fn set(&mut self, key: ContractAssetKey, value: ContractAssetValue) {
         self.changes.insert(key, value);
     }
 
     /// Mark a key as deleted in the overlay
-    pub fn delete(&mut self, key: NativeAssetKey) {
-        self.changes.insert(key, NativeAssetValue::Deleted);
+    pub fn delete(&mut self, key: ContractAssetKey) {
+        self.changes.insert(key, ContractAssetValue::Deleted);
     }
 
     /// Check if a key is marked as deleted
-    pub fn is_deleted(&self, key: &NativeAssetKey) -> bool {
-        matches!(self.get(key), Some(NativeAssetValue::Deleted))
+    pub fn is_deleted(&self, key: &ContractAssetKey) -> bool {
+        matches!(self.get(key), Some(ContractAssetValue::Deleted))
     }
 
     /// Clear all changes from the overlay
@@ -240,7 +240,7 @@ impl NativeAssetOverlay {
     }
 
     /// Merge another overlay into this one (other's changes take precedence)
-    pub fn merge(&mut self, other: NativeAssetOverlay) {
+    pub fn merge(&mut self, other: ContractAssetOverlay) {
         for (key, value) in other.changes {
             self.changes.insert(key, value);
         }

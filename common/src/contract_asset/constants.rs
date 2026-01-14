@@ -1,4 +1,4 @@
-//! Native Asset Constants
+//! Contract Asset Constants
 //!
 //! Defines limits, prefixes, and configuration constants.
 
@@ -56,28 +56,28 @@ pub const MAX_ROLE_MEMBERS: usize = 256;
 
 // ===== Storage Key Prefixes (4-byte) =====
 
-/// Native asset data prefix
+/// Contract asset data prefix
 pub const NATIVE_ASSET_PREFIX: &[u8] = b"nasd";
 
-/// Native asset balance prefix
+/// Contract asset balance prefix
 pub const NATIVE_ASSET_BALANCE_PREFIX: &[u8] = b"nasb";
 
-/// Native asset allowance prefix
+/// Contract asset allowance prefix
 pub const NATIVE_ASSET_ALLOWANCE_PREFIX: &[u8] = b"nasa";
 
-/// Native asset total supply prefix
+/// Contract asset total supply prefix
 pub const NATIVE_ASSET_SUPPLY_PREFIX: &[u8] = b"nass";
 
-/// Lock data prefix (nalD = native asset lock Data)
+/// Lock data prefix (nalD = contract asset lock Data)
 pub const NATIVE_ASSET_LOCK_PREFIX: &[u8] = b"nalD";
 
-/// Lock count prefix (nalC = native asset lock Count)
+/// Lock count prefix (nalC = contract asset lock Count)
 pub const NATIVE_ASSET_LOCK_COUNT_PREFIX: &[u8] = b"nalC";
 
-/// Next lock ID prefix (nalN = native asset lock Next)
+/// Next lock ID prefix (nalN = contract asset lock Next)
 pub const NATIVE_ASSET_LOCK_NEXT_ID_PREFIX: &[u8] = b"nalN";
 
-/// Locked balance prefix (nalB = native asset lock Balance)
+/// Locked balance prefix (nalB = contract asset lock Balance)
 pub const NATIVE_ASSET_LOCKED_BALANCE_PREFIX: &[u8] = b"nalB";
 
 /// Role config prefix

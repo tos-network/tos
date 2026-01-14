@@ -1,11 +1,11 @@
-//! Native Asset delegation chain tests
+//! Contract Asset delegation chain tests
 
 #![allow(clippy::disallowed_methods)]
 
 use tempdir::TempDir;
 use tos_common::{
+    contract_asset::{ContractAssetData, Delegation},
     crypto::Hash,
-    native_asset::{Delegation, NativeAssetData},
     network::Network,
 };
 use tos_daemon::{
@@ -13,12 +13,12 @@ use tos_daemon::{
         config::RocksDBConfig,
         storage::{
             rocksdb::{CacheMode, CompressionMode, RocksStorage},
-            NativeAssetProvider,
+            ContractAssetProvider,
         },
     },
-    tako_integration::TosNativeAssetAdapter,
+    tako_integration::TosContractAssetAdapter,
 };
-use tos_program_runtime::storage::NativeAssetProvider as TakoNativeAssetProvider;
+use tos_program_runtime::storage::ContractAssetProvider as TakoContractAssetProvider;
 
 fn test_rocksdb_config() -> RocksDBConfig {
     RocksDBConfig {
@@ -52,12 +52,12 @@ fn random_account() -> [u8; 32] {
 #[tokio::test]
 async fn test_delegate_rejects_chain_delegation() {
     let temp_dir =
-        TempDir::new("native_asset_delegation_chain").expect("Failed to create temp dir");
+        TempDir::new("contract_asset_delegation_chain").expect("Failed to create temp dir");
     let mut storage = create_test_storage(&temp_dir);
 
     let creator = random_account();
     let asset = random_asset();
-    let data = NativeAssetData {
+    let data = ContractAssetData {
         name: "Chain Delegation Test Token".to_string(),
         symbol: "CDT".to_string(),
         decimals: 8,
@@ -75,7 +75,7 @@ async fn test_delegate_rejects_chain_delegation() {
     };
 
     storage
-        .set_native_asset(&asset, &data)
+        .set_contract_asset(&asset, &data)
         .await
         .expect("Failed to set asset data");
 
@@ -84,12 +84,12 @@ async fn test_delegate_rejects_chain_delegation() {
     let final_delegatee = random_account();
 
     storage
-        .set_native_asset_balance(&asset, &delegator, 100)
+        .set_contract_asset_balance(&asset, &delegator, 100)
         .await
         .expect("Failed to set delegator balance");
 
     storage
-        .set_native_asset_delegation(
+        .set_contract_asset_delegation(
             &asset,
             &delegatee,
             &Delegation {
@@ -101,7 +101,7 @@ async fn test_delegate_rejects_chain_delegation() {
         .expect("Failed to set delegatee delegation");
 
     let asset_bytes = *asset.as_bytes();
-    let mut adapter = TosNativeAssetAdapter::new(&mut storage, 100);
+    let mut adapter = TosContractAssetAdapter::new(&mut storage, 100);
 
     let err = adapter
         .delegate(&asset_bytes, &delegator, &delegatee)
@@ -117,12 +117,12 @@ async fn test_delegate_rejects_chain_delegation() {
 #[tokio::test]
 async fn test_delegate_allows_direct_delegation() {
     let temp_dir =
-        TempDir::new("native_asset_delegation_direct").expect("Failed to create temp dir");
+        TempDir::new("contract_asset_delegation_direct").expect("Failed to create temp dir");
     let mut storage = create_test_storage(&temp_dir);
 
     let creator = random_account();
     let asset = random_asset();
-    let data = NativeAssetData {
+    let data = ContractAssetData {
         name: "Direct Delegation Test Token".to_string(),
         symbol: "DDT".to_string(),
         decimals: 8,
@@ -140,7 +140,7 @@ async fn test_delegate_allows_direct_delegation() {
     };
 
     storage
-        .set_native_asset(&asset, &data)
+        .set_contract_asset(&asset, &data)
         .await
         .expect("Failed to set asset data");
 
@@ -148,19 +148,19 @@ async fn test_delegate_allows_direct_delegation() {
     let delegatee = random_account();
 
     storage
-        .set_native_asset_balance(&asset, &delegator, 100)
+        .set_contract_asset_balance(&asset, &delegator, 100)
         .await
         .expect("Failed to set delegator balance");
 
     let asset_bytes = *asset.as_bytes();
-    let mut adapter = TosNativeAssetAdapter::new(&mut storage, 100);
+    let mut adapter = TosContractAssetAdapter::new(&mut storage, 100);
 
     adapter
         .delegate(&asset_bytes, &delegator, &delegatee)
         .expect("Direct delegation should succeed");
 
     let delegation = storage
-        .get_native_asset_delegation(&asset, &delegator)
+        .get_contract_asset_delegation(&asset, &delegator)
         .await
         .expect("Failed to read delegation");
     assert_eq!(delegation.delegatee, Some(delegatee));

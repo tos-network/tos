@@ -1,6 +1,6 @@
 use crate::{
-    asset::AssetData, context::NoOpBuildHasher, crypto::Hash, native_asset::TokenKey,
-    native_asset::TokenValue, versioned_type::VersionedState,
+    asset::AssetData, context::NoOpBuildHasher, contract_asset::TokenKey,
+    contract_asset::TokenValue, crypto::Hash, versioned_type::VersionedState,
 };
 use std::collections::HashMap;
 use tos_kernel::ValueCell;

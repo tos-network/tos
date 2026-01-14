@@ -1,6 +1,6 @@
-//! Native Asset Module
+//! Contract Asset Module
 //!
-//! This module provides native asset support for the TOS blockchain,
+//! This module provides contract asset support for the TOS blockchain,
 //! implementing ERC20-like functionality at the protocol level.
 //!
 //! # Features
@@ -23,11 +23,11 @@ pub mod types;
 
 pub use constants::*;
 pub use error::*;
-pub use overlay::{NativeAssetKey, NativeAssetValue};
+pub use overlay::{ContractAssetKey, ContractAssetValue};
 pub use roles::*;
 pub use types::*;
 
 // Token naming aliases for contract-scoped token domain.
-pub type TokenKey = NativeAssetKey;
-pub type TokenValue = NativeAssetValue;
-pub type TokenData = NativeAssetData;
+pub type TokenKey = ContractAssetKey;
+pub type TokenValue = ContractAssetValue;
+pub type TokenData = ContractAssetData;

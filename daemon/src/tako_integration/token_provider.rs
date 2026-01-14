@@ -4,18 +4,18 @@ use async_trait::async_trait;
 use tos_common::{
     block::TopoHeight,
     contract::ContractProvider,
-    crypto::Hash,
-    native_asset::{
-        AdminDelay, AgentAuthorization, Allowance, BalanceCheckpoint, Checkpoint, Delegation,
-        DelegationCheckpoint, Escrow, FreezeState, NativeAssetData, PauseState, RoleConfig, RoleId,
-        SupplyCheckpoint, TimelockOperation, TokenKey, TokenLock, TokenValue,
+    contract_asset::{
+        AdminDelay, AgentAuthorization, Allowance, BalanceCheckpoint, Checkpoint,
+        ContractAssetData, Delegation, DelegationCheckpoint, Escrow, FreezeState, PauseState,
+        RoleConfig, RoleId, SupplyCheckpoint, TimelockOperation, TokenKey, TokenLock, TokenValue,
     },
+    crypto::Hash,
     versioned_type::VersionedState,
 };
 
 use crate::core::{
     error::BlockchainError,
-    storage::{NativeAssetProvider, StorageWriteBatch},
+    storage::{ContractAssetProvider, StorageWriteBatch},
 };
 
 pub struct ContractTokenProvider<'a> {
@@ -117,13 +117,13 @@ impl<'a> ContractTokenProvider<'a> {
 }
 
 #[async_trait(?Send)]
-impl NativeAssetProvider for ContractTokenProvider<'_> {
-    async fn has_native_asset(&self, asset: &Hash) -> Result<bool, BlockchainError> {
+impl ContractAssetProvider for ContractTokenProvider<'_> {
+    async fn has_contract_asset(&self, asset: &Hash) -> Result<bool, BlockchainError> {
         let key = TokenKey::Asset(asset.clone());
         Ok(self.get_cached_value(&key).await?.is_some())
     }
 
-    async fn get_native_asset(&self, asset: &Hash) -> Result<NativeAssetData, BlockchainError> {
+    async fn get_contract_asset(&self, asset: &Hash) -> Result<ContractAssetData, BlockchainError> {
         let key = TokenKey::Asset(asset.clone());
         match self.get_cached_value(&key).await? {
             Some(TokenValue::Asset(data)) => Ok(data),
@@ -131,10 +131,10 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
         }
     }
 
-    async fn set_native_asset(
+    async fn set_contract_asset(
         &mut self,
         asset: &Hash,
-        data: &NativeAssetData,
+        data: &ContractAssetData,
     ) -> Result<(), BlockchainError> {
         self.set_cached_value(
             TokenKey::Asset(asset.clone()),
@@ -143,7 +143,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
         .await
     }
 
-    async fn get_native_asset_supply(&self, asset: &Hash) -> Result<u64, BlockchainError> {
+    async fn get_contract_asset_supply(&self, asset: &Hash) -> Result<u64, BlockchainError> {
         let key = TokenKey::Supply(asset.clone());
         match self.get_cached_value(&key).await? {
             Some(TokenValue::Supply(value)) => Ok(value),
@@ -151,7 +151,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
         }
     }
 
-    async fn set_native_asset_supply(
+    async fn set_contract_asset_supply(
         &mut self,
         asset: &Hash,
         supply: u64,
@@ -160,7 +160,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
             .await
     }
 
-    async fn get_native_asset_balance(
+    async fn get_contract_asset_balance(
         &self,
         asset: &Hash,
         account: &[u8; 32],
@@ -175,7 +175,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
         }
     }
 
-    async fn set_native_asset_balance(
+    async fn set_contract_asset_balance(
         &mut self,
         asset: &Hash,
         account: &[u8; 32],
@@ -189,7 +189,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
             .await
     }
 
-    async fn has_native_asset_balance(
+    async fn has_contract_asset_balance(
         &self,
         asset: &Hash,
         account: &[u8; 32],
@@ -201,7 +201,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
         Ok(self.get_cached_value(&key).await?.is_some())
     }
 
-    async fn get_native_asset_allowance(
+    async fn get_contract_asset_allowance(
         &self,
         asset: &Hash,
         owner: &[u8; 32],
@@ -218,7 +218,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
         }
     }
 
-    async fn set_native_asset_allowance(
+    async fn set_contract_asset_allowance(
         &mut self,
         asset: &Hash,
         owner: &[u8; 32],
@@ -234,7 +234,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
             .await
     }
 
-    async fn delete_native_asset_allowance(
+    async fn delete_contract_asset_allowance(
         &mut self,
         asset: &Hash,
         owner: &[u8; 32],
@@ -248,7 +248,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
         self.delete_cached_value(key).await
     }
 
-    async fn get_native_asset_lock(
+    async fn get_contract_asset_lock(
         &self,
         asset: &Hash,
         account: &[u8; 32],
@@ -265,7 +265,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
         }
     }
 
-    async fn set_native_asset_lock(
+    async fn set_contract_asset_lock(
         &mut self,
         asset: &Hash,
         account: &[u8; 32],
@@ -280,7 +280,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
             .await
     }
 
-    async fn delete_native_asset_lock(
+    async fn delete_contract_asset_lock(
         &mut self,
         asset: &Hash,
         account: &[u8; 32],
@@ -294,7 +294,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
         self.delete_cached_value(key).await
     }
 
-    async fn get_native_asset_lock_count(
+    async fn get_contract_asset_lock_count(
         &self,
         asset: &Hash,
         account: &[u8; 32],
@@ -309,7 +309,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
         }
     }
 
-    async fn set_native_asset_lock_count(
+    async fn set_contract_asset_lock_count(
         &mut self,
         asset: &Hash,
         account: &[u8; 32],
@@ -323,7 +323,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
             .await
     }
 
-    async fn get_native_asset_next_lock_id(
+    async fn get_contract_asset_next_lock_id(
         &self,
         asset: &Hash,
         account: &[u8; 32],
@@ -338,7 +338,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
         }
     }
 
-    async fn set_native_asset_next_lock_id(
+    async fn set_contract_asset_next_lock_id(
         &mut self,
         asset: &Hash,
         account: &[u8; 32],
@@ -352,7 +352,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
             .await
     }
 
-    async fn get_native_asset_locked_balance(
+    async fn get_contract_asset_locked_balance(
         &self,
         asset: &Hash,
         account: &[u8; 32],
@@ -367,7 +367,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
         }
     }
 
-    async fn set_native_asset_locked_balance(
+    async fn set_contract_asset_locked_balance(
         &mut self,
         asset: &Hash,
         account: &[u8; 32],
@@ -381,7 +381,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
             .await
     }
 
-    async fn get_native_asset_role_config(
+    async fn get_contract_asset_role_config(
         &self,
         asset: &Hash,
         role: &RoleId,
@@ -396,7 +396,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
         }
     }
 
-    async fn set_native_asset_role_config(
+    async fn set_contract_asset_role_config(
         &mut self,
         asset: &Hash,
         role: &RoleId,
@@ -410,7 +410,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
             .await
     }
 
-    async fn has_native_asset_role(
+    async fn has_contract_asset_role(
         &self,
         asset: &Hash,
         role: &RoleId,
@@ -427,7 +427,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
         }
     }
 
-    async fn grant_native_asset_role(
+    async fn grant_contract_asset_role(
         &mut self,
         asset: &Hash,
         role: &RoleId,
@@ -443,7 +443,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
             .await
     }
 
-    async fn revoke_native_asset_role(
+    async fn revoke_contract_asset_role(
         &mut self,
         asset: &Hash,
         role: &RoleId,
@@ -457,7 +457,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
         self.delete_cached_value(key).await
     }
 
-    async fn get_native_asset_pause_state(
+    async fn get_contract_asset_pause_state(
         &self,
         asset: &Hash,
     ) -> Result<PauseState, BlockchainError> {
@@ -468,7 +468,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
         }
     }
 
-    async fn set_native_asset_pause_state(
+    async fn set_contract_asset_pause_state(
         &mut self,
         asset: &Hash,
         state: &PauseState,
@@ -478,7 +478,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
             .await
     }
 
-    async fn get_native_asset_freeze_state(
+    async fn get_contract_asset_freeze_state(
         &self,
         asset: &Hash,
         account: &[u8; 32],
@@ -493,7 +493,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
         }
     }
 
-    async fn set_native_asset_freeze_state(
+    async fn set_contract_asset_freeze_state(
         &mut self,
         asset: &Hash,
         account: &[u8; 32],
@@ -507,7 +507,10 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
             .await
     }
 
-    async fn get_native_asset_escrow_counter(&self, asset: &Hash) -> Result<u64, BlockchainError> {
+    async fn get_contract_asset_escrow_counter(
+        &self,
+        asset: &Hash,
+    ) -> Result<u64, BlockchainError> {
         let key = TokenKey::EscrowCounter(asset.clone());
         match self.get_cached_value(&key).await? {
             Some(TokenValue::EscrowCounter(value)) => Ok(value),
@@ -515,7 +518,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
         }
     }
 
-    async fn set_native_asset_escrow_counter(
+    async fn set_contract_asset_escrow_counter(
         &mut self,
         asset: &Hash,
         counter: u64,
@@ -525,7 +528,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
             .await
     }
 
-    async fn get_native_asset_escrow(
+    async fn get_contract_asset_escrow(
         &self,
         asset: &Hash,
         escrow_id: u64,
@@ -540,7 +543,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
         }
     }
 
-    async fn set_native_asset_escrow(
+    async fn set_contract_asset_escrow(
         &mut self,
         asset: &Hash,
         escrow: &Escrow,
@@ -553,7 +556,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
             .await
     }
 
-    async fn delete_native_asset_escrow(
+    async fn delete_contract_asset_escrow(
         &mut self,
         asset: &Hash,
         escrow_id: u64,
@@ -565,7 +568,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
         self.delete_cached_value(key).await
     }
 
-    async fn get_native_asset_permit_nonce(
+    async fn get_contract_asset_permit_nonce(
         &self,
         asset: &Hash,
         account: &[u8; 32],
@@ -580,7 +583,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
         }
     }
 
-    async fn set_native_asset_permit_nonce(
+    async fn set_contract_asset_permit_nonce(
         &mut self,
         asset: &Hash,
         account: &[u8; 32],
@@ -594,7 +597,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
             .await
     }
 
-    async fn get_native_asset_delegation(
+    async fn get_contract_asset_delegation(
         &self,
         asset: &Hash,
         account: &[u8; 32],
@@ -609,7 +612,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
         }
     }
 
-    async fn set_native_asset_delegation(
+    async fn set_contract_asset_delegation(
         &mut self,
         asset: &Hash,
         account: &[u8; 32],
@@ -623,7 +626,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
             .await
     }
 
-    async fn get_native_asset_checkpoint_count(
+    async fn get_contract_asset_checkpoint_count(
         &self,
         asset: &Hash,
         account: &[u8; 32],
@@ -638,7 +641,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
         }
     }
 
-    async fn set_native_asset_checkpoint_count(
+    async fn set_contract_asset_checkpoint_count(
         &mut self,
         asset: &Hash,
         account: &[u8; 32],
@@ -652,7 +655,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
             .await
     }
 
-    async fn get_native_asset_checkpoint(
+    async fn get_contract_asset_checkpoint(
         &self,
         asset: &Hash,
         account: &[u8; 32],
@@ -669,7 +672,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
         }
     }
 
-    async fn set_native_asset_checkpoint(
+    async fn set_contract_asset_checkpoint(
         &mut self,
         asset: &Hash,
         account: &[u8; 32],
@@ -685,7 +688,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
             .await
     }
 
-    async fn get_native_asset_balance_checkpoint_count(
+    async fn get_contract_asset_balance_checkpoint_count(
         &self,
         asset: &Hash,
         account: &[u8; 32],
@@ -700,7 +703,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
         }
     }
 
-    async fn set_native_asset_balance_checkpoint_count(
+    async fn set_contract_asset_balance_checkpoint_count(
         &mut self,
         asset: &Hash,
         account: &[u8; 32],
@@ -714,7 +717,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
             .await
     }
 
-    async fn get_native_asset_balance_checkpoint(
+    async fn get_contract_asset_balance_checkpoint(
         &self,
         asset: &Hash,
         account: &[u8; 32],
@@ -731,7 +734,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
         }
     }
 
-    async fn set_native_asset_balance_checkpoint(
+    async fn set_contract_asset_balance_checkpoint(
         &mut self,
         asset: &Hash,
         account: &[u8; 32],
@@ -747,7 +750,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
             .await
     }
 
-    async fn get_native_asset_delegation_checkpoint_count(
+    async fn get_contract_asset_delegation_checkpoint_count(
         &self,
         asset: &Hash,
         account: &[u8; 32],
@@ -762,7 +765,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
         }
     }
 
-    async fn set_native_asset_delegation_checkpoint_count(
+    async fn set_contract_asset_delegation_checkpoint_count(
         &mut self,
         asset: &Hash,
         account: &[u8; 32],
@@ -776,7 +779,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
             .await
     }
 
-    async fn get_native_asset_delegation_checkpoint(
+    async fn get_contract_asset_delegation_checkpoint(
         &self,
         asset: &Hash,
         account: &[u8; 32],
@@ -793,7 +796,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
         }
     }
 
-    async fn set_native_asset_delegation_checkpoint(
+    async fn set_contract_asset_delegation_checkpoint(
         &mut self,
         asset: &Hash,
         account: &[u8; 32],
@@ -809,7 +812,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
             .await
     }
 
-    async fn get_native_asset_supply_checkpoint_count(
+    async fn get_contract_asset_supply_checkpoint_count(
         &self,
         asset: &Hash,
     ) -> Result<u32, BlockchainError> {
@@ -820,7 +823,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
         }
     }
 
-    async fn set_native_asset_supply_checkpoint_count(
+    async fn set_contract_asset_supply_checkpoint_count(
         &mut self,
         asset: &Hash,
         count: u32,
@@ -830,7 +833,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
             .await
     }
 
-    async fn get_native_asset_supply_checkpoint(
+    async fn get_contract_asset_supply_checkpoint(
         &self,
         asset: &Hash,
         index: u32,
@@ -845,7 +848,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
         }
     }
 
-    async fn set_native_asset_supply_checkpoint(
+    async fn set_contract_asset_supply_checkpoint(
         &mut self,
         asset: &Hash,
         index: u32,
@@ -859,7 +862,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
             .await
     }
 
-    async fn get_native_asset_vote_power(
+    async fn get_contract_asset_vote_power(
         &self,
         asset: &Hash,
         account: &[u8; 32],
@@ -874,7 +877,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
         }
     }
 
-    async fn set_native_asset_vote_power(
+    async fn set_contract_asset_vote_power(
         &mut self,
         asset: &Hash,
         account: &[u8; 32],
@@ -888,7 +891,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
             .await
     }
 
-    async fn get_native_asset_role_members(
+    async fn get_contract_asset_role_members(
         &self,
         asset: &Hash,
         role: &RoleId,
@@ -903,13 +906,13 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
         }
     }
 
-    async fn add_native_asset_role_member(
+    async fn add_contract_asset_role_member(
         &mut self,
         asset: &Hash,
         role: &RoleId,
         account: &[u8; 32],
     ) -> Result<(), BlockchainError> {
-        let mut members = self.get_native_asset_role_members(asset, role).await?;
+        let mut members = self.get_contract_asset_role_members(asset, role).await?;
         if !members.contains(account) {
             members.push(*account);
         }
@@ -921,13 +924,13 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
             .await
     }
 
-    async fn remove_native_asset_role_member(
+    async fn remove_contract_asset_role_member(
         &mut self,
         asset: &Hash,
         role: &RoleId,
         account: &[u8; 32],
     ) -> Result<(), BlockchainError> {
-        let mut members = self.get_native_asset_role_members(asset, role).await?;
+        let mut members = self.get_contract_asset_role_members(asset, role).await?;
         members.retain(|member| member != account);
         let key = TokenKey::RoleMembers {
             asset: asset.clone(),
@@ -937,7 +940,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
             .await
     }
 
-    async fn get_native_asset_pending_admin(
+    async fn get_contract_asset_pending_admin(
         &self,
         asset: &Hash,
     ) -> Result<Option<[u8; 32]>, BlockchainError> {
@@ -948,7 +951,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
         }
     }
 
-    async fn set_native_asset_pending_admin(
+    async fn set_contract_asset_pending_admin(
         &mut self,
         asset: &Hash,
         admin: Option<&[u8; 32]>,
@@ -958,7 +961,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
             .await
     }
 
-    async fn get_native_asset_metadata_uri(
+    async fn get_contract_asset_metadata_uri(
         &self,
         asset: &Hash,
     ) -> Result<Option<String>, BlockchainError> {
@@ -969,7 +972,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
         }
     }
 
-    async fn set_native_asset_metadata_uri(
+    async fn set_contract_asset_metadata_uri(
         &mut self,
         asset: &Hash,
         uri: Option<&str>,
@@ -979,7 +982,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
             .await
     }
 
-    async fn get_native_asset_lock_ids(
+    async fn get_contract_asset_lock_ids(
         &self,
         asset: &Hash,
         account: &[u8; 32],
@@ -994,13 +997,13 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
         }
     }
 
-    async fn add_native_asset_lock_id(
+    async fn add_contract_asset_lock_id(
         &mut self,
         asset: &Hash,
         account: &[u8; 32],
         lock_id: u64,
     ) -> Result<(), BlockchainError> {
-        let mut ids = self.get_native_asset_lock_ids(asset, account).await?;
+        let mut ids = self.get_contract_asset_lock_ids(asset, account).await?;
         if !ids.contains(&lock_id) {
             ids.push(lock_id);
         }
@@ -1011,13 +1014,13 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
         self.set_cached_value(key, TokenValue::LockIds(ids)).await
     }
 
-    async fn remove_native_asset_lock_id(
+    async fn remove_contract_asset_lock_id(
         &mut self,
         asset: &Hash,
         account: &[u8; 32],
         lock_id: u64,
     ) -> Result<(), BlockchainError> {
-        let mut ids = self.get_native_asset_lock_ids(asset, account).await?;
+        let mut ids = self.get_contract_asset_lock_ids(asset, account).await?;
         ids.retain(|id| *id != lock_id);
         let key = TokenKey::LockIds {
             asset: asset.clone(),
@@ -1026,7 +1029,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
         self.set_cached_value(key, TokenValue::LockIds(ids)).await
     }
 
-    async fn get_native_asset_user_escrows(
+    async fn get_contract_asset_user_escrows(
         &self,
         asset: &Hash,
         user: &[u8; 32],
@@ -1041,13 +1044,13 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
         }
     }
 
-    async fn add_native_asset_user_escrow(
+    async fn add_contract_asset_user_escrow(
         &mut self,
         asset: &Hash,
         user: &[u8; 32],
         escrow_id: u64,
     ) -> Result<(), BlockchainError> {
-        let mut escrows = self.get_native_asset_user_escrows(asset, user).await?;
+        let mut escrows = self.get_contract_asset_user_escrows(asset, user).await?;
         if !escrows.contains(&escrow_id) {
             escrows.push(escrow_id);
         }
@@ -1059,13 +1062,13 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
             .await
     }
 
-    async fn remove_native_asset_user_escrow(
+    async fn remove_contract_asset_user_escrow(
         &mut self,
         asset: &Hash,
         user: &[u8; 32],
         escrow_id: u64,
     ) -> Result<(), BlockchainError> {
-        let mut escrows = self.get_native_asset_user_escrows(asset, user).await?;
+        let mut escrows = self.get_contract_asset_user_escrows(asset, user).await?;
         escrows.retain(|id| *id != escrow_id);
         let key = TokenKey::UserEscrows {
             asset: asset.clone(),
@@ -1075,7 +1078,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
             .await
     }
 
-    async fn get_native_asset_owner_agents(
+    async fn get_contract_asset_owner_agents(
         &self,
         asset: &Hash,
         owner: &[u8; 32],
@@ -1090,13 +1093,13 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
         }
     }
 
-    async fn add_native_asset_owner_agent(
+    async fn add_contract_asset_owner_agent(
         &mut self,
         asset: &Hash,
         owner: &[u8; 32],
         agent: &[u8; 32],
     ) -> Result<(), BlockchainError> {
-        let mut agents = self.get_native_asset_owner_agents(asset, owner).await?;
+        let mut agents = self.get_contract_asset_owner_agents(asset, owner).await?;
         if !agents.contains(agent) {
             agents.push(*agent);
         }
@@ -1108,13 +1111,13 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
             .await
     }
 
-    async fn remove_native_asset_owner_agent(
+    async fn remove_contract_asset_owner_agent(
         &mut self,
         asset: &Hash,
         owner: &[u8; 32],
         agent: &[u8; 32],
     ) -> Result<(), BlockchainError> {
-        let mut agents = self.get_native_asset_owner_agents(asset, owner).await?;
+        let mut agents = self.get_contract_asset_owner_agents(asset, owner).await?;
         agents.retain(|a| a != agent);
         let key = TokenKey::OwnerAgents {
             asset: asset.clone(),
@@ -1124,20 +1127,20 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
             .await
     }
 
-    async fn get_native_asset_role_member(
+    async fn get_contract_asset_role_member(
         &self,
         asset: &Hash,
         role: &RoleId,
         index: u32,
     ) -> Result<[u8; 32], BlockchainError> {
-        let members = self.get_native_asset_role_members(asset, role).await?;
+        let members = self.get_contract_asset_role_members(asset, role).await?;
         members
             .get(index as usize)
             .copied()
             .ok_or(BlockchainError::Unknown)
     }
 
-    async fn get_native_asset_agent_auth(
+    async fn get_contract_asset_agent_auth(
         &self,
         asset: &Hash,
         owner: &[u8; 32],
@@ -1154,7 +1157,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
         }
     }
 
-    async fn set_native_asset_agent_auth(
+    async fn set_contract_asset_agent_auth(
         &mut self,
         asset: &Hash,
         auth: &AgentAuthorization,
@@ -1168,7 +1171,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
             .await
     }
 
-    async fn delete_native_asset_agent_auth(
+    async fn delete_contract_asset_agent_auth(
         &mut self,
         asset: &Hash,
         owner: &[u8; 32],
@@ -1182,7 +1185,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
         self.delete_cached_value(key).await
     }
 
-    async fn has_native_asset_agent_auth(
+    async fn has_contract_asset_agent_auth(
         &self,
         asset: &Hash,
         owner: &[u8; 32],
@@ -1196,7 +1199,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
         Ok(self.get_cached_value(&key).await?.is_some())
     }
 
-    async fn get_native_asset_admin_delay(
+    async fn get_contract_asset_admin_delay(
         &self,
         asset: &Hash,
     ) -> Result<AdminDelay, BlockchainError> {
@@ -1207,7 +1210,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
         }
     }
 
-    async fn set_native_asset_admin_delay(
+    async fn set_contract_asset_admin_delay(
         &mut self,
         asset: &Hash,
         delay: &AdminDelay,
@@ -1217,7 +1220,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
             .await
     }
 
-    async fn get_native_asset_timelock_min_delay(
+    async fn get_contract_asset_timelock_min_delay(
         &self,
         asset: &Hash,
     ) -> Result<u64, BlockchainError> {
@@ -1228,7 +1231,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
         }
     }
 
-    async fn set_native_asset_timelock_min_delay(
+    async fn set_contract_asset_timelock_min_delay(
         &mut self,
         asset: &Hash,
         delay: u64,
@@ -1238,7 +1241,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
             .await
     }
 
-    async fn get_native_asset_timelock_operation(
+    async fn get_contract_asset_timelock_operation(
         &self,
         asset: &Hash,
         operation_id: &[u8; 32],
@@ -1254,7 +1257,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
         }
     }
 
-    async fn set_native_asset_timelock_operation(
+    async fn set_contract_asset_timelock_operation(
         &mut self,
         asset: &Hash,
         operation: &TimelockOperation,
@@ -1267,7 +1270,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
             .await
     }
 
-    async fn delete_native_asset_timelock_operation(
+    async fn delete_contract_asset_timelock_operation(
         &mut self,
         asset: &Hash,
         operation_id: &[u8; 32],
@@ -1279,7 +1282,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
         self.delete_cached_value(key).await
     }
 
-    async fn get_native_asset_delegators(
+    async fn get_contract_asset_delegators(
         &self,
         asset: &Hash,
         delegatee: &[u8; 32],
@@ -1294,13 +1297,13 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
         }
     }
 
-    async fn add_native_asset_delegator(
+    async fn add_contract_asset_delegator(
         &mut self,
         asset: &Hash,
         delegatee: &[u8; 32],
         delegator: &[u8; 32],
     ) -> Result<(), BlockchainError> {
-        let mut delegators = self.get_native_asset_delegators(asset, delegatee).await?;
+        let mut delegators = self.get_contract_asset_delegators(asset, delegatee).await?;
         if !delegators.contains(delegator) {
             delegators.push(*delegator);
         }
@@ -1312,13 +1315,13 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
             .await
     }
 
-    async fn remove_native_asset_delegator(
+    async fn remove_contract_asset_delegator(
         &mut self,
         asset: &Hash,
         delegatee: &[u8; 32],
         delegator: &[u8; 32],
     ) -> Result<(), BlockchainError> {
-        let mut delegators = self.get_native_asset_delegators(asset, delegatee).await?;
+        let mut delegators = self.get_contract_asset_delegators(asset, delegatee).await?;
         delegators.retain(|d| d != delegator);
         let key = TokenKey::Delegators {
             asset: asset.clone(),

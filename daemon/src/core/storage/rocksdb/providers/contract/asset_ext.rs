@@ -9,12 +9,12 @@ use async_trait::async_trait;
 use log::trace;
 use tos_common::{
     block::TopoHeight,
-    crypto::Hash,
-    native_asset::{
-        AdminDelay, AgentAuthorization, Allowance, BalanceCheckpoint, Checkpoint, Delegation,
-        DelegationCheckpoint, Escrow, FreezeState, NativeAssetData, PauseState, RoleConfig,
-        SupplyCheckpoint, TimelockOperation, TokenKey, TokenLock, TokenValue,
+    contract_asset::{
+        AdminDelay, AgentAuthorization, Allowance, BalanceCheckpoint, Checkpoint,
+        ContractAssetData, Delegation, DelegationCheckpoint, Escrow, FreezeState, PauseState,
+        RoleConfig, SupplyCheckpoint, TimelockOperation, TokenKey, TokenLock, TokenValue,
     },
+    crypto::Hash,
     serializer::{Reader, Serializer},
     versioned_type::Versioned,
 };
@@ -299,7 +299,7 @@ fn encode_value(key: &TokenKey, value: &TokenValue) -> Result<Vec<u8>, Blockchai
 fn decode_value(key: &TokenKey, bytes: &[u8]) -> Result<TokenValue, BlockchainError> {
     let mut reader = Reader::new(bytes);
     let value = match key {
-        TokenKey::Asset(_) => TokenValue::Asset(NativeAssetData::read(&mut reader)?),
+        TokenKey::Asset(_) => TokenValue::Asset(ContractAssetData::read(&mut reader)?),
         TokenKey::Balance { .. } => TokenValue::Balance(u64::read(&mut reader)?),
         TokenKey::Supply(_) => TokenValue::Supply(u64::read(&mut reader)?),
         TokenKey::Allowance { .. } => TokenValue::Allowance(Allowance::read(&mut reader)?),

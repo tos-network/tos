@@ -1,6 +1,6 @@
-//! Native Asset Integration Tests
+//! Contract Asset Integration Tests
 //!
-//! End-to-end integration tests for Native Asset syscalls in the TOS blockchain.
+//! End-to-end integration tests for Contract Asset syscalls in the TOS blockchain.
 //! These tests verify the complete execution flow from transaction submission
 //! to state persistence, covering:
 //!
@@ -48,21 +48,21 @@
 
 use tempdir::TempDir;
 use tos_common::{
-    crypto::Hash,
-    native_asset::{
-        AdminDelay, AgentAuthorization, Allowance, BalanceCheckpoint, Checkpoint, Delegation,
-        DelegationCheckpoint, Escrow, EscrowStatus, FreezeState, NativeAssetData, PauseState,
-        ReleaseCondition, RoleConfig, SpendingLimit, SpendingPeriod, SupplyCheckpoint,
+    contract_asset::{
+        AdminDelay, AgentAuthorization, Allowance, BalanceCheckpoint, Checkpoint,
+        ContractAssetData, Delegation, DelegationCheckpoint, Escrow, EscrowStatus, FreezeState,
+        PauseState, ReleaseCondition, RoleConfig, SpendingLimit, SpendingPeriod, SupplyCheckpoint,
         TimelockOperation, TimelockStatus, TokenLock, BURNER_ROLE, DEFAULT_ADMIN_ROLE,
         FREEZER_ROLE, MINTER_ROLE, PAUSER_ROLE,
     },
+    crypto::Hash,
     network::Network,
 };
 use tos_daemon::core::{
     config::RocksDBConfig,
     storage::{
         rocksdb::{CacheMode, CompressionMode, RocksStorage},
-        NativeAssetProvider,
+        ContractAssetProvider,
     },
 };
 
@@ -111,7 +111,8 @@ struct TestContext {
 
 impl TestContext {
     fn new() -> Self {
-        let temp_dir = TempDir::new("native_asset_integration").expect("Failed to create temp dir");
+        let temp_dir =
+            TempDir::new("contract_asset_integration").expect("Failed to create temp dir");
         let storage = create_test_storage(&temp_dir);
         Self {
             storage,
@@ -122,7 +123,7 @@ impl TestContext {
     /// Create a test asset with default configuration
     async fn create_test_asset(&mut self, creator: &[u8; 32]) -> Hash {
         let asset = random_asset();
-        let data = NativeAssetData {
+        let data = ContractAssetData {
             name: "Integration Test Token".to_string(),
             symbol: "ITT".to_string(),
             decimals: 8,
@@ -140,33 +141,33 @@ impl TestContext {
         };
 
         self.storage
-            .set_native_asset(&asset, &data)
+            .set_contract_asset(&asset, &data)
             .await
             .expect("Failed to create asset");
 
         // Set supply separately (stored in different key)
         self.storage
-            .set_native_asset_supply(&asset, data.total_supply)
+            .set_contract_asset_supply(&asset, data.total_supply)
             .await
             .expect("Failed to set supply");
 
         // Set metadata URI separately (stored in different key)
         if let Some(ref uri) = data.metadata_uri {
             self.storage
-                .set_native_asset_metadata_uri(&asset, Some(uri))
+                .set_contract_asset_metadata_uri(&asset, Some(uri))
                 .await
                 .expect("Failed to set metadata uri");
         }
 
         // Set creator balance to total supply
         self.storage
-            .set_native_asset_balance(&asset, creator, data.total_supply)
+            .set_contract_asset_balance(&asset, creator, data.total_supply)
             .await
             .expect("Failed to set creator balance");
 
         // Grant admin role to creator
         self.storage
-            .grant_native_asset_role(&asset, &DEFAULT_ADMIN_ROLE, creator, 100)
+            .grant_contract_asset_role(&asset, &DEFAULT_ADMIN_ROLE, creator, 100)
             .await
             .expect("Failed to grant admin role");
 
@@ -176,7 +177,7 @@ impl TestContext {
     /// Create a minimal test asset
     async fn create_minimal_asset(&mut self, creator: &[u8; 32], supply: u64) -> Hash {
         let asset = random_asset();
-        let data = NativeAssetData {
+        let data = ContractAssetData {
             name: "Minimal Token".to_string(),
             symbol: "MIN".to_string(),
             decimals: 8,
@@ -194,12 +195,12 @@ impl TestContext {
         };
 
         self.storage
-            .set_native_asset(&asset, &data)
+            .set_contract_asset(&asset, &data)
             .await
             .expect("Failed to create asset");
 
         self.storage
-            .set_native_asset_balance(&asset, creator, supply)
+            .set_contract_asset_balance(&asset, creator, supply)
             .await
             .expect("Failed to set balance");
 
@@ -221,7 +222,7 @@ async fn test_asset_creation_with_full_metadata() {
     // Verify asset exists
     let data = ctx
         .storage
-        .get_native_asset(&asset)
+        .get_contract_asset(&asset)
         .await
         .expect("Should get asset");
 
@@ -238,7 +239,7 @@ async fn test_asset_creation_with_full_metadata() {
     // Verify creator balance
     let balance = ctx
         .storage
-        .get_native_asset_balance(&asset, &creator)
+        .get_contract_asset_balance(&asset, &creator)
         .await
         .expect("Should get balance");
     assert_eq!(balance, data.total_supply);
@@ -258,35 +259,35 @@ async fn test_transfer_operations() {
     // Transfer 300 tokens
     let sender_balance = ctx
         .storage
-        .get_native_asset_balance(&asset, &creator)
+        .get_contract_asset_balance(&asset, &creator)
         .await
         .expect("Should get sender balance");
 
     ctx.storage
-        .set_native_asset_balance(&asset, &creator, sender_balance - 300)
+        .set_contract_asset_balance(&asset, &creator, sender_balance - 300)
         .await
         .expect("Should update sender balance");
 
     let recipient_balance = ctx
         .storage
-        .get_native_asset_balance(&asset, &recipient)
+        .get_contract_asset_balance(&asset, &recipient)
         .await
         .expect("Should get recipient balance");
 
     ctx.storage
-        .set_native_asset_balance(&asset, &recipient, recipient_balance + 300)
+        .set_contract_asset_balance(&asset, &recipient, recipient_balance + 300)
         .await
         .expect("Should update recipient balance");
 
     // Verify balances
     let final_sender = ctx
         .storage
-        .get_native_asset_balance(&asset, &creator)
+        .get_contract_asset_balance(&asset, &creator)
         .await
         .expect("Should get sender balance");
     let final_recipient = ctx
         .storage
-        .get_native_asset_balance(&asset, &recipient)
+        .get_contract_asset_balance(&asset, &recipient)
         .await
         .expect("Should get recipient balance");
 
@@ -309,67 +310,67 @@ async fn test_multiple_sequential_transfers() {
     // Alice → Bob: 400
     let alice_balance = ctx
         .storage
-        .get_native_asset_balance(&asset, &alice)
+        .get_contract_asset_balance(&asset, &alice)
         .await
         .unwrap();
     ctx.storage
-        .set_native_asset_balance(&asset, &alice, alice_balance - 400)
+        .set_contract_asset_balance(&asset, &alice, alice_balance - 400)
         .await
         .unwrap();
     ctx.storage
-        .set_native_asset_balance(&asset, &bob, 400)
+        .set_contract_asset_balance(&asset, &bob, 400)
         .await
         .unwrap();
 
     // Bob → Charlie: 150
     let bob_balance = ctx
         .storage
-        .get_native_asset_balance(&asset, &bob)
+        .get_contract_asset_balance(&asset, &bob)
         .await
         .unwrap();
     ctx.storage
-        .set_native_asset_balance(&asset, &bob, bob_balance - 150)
+        .set_contract_asset_balance(&asset, &bob, bob_balance - 150)
         .await
         .unwrap();
     ctx.storage
-        .set_native_asset_balance(&asset, &charlie, 150)
+        .set_contract_asset_balance(&asset, &charlie, 150)
         .await
         .unwrap();
 
     // Charlie → Alice: 50
     let charlie_balance = ctx
         .storage
-        .get_native_asset_balance(&asset, &charlie)
+        .get_contract_asset_balance(&asset, &charlie)
         .await
         .unwrap();
     let alice_balance = ctx
         .storage
-        .get_native_asset_balance(&asset, &alice)
+        .get_contract_asset_balance(&asset, &alice)
         .await
         .unwrap();
     ctx.storage
-        .set_native_asset_balance(&asset, &charlie, charlie_balance - 50)
+        .set_contract_asset_balance(&asset, &charlie, charlie_balance - 50)
         .await
         .unwrap();
     ctx.storage
-        .set_native_asset_balance(&asset, &alice, alice_balance + 50)
+        .set_contract_asset_balance(&asset, &alice, alice_balance + 50)
         .await
         .unwrap();
 
     // Final balances: Alice=650, Bob=250, Charlie=100
     let final_alice = ctx
         .storage
-        .get_native_asset_balance(&asset, &alice)
+        .get_contract_asset_balance(&asset, &alice)
         .await
         .unwrap();
     let final_bob = ctx
         .storage
-        .get_native_asset_balance(&asset, &bob)
+        .get_contract_asset_balance(&asset, &bob)
         .await
         .unwrap();
     let final_charlie = ctx
         .storage
-        .get_native_asset_balance(&asset, &charlie)
+        .get_contract_asset_balance(&asset, &charlie)
         .await
         .unwrap();
 
@@ -394,7 +395,7 @@ async fn test_self_transfer() {
 
     let initial_balance = ctx
         .storage
-        .get_native_asset_balance(&asset, &account)
+        .get_contract_asset_balance(&asset, &account)
         .await
         .unwrap();
 
@@ -403,7 +404,7 @@ async fn test_self_transfer() {
 
     let final_balance = ctx
         .storage
-        .get_native_asset_balance(&asset, &account)
+        .get_contract_asset_balance(&asset, &account)
         .await
         .unwrap();
 
@@ -432,14 +433,14 @@ async fn test_approve_and_allowance() {
     };
 
     ctx.storage
-        .set_native_asset_allowance(&asset, &owner, &spender, &allowance)
+        .set_contract_asset_allowance(&asset, &owner, &spender, &allowance)
         .await
         .expect("Should set allowance");
 
     // Verify allowance
     let retrieved = ctx
         .storage
-        .get_native_asset_allowance(&asset, &owner, &spender)
+        .get_contract_asset_allowance(&asset, &owner, &spender)
         .await
         .expect("Should get allowance");
 
@@ -460,7 +461,7 @@ async fn test_transfer_from_with_allowance() {
 
     // Set allowance for spender
     ctx.storage
-        .set_native_asset_allowance(
+        .set_contract_asset_allowance(
             &asset,
             &owner,
             &spender,
@@ -475,26 +476,26 @@ async fn test_transfer_from_with_allowance() {
     // Spender transfers 200 from owner to recipient
     let owner_balance = ctx
         .storage
-        .get_native_asset_balance(&asset, &owner)
+        .get_contract_asset_balance(&asset, &owner)
         .await
         .unwrap();
     let allowance = ctx
         .storage
-        .get_native_asset_allowance(&asset, &owner, &spender)
+        .get_contract_asset_allowance(&asset, &owner, &spender)
         .await
         .unwrap();
 
     // Simulate transfer-from
     ctx.storage
-        .set_native_asset_balance(&asset, &owner, owner_balance - 200)
+        .set_contract_asset_balance(&asset, &owner, owner_balance - 200)
         .await
         .unwrap();
     ctx.storage
-        .set_native_asset_balance(&asset, &recipient, 200)
+        .set_contract_asset_balance(&asset, &recipient, 200)
         .await
         .unwrap();
     ctx.storage
-        .set_native_asset_allowance(
+        .set_contract_asset_allowance(
             &asset,
             &owner,
             &spender,
@@ -509,17 +510,17 @@ async fn test_transfer_from_with_allowance() {
     // Verify
     let final_owner = ctx
         .storage
-        .get_native_asset_balance(&asset, &owner)
+        .get_contract_asset_balance(&asset, &owner)
         .await
         .unwrap();
     let final_recipient = ctx
         .storage
-        .get_native_asset_balance(&asset, &recipient)
+        .get_contract_asset_balance(&asset, &recipient)
         .await
         .unwrap();
     let final_allowance = ctx
         .storage
-        .get_native_asset_allowance(&asset, &owner, &spender)
+        .get_contract_asset_allowance(&asset, &owner, &spender)
         .await
         .unwrap();
 
@@ -541,7 +542,7 @@ async fn test_increase_decrease_allowance() {
 
     // Initial allowance
     ctx.storage
-        .set_native_asset_allowance(
+        .set_contract_asset_allowance(
             &asset,
             &owner,
             &spender,
@@ -556,11 +557,11 @@ async fn test_increase_decrease_allowance() {
     // Increase by 50
     let current = ctx
         .storage
-        .get_native_asset_allowance(&asset, &owner, &spender)
+        .get_contract_asset_allowance(&asset, &owner, &spender)
         .await
         .unwrap();
     ctx.storage
-        .set_native_asset_allowance(
+        .set_contract_asset_allowance(
             &asset,
             &owner,
             &spender,
@@ -574,14 +575,14 @@ async fn test_increase_decrease_allowance() {
 
     let after_increase = ctx
         .storage
-        .get_native_asset_allowance(&asset, &owner, &spender)
+        .get_contract_asset_allowance(&asset, &owner, &spender)
         .await
         .unwrap();
     assert_eq!(after_increase.amount, 150);
 
     // Decrease by 30
     ctx.storage
-        .set_native_asset_allowance(
+        .set_contract_asset_allowance(
             &asset,
             &owner,
             &spender,
@@ -595,7 +596,7 @@ async fn test_increase_decrease_allowance() {
 
     let after_decrease = ctx
         .storage
-        .get_native_asset_allowance(&asset, &owner, &spender)
+        .get_contract_asset_allowance(&asset, &owner, &spender)
         .await
         .unwrap();
     assert_eq!(after_decrease.amount, 120);
@@ -616,7 +617,7 @@ async fn test_multiple_spenders() {
 
     // Set different allowances for each spender
     ctx.storage
-        .set_native_asset_allowance(
+        .set_contract_asset_allowance(
             &asset,
             &owner,
             &spender1,
@@ -628,7 +629,7 @@ async fn test_multiple_spenders() {
         .await
         .unwrap();
     ctx.storage
-        .set_native_asset_allowance(
+        .set_contract_asset_allowance(
             &asset,
             &owner,
             &spender2,
@@ -640,7 +641,7 @@ async fn test_multiple_spenders() {
         .await
         .unwrap();
     ctx.storage
-        .set_native_asset_allowance(
+        .set_contract_asset_allowance(
             &asset,
             &owner,
             &spender3,
@@ -655,17 +656,17 @@ async fn test_multiple_spenders() {
     // Verify each spender has correct allowance
     let a1 = ctx
         .storage
-        .get_native_asset_allowance(&asset, &owner, &spender1)
+        .get_contract_asset_allowance(&asset, &owner, &spender1)
         .await
         .unwrap();
     let a2 = ctx
         .storage
-        .get_native_asset_allowance(&asset, &owner, &spender2)
+        .get_contract_asset_allowance(&asset, &owner, &spender2)
         .await
         .unwrap();
     let a3 = ctx
         .storage
-        .get_native_asset_allowance(&asset, &owner, &spender3)
+        .get_contract_asset_allowance(&asset, &owner, &spender3)
         .await
         .unwrap();
 
@@ -692,18 +693,18 @@ async fn test_mint_with_role() {
 
     // Grant minter role
     ctx.storage
-        .grant_native_asset_role(&asset, &MINTER_ROLE, &minter, 100)
+        .grant_contract_asset_role(&asset, &MINTER_ROLE, &minter, 100)
         .await
         .expect("Should grant minter role");
     ctx.storage
-        .add_native_asset_role_member(&asset, &MINTER_ROLE, &minter)
+        .add_contract_asset_role_member(&asset, &MINTER_ROLE, &minter)
         .await
         .expect("Should add to role members");
 
     // Verify minter has role
     let has_role = ctx
         .storage
-        .has_native_asset_role(&asset, &MINTER_ROLE, &minter)
+        .has_contract_asset_role(&asset, &MINTER_ROLE, &minter)
         .await
         .expect("Should check role");
     assert!(has_role, "Minter should have minter role");
@@ -711,26 +712,26 @@ async fn test_mint_with_role() {
     // Mint tokens
     let initial_supply = ctx
         .storage
-        .get_native_asset(&asset)
+        .get_contract_asset(&asset)
         .await
         .unwrap()
         .total_supply;
 
     let mint_amount = 1000u64;
     ctx.storage
-        .set_native_asset_balance(&asset, &recipient, mint_amount)
+        .set_contract_asset_balance(&asset, &recipient, mint_amount)
         .await
         .unwrap();
 
     // Update total supply
-    let mut data = ctx.storage.get_native_asset(&asset).await.unwrap();
+    let mut data = ctx.storage.get_contract_asset(&asset).await.unwrap();
     data.total_supply += mint_amount;
-    ctx.storage.set_native_asset(&asset, &data).await.unwrap();
+    ctx.storage.set_contract_asset(&asset, &data).await.unwrap();
 
     // Verify
     let final_supply = ctx
         .storage
-        .get_native_asset(&asset)
+        .get_contract_asset(&asset)
         .await
         .unwrap()
         .total_supply;
@@ -750,20 +751,20 @@ async fn test_burn_with_role() {
 
     // Give burner some tokens
     ctx.storage
-        .set_native_asset_balance(&asset, &burner, 1000)
+        .set_contract_asset_balance(&asset, &burner, 1000)
         .await
         .unwrap();
 
     // Grant burner role
     ctx.storage
-        .grant_native_asset_role(&asset, &BURNER_ROLE, &burner, 100)
+        .grant_contract_asset_role(&asset, &BURNER_ROLE, &burner, 100)
         .await
         .unwrap();
 
     // Burn tokens
     let initial_supply = ctx
         .storage
-        .get_native_asset(&asset)
+        .get_contract_asset(&asset)
         .await
         .unwrap()
         .total_supply;
@@ -771,23 +772,23 @@ async fn test_burn_with_role() {
     let burn_amount = 500u64;
     let burner_balance = ctx
         .storage
-        .get_native_asset_balance(&asset, &burner)
+        .get_contract_asset_balance(&asset, &burner)
         .await
         .unwrap();
     ctx.storage
-        .set_native_asset_balance(&asset, &burner, burner_balance - burn_amount)
+        .set_contract_asset_balance(&asset, &burner, burner_balance - burn_amount)
         .await
         .unwrap();
 
     // Update total supply
-    let mut data = ctx.storage.get_native_asset(&asset).await.unwrap();
+    let mut data = ctx.storage.get_contract_asset(&asset).await.unwrap();
     data.total_supply -= burn_amount;
-    ctx.storage.set_native_asset(&asset, &data).await.unwrap();
+    ctx.storage.set_contract_asset(&asset, &data).await.unwrap();
 
     // Verify
     let final_supply = ctx
         .storage
-        .get_native_asset(&asset)
+        .get_contract_asset(&asset)
         .await
         .unwrap()
         .total_supply;
@@ -795,7 +796,7 @@ async fn test_burn_with_role() {
 
     let final_burner_balance = ctx
         .storage
-        .get_native_asset_balance(&asset, &burner)
+        .get_contract_asset_balance(&asset, &burner)
         .await
         .unwrap();
     assert_eq!(final_burner_balance, 500);
@@ -814,21 +815,21 @@ async fn test_pause_unpause() {
 
     // Grant pauser role
     ctx.storage
-        .grant_native_asset_role(&asset, &PAUSER_ROLE, &pauser, 100)
+        .grant_contract_asset_role(&asset, &PAUSER_ROLE, &pauser, 100)
         .await
         .unwrap();
 
     // Initially not paused
     let pause_state = ctx
         .storage
-        .get_native_asset_pause_state(&asset)
+        .get_contract_asset_pause_state(&asset)
         .await
         .unwrap();
     assert!(!pause_state.is_paused, "Should not be paused initially");
 
     // Pause
     ctx.storage
-        .set_native_asset_pause_state(
+        .set_contract_asset_pause_state(
             &asset,
             &PauseState {
                 is_paused: true,
@@ -841,7 +842,7 @@ async fn test_pause_unpause() {
 
     let pause_state = ctx
         .storage
-        .get_native_asset_pause_state(&asset)
+        .get_contract_asset_pause_state(&asset)
         .await
         .unwrap();
     assert!(pause_state.is_paused, "Should be paused");
@@ -849,7 +850,7 @@ async fn test_pause_unpause() {
 
     // Unpause
     ctx.storage
-        .set_native_asset_pause_state(
+        .set_contract_asset_pause_state(
             &asset,
             &PauseState {
                 is_paused: false,
@@ -862,7 +863,7 @@ async fn test_pause_unpause() {
 
     let pause_state = ctx
         .storage
-        .get_native_asset_pause_state(&asset)
+        .get_contract_asset_pause_state(&asset)
         .await
         .unwrap();
     assert!(!pause_state.is_paused, "Should be unpaused");
@@ -882,21 +883,21 @@ async fn test_freeze_unfreeze_account() {
 
     // Grant freezer role
     ctx.storage
-        .grant_native_asset_role(&asset, &FREEZER_ROLE, &freezer, 100)
+        .grant_contract_asset_role(&asset, &FREEZER_ROLE, &freezer, 100)
         .await
         .unwrap();
 
     // Initially not frozen
     let freeze_state = ctx
         .storage
-        .get_native_asset_freeze_state(&asset, &target)
+        .get_contract_asset_freeze_state(&asset, &target)
         .await
         .unwrap();
     assert!(!freeze_state.is_frozen, "Should not be frozen initially");
 
     // Freeze
     ctx.storage
-        .set_native_asset_freeze_state(
+        .set_contract_asset_freeze_state(
             &asset,
             &target,
             &FreezeState {
@@ -910,14 +911,14 @@ async fn test_freeze_unfreeze_account() {
 
     let freeze_state = ctx
         .storage
-        .get_native_asset_freeze_state(&asset, &target)
+        .get_contract_asset_freeze_state(&asset, &target)
         .await
         .unwrap();
     assert!(freeze_state.is_frozen, "Should be frozen");
 
     // Unfreeze
     ctx.storage
-        .set_native_asset_freeze_state(
+        .set_contract_asset_freeze_state(
             &asset,
             &target,
             &FreezeState {
@@ -931,7 +932,7 @@ async fn test_freeze_unfreeze_account() {
 
     let freeze_state = ctx
         .storage
-        .get_native_asset_freeze_state(&asset, &target)
+        .get_contract_asset_freeze_state(&asset, &target)
         .await
         .unwrap();
     assert!(!freeze_state.is_frozen, "Should be unfrozen");
@@ -955,13 +956,13 @@ async fn test_delegation_voting_power() {
 
     // Give delegator some tokens
     ctx.storage
-        .set_native_asset_balance(&asset, &delegator, 1000)
+        .set_contract_asset_balance(&asset, &delegator, 1000)
         .await
         .unwrap();
 
     // Set delegation
     ctx.storage
-        .set_native_asset_delegation(
+        .set_contract_asset_delegation(
             &asset,
             &delegator,
             &Delegation {
@@ -975,7 +976,7 @@ async fn test_delegation_voting_power() {
     // Verify delegation
     let delegation = ctx
         .storage
-        .get_native_asset_delegation(&asset, &delegator)
+        .get_contract_asset_delegation(&asset, &delegator)
         .await
         .unwrap();
     assert_eq!(delegation.delegatee, Some(delegatee));
@@ -1011,20 +1012,20 @@ async fn test_balance_checkpoint_history() {
 
     for (i, cp) in checkpoints.iter().enumerate() {
         ctx.storage
-            .set_native_asset_balance_checkpoint(&asset, &account, i as u32, cp)
+            .set_contract_asset_balance_checkpoint(&asset, &account, i as u32, cp)
             .await
             .unwrap();
     }
 
     ctx.storage
-        .set_native_asset_balance_checkpoint_count(&asset, &account, 3)
+        .set_contract_asset_balance_checkpoint_count(&asset, &account, 3)
         .await
         .unwrap();
 
     // Verify checkpoints
     let count = ctx
         .storage
-        .get_native_asset_balance_checkpoint_count(&asset, &account)
+        .get_contract_asset_balance_checkpoint_count(&asset, &account)
         .await
         .unwrap();
     assert_eq!(count, 3);
@@ -1032,7 +1033,7 @@ async fn test_balance_checkpoint_history() {
     for (i, expected) in checkpoints.iter().enumerate() {
         let cp = ctx
             .storage
-            .get_native_asset_balance_checkpoint(&asset, &account, i as u32)
+            .get_contract_asset_balance_checkpoint(&asset, &account, i as u32)
             .await
             .unwrap();
         assert_eq!(cp.from_block, expected.from_block);
@@ -1071,20 +1072,20 @@ async fn test_delegation_checkpoint_history() {
 
     for (i, cp) in checkpoints.iter().enumerate() {
         ctx.storage
-            .set_native_asset_delegation_checkpoint(&asset, &account, i as u32, cp)
+            .set_contract_asset_delegation_checkpoint(&asset, &account, i as u32, cp)
             .await
             .unwrap();
     }
 
     ctx.storage
-        .set_native_asset_delegation_checkpoint_count(&asset, &account, 3)
+        .set_contract_asset_delegation_checkpoint_count(&asset, &account, 3)
         .await
         .unwrap();
 
     // Verify checkpoints
     let count = ctx
         .storage
-        .get_native_asset_delegation_checkpoint_count(&asset, &account)
+        .get_contract_asset_delegation_checkpoint_count(&asset, &account)
         .await
         .unwrap();
     assert_eq!(count, 3);
@@ -1107,7 +1108,7 @@ async fn test_token_lock_create_retrieve() {
 
     // Give locker some tokens
     ctx.storage
-        .set_native_asset_balance(&asset, &locker, 1000)
+        .set_contract_asset_balance(&asset, &locker, 1000)
         .await
         .unwrap();
 
@@ -1122,18 +1123,18 @@ async fn test_token_lock_create_retrieve() {
     };
 
     ctx.storage
-        .set_native_asset_lock(&asset, &locker, &lock)
+        .set_contract_asset_lock(&asset, &locker, &lock)
         .await
         .unwrap();
     ctx.storage
-        .add_native_asset_lock_id(&asset, &locker, 1)
+        .add_contract_asset_lock_id(&asset, &locker, 1)
         .await
         .unwrap();
 
     // Retrieve lock
     let retrieved = ctx
         .storage
-        .get_native_asset_lock(&asset, &locker, 1)
+        .get_contract_asset_lock(&asset, &locker, 1)
         .await
         .unwrap();
 
@@ -1165,11 +1166,11 @@ async fn test_multiple_locks() {
         };
 
         ctx.storage
-            .set_native_asset_lock(&asset, &locker, &lock)
+            .set_contract_asset_lock(&asset, &locker, &lock)
             .await
             .unwrap();
         ctx.storage
-            .add_native_asset_lock_id(&asset, &locker, lock_id)
+            .add_contract_asset_lock_id(&asset, &locker, lock_id)
             .await
             .unwrap();
     }
@@ -1177,7 +1178,7 @@ async fn test_multiple_locks() {
     // Verify all locks
     let lock_ids = ctx
         .storage
-        .get_native_asset_lock_ids(&asset, &locker)
+        .get_contract_asset_lock_ids(&asset, &locker)
         .await
         .unwrap();
     assert_eq!(lock_ids.len(), 5);
@@ -1185,7 +1186,7 @@ async fn test_multiple_locks() {
     for lock_id in 1..=5u64 {
         let lock = ctx
             .storage
-            .get_native_asset_lock(&asset, &locker, lock_id)
+            .get_contract_asset_lock(&asset, &locker, lock_id)
             .await
             .unwrap();
         assert_eq!(lock.amount, 100 * lock_id);
@@ -1214,28 +1215,28 @@ async fn test_lock_release() {
     };
 
     ctx.storage
-        .set_native_asset_lock(&asset, &locker, &lock)
+        .set_contract_asset_lock(&asset, &locker, &lock)
         .await
         .unwrap();
     ctx.storage
-        .add_native_asset_lock_id(&asset, &locker, 1)
+        .add_contract_asset_lock_id(&asset, &locker, 1)
         .await
         .unwrap();
 
     // Release lock (simulating unlock after time passes)
     ctx.storage
-        .delete_native_asset_lock(&asset, &locker, 1)
+        .delete_contract_asset_lock(&asset, &locker, 1)
         .await
         .unwrap();
     ctx.storage
-        .remove_native_asset_lock_id(&asset, &locker, 1)
+        .remove_contract_asset_lock_id(&asset, &locker, 1)
         .await
         .unwrap();
 
     // Verify lock is gone
     let lock_ids = ctx
         .storage
-        .get_native_asset_lock_ids(&asset, &locker)
+        .get_contract_asset_lock_ids(&asset, &locker)
         .await
         .unwrap();
     assert!(lock_ids.is_empty());
@@ -1273,22 +1274,22 @@ async fn test_escrow_create_retrieve() {
     };
 
     ctx.storage
-        .set_native_asset_escrow(&asset, &escrow)
+        .set_contract_asset_escrow(&asset, &escrow)
         .await
         .unwrap();
     ctx.storage
-        .add_native_asset_user_escrow(&asset, &sender, 1)
+        .add_contract_asset_user_escrow(&asset, &sender, 1)
         .await
         .unwrap();
     ctx.storage
-        .add_native_asset_user_escrow(&asset, &recipient, 1)
+        .add_contract_asset_user_escrow(&asset, &recipient, 1)
         .await
         .unwrap();
 
     // Retrieve escrow
     let retrieved = ctx
         .storage
-        .get_native_asset_escrow(&asset, 1)
+        .get_contract_asset_escrow(&asset, 1)
         .await
         .unwrap();
 
@@ -1326,21 +1327,21 @@ async fn test_escrow_release() {
     };
 
     ctx.storage
-        .set_native_asset_escrow(&asset, &escrow)
+        .set_contract_asset_escrow(&asset, &escrow)
         .await
         .unwrap();
 
     // Release escrow
     escrow.status = EscrowStatus::Released;
     ctx.storage
-        .set_native_asset_escrow(&asset, &escrow)
+        .set_contract_asset_escrow(&asset, &escrow)
         .await
         .unwrap();
 
     // Verify status
     let retrieved = ctx
         .storage
-        .get_native_asset_escrow(&asset, 1)
+        .get_contract_asset_escrow(&asset, 1)
         .await
         .unwrap();
     assert!(matches!(retrieved.status, EscrowStatus::Released));
@@ -1376,21 +1377,21 @@ async fn test_escrow_cancellation() {
     };
 
     ctx.storage
-        .set_native_asset_escrow(&asset, &escrow)
+        .set_contract_asset_escrow(&asset, &escrow)
         .await
         .unwrap();
 
     // Cancel escrow (after expiry)
     escrow.status = EscrowStatus::Cancelled;
     ctx.storage
-        .set_native_asset_escrow(&asset, &escrow)
+        .set_contract_asset_escrow(&asset, &escrow)
         .await
         .unwrap();
 
     // Verify status
     let retrieved = ctx
         .storage
-        .get_native_asset_escrow(&asset, 1)
+        .get_contract_asset_escrow(&asset, 1)
         .await
         .unwrap();
     assert!(matches!(retrieved.status, EscrowStatus::Cancelled));
@@ -1414,11 +1415,11 @@ async fn test_grant_revoke_roles() {
     // Grant multiple roles
     for role in [MINTER_ROLE, BURNER_ROLE, PAUSER_ROLE, FREEZER_ROLE] {
         ctx.storage
-            .grant_native_asset_role(&asset, &role, &account, 100)
+            .grant_contract_asset_role(&asset, &role, &account, 100)
             .await
             .unwrap();
         ctx.storage
-            .add_native_asset_role_member(&asset, &role, &account)
+            .add_contract_asset_role_member(&asset, &role, &account)
             .await
             .unwrap();
     }
@@ -1427,7 +1428,7 @@ async fn test_grant_revoke_roles() {
     for role in [MINTER_ROLE, BURNER_ROLE, PAUSER_ROLE, FREEZER_ROLE] {
         let has_role = ctx
             .storage
-            .has_native_asset_role(&asset, &role, &account)
+            .has_contract_asset_role(&asset, &role, &account)
             .await
             .unwrap();
         assert!(has_role);
@@ -1435,18 +1436,18 @@ async fn test_grant_revoke_roles() {
 
     // Revoke one role
     ctx.storage
-        .revoke_native_asset_role(&asset, &MINTER_ROLE, &account)
+        .revoke_contract_asset_role(&asset, &MINTER_ROLE, &account)
         .await
         .unwrap();
     ctx.storage
-        .remove_native_asset_role_member(&asset, &MINTER_ROLE, &account)
+        .remove_contract_asset_role_member(&asset, &MINTER_ROLE, &account)
         .await
         .unwrap();
 
     // Verify minter role is revoked
     let has_minter = ctx
         .storage
-        .has_native_asset_role(&asset, &MINTER_ROLE, &account)
+        .has_contract_asset_role(&asset, &MINTER_ROLE, &account)
         .await
         .unwrap();
     assert!(!has_minter, "Minter role should be revoked");
@@ -1454,7 +1455,7 @@ async fn test_grant_revoke_roles() {
     // Other roles still exist
     let has_burner = ctx
         .storage
-        .has_native_asset_role(&asset, &BURNER_ROLE, &account)
+        .has_contract_asset_role(&asset, &BURNER_ROLE, &account)
         .await
         .unwrap();
     assert!(has_burner, "Burner role should still exist");
@@ -1474,11 +1475,11 @@ async fn test_role_enumeration() {
     // Add multiple members to a role
     for member in &members {
         ctx.storage
-            .grant_native_asset_role(&asset, &MINTER_ROLE, member, 100)
+            .grant_contract_asset_role(&asset, &MINTER_ROLE, member, 100)
             .await
             .unwrap();
         ctx.storage
-            .add_native_asset_role_member(&asset, &MINTER_ROLE, member)
+            .add_contract_asset_role_member(&asset, &MINTER_ROLE, member)
             .await
             .unwrap();
     }
@@ -1486,7 +1487,7 @@ async fn test_role_enumeration() {
     // Enumerate members
     let role_members = ctx
         .storage
-        .get_native_asset_role_members(&asset, &MINTER_ROLE)
+        .get_contract_asset_role_members(&asset, &MINTER_ROLE)
         .await
         .unwrap();
 
@@ -1509,45 +1510,45 @@ async fn test_admin_transfer() {
 
     // Step 1: Propose new admin
     ctx.storage
-        .set_native_asset_pending_admin(&asset, Some(&new_admin))
+        .set_contract_asset_pending_admin(&asset, Some(&new_admin))
         .await
         .unwrap();
 
     let pending = ctx
         .storage
-        .get_native_asset_pending_admin(&asset)
+        .get_contract_asset_pending_admin(&asset)
         .await
         .unwrap();
     assert_eq!(pending, Some(new_admin));
 
     // Step 2: Accept admin (grant role to new admin, revoke from old)
     ctx.storage
-        .grant_native_asset_role(&asset, &DEFAULT_ADMIN_ROLE, &new_admin, 200)
+        .grant_contract_asset_role(&asset, &DEFAULT_ADMIN_ROLE, &new_admin, 200)
         .await
         .unwrap();
     ctx.storage
-        .revoke_native_asset_role(&asset, &DEFAULT_ADMIN_ROLE, &creator)
+        .revoke_contract_asset_role(&asset, &DEFAULT_ADMIN_ROLE, &creator)
         .await
         .unwrap();
     ctx.storage
-        .set_native_asset_pending_admin(&asset, None)
+        .set_contract_asset_pending_admin(&asset, None)
         .await
         .unwrap();
 
     // Verify
     let has_new_admin = ctx
         .storage
-        .has_native_asset_role(&asset, &DEFAULT_ADMIN_ROLE, &new_admin)
+        .has_contract_asset_role(&asset, &DEFAULT_ADMIN_ROLE, &new_admin)
         .await
         .unwrap();
     let has_old_admin = ctx
         .storage
-        .has_native_asset_role(&asset, &DEFAULT_ADMIN_ROLE, &creator)
+        .has_contract_asset_role(&asset, &DEFAULT_ADMIN_ROLE, &creator)
         .await
         .unwrap();
     let pending = ctx
         .storage
-        .get_native_asset_pending_admin(&asset)
+        .get_contract_asset_pending_admin(&asset)
         .await
         .unwrap();
 
@@ -1574,7 +1575,7 @@ async fn test_complete_token_lifecycle() {
     let asset = ctx.create_test_asset(&creator).await;
     let initial_supply = ctx
         .storage
-        .get_native_asset(&asset)
+        .get_contract_asset(&asset)
         .await
         .unwrap()
         .total_supply;
@@ -1583,25 +1584,25 @@ async fn test_complete_token_lifecycle() {
     let transfer_amount = initial_supply / 10;
     let creator_balance = ctx
         .storage
-        .get_native_asset_balance(&asset, &creator)
+        .get_contract_asset_balance(&asset, &creator)
         .await
         .unwrap();
     ctx.storage
-        .set_native_asset_balance(&asset, &creator, creator_balance - transfer_amount * 2)
+        .set_contract_asset_balance(&asset, &creator, creator_balance - transfer_amount * 2)
         .await
         .unwrap();
     ctx.storage
-        .set_native_asset_balance(&asset, &user1, transfer_amount)
+        .set_contract_asset_balance(&asset, &user1, transfer_amount)
         .await
         .unwrap();
     ctx.storage
-        .set_native_asset_balance(&asset, &user2, transfer_amount)
+        .set_contract_asset_balance(&asset, &user2, transfer_amount)
         .await
         .unwrap();
 
     // 3. Set allowance
     ctx.storage
-        .set_native_asset_allowance(
+        .set_contract_asset_allowance(
             &asset,
             &user1,
             &user2,
@@ -1616,31 +1617,31 @@ async fn test_complete_token_lifecycle() {
     // 4. Transfer-from
     let user1_balance = ctx
         .storage
-        .get_native_asset_balance(&asset, &user1)
+        .get_contract_asset_balance(&asset, &user1)
         .await
         .unwrap();
     let user2_balance = ctx
         .storage
-        .get_native_asset_balance(&asset, &user2)
+        .get_contract_asset_balance(&asset, &user2)
         .await
         .unwrap();
     let allowance = ctx
         .storage
-        .get_native_asset_allowance(&asset, &user1, &user2)
+        .get_contract_asset_allowance(&asset, &user1, &user2)
         .await
         .unwrap();
 
     let transfer_from_amount = allowance.amount / 2;
     ctx.storage
-        .set_native_asset_balance(&asset, &user1, user1_balance - transfer_from_amount)
+        .set_contract_asset_balance(&asset, &user1, user1_balance - transfer_from_amount)
         .await
         .unwrap();
     ctx.storage
-        .set_native_asset_balance(&asset, &user2, user2_balance + transfer_from_amount)
+        .set_contract_asset_balance(&asset, &user2, user2_balance + transfer_from_amount)
         .await
         .unwrap();
     ctx.storage
-        .set_native_asset_allowance(
+        .set_contract_asset_allowance(
             &asset,
             &user1,
             &user2,
@@ -1656,21 +1657,21 @@ async fn test_complete_token_lifecycle() {
     let burn_amount = transfer_amount / 10;
     let user2_balance = ctx
         .storage
-        .get_native_asset_balance(&asset, &user2)
+        .get_contract_asset_balance(&asset, &user2)
         .await
         .unwrap();
     ctx.storage
-        .set_native_asset_balance(&asset, &user2, user2_balance - burn_amount)
+        .set_contract_asset_balance(&asset, &user2, user2_balance - burn_amount)
         .await
         .unwrap();
-    let mut data = ctx.storage.get_native_asset(&asset).await.unwrap();
+    let mut data = ctx.storage.get_contract_asset(&asset).await.unwrap();
     data.total_supply -= burn_amount;
-    ctx.storage.set_native_asset(&asset, &data).await.unwrap();
+    ctx.storage.set_contract_asset(&asset, &data).await.unwrap();
 
     // 6. Verify final state
     let final_supply = ctx
         .storage
-        .get_native_asset(&asset)
+        .get_contract_asset(&asset)
         .await
         .unwrap()
         .total_supply;
@@ -1678,17 +1679,17 @@ async fn test_complete_token_lifecycle() {
 
     let final_user1 = ctx
         .storage
-        .get_native_asset_balance(&asset, &user1)
+        .get_contract_asset_balance(&asset, &user1)
         .await
         .unwrap();
     let final_user2 = ctx
         .storage
-        .get_native_asset_balance(&asset, &user2)
+        .get_contract_asset_balance(&asset, &user2)
         .await
         .unwrap();
     let final_creator = ctx
         .storage
-        .get_native_asset_balance(&asset, &creator)
+        .get_contract_asset_balance(&asset, &creator)
         .await
         .unwrap();
 
@@ -1719,15 +1720,15 @@ async fn test_multi_asset_operations() {
     for asset in &assets {
         let creator_balance = ctx
             .storage
-            .get_native_asset_balance(asset, &creator)
+            .get_contract_asset_balance(asset, &creator)
             .await
             .unwrap();
         ctx.storage
-            .set_native_asset_balance(asset, &creator, creator_balance - 1000)
+            .set_contract_asset_balance(asset, &creator, creator_balance - 1000)
             .await
             .unwrap();
         ctx.storage
-            .set_native_asset_balance(asset, &user, 1000)
+            .set_contract_asset_balance(asset, &user, 1000)
             .await
             .unwrap();
     }
@@ -1736,7 +1737,7 @@ async fn test_multi_asset_operations() {
     for asset in &assets {
         let balance = ctx
             .storage
-            .get_native_asset_balance(asset, &user)
+            .get_contract_asset_balance(asset, &user)
             .await
             .unwrap();
         assert_eq!(balance, 1000);
@@ -1758,7 +1759,7 @@ async fn test_complex_workflow_locks_escrow() {
     // Give seller some tokens
     let seller_amount = 10000u64;
     ctx.storage
-        .set_native_asset_balance(&asset, &seller, seller_amount)
+        .set_contract_asset_balance(&asset, &seller, seller_amount)
         .await
         .unwrap();
 
@@ -1772,11 +1773,11 @@ async fn test_complex_workflow_locks_escrow() {
         created_at: 100,
     };
     ctx.storage
-        .set_native_asset_lock(&asset, &seller, &lock)
+        .set_contract_asset_lock(&asset, &seller, &lock)
         .await
         .unwrap();
     ctx.storage
-        .add_native_asset_lock_id(&asset, &seller, 1)
+        .add_contract_asset_lock_id(&asset, &seller, 1)
         .await
         .unwrap();
 
@@ -1795,35 +1796,39 @@ async fn test_complex_workflow_locks_escrow() {
         metadata: None,
     };
     ctx.storage
-        .set_native_asset_escrow(&asset, &escrow)
+        .set_contract_asset_escrow(&asset, &escrow)
         .await
         .unwrap();
 
     // Deduct escrowed amount from seller
     let seller_balance = ctx
         .storage
-        .get_native_asset_balance(&asset, &seller)
+        .get_contract_asset_balance(&asset, &seller)
         .await
         .unwrap();
     ctx.storage
-        .set_native_asset_balance(&asset, &seller, seller_balance - 2000)
+        .set_contract_asset_balance(&asset, &seller, seller_balance - 2000)
         .await
         .unwrap();
 
     // Verify seller's effective balance
     let seller_balance = ctx
         .storage
-        .get_native_asset_balance(&asset, &seller)
+        .get_contract_asset_balance(&asset, &seller)
         .await
         .unwrap();
     let lock_ids = ctx
         .storage
-        .get_native_asset_lock_ids(&asset, &seller)
+        .get_contract_asset_lock_ids(&asset, &seller)
         .await
         .unwrap();
     let mut locked_amount = 0u64;
     for id in lock_ids {
-        if let Ok(lock) = ctx.storage.get_native_asset_lock(&asset, &seller, id).await {
+        if let Ok(lock) = ctx
+            .storage
+            .get_contract_asset_lock(&asset, &seller, id)
+            .await
+        {
             locked_amount += lock.amount;
         }
     }
@@ -1841,25 +1846,25 @@ async fn test_complex_workflow_locks_escrow() {
 // I. Additional Coverage Tests - Asset Data Operations
 // ============================================================================
 
-/// Test I.1: has_native_asset check
+/// Test I.1: has_contract_asset check
 #[tokio::test]
-async fn test_has_native_asset() {
+async fn test_has_contract_asset() {
     let mut ctx = TestContext::new();
     let creator = random_account();
     let non_existent = random_asset();
 
     // Check non-existent asset
-    let exists = ctx.storage.has_native_asset(&non_existent).await.unwrap();
+    let exists = ctx.storage.has_contract_asset(&non_existent).await.unwrap();
     assert!(!exists, "Non-existent asset should return false");
 
     // Create asset
     let asset = ctx.create_test_asset(&creator).await;
 
     // Check existing asset
-    let exists = ctx.storage.has_native_asset(&asset).await.unwrap();
+    let exists = ctx.storage.has_contract_asset(&asset).await.unwrap();
     assert!(exists, "Created asset should exist");
 
-    println!("Test I.1 passed: has_native_asset");
+    println!("Test I.1 passed: has_contract_asset");
 }
 
 /// Test I.2: Supply get/set operations
@@ -1870,25 +1875,25 @@ async fn test_supply_operations() {
     let asset = ctx.create_test_asset(&creator).await;
 
     // Get initial supply
-    let supply = ctx.storage.get_native_asset_supply(&asset).await.unwrap();
+    let supply = ctx.storage.get_contract_asset_supply(&asset).await.unwrap();
     assert_eq!(supply, 100_000_000_000_000);
 
     // Update supply
     ctx.storage
-        .set_native_asset_supply(&asset, 200_000_000_000_000)
+        .set_contract_asset_supply(&asset, 200_000_000_000_000)
         .await
         .unwrap();
 
     // Verify updated supply
-    let supply = ctx.storage.get_native_asset_supply(&asset).await.unwrap();
+    let supply = ctx.storage.get_contract_asset_supply(&asset).await.unwrap();
     assert_eq!(supply, 200_000_000_000_000);
 
     println!("Test I.2 passed: Supply operations");
 }
 
-/// Test I.3: has_native_asset_balance check
+/// Test I.3: has_contract_asset_balance check
 #[tokio::test]
-async fn test_has_native_asset_balance() {
+async fn test_has_contract_asset_balance() {
     let mut ctx = TestContext::new();
     let creator = random_account();
     let account = random_account();
@@ -1897,33 +1902,33 @@ async fn test_has_native_asset_balance() {
     // Check account with no balance
     let has_balance = ctx
         .storage
-        .has_native_asset_balance(&asset, &account)
+        .has_contract_asset_balance(&asset, &account)
         .await
         .unwrap();
     assert!(!has_balance, "Account without balance should return false");
 
     // Set balance
     ctx.storage
-        .set_native_asset_balance(&asset, &account, 1000)
+        .set_contract_asset_balance(&asset, &account, 1000)
         .await
         .unwrap();
 
     // Check account with balance
     let has_balance = ctx
         .storage
-        .has_native_asset_balance(&asset, &account)
+        .has_contract_asset_balance(&asset, &account)
         .await
         .unwrap();
     assert!(has_balance, "Account with balance should return true");
 
-    println!("Test I.3 passed: has_native_asset_balance");
+    println!("Test I.3 passed: has_contract_asset_balance");
 }
 
 // ============================================================================
 // J. Additional Coverage Tests - Allowance Operations
 // ============================================================================
 
-/// Test J.1: delete_native_asset_allowance
+/// Test J.1: delete_contract_asset_allowance
 #[tokio::test]
 async fn test_delete_allowance() {
     let mut ctx = TestContext::new();
@@ -1938,33 +1943,33 @@ async fn test_delete_allowance() {
         updated_at: 100,
     };
     ctx.storage
-        .set_native_asset_allowance(&asset, &owner, &spender, &allowance)
+        .set_contract_asset_allowance(&asset, &owner, &spender, &allowance)
         .await
         .unwrap();
 
     // Verify allowance exists
     let retrieved = ctx
         .storage
-        .get_native_asset_allowance(&asset, &owner, &spender)
+        .get_contract_asset_allowance(&asset, &owner, &spender)
         .await
         .unwrap();
     assert_eq!(retrieved.amount, 1000);
 
     // Delete allowance
     ctx.storage
-        .delete_native_asset_allowance(&asset, &owner, &spender)
+        .delete_contract_asset_allowance(&asset, &owner, &spender)
         .await
         .unwrap();
 
     // Verify allowance is deleted (should return default/zero)
     let retrieved = ctx
         .storage
-        .get_native_asset_allowance(&asset, &owner, &spender)
+        .get_contract_asset_allowance(&asset, &owner, &spender)
         .await
         .unwrap();
     assert_eq!(retrieved.amount, 0);
 
-    println!("Test J.1 passed: delete_native_asset_allowance");
+    println!("Test J.1 passed: delete_contract_asset_allowance");
 }
 
 // ============================================================================
@@ -1982,21 +1987,21 @@ async fn test_lock_count_and_next_id() {
     // Get initial lock count (should be 0)
     let count = ctx
         .storage
-        .get_native_asset_lock_count(&asset, &locker)
+        .get_contract_asset_lock_count(&asset, &locker)
         .await
         .unwrap();
     assert_eq!(count, 0);
 
     // Set lock count
     ctx.storage
-        .set_native_asset_lock_count(&asset, &locker, 5)
+        .set_contract_asset_lock_count(&asset, &locker, 5)
         .await
         .unwrap();
 
     // Verify lock count
     let count = ctx
         .storage
-        .get_native_asset_lock_count(&asset, &locker)
+        .get_contract_asset_lock_count(&asset, &locker)
         .await
         .unwrap();
     assert_eq!(count, 5);
@@ -2004,21 +2009,21 @@ async fn test_lock_count_and_next_id() {
     // Get initial next lock ID (should be 0)
     let next_id = ctx
         .storage
-        .get_native_asset_next_lock_id(&asset, &locker)
+        .get_contract_asset_next_lock_id(&asset, &locker)
         .await
         .unwrap();
     assert_eq!(next_id, 0);
 
     // Set next lock ID
     ctx.storage
-        .set_native_asset_next_lock_id(&asset, &locker, 10)
+        .set_contract_asset_next_lock_id(&asset, &locker, 10)
         .await
         .unwrap();
 
     // Verify next lock ID
     let next_id = ctx
         .storage
-        .get_native_asset_next_lock_id(&asset, &locker)
+        .get_contract_asset_next_lock_id(&asset, &locker)
         .await
         .unwrap();
     assert_eq!(next_id, 10);
@@ -2037,21 +2042,21 @@ async fn test_locked_balance_operations() {
     // Get initial locked balance (should be 0)
     let locked = ctx
         .storage
-        .get_native_asset_locked_balance(&asset, &locker)
+        .get_contract_asset_locked_balance(&asset, &locker)
         .await
         .unwrap();
     assert_eq!(locked, 0);
 
     // Set locked balance
     ctx.storage
-        .set_native_asset_locked_balance(&asset, &locker, 5000)
+        .set_contract_asset_locked_balance(&asset, &locker, 5000)
         .await
         .unwrap();
 
     // Verify locked balance
     let locked = ctx
         .storage
-        .get_native_asset_locked_balance(&asset, &locker)
+        .get_contract_asset_locked_balance(&asset, &locker)
         .await
         .unwrap();
     assert_eq!(locked, 5000);
@@ -2077,26 +2082,29 @@ async fn test_delete_lock() {
         created_at: 100,
     };
     ctx.storage
-        .set_native_asset_lock(&asset, &locker, &lock)
+        .set_contract_asset_lock(&asset, &locker, &lock)
         .await
         .unwrap();
 
     // Verify lock exists
     let retrieved = ctx
         .storage
-        .get_native_asset_lock(&asset, &locker, 1)
+        .get_contract_asset_lock(&asset, &locker, 1)
         .await
         .unwrap();
     assert_eq!(retrieved.amount, 500);
 
     // Delete lock
     ctx.storage
-        .delete_native_asset_lock(&asset, &locker, 1)
+        .delete_contract_asset_lock(&asset, &locker, 1)
         .await
         .unwrap();
 
     // Verify lock is deleted (should error or return default)
-    let result = ctx.storage.get_native_asset_lock(&asset, &locker, 1).await;
+    let result = ctx
+        .storage
+        .get_contract_asset_lock(&asset, &locker, 1)
+        .await;
     assert!(result.is_err(), "Deleted lock should not be found");
 
     println!("Test K.3 passed: Delete lock operation");
@@ -2113,7 +2121,7 @@ async fn test_remove_lock_id() {
     // Add multiple lock IDs
     for id in 1..=3u64 {
         ctx.storage
-            .add_native_asset_lock_id(&asset, &locker, id)
+            .add_contract_asset_lock_id(&asset, &locker, id)
             .await
             .unwrap();
     }
@@ -2121,21 +2129,21 @@ async fn test_remove_lock_id() {
     // Verify all IDs exist
     let ids = ctx
         .storage
-        .get_native_asset_lock_ids(&asset, &locker)
+        .get_contract_asset_lock_ids(&asset, &locker)
         .await
         .unwrap();
     assert_eq!(ids.len(), 3);
 
     // Remove middle ID
     ctx.storage
-        .remove_native_asset_lock_id(&asset, &locker, 2)
+        .remove_contract_asset_lock_id(&asset, &locker, 2)
         .await
         .unwrap();
 
     // Verify ID is removed
     let ids = ctx
         .storage
-        .get_native_asset_lock_ids(&asset, &locker)
+        .get_contract_asset_lock_ids(&asset, &locker)
         .await
         .unwrap();
     assert_eq!(ids.len(), 2);
@@ -2164,14 +2172,14 @@ async fn test_role_config_operations() {
         member_count: 5,
     };
     ctx.storage
-        .set_native_asset_role_config(&asset, &MINTER_ROLE, &config)
+        .set_contract_asset_role_config(&asset, &MINTER_ROLE, &config)
         .await
         .unwrap();
 
     // Get role config
     let retrieved = ctx
         .storage
-        .get_native_asset_role_config(&asset, &MINTER_ROLE)
+        .get_contract_asset_role_config(&asset, &MINTER_ROLE)
         .await
         .unwrap();
     assert_eq!(retrieved.admin_role, admin_role);
@@ -2191,32 +2199,32 @@ async fn test_remove_role_member() {
 
     // Add members
     ctx.storage
-        .add_native_asset_role_member(&asset, &MINTER_ROLE, &member1)
+        .add_contract_asset_role_member(&asset, &MINTER_ROLE, &member1)
         .await
         .unwrap();
     ctx.storage
-        .add_native_asset_role_member(&asset, &MINTER_ROLE, &member2)
+        .add_contract_asset_role_member(&asset, &MINTER_ROLE, &member2)
         .await
         .unwrap();
 
     // Verify members
     let members = ctx
         .storage
-        .get_native_asset_role_members(&asset, &MINTER_ROLE)
+        .get_contract_asset_role_members(&asset, &MINTER_ROLE)
         .await
         .unwrap();
     assert_eq!(members.len(), 2);
 
     // Remove member1
     ctx.storage
-        .remove_native_asset_role_member(&asset, &MINTER_ROLE, &member1)
+        .remove_contract_asset_role_member(&asset, &MINTER_ROLE, &member1)
         .await
         .unwrap();
 
     // Verify member removed
     let members = ctx
         .storage
-        .get_native_asset_role_members(&asset, &MINTER_ROLE)
+        .get_contract_asset_role_members(&asset, &MINTER_ROLE)
         .await
         .unwrap();
     assert_eq!(members.len(), 1);
@@ -2237,25 +2245,25 @@ async fn test_get_role_member_by_index() {
 
     // Add members
     ctx.storage
-        .add_native_asset_role_member(&asset, &MINTER_ROLE, &member1)
+        .add_contract_asset_role_member(&asset, &MINTER_ROLE, &member1)
         .await
         .unwrap();
     ctx.storage
-        .add_native_asset_role_member(&asset, &MINTER_ROLE, &member2)
+        .add_contract_asset_role_member(&asset, &MINTER_ROLE, &member2)
         .await
         .unwrap();
 
     // Get member by index
     let retrieved = ctx
         .storage
-        .get_native_asset_role_member(&asset, &MINTER_ROLE, 0)
+        .get_contract_asset_role_member(&asset, &MINTER_ROLE, 0)
         .await
         .unwrap();
     assert_eq!(retrieved, member1);
 
     let retrieved = ctx
         .storage
-        .get_native_asset_role_member(&asset, &MINTER_ROLE, 1)
+        .get_contract_asset_role_member(&asset, &MINTER_ROLE, 1)
         .await
         .unwrap();
     assert_eq!(retrieved, member2);
@@ -2277,21 +2285,21 @@ async fn test_escrow_counter_operations() {
     // Get initial counter
     let counter = ctx
         .storage
-        .get_native_asset_escrow_counter(&asset)
+        .get_contract_asset_escrow_counter(&asset)
         .await
         .unwrap();
     assert_eq!(counter, 0);
 
     // Set counter
     ctx.storage
-        .set_native_asset_escrow_counter(&asset, 5)
+        .set_contract_asset_escrow_counter(&asset, 5)
         .await
         .unwrap();
 
     // Verify counter
     let counter = ctx
         .storage
-        .get_native_asset_escrow_counter(&asset)
+        .get_contract_asset_escrow_counter(&asset)
         .await
         .unwrap();
     assert_eq!(counter, 5);
@@ -2325,26 +2333,26 @@ async fn test_delete_escrow() {
         metadata: None,
     };
     ctx.storage
-        .set_native_asset_escrow(&asset, &escrow)
+        .set_contract_asset_escrow(&asset, &escrow)
         .await
         .unwrap();
 
     // Verify escrow exists
     let retrieved = ctx
         .storage
-        .get_native_asset_escrow(&asset, 1)
+        .get_contract_asset_escrow(&asset, 1)
         .await
         .unwrap();
     assert_eq!(retrieved.amount, 1000);
 
     // Delete escrow
     ctx.storage
-        .delete_native_asset_escrow(&asset, 1)
+        .delete_contract_asset_escrow(&asset, 1)
         .await
         .unwrap();
 
     // Verify escrow deleted
-    let result = ctx.storage.get_native_asset_escrow(&asset, 1).await;
+    let result = ctx.storage.get_contract_asset_escrow(&asset, 1).await;
     assert!(result.is_err(), "Deleted escrow should not be found");
 
     println!("Test M.2 passed: Delete escrow");
@@ -2361,7 +2369,7 @@ async fn test_user_escrow_index() {
     // Add escrow IDs
     for id in 1..=3u64 {
         ctx.storage
-            .add_native_asset_user_escrow(&asset, &user, id)
+            .add_contract_asset_user_escrow(&asset, &user, id)
             .await
             .unwrap();
     }
@@ -2369,21 +2377,21 @@ async fn test_user_escrow_index() {
     // Get user escrows
     let escrows = ctx
         .storage
-        .get_native_asset_user_escrows(&asset, &user)
+        .get_contract_asset_user_escrows(&asset, &user)
         .await
         .unwrap();
     assert_eq!(escrows.len(), 3);
 
     // Remove escrow
     ctx.storage
-        .remove_native_asset_user_escrow(&asset, &user, 2)
+        .remove_contract_asset_user_escrow(&asset, &user, 2)
         .await
         .unwrap();
 
     // Verify removal
     let escrows = ctx
         .storage
-        .get_native_asset_user_escrows(&asset, &user)
+        .get_contract_asset_user_escrows(&asset, &user)
         .await
         .unwrap();
     assert_eq!(escrows.len(), 2);
@@ -2407,34 +2415,34 @@ async fn test_permit_nonce_operations() {
     // Get initial nonce
     let nonce = ctx
         .storage
-        .get_native_asset_permit_nonce(&asset, &account)
+        .get_contract_asset_permit_nonce(&asset, &account)
         .await
         .unwrap();
     assert_eq!(nonce, 0);
 
     // Set nonce
     ctx.storage
-        .set_native_asset_permit_nonce(&asset, &account, 5)
+        .set_contract_asset_permit_nonce(&asset, &account, 5)
         .await
         .unwrap();
 
     // Verify nonce
     let nonce = ctx
         .storage
-        .get_native_asset_permit_nonce(&asset, &account)
+        .get_contract_asset_permit_nonce(&asset, &account)
         .await
         .unwrap();
     assert_eq!(nonce, 5);
 
     // Increment nonce
     ctx.storage
-        .set_native_asset_permit_nonce(&asset, &account, 6)
+        .set_contract_asset_permit_nonce(&asset, &account, 6)
         .await
         .unwrap();
 
     let nonce = ctx
         .storage
-        .get_native_asset_permit_nonce(&asset, &account)
+        .get_contract_asset_permit_nonce(&asset, &account)
         .await
         .unwrap();
     assert_eq!(nonce, 6);
@@ -2456,7 +2464,7 @@ async fn test_checkpoint_operations() {
 
     // Set checkpoint count
     ctx.storage
-        .set_native_asset_checkpoint_count(&asset, &account, 3)
+        .set_contract_asset_checkpoint_count(&asset, &account, 3)
         .await
         .unwrap();
 
@@ -2478,7 +2486,7 @@ async fn test_checkpoint_operations() {
 
     for (i, cp) in checkpoints.iter().enumerate() {
         ctx.storage
-            .set_native_asset_checkpoint(&asset, &account, i as u32, cp)
+            .set_contract_asset_checkpoint(&asset, &account, i as u32, cp)
             .await
             .unwrap();
     }
@@ -2486,7 +2494,7 @@ async fn test_checkpoint_operations() {
     // Verify checkpoint count
     let count = ctx
         .storage
-        .get_native_asset_checkpoint_count(&asset, &account)
+        .get_contract_asset_checkpoint_count(&asset, &account)
         .await
         .unwrap();
     assert_eq!(count, 3);
@@ -2495,7 +2503,7 @@ async fn test_checkpoint_operations() {
     for (i, expected) in checkpoints.iter().enumerate() {
         let cp = ctx
             .storage
-            .get_native_asset_checkpoint(&asset, &account, i as u32)
+            .get_contract_asset_checkpoint(&asset, &account, i as u32)
             .await
             .unwrap();
         assert_eq!(cp.from_block, expected.from_block);
@@ -2521,7 +2529,7 @@ async fn test_agent_authorization() {
     // Check no authorization exists
     let has_auth = ctx
         .storage
-        .has_native_asset_agent_auth(&asset, &owner, &agent)
+        .has_contract_asset_agent_auth(&asset, &owner, &agent)
         .await
         .unwrap();
     assert!(!has_auth);
@@ -2543,14 +2551,14 @@ async fn test_agent_authorization() {
         created_at: 100,
     };
     ctx.storage
-        .set_native_asset_agent_auth(&asset, &auth)
+        .set_contract_asset_agent_auth(&asset, &auth)
         .await
         .unwrap();
 
     // Verify authorization exists
     let has_auth = ctx
         .storage
-        .has_native_asset_agent_auth(&asset, &owner, &agent)
+        .has_contract_asset_agent_auth(&asset, &owner, &agent)
         .await
         .unwrap();
     assert!(has_auth);
@@ -2558,7 +2566,7 @@ async fn test_agent_authorization() {
     // Get authorization
     let retrieved = ctx
         .storage
-        .get_native_asset_agent_auth(&asset, &owner, &agent)
+        .get_contract_asset_agent_auth(&asset, &owner, &agent)
         .await
         .unwrap();
     assert_eq!(retrieved.spending_limit.max_amount, 100000);
@@ -2589,28 +2597,28 @@ async fn test_delete_agent_authorization() {
         created_at: 100,
     };
     ctx.storage
-        .set_native_asset_agent_auth(&asset, &auth)
+        .set_contract_asset_agent_auth(&asset, &auth)
         .await
         .unwrap();
 
     // Verify exists
     let has_auth = ctx
         .storage
-        .has_native_asset_agent_auth(&asset, &owner, &agent)
+        .has_contract_asset_agent_auth(&asset, &owner, &agent)
         .await
         .unwrap();
     assert!(has_auth);
 
     // Delete authorization
     ctx.storage
-        .delete_native_asset_agent_auth(&asset, &owner, &agent)
+        .delete_contract_asset_agent_auth(&asset, &owner, &agent)
         .await
         .unwrap();
 
     // Verify deleted
     let has_auth = ctx
         .storage
-        .has_native_asset_agent_auth(&asset, &owner, &agent)
+        .has_contract_asset_agent_auth(&asset, &owner, &agent)
         .await
         .unwrap();
     assert!(!has_auth);
@@ -2630,18 +2638,18 @@ async fn test_owner_agents_index() {
 
     // Add agents
     ctx.storage
-        .add_native_asset_owner_agent(&asset, &owner, &agent1)
+        .add_contract_asset_owner_agent(&asset, &owner, &agent1)
         .await
         .unwrap();
     ctx.storage
-        .add_native_asset_owner_agent(&asset, &owner, &agent2)
+        .add_contract_asset_owner_agent(&asset, &owner, &agent2)
         .await
         .unwrap();
 
     // Get owner agents
     let agents = ctx
         .storage
-        .get_native_asset_owner_agents(&asset, &owner)
+        .get_contract_asset_owner_agents(&asset, &owner)
         .await
         .unwrap();
     assert_eq!(agents.len(), 2);
@@ -2650,14 +2658,14 @@ async fn test_owner_agents_index() {
 
     // Remove agent
     ctx.storage
-        .remove_native_asset_owner_agent(&asset, &owner, &agent1)
+        .remove_contract_asset_owner_agent(&asset, &owner, &agent1)
         .await
         .unwrap();
 
     // Verify removal
     let agents = ctx
         .storage
-        .get_native_asset_owner_agents(&asset, &owner)
+        .get_contract_asset_owner_agents(&asset, &owner)
         .await
         .unwrap();
     assert_eq!(agents.len(), 1);
@@ -2681,21 +2689,21 @@ async fn test_metadata_uri_operations() {
     // Get initial metadata URI (set during creation)
     let uri = ctx
         .storage
-        .get_native_asset_metadata_uri(&asset)
+        .get_contract_asset_metadata_uri(&asset)
         .await
         .unwrap();
     assert_eq!(uri, Some("https://example.com/token.json".to_string()));
 
     // Update metadata URI
     ctx.storage
-        .set_native_asset_metadata_uri(&asset, Some("https://new.example.com/metadata.json"))
+        .set_contract_asset_metadata_uri(&asset, Some("https://new.example.com/metadata.json"))
         .await
         .unwrap();
 
     // Verify update
     let uri = ctx
         .storage
-        .get_native_asset_metadata_uri(&asset)
+        .get_contract_asset_metadata_uri(&asset)
         .await
         .unwrap();
     assert_eq!(
@@ -2705,14 +2713,14 @@ async fn test_metadata_uri_operations() {
 
     // Clear metadata URI
     ctx.storage
-        .set_native_asset_metadata_uri(&asset, None)
+        .set_contract_asset_metadata_uri(&asset, None)
         .await
         .unwrap();
 
     // Verify cleared
     let uri = ctx
         .storage
-        .get_native_asset_metadata_uri(&asset)
+        .get_contract_asset_metadata_uri(&asset)
         .await
         .unwrap();
     assert!(uri.is_none());
@@ -2735,35 +2743,35 @@ async fn test_pending_admin_operations() {
     // Get initial pending admin (should be None)
     let pending = ctx
         .storage
-        .get_native_asset_pending_admin(&asset)
+        .get_contract_asset_pending_admin(&asset)
         .await
         .unwrap();
     assert!(pending.is_none());
 
     // Set pending admin
     ctx.storage
-        .set_native_asset_pending_admin(&asset, Some(&new_admin))
+        .set_contract_asset_pending_admin(&asset, Some(&new_admin))
         .await
         .unwrap();
 
     // Verify pending admin
     let pending = ctx
         .storage
-        .get_native_asset_pending_admin(&asset)
+        .get_contract_asset_pending_admin(&asset)
         .await
         .unwrap();
     assert_eq!(pending, Some(new_admin));
 
     // Clear pending admin
     ctx.storage
-        .set_native_asset_pending_admin(&asset, None)
+        .set_contract_asset_pending_admin(&asset, None)
         .await
         .unwrap();
 
     // Verify cleared
     let pending = ctx
         .storage
-        .get_native_asset_pending_admin(&asset)
+        .get_contract_asset_pending_admin(&asset)
         .await
         .unwrap();
     assert!(pending.is_none());
@@ -2784,7 +2792,7 @@ async fn test_supply_checkpoint_operations() {
 
     // Set checkpoint count
     ctx.storage
-        .set_native_asset_supply_checkpoint_count(&asset, 3)
+        .set_contract_asset_supply_checkpoint_count(&asset, 3)
         .await
         .unwrap();
 
@@ -2806,7 +2814,7 @@ async fn test_supply_checkpoint_operations() {
 
     for (i, cp) in checkpoints.iter().enumerate() {
         ctx.storage
-            .set_native_asset_supply_checkpoint(&asset, i as u32, cp)
+            .set_contract_asset_supply_checkpoint(&asset, i as u32, cp)
             .await
             .unwrap();
     }
@@ -2814,7 +2822,7 @@ async fn test_supply_checkpoint_operations() {
     // Verify checkpoint count
     let count = ctx
         .storage
-        .get_native_asset_supply_checkpoint_count(&asset)
+        .get_contract_asset_supply_checkpoint_count(&asset)
         .await
         .unwrap();
     assert_eq!(count, 3);
@@ -2823,7 +2831,7 @@ async fn test_supply_checkpoint_operations() {
     for (i, expected) in checkpoints.iter().enumerate() {
         let cp = ctx
             .storage
-            .get_native_asset_supply_checkpoint(&asset, i as u32)
+            .get_contract_asset_supply_checkpoint(&asset, i as u32)
             .await
             .unwrap();
         assert_eq!(cp.from_block, expected.from_block);
@@ -2851,14 +2859,14 @@ async fn test_admin_delay_operations() {
         pending_delay_effective_at: Some(10000),
     };
     ctx.storage
-        .set_native_asset_admin_delay(&asset, &admin_delay)
+        .set_contract_asset_admin_delay(&asset, &admin_delay)
         .await
         .unwrap();
 
     // Get admin delay
     let retrieved = ctx
         .storage
-        .get_native_asset_admin_delay(&asset)
+        .get_contract_asset_admin_delay(&asset)
         .await
         .unwrap();
     assert_eq!(retrieved.delay, 3600);
@@ -2882,21 +2890,21 @@ async fn test_timelock_min_delay() {
     // Get initial min delay (should be 0)
     let min_delay = ctx
         .storage
-        .get_native_asset_timelock_min_delay(&asset)
+        .get_contract_asset_timelock_min_delay(&asset)
         .await
         .unwrap();
     assert_eq!(min_delay, 0);
 
     // Set min delay
     ctx.storage
-        .set_native_asset_timelock_min_delay(&asset, 86400) // 1 day
+        .set_contract_asset_timelock_min_delay(&asset, 86400) // 1 day
         .await
         .unwrap();
 
     // Verify min delay
     let min_delay = ctx
         .storage
-        .get_native_asset_timelock_min_delay(&asset)
+        .get_contract_asset_timelock_min_delay(&asset)
         .await
         .unwrap();
     assert_eq!(min_delay, 86400);
@@ -2916,7 +2924,7 @@ async fn test_timelock_operation_crud() {
     // Check operation doesn't exist
     let op = ctx
         .storage
-        .get_native_asset_timelock_operation(&asset, &operation_id)
+        .get_contract_asset_timelock_operation(&asset, &operation_id)
         .await
         .unwrap();
     assert!(op.is_none());
@@ -2933,14 +2941,14 @@ async fn test_timelock_operation_crud() {
         scheduled_at: 100,
     };
     ctx.storage
-        .set_native_asset_timelock_operation(&asset, &operation)
+        .set_contract_asset_timelock_operation(&asset, &operation)
         .await
         .unwrap();
 
     // Verify operation exists
     let retrieved = ctx
         .storage
-        .get_native_asset_timelock_operation(&asset, &operation_id)
+        .get_contract_asset_timelock_operation(&asset, &operation_id)
         .await
         .unwrap();
     assert!(retrieved.is_some());
@@ -2953,14 +2961,14 @@ async fn test_timelock_operation_crud() {
     let mut updated = retrieved;
     updated.status = TimelockStatus::Done;
     ctx.storage
-        .set_native_asset_timelock_operation(&asset, &updated)
+        .set_contract_asset_timelock_operation(&asset, &updated)
         .await
         .unwrap();
 
     // Verify update
     let retrieved = ctx
         .storage
-        .get_native_asset_timelock_operation(&asset, &operation_id)
+        .get_contract_asset_timelock_operation(&asset, &operation_id)
         .await
         .unwrap()
         .unwrap();
@@ -2968,14 +2976,14 @@ async fn test_timelock_operation_crud() {
 
     // Delete operation
     ctx.storage
-        .delete_native_asset_timelock_operation(&asset, &operation_id)
+        .delete_contract_asset_timelock_operation(&asset, &operation_id)
         .await
         .unwrap();
 
     // Verify deletion
     let op = ctx
         .storage
-        .get_native_asset_timelock_operation(&asset, &operation_id)
+        .get_contract_asset_timelock_operation(&asset, &operation_id)
         .await
         .unwrap();
     assert!(op.is_none());
@@ -3000,61 +3008,61 @@ async fn test_vote_power_operations() {
     // Initial vote power should be 0
     let vote_power = ctx
         .storage
-        .get_native_asset_vote_power(&asset, &alice)
+        .get_contract_asset_vote_power(&asset, &alice)
         .await
         .unwrap();
     assert_eq!(vote_power, 0);
 
     // Set vote power for Alice
     ctx.storage
-        .set_native_asset_vote_power(&asset, &alice, 1000)
+        .set_contract_asset_vote_power(&asset, &alice, 1000)
         .await
         .unwrap();
 
     // Verify vote power
     let vote_power = ctx
         .storage
-        .get_native_asset_vote_power(&asset, &alice)
+        .get_contract_asset_vote_power(&asset, &alice)
         .await
         .unwrap();
     assert_eq!(vote_power, 1000);
 
     // Set vote power for Bob
     ctx.storage
-        .set_native_asset_vote_power(&asset, &bob, 500)
+        .set_contract_asset_vote_power(&asset, &bob, 500)
         .await
         .unwrap();
 
     // Verify Bob's vote power
     let vote_power = ctx
         .storage
-        .get_native_asset_vote_power(&asset, &bob)
+        .get_contract_asset_vote_power(&asset, &bob)
         .await
         .unwrap();
     assert_eq!(vote_power, 500);
 
     // Update Alice's vote power
     ctx.storage
-        .set_native_asset_vote_power(&asset, &alice, 2000)
+        .set_contract_asset_vote_power(&asset, &alice, 2000)
         .await
         .unwrap();
 
     let vote_power = ctx
         .storage
-        .get_native_asset_vote_power(&asset, &alice)
+        .get_contract_asset_vote_power(&asset, &alice)
         .await
         .unwrap();
     assert_eq!(vote_power, 2000);
 
     // Set vote power to 0
     ctx.storage
-        .set_native_asset_vote_power(&asset, &alice, 0)
+        .set_contract_asset_vote_power(&asset, &alice, 0)
         .await
         .unwrap();
 
     let vote_power = ctx
         .storage
-        .get_native_asset_vote_power(&asset, &alice)
+        .get_contract_asset_vote_power(&asset, &alice)
         .await
         .unwrap();
     assert_eq!(vote_power, 0);
@@ -3074,24 +3082,24 @@ async fn test_vote_power_multi_asset() {
 
     // Set different vote power for same account on different assets
     ctx.storage
-        .set_native_asset_vote_power(&asset1, &alice, 1000)
+        .set_contract_asset_vote_power(&asset1, &alice, 1000)
         .await
         .unwrap();
 
     ctx.storage
-        .set_native_asset_vote_power(&asset2, &alice, 5000)
+        .set_contract_asset_vote_power(&asset2, &alice, 5000)
         .await
         .unwrap();
 
     // Verify they are independent
     let vp1 = ctx
         .storage
-        .get_native_asset_vote_power(&asset1, &alice)
+        .get_contract_asset_vote_power(&asset1, &alice)
         .await
         .unwrap();
     let vp2 = ctx
         .storage
-        .get_native_asset_vote_power(&asset2, &alice)
+        .get_contract_asset_vote_power(&asset2, &alice)
         .await
         .unwrap();
 
@@ -3120,20 +3128,20 @@ async fn test_delegators_index_operations() {
     // Initially empty
     let delegators = ctx
         .storage
-        .get_native_asset_delegators(&asset, &delegatee)
+        .get_contract_asset_delegators(&asset, &delegatee)
         .await
         .unwrap();
     assert!(delegators.is_empty());
 
     // Add first delegator
     ctx.storage
-        .add_native_asset_delegator(&asset, &delegatee, &delegator1)
+        .add_contract_asset_delegator(&asset, &delegatee, &delegator1)
         .await
         .unwrap();
 
     let delegators = ctx
         .storage
-        .get_native_asset_delegators(&asset, &delegatee)
+        .get_contract_asset_delegators(&asset, &delegatee)
         .await
         .unwrap();
     assert_eq!(delegators.len(), 1);
@@ -3141,31 +3149,31 @@ async fn test_delegators_index_operations() {
 
     // Add more delegators
     ctx.storage
-        .add_native_asset_delegator(&asset, &delegatee, &delegator2)
+        .add_contract_asset_delegator(&asset, &delegatee, &delegator2)
         .await
         .unwrap();
 
     ctx.storage
-        .add_native_asset_delegator(&asset, &delegatee, &delegator3)
+        .add_contract_asset_delegator(&asset, &delegatee, &delegator3)
         .await
         .unwrap();
 
     let delegators = ctx
         .storage
-        .get_native_asset_delegators(&asset, &delegatee)
+        .get_contract_asset_delegators(&asset, &delegatee)
         .await
         .unwrap();
     assert_eq!(delegators.len(), 3);
 
     // Remove one delegator
     ctx.storage
-        .remove_native_asset_delegator(&asset, &delegatee, &delegator2)
+        .remove_contract_asset_delegator(&asset, &delegatee, &delegator2)
         .await
         .unwrap();
 
     let delegators = ctx
         .storage
-        .get_native_asset_delegators(&asset, &delegatee)
+        .get_contract_asset_delegators(&asset, &delegatee)
         .await
         .unwrap();
     assert_eq!(delegators.len(), 2);
@@ -3188,24 +3196,24 @@ async fn test_delegators_index_no_duplicates() {
 
     // Add same delegator multiple times
     ctx.storage
-        .add_native_asset_delegator(&asset, &delegatee, &delegator)
+        .add_contract_asset_delegator(&asset, &delegatee, &delegator)
         .await
         .unwrap();
 
     ctx.storage
-        .add_native_asset_delegator(&asset, &delegatee, &delegator)
+        .add_contract_asset_delegator(&asset, &delegatee, &delegator)
         .await
         .unwrap();
 
     ctx.storage
-        .add_native_asset_delegator(&asset, &delegatee, &delegator)
+        .add_contract_asset_delegator(&asset, &delegatee, &delegator)
         .await
         .unwrap();
 
     // Should only have one entry
     let delegators = ctx
         .storage
-        .get_native_asset_delegators(&asset, &delegatee)
+        .get_contract_asset_delegators(&asset, &delegatee)
         .await
         .unwrap();
     assert_eq!(delegators.len(), 1);
@@ -3227,7 +3235,7 @@ async fn test_delegators_index_sorted_order() {
 
     for d in &delegators_to_add {
         ctx.storage
-            .add_native_asset_delegator(&asset, &delegatee, d)
+            .add_contract_asset_delegator(&asset, &delegatee, d)
             .await
             .unwrap();
     }
@@ -3235,7 +3243,7 @@ async fn test_delegators_index_sorted_order() {
     // Retrieve and verify sorted order
     let delegators = ctx
         .storage
-        .get_native_asset_delegators(&asset, &delegatee)
+        .get_contract_asset_delegators(&asset, &delegatee)
         .await
         .unwrap();
 
@@ -3261,20 +3269,20 @@ async fn test_delegators_index_remove_nonexistent() {
 
     // Add one delegator
     ctx.storage
-        .add_native_asset_delegator(&asset, &delegatee, &delegator1)
+        .add_contract_asset_delegator(&asset, &delegatee, &delegator1)
         .await
         .unwrap();
 
     // Try to remove non-existent delegator (should be no-op)
     ctx.storage
-        .remove_native_asset_delegator(&asset, &delegatee, &delegator2)
+        .remove_contract_asset_delegator(&asset, &delegatee, &delegator2)
         .await
         .unwrap();
 
     // Original delegator should still be there
     let delegators = ctx
         .storage
-        .get_native_asset_delegators(&asset, &delegatee)
+        .get_contract_asset_delegators(&asset, &delegatee)
         .await
         .unwrap();
     assert_eq!(delegators.len(), 1);
@@ -3295,19 +3303,19 @@ async fn test_delegators_index_cleanup() {
 
     // Add then remove
     ctx.storage
-        .add_native_asset_delegator(&asset, &delegatee, &delegator)
+        .add_contract_asset_delegator(&asset, &delegatee, &delegator)
         .await
         .unwrap();
 
     ctx.storage
-        .remove_native_asset_delegator(&asset, &delegatee, &delegator)
+        .remove_contract_asset_delegator(&asset, &delegatee, &delegator)
         .await
         .unwrap();
 
     // Should be empty (key deleted from storage)
     let delegators = ctx
         .storage
-        .get_native_asset_delegators(&asset, &delegatee)
+        .get_contract_asset_delegators(&asset, &delegatee)
         .await
         .unwrap();
     assert!(delegators.is_empty());
@@ -3333,11 +3341,11 @@ async fn test_atomic_batch_operations() {
 
     // Set initial balances
     ctx.storage
-        .set_native_asset_balance(&asset, &alice, 1000)
+        .set_contract_asset_balance(&asset, &alice, 1000)
         .await
         .unwrap();
     ctx.storage
-        .set_native_asset_balance(&asset, &bob, 500)
+        .set_contract_asset_balance(&asset, &bob, 500)
         .await
         .unwrap();
 
@@ -3352,12 +3360,12 @@ async fn test_atomic_batch_operations() {
     // Verify both balances updated
     let alice_balance = ctx
         .storage
-        .get_native_asset_balance(&asset, &alice)
+        .get_contract_asset_balance(&asset, &alice)
         .await
         .unwrap();
     let bob_balance = ctx
         .storage
-        .get_native_asset_balance(&asset, &bob)
+        .get_contract_asset_balance(&asset, &bob)
         .await
         .unwrap();
 
@@ -3380,7 +3388,7 @@ async fn test_atomic_batch_empty() {
 
     // Set initial balance
     ctx.storage
-        .set_native_asset_balance(&asset, &alice, 1000)
+        .set_contract_asset_balance(&asset, &alice, 1000)
         .await
         .unwrap();
 
@@ -3392,7 +3400,7 @@ async fn test_atomic_batch_empty() {
     // Balance unchanged
     let balance = ctx
         .storage
-        .get_native_asset_balance(&asset, &alice)
+        .get_contract_asset_balance(&asset, &alice)
         .await
         .unwrap();
     assert_eq!(balance, 1000);
@@ -3432,27 +3440,27 @@ async fn test_atomic_batch_mixed_operations() {
     // Verify all changes
     let balance = ctx
         .storage
-        .get_native_asset_balance(&asset, &alice)
+        .get_contract_asset_balance(&asset, &alice)
         .await
         .unwrap();
     assert_eq!(balance, 5000);
 
     let cp_count = ctx
         .storage
-        .get_native_asset_balance_checkpoint_count(&asset, &alice)
+        .get_contract_asset_balance_checkpoint_count(&asset, &alice)
         .await
         .unwrap();
     assert_eq!(cp_count, 1);
 
     let cp = ctx
         .storage
-        .get_native_asset_balance_checkpoint(&asset, &alice, 0)
+        .get_contract_asset_balance_checkpoint(&asset, &alice, 0)
         .await
         .unwrap();
     assert_eq!(cp.from_block, 100);
     assert_eq!(cp.balance, 5000);
 
-    let supply = ctx.storage.get_native_asset_supply(&asset).await.unwrap();
+    let supply = ctx.storage.get_contract_asset_supply(&asset).await.unwrap();
     assert_eq!(supply, 10000);
 
     println!("Test X.3 passed: Atomic batch mixed operations");
@@ -3463,9 +3471,9 @@ async fn test_atomic_batch_mixed_operations() {
 // ============================================================================
 
 #[test]
-fn test_native_asset_integration_summary() {
+fn test_contract_asset_integration_summary() {
     println!("\n========================================");
-    println!("Native Asset Integration Test Summary");
+    println!("Contract Asset Integration Test Summary");
     println!("========================================");
     println!();
     println!("A. Core ERC20 Operations:");
@@ -3512,9 +3520,9 @@ fn test_native_asset_integration_summary() {
     println!("   H.3 test_complex_workflow_locks_escrow");
     println!();
     println!("I. Additional Coverage - Asset Data:");
-    println!("   I.1 test_has_native_asset");
+    println!("   I.1 test_has_contract_asset");
     println!("   I.2 test_supply_operations");
-    println!("   I.3 test_has_native_asset_balance");
+    println!("   I.3 test_has_contract_asset_balance");
     println!();
     println!("J. Additional Coverage - Allowance:");
     println!("   J.1 test_delete_allowance");
@@ -3579,7 +3587,7 @@ fn test_native_asset_integration_summary() {
     println!("   X.3 test_atomic_batch_mixed_operations");
     println!();
     println!("========================================");
-    println!("Total: 92 NativeAssetProvider methods covered");
+    println!("Total: 92 ContractAssetProvider methods covered");
     println!("Coverage: 100%");
     println!("========================================");
 }

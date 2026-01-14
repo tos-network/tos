@@ -1,6 +1,6 @@
-//! Native Asset Role System
+//! Contract Asset Role System
 //!
-//! Role-based access control for native assets.
+//! Role-based access control for contract assets.
 
 use serde::{Deserialize, Serialize};
 

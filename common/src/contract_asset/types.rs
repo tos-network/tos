@@ -1,6 +1,6 @@
-//! Native Asset Types
+//! Contract Asset Types
 //!
-//! Core data structures for native assets.
+//! Core data structures for contract assets.
 
 use serde::{Deserialize, Serialize};
 
@@ -9,9 +9,9 @@ use crate::serializer::{Reader, ReaderError, Serializer, Writer};
 
 // ===== Extended Asset Data =====
 
-/// Extended native asset data with additional features
+/// Extended contract asset data with additional features
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct NativeAssetData {
+pub struct ContractAssetData {
     /// Asset name
     pub name: String,
     /// Asset symbol/ticker
@@ -44,7 +44,7 @@ pub struct NativeAssetData {
     pub metadata_uri: Option<String>,
 }
 
-impl Default for NativeAssetData {
+impl Default for ContractAssetData {
     fn default() -> Self {
         Self {
             name: String::new(),
@@ -65,7 +65,7 @@ impl Default for NativeAssetData {
     }
 }
 
-impl Serializer for NativeAssetData {
+impl Serializer for ContractAssetData {
     fn write(&self, writer: &mut Writer) {
         self.name.write(writer);
         self.symbol.write(writer);

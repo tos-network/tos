@@ -22,11 +22,11 @@ use tos_common::{
         AssetChanges, ChainState as ContractChainState, ContractCache, ContractEventTracker,
         ContractOutput, ScheduledExecution,
     },
+    contract_asset::TokenValue,
     crypto::{
         elgamal::{Ciphertext, CompressedPublicKey},
         Hash, PublicKey,
     },
-    native_asset::TokenValue,
     transaction::{
         verify::{BlockchainApplyState, BlockchainVerificationState, ContractEnvironment},
         ContractDeposit, MultiSigPayload, Reference,

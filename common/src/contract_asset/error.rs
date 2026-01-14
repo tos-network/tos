@@ -1,4 +1,4 @@
-//! Native Asset Error Codes
+//! Contract Asset Error Codes
 //!
 //! Range: 0x0200 - 0x02FF
 //! Format: ASSET_ERROR_<CATEGORY>_<SPECIFIC>
@@ -107,9 +107,9 @@ pub const ASSET_ERROR_ALREADY_PAUSED: u64 = 0x0295;
 pub const ASSET_ERROR_ALREADY_FROZEN: u64 = 0x0296;
 pub const ASSET_ERROR_CANNOT_REVOKE_LAST_ADMIN: u64 = 0x0299;
 
-/// Native Asset Error enum for internal use
+/// Contract Asset Error enum for internal use
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum NativeAssetError {
+pub enum ContractAssetError {
     // General
     NotFound,
     AlreadyExists,
@@ -203,7 +203,7 @@ pub enum NativeAssetError {
     CannotRevokeLastAdmin,
 }
 
-impl NativeAssetError {
+impl ContractAssetError {
     /// Convert error to u64 error code
     pub fn to_code(self) -> u64 {
         match self {
@@ -335,7 +335,7 @@ impl NativeAssetError {
     }
 }
 
-impl fmt::Display for NativeAssetError {
+impl fmt::Display for ContractAssetError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::NotFound => write!(f, "Asset not found"),
@@ -414,4 +414,4 @@ impl fmt::Display for NativeAssetError {
     }
 }
 
-impl std::error::Error for NativeAssetError {}
+impl std::error::Error for ContractAssetError {}

@@ -2,8 +2,8 @@ use crate::core::error::BlockchainError;
 use async_trait::async_trait;
 use tos_common::{
     block::TopoHeight,
+    contract_asset::{TokenKey, TokenValue},
     crypto::Hash,
-    native_asset::{TokenKey, TokenValue},
 };
 
 #[async_trait]

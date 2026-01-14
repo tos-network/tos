@@ -2,9 +2,9 @@
 #![allow(clippy::expect_used)]
 #![allow(clippy::disallowed_methods)]
 
-// Native Asset ERC20 Compliance Tests
+// Contract Asset ERC20 Compliance Tests
 //
-// This test suite validates that Native Asset syscalls provide ERC20-compatible
+// This test suite validates that Contract Asset syscalls provide ERC20-compatible
 // functionality, following OpenZeppelin ERC20 test patterns.
 //
 // Test Categories:
@@ -53,9 +53,9 @@ const TEST_URI: &str = "https://example.com/metadata.json";
 // MOCK PROVIDER
 // ============================================================================
 
-/// Mock provider for testing Native Asset syscalls
+/// Mock provider for testing Contract Asset syscalls
 #[allow(clippy::type_complexity)]
-struct NativeAssetTestProvider {
+struct ContractAssetTestProvider {
     /// Track balances: (asset, account) -> balance
     balances: Arc<Mutex<HashMap<([u8; 32], [u8; 32]), u64>>>,
     /// Track allowances: (asset, owner, spender) -> amount
@@ -72,7 +72,7 @@ struct NativeAssetTestProvider {
     contracts: Arc<Mutex<HashMap<[u8; 32], Vec<u8>>>>,
 }
 
-impl NativeAssetTestProvider {
+impl ContractAssetTestProvider {
     fn new() -> Self {
         Self {
             balances: Arc::new(Mutex::new(HashMap::new())),
@@ -273,7 +273,7 @@ impl NativeAssetTestProvider {
     }
 }
 
-impl ContractProvider for NativeAssetTestProvider {
+impl ContractProvider for ContractAssetTestProvider {
     fn get_contract_balance_for_asset(
         &self,
         contract: &Hash,
@@ -340,7 +340,7 @@ impl ContractProvider for NativeAssetTestProvider {
     }
 }
 
-impl ContractStorage for NativeAssetTestProvider {
+impl ContractStorage for ContractAssetTestProvider {
     fn load_data(
         &self,
         _contract: &Hash,
@@ -380,7 +380,7 @@ impl ContractStorage for NativeAssetTestProvider {
 /// Test ERC20 metadata: name, symbol, decimals
 #[test]
 fn test_erc20_metadata() {
-    let provider = NativeAssetTestProvider::new();
+    let provider = ContractAssetTestProvider::new();
     provider.setup_test_asset();
 
     // Verify metadata is set correctly
@@ -406,7 +406,7 @@ fn test_erc20_metadata() {
 /// Test totalSupply query
 #[test]
 fn test_erc20_total_supply() {
-    let provider = NativeAssetTestProvider::new();
+    let provider = ContractAssetTestProvider::new();
     provider.setup_test_asset();
 
     let total_supply = provider.get_total_supply(&TEST_ASSET);
@@ -426,7 +426,7 @@ fn test_erc20_total_supply() {
 /// Test balanceOf query
 #[test]
 fn test_erc20_balance_of() {
-    let provider = NativeAssetTestProvider::new();
+    let provider = ContractAssetTestProvider::new();
     provider.setup_test_asset();
 
     // Check Alice's balance
@@ -454,7 +454,7 @@ fn test_erc20_balance_of() {
 /// Test successful transfer
 #[test]
 fn test_erc20_transfer_success() {
-    let provider = NativeAssetTestProvider::new();
+    let provider = ContractAssetTestProvider::new();
     provider.setup_test_asset();
 
     let transfer_amount = 10_000_000u64;
@@ -494,7 +494,7 @@ fn test_erc20_transfer_success() {
 /// Test transfer with insufficient balance
 #[test]
 fn test_erc20_transfer_insufficient_balance() {
-    let provider = NativeAssetTestProvider::new();
+    let provider = ContractAssetTestProvider::new();
     provider.setup_test_asset();
 
     let alice_balance = provider.get_balance(&TEST_ASSET, &ALICE);
@@ -522,7 +522,7 @@ fn test_erc20_transfer_insufficient_balance() {
 /// Test transfer of zero amount
 #[test]
 fn test_erc20_transfer_zero_amount() {
-    let provider = NativeAssetTestProvider::new();
+    let provider = ContractAssetTestProvider::new();
     provider.setup_test_asset();
 
     let alice_before = provider.get_balance(&TEST_ASSET, &ALICE);
@@ -546,7 +546,7 @@ fn test_erc20_transfer_zero_amount() {
 /// Test self-transfer
 #[test]
 fn test_erc20_transfer_self() {
-    let provider = NativeAssetTestProvider::new();
+    let provider = ContractAssetTestProvider::new();
     provider.setup_test_asset();
 
     let alice_before = provider.get_balance(&TEST_ASSET, &ALICE);
@@ -573,7 +573,7 @@ fn test_erc20_transfer_self() {
 /// Test approve and allowance
 #[test]
 fn test_erc20_approve_and_allowance() {
-    let provider = NativeAssetTestProvider::new();
+    let provider = ContractAssetTestProvider::new();
     provider.setup_test_asset();
 
     let allowance_amount = 50_000_000u64;
@@ -601,7 +601,7 @@ fn test_erc20_approve_and_allowance() {
 /// Test successful transferFrom
 #[test]
 fn test_erc20_transfer_from_success() {
-    let provider = NativeAssetTestProvider::new();
+    let provider = ContractAssetTestProvider::new();
     provider.setup_test_asset();
 
     let allowance_amount = 50_000_000u64;
@@ -642,7 +642,7 @@ fn test_erc20_transfer_from_success() {
 /// Test transferFrom with insufficient allowance
 #[test]
 fn test_erc20_transfer_from_insufficient_allowance() {
-    let provider = NativeAssetTestProvider::new();
+    let provider = ContractAssetTestProvider::new();
     provider.setup_test_asset();
 
     let allowance_amount = 10_000_000u64;
@@ -667,7 +667,7 @@ fn test_erc20_transfer_from_insufficient_allowance() {
 /// Test increaseAllowance pattern
 #[test]
 fn test_erc20_increase_allowance() {
-    let provider = NativeAssetTestProvider::new();
+    let provider = ContractAssetTestProvider::new();
     provider.setup_test_asset();
 
     let initial_allowance = 10_000_000u64;
@@ -702,7 +702,7 @@ fn test_erc20_increase_allowance() {
 /// Test decreaseAllowance pattern
 #[test]
 fn test_erc20_decrease_allowance() {
-    let provider = NativeAssetTestProvider::new();
+    let provider = ContractAssetTestProvider::new();
     provider.setup_test_asset();
 
     let initial_allowance = 50_000_000u64;
@@ -737,7 +737,7 @@ fn test_erc20_decrease_allowance() {
 /// Test revoking allowance (set to zero)
 #[test]
 fn test_erc20_revoke_allowance() {
-    let provider = NativeAssetTestProvider::new();
+    let provider = ContractAssetTestProvider::new();
     provider.setup_test_asset();
 
     let initial_allowance = 50_000_000u64;
@@ -766,7 +766,7 @@ fn test_erc20_revoke_allowance() {
 /// Test burn functionality
 #[test]
 fn test_erc20_burn() {
-    let provider = NativeAssetTestProvider::new();
+    let provider = ContractAssetTestProvider::new();
     provider.setup_test_asset();
 
     let burn_amount = 10_000_000u64;
@@ -798,7 +798,7 @@ fn test_erc20_burn() {
 /// Test burnFrom functionality (burn using allowance)
 #[test]
 fn test_erc20_burn_from() {
-    let provider = NativeAssetTestProvider::new();
+    let provider = ContractAssetTestProvider::new();
     provider.setup_test_asset();
 
     let allowance_amount = 20_000_000u64;
@@ -840,7 +840,7 @@ fn test_erc20_burn_from() {
 /// Test mint functionality
 #[test]
 fn test_erc20_mint() {
-    let provider = NativeAssetTestProvider::new();
+    let provider = ContractAssetTestProvider::new();
     provider.setup_test_asset();
 
     let mint_amount = 50_000_000u64;
@@ -872,7 +872,7 @@ fn test_erc20_mint() {
 /// Test paused asset blocks transfers
 #[test]
 fn test_erc20_pausable_transfer_blocked() {
-    let provider = NativeAssetTestProvider::new();
+    let provider = ContractAssetTestProvider::new();
     provider.setup_test_asset();
 
     // Pause the asset
@@ -894,7 +894,7 @@ fn test_erc20_pausable_transfer_blocked() {
 /// Test unpaused asset allows transfers
 #[test]
 fn test_erc20_pausable_transfer_resumed() {
-    let provider = NativeAssetTestProvider::new();
+    let provider = ContractAssetTestProvider::new();
     provider.setup_test_asset();
 
     // Pause and then unpause
@@ -916,7 +916,7 @@ fn test_erc20_pausable_transfer_resumed() {
 /// Test frozen account cannot send
 #[test]
 fn test_erc20_freeze_sender() {
-    let provider = NativeAssetTestProvider::new();
+    let provider = ContractAssetTestProvider::new();
     provider.setup_test_asset();
 
     // Freeze Alice
@@ -941,7 +941,7 @@ fn test_erc20_freeze_sender() {
 /// Test frozen account cannot receive
 #[test]
 fn test_erc20_freeze_receiver() {
-    let provider = NativeAssetTestProvider::new();
+    let provider = ContractAssetTestProvider::new();
     provider.setup_test_asset();
 
     // Freeze Bob
@@ -966,7 +966,7 @@ fn test_erc20_freeze_receiver() {
 /// Test unfreezing account
 #[test]
 fn test_erc20_unfreeze() {
-    let provider = NativeAssetTestProvider::new();
+    let provider = ContractAssetTestProvider::new();
     provider.setup_test_asset();
 
     // Freeze and then unfreeze Alice
@@ -991,7 +991,7 @@ fn test_erc20_unfreeze() {
 /// Test transfer to zero address fails
 #[test]
 fn test_erc20_transfer_to_zero_address() {
-    let provider = NativeAssetTestProvider::new();
+    let provider = ContractAssetTestProvider::new();
     provider.setup_test_asset();
 
     // Transfer to zero address should fail
@@ -1009,7 +1009,7 @@ fn test_erc20_transfer_to_zero_address() {
 /// Test overflow protection
 #[test]
 fn test_erc20_overflow_protection() {
-    let provider = NativeAssetTestProvider::new();
+    let provider = ContractAssetTestProvider::new();
     provider.setup_test_asset();
 
     // Set Bob's balance to near max
@@ -1030,7 +1030,7 @@ fn test_erc20_overflow_protection() {
 /// Test multiple transfers in sequence
 #[test]
 fn test_erc20_multiple_transfers() {
-    let provider = NativeAssetTestProvider::new();
+    let provider = ContractAssetTestProvider::new();
     provider.setup_test_asset();
 
     let transfer_amount = 1_000_000u64;
@@ -1061,7 +1061,7 @@ fn test_erc20_multiple_transfers() {
 /// Test multiple users with different allowances
 #[test]
 fn test_erc20_multiple_allowance_users() {
-    let provider = NativeAssetTestProvider::new();
+    let provider = ContractAssetTestProvider::new();
     provider.setup_test_asset();
 
     let bob_allowance = 10_000_000u64;
@@ -1106,7 +1106,7 @@ fn test_erc20_multiple_allowance_users() {
 #[test]
 fn test_erc20_compliance_summary() {
     println!("\n========================================");
-    println!("Native Asset ERC20 Compliance Test Suite");
+    println!("Contract Asset ERC20 Compliance Test Suite");
     println!("========================================\n");
 
     println!("Test Categories:");

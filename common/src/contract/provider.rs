@@ -3,8 +3,8 @@ use tos_kernel::tid;
 use crate::{
     asset::AssetData,
     block::TopoHeight,
+    contract_asset::{TokenKey, TokenValue},
     crypto::{Hash, PublicKey},
-    native_asset::{TokenKey, TokenValue},
 };
 
 use super::ContractStorage;

@@ -14,8 +14,8 @@ use tos_common::{
     asset::AssetData,
     block::TopoHeight,
     contract::{ContractProvider as ContractAccess, ContractStorage},
+    contract_asset::{TokenKey, TokenValue},
     crypto::{Hash, PublicKey},
-    native_asset::{TokenKey, TokenValue},
     tokio::try_block_on,
 };
 use tos_kernel::ValueCell;
