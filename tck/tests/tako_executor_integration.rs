@@ -165,6 +165,7 @@ async fn test_tako_executor_hello_world() {
             &Hash::zero(), // tx_sender
             200_000,       // max_gas
             None,          // parameters
+            None,          // nft_provider
         )
         .await
         .expect("Execution should succeed");
@@ -230,6 +231,7 @@ async fn test_multi_executor_execution() {
             &Hash::zero(),
             200_000,
             None,
+            None,
         )
         .await
         .expect("TakoContractExecutor should execute ELF contract");
@@ -267,6 +269,7 @@ async fn test_gas_metering() {
                 &Hash::zero(),
                 &Hash::zero(),
                 limit,
+                None,
                 None,
             )
             .await
@@ -308,6 +311,7 @@ async fn test_contract_with_storage() {
             &Hash::zero(),
             &Hash::zero(),
             200_000,
+            None,
             None,
         )
         .await

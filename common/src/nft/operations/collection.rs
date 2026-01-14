@@ -62,7 +62,7 @@ impl CreateCollectionParams {
 /// # Returns
 /// - `Ok(Hash)`: The new collection ID
 /// - `Err(NftError)`: Error code
-pub fn create_collection<S: NftStorage>(
+pub fn create_collection<S: NftStorage + ?Sized>(
     storage: &mut S,
     ctx: &RuntimeContext,
     params: CreateCollectionParams,
@@ -116,7 +116,7 @@ pub fn create_collection<S: NftStorage>(
 ///
 /// Uses: creator + name + symbol + block_height + nonce
 /// The nonce prevents collisions within the same block
-fn generate_collection_id<S: NftStorage>(
+fn generate_collection_id<S: NftStorage + ?Sized>(
     storage: &mut S,
     creator: &PublicKey,
     name: &str,
@@ -143,7 +143,7 @@ fn generate_collection_id<S: NftStorage>(
 // ========================================
 
 /// Pause a collection (only creator can pause)
-pub fn pause_collection<S: NftStorage>(
+pub fn pause_collection<S: NftStorage + ?Sized>(
     storage: &mut S,
     ctx: &RuntimeContext,
     collection_id: &Hash,
@@ -169,7 +169,7 @@ pub fn pause_collection<S: NftStorage>(
 }
 
 /// Unpause a collection (only creator can unpause)
-pub fn unpause_collection<S: NftStorage>(
+pub fn unpause_collection<S: NftStorage + ?Sized>(
     storage: &mut S,
     ctx: &RuntimeContext,
     collection_id: &Hash,
@@ -195,7 +195,7 @@ pub fn unpause_collection<S: NftStorage>(
 }
 
 /// Update collection mint authority (only creator can update)
-pub fn update_mint_authority<S: NftStorage>(
+pub fn update_mint_authority<S: NftStorage + ?Sized>(
     storage: &mut S,
     ctx: &RuntimeContext,
     collection_id: &Hash,
@@ -220,7 +220,7 @@ pub fn update_mint_authority<S: NftStorage>(
 }
 
 /// Update collection base URI (requires metadata authority)
-pub fn update_base_uri<S: NftStorage>(
+pub fn update_base_uri<S: NftStorage + ?Sized>(
     storage: &mut S,
     ctx: &RuntimeContext,
     collection_id: &Hash,
@@ -247,7 +247,7 @@ pub fn update_base_uri<S: NftStorage>(
 }
 
 /// Transfer freeze authority to a new address
-pub fn transfer_freeze_authority<S: NftStorage>(
+pub fn transfer_freeze_authority<S: NftStorage + ?Sized>(
     storage: &mut S,
     ctx: &RuntimeContext,
     collection_id: &Hash,

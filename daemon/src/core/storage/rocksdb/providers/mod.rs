@@ -18,6 +18,7 @@ mod kyc;
 mod merkle;
 mod multisig;
 mod network;
+mod nft;
 mod nonce;
 mod pruned_topoheight;
 mod referral;

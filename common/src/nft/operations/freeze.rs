@@ -29,7 +29,7 @@ use crate::nft::{NftError, NftResult};
 /// * `Err(NftError::TokenNotFound)` if token doesn't exist
 /// * `Err(NftError::NotFreezeAuthority)` if caller is not freeze authority
 /// * `Err(NftError::TokenFrozen)` if token is already frozen
-pub fn freeze<S: NftStorage>(
+pub fn freeze<S: NftStorage + ?Sized>(
     storage: &mut S,
     ctx: &RuntimeContext,
     collection: &Hash,
@@ -87,7 +87,7 @@ pub fn freeze<S: NftStorage>(
 /// * `Err(NftError::TokenNotFound)` if token doesn't exist
 /// * `Err(NftError::NotFreezeAuthority)` if caller is not freeze authority
 /// * `Err(NftError::TokenNotFrozen)` if token is not frozen
-pub fn thaw<S: NftStorage>(
+pub fn thaw<S: NftStorage + ?Sized>(
     storage: &mut S,
     ctx: &RuntimeContext,
     collection: &Hash,

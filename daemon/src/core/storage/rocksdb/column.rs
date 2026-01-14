@@ -194,6 +194,53 @@ pub enum Column {
     // {prefix}{asset_hash (32 bytes)} => {ContractAssetData}
     ContractAssets,
 
+    // ===== Native NFT System =====
+
+    // {nft:col:<collection_id>} => {topoheight}
+    NftCollections,
+    // {topoheight}{nft:col:<collection_id>} => {Versioned<Option<NftCollection>>}
+    VersionedNftCollections,
+
+    // {nft:tok:<collection_id><token_id>} => {topoheight}
+    NftTokens,
+    // {topoheight}{nft:tok:<collection_id><token_id>} => {Versioned<Option<Nft>>}
+    VersionedNftTokens,
+
+    // {nft:own:<collection_id><owner>} => {topoheight}
+    NftOwnerBalances,
+    // {topoheight}{nft:own:<collection_id><owner>} => {Versioned<u64>}
+    VersionedNftOwnerBalances,
+
+    // {nft:opr:<owner><collection_id><operator>} => {topoheight}
+    NftOperatorApprovals,
+    // {topoheight}{nft:opr:<owner><collection_id><operator>} => {Versioned<bool>}
+    VersionedNftOperatorApprovals,
+
+    // {nft:mnt:<collection_id><user>} => {topoheight}
+    NftMintCounts,
+    // {topoheight}{nft:mnt:<collection_id><user>} => {Versioned<u64>}
+    VersionedNftMintCounts,
+
+    // {nft:nonce} => {topoheight}
+    NftCollectionNonce,
+    // {topoheight}{nft:nonce} => {Versioned<u64>}
+    VersionedNftCollectionNonce,
+
+    // {nft:tba:<collection_id><token_id>} => {topoheight}
+    NftTba,
+    // {topoheight}{nft:tba:<collection_id><token_id>} => {Versioned<Option<TokenBoundAccount>>}
+    VersionedNftTba,
+
+    // {nft:lst:<listing_id>} => {topoheight}
+    NftRentalListings,
+    // {topoheight}{nft:lst:<listing_id>} => {Versioned<Option<RentalListing>>}
+    VersionedNftRentalListings,
+
+    // {nft:rnt:<collection_id><token_id>} => {topoheight}
+    NftActiveRentals,
+    // {topoheight}{nft:rnt:<collection_id><token_id>} => {Versioned<Option<NftRental>>}
+    VersionedNftActiveRentals,
+
     // ===== TNS (TOS Name Service) =====
 
     // Name to owner mapping: name_hash -> owner_public_key
@@ -227,7 +274,16 @@ impl Column {
             | VersionedContractsAssetExt
             | VersionedContractsData
             | PrefixedRegistrations
-            | VersionedEnergyResources => Some(PREFIX_TOPOHEIGHT_LEN),
+            | VersionedEnergyResources
+            | VersionedNftCollections
+            | VersionedNftTokens
+            | VersionedNftOwnerBalances
+            | VersionedNftOperatorApprovals
+            | VersionedNftMintCounts
+            | VersionedNftCollectionNonce
+            | VersionedNftTba
+            | VersionedNftRentalListings
+            | VersionedNftActiveRentals => Some(PREFIX_TOPOHEIGHT_LEN),
 
             UnoBalances => Some(PREFIX_ID_LEN),
 

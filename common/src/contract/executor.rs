@@ -19,7 +19,7 @@ use anyhow::Result;
 /// This follows SVM pattern of dependency injection for VM execution.
 use async_trait::async_trait;
 
-use crate::{block::TopoHeight, contract::ContractProvider, crypto::Hash};
+use crate::{block::TopoHeight, contract::ContractProvider, crypto::Hash, nft::NftStorage};
 
 /// Contract event emitted during execution
 ///
@@ -92,7 +92,7 @@ pub struct ContractExecutionResult {
 ///     async fn execute(
 ///         &self,
 ///         _bytecode: &[u8],
-///         _provider: &mut (dyn tos_common::contract::ContractProvider + Send),
+///         _provider: &(dyn tos_common::contract::ContractProvider + Send),
 ///         _topoheight: TopoHeight,
 ///         _contract_hash: &Hash,
 ///         _block_hash: &Hash,
@@ -102,6 +102,7 @@ pub struct ContractExecutionResult {
 ///         _tx_sender: &Hash,
 ///         _max_gas: u64,
 ///         _parameters: Option<Vec<u8>>,
+///         _nft_provider: Option<&mut (dyn tos_common::nft::NftStorage + Send)>,
 ///     ) -> Result<ContractExecutionResult> {
 ///         // Execute bytecode and return result
 ///         Ok(ContractExecutionResult {
@@ -145,6 +146,7 @@ pub trait ContractExecutor: Send + Sync {
     /// * `tx_sender` - Transaction sender's address (as Hash)
     /// * `max_gas` - Maximum gas allowed for this execution
     /// * `parameters` - Optional execution parameters (VM-specific)
+    /// * `nft_provider` - Optional NFT storage provider for native NFT syscalls
     ///
     /// # Returns
     ///
@@ -159,7 +161,7 @@ pub trait ContractExecutor: Send + Sync {
     async fn execute(
         &self,
         bytecode: &[u8],
-        provider: &mut (dyn ContractProvider + Send),
+        provider: &(dyn ContractProvider + Send),
         topoheight: TopoHeight,
         contract_hash: &Hash,
         block_hash: &Hash,
@@ -169,6 +171,7 @@ pub trait ContractExecutor: Send + Sync {
         tx_sender: &Hash,
         max_gas: u64,
         parameters: Option<Vec<u8>>,
+        nft_provider: Option<&mut (dyn NftStorage + Send)>,
     ) -> Result<ContractExecutionResult>;
 
     /// Check if this executor supports the given bytecode format
@@ -202,7 +205,7 @@ impl ContractExecutor for NoOpExecutor {
     async fn execute(
         &self,
         _bytecode: &[u8],
-        _provider: &mut (dyn ContractProvider + Send),
+        _provider: &(dyn ContractProvider + Send),
         _topoheight: TopoHeight,
         _contract_hash: &Hash,
         _block_hash: &Hash,
@@ -212,6 +215,7 @@ impl ContractExecutor for NoOpExecutor {
         _tx_sender: &Hash,
         _max_gas: u64,
         _parameters: Option<Vec<u8>>,
+        _nft_provider: Option<&mut (dyn NftStorage + Send)>,
     ) -> Result<ContractExecutionResult> {
         anyhow::bail!("NoOpExecutor: No contract executor configured")
     }

@@ -18,6 +18,7 @@ use tos_common::{
     },
     immutable::Immutable,
     network::Network,
+    nft::{NftCache, NftStorageProvider},
     referral::{DistributionResult, ReferralRewardRatios, RewardDistribution},
     transaction::{
         builder::{
@@ -135,6 +136,83 @@ impl tos_common::contract::ContractProvider for DummyContractProvider {
         _contract: &Hash,
         _topoheight: u64,
     ) -> Result<Option<Vec<u8>>, anyhow::Error> {
+        Ok(None)
+    }
+}
+
+impl NftStorageProvider for DummyContractProvider {
+    fn get_collection(
+        &self,
+        _id: &Hash,
+        _topoheight: u64,
+    ) -> Result<Option<(u64, tos_common::nft::NftCollection)>, anyhow::Error> {
+        Ok(None)
+    }
+
+    fn get_token(
+        &self,
+        _collection: &Hash,
+        _token_id: u64,
+        _topoheight: u64,
+    ) -> Result<Option<(u64, tos_common::nft::Nft)>, anyhow::Error> {
+        Ok(None)
+    }
+
+    fn get_owner_balance(
+        &self,
+        _collection: &Hash,
+        _owner: &PublicKey,
+        _topoheight: u64,
+    ) -> Result<Option<(u64, u64)>, anyhow::Error> {
+        Ok(None)
+    }
+
+    fn get_operator_approval(
+        &self,
+        _owner: &PublicKey,
+        _collection: &Hash,
+        _operator: &PublicKey,
+        _topoheight: u64,
+    ) -> Result<Option<(u64, bool)>, anyhow::Error> {
+        Ok(None)
+    }
+
+    fn get_mint_count(
+        &self,
+        _collection: &Hash,
+        _user: &PublicKey,
+        _topoheight: u64,
+    ) -> Result<Option<(u64, u64)>, anyhow::Error> {
+        Ok(None)
+    }
+
+    fn get_collection_nonce(&self, _topoheight: u64) -> Result<Option<(u64, u64)>, anyhow::Error> {
+        Ok(None)
+    }
+
+    fn get_tba(
+        &self,
+        _collection: &Hash,
+        _token_id: u64,
+        _topoheight: u64,
+    ) -> Result<Option<(u64, tos_common::nft::TokenBoundAccount)>, anyhow::Error> {
+        Ok(None)
+    }
+
+    fn get_rental_listing(
+        &self,
+        _listing_id: &Hash,
+        _topoheight: u64,
+    ) -> Result<Option<(u64, tos_common::nft::RentalListing)>, anyhow::Error> {
+        Ok(None)
+    }
+
+    fn get_active_rental(
+        &self,
+        _collection: &Hash,
+        _token_id: u64,
+        _topoheight: u64,
+    ) -> Result<Option<(u64, tos_common::nft::NftRental)>, anyhow::Error> {
         Ok(None)
     }
 }
@@ -524,6 +602,7 @@ impl<'a> BlockchainApplyState<'a, DummyContractProvider, TestError> for TestChai
         &mut self,
         _hash: &Hash,
         _cache: ContractCache,
+        _nft_cache: NftCache,
         _tracker: ContractEventTracker,
         _assets: HashMap<Hash, Option<AssetChanges>>,
     ) -> Result<(), TestError> {

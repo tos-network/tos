@@ -16,6 +16,7 @@ mod contract;
 mod dag_order;
 mod energy;
 mod multisig;
+mod nft;
 mod nonce;
 mod registrations;
 mod scheduled_execution;
