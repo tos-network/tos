@@ -23,8 +23,8 @@ pub mod kyc;
 // Native NFT System module
 pub mod nft;
 
-// Native Asset System module (ERC20-like tokens)
-pub mod native_asset;
+// Contract Asset System module (ERC20-like tokens)
+pub mod contract_asset;
 
 // TNS (TOS Name Service) module
 pub mod tns;

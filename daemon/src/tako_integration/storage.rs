@@ -1,8 +1,6 @@
+use std::collections::HashMap;
 use tos_common::{
-    block::TopoHeight,
-    contract::{ContractCache, ContractProvider},
-    crypto::Hash,
-    versioned_type::VersionedState,
+    block::TopoHeight, contract::ContractProvider, crypto::Hash, versioned_type::VersionedState,
 };
 use tos_kernel::ValueCell;
 /// Storage adapter: TOS ContractProvider → TAKO StorageProvider
@@ -71,7 +69,7 @@ use tos_tbpf::error::EbpfError;
 /// let mut adapter = TosStorageAdapter::new(
 ///     &provider,
 ///     &contract_hash,
-///     &mut cache,
+///     &mut cache.storage,
 ///     topoheight,
 /// );
 ///
@@ -84,8 +82,8 @@ pub struct TosStorageAdapter<'a> {
     provider: &'a (dyn ContractProvider + Send),
     /// Current contract being executed
     contract_hash: &'a Hash,
-    /// Contract cache for this execution
-    cache: &'a mut ContractCache,
+    /// Contract storage cache for this execution
+    storage: &'a mut HashMap<ValueCell, (VersionedState, Option<ValueCell>)>,
     /// Current topoheight (for versioned reads)
     topoheight: TopoHeight,
 }
@@ -102,13 +100,13 @@ impl<'a> TosStorageAdapter<'a> {
     pub fn new(
         provider: &'a (dyn ContractProvider + Send),
         contract_hash: &'a Hash,
-        cache: &'a mut ContractCache,
+        storage: &'a mut HashMap<ValueCell, (VersionedState, Option<ValueCell>)>,
         topoheight: TopoHeight,
     ) -> Self {
         Self {
             provider,
             contract_hash,
-            cache,
+            storage,
             topoheight,
         }
     }
@@ -153,7 +151,7 @@ impl<'a> StorageProvider for TosStorageAdapter<'a> {
         let key_cell = Self::bytes_to_value_cell(key)?;
 
         // Check cache first
-        if let Some((_, value_opt)) = self.cache.storage.get(&key_cell) {
+        if let Some((_, value_opt)) = self.storage.get(&key_cell) {
             return match value_opt {
                 Some(value) => Ok(Some(Self::value_cell_to_bytes(value)?)),
                 None => Ok(None),
@@ -196,7 +194,7 @@ impl<'a> StorageProvider for TosStorageAdapter<'a> {
         let value_cell = Self::bytes_to_value_cell(value)?;
 
         // Determine versioned state
-        let data_state = match self.cache.storage.get(&key_cell) {
+        let data_state = match self.storage.get(&key_cell) {
             Some((mut state, _)) => {
                 state.mark_updated();
                 state
@@ -221,8 +219,7 @@ impl<'a> StorageProvider for TosStorageAdapter<'a> {
         };
 
         // Insert into cache (writes are cached, persisted later)
-        self.cache
-            .storage
+        self.storage
             .insert(key_cell, (data_state, Some(value_cell)));
 
         Ok(())
@@ -241,7 +238,7 @@ impl<'a> StorageProvider for TosStorageAdapter<'a> {
         let key_cell = Self::bytes_to_value_cell(key)?;
 
         // Check if key exists
-        let exists = match self.cache.storage.get(&key_cell) {
+        let exists = match self.storage.get(&key_cell) {
             Some((_, value_opt)) => value_opt.is_some(),
             None => self
                 .provider
@@ -259,11 +256,11 @@ impl<'a> StorageProvider for TosStorageAdapter<'a> {
         }
 
         // Determine versioned state
-        let data_state = match self.cache.storage.get(&key_cell) {
+        let data_state = match self.storage.get(&key_cell) {
             Some((s, _)) => match s {
                 VersionedState::New => {
                     // Key was just created in this transaction, remove from cache entirely
-                    self.cache.storage.remove(&key_cell);
+                    self.storage.remove(&key_cell);
                     return Ok(true);
                 }
                 VersionedState::FetchedAt(topoheight) => VersionedState::Updated(*topoheight),
@@ -289,7 +286,7 @@ impl<'a> StorageProvider for TosStorageAdapter<'a> {
         };
 
         // Mark as deleted (insert None)
-        self.cache.storage.insert(key_cell, (data_state, None));
+        self.storage.insert(key_cell, (data_state, None));
 
         Ok(true)
     }
@@ -421,7 +418,8 @@ mod tests {
         let mut cache = ContractCache::default();
         let topoheight = 100;
 
-        let mut adapter = TosStorageAdapter::new(&provider, &contract_hash, &mut cache, topoheight);
+        let mut adapter =
+            TosStorageAdapter::new(&provider, &contract_hash, &mut cache.storage, topoheight);
 
         // Test write
         let key = b"test_key";
@@ -444,7 +442,8 @@ mod tests {
         let mut cache = ContractCache::default();
         let topoheight = 100;
 
-        let adapter = TosStorageAdapter::new(&provider, &contract_hash, &mut cache, topoheight);
+        let adapter =
+            TosStorageAdapter::new(&provider, &contract_hash, &mut cache.storage, topoheight);
 
         // Attempt to access different contract's storage
         let result = adapter.get(other_contract.as_bytes(), b"key");
@@ -459,7 +458,8 @@ mod tests {
         let mut cache = ContractCache::default();
         let topoheight = 100;
 
-        let mut adapter = TosStorageAdapter::new(&provider, &contract_hash, &mut cache, topoheight);
+        let mut adapter =
+            TosStorageAdapter::new(&provider, &contract_hash, &mut cache.storage, topoheight);
 
         adapter
             .set(contract_hash.as_bytes(), b"key_a", b"value_a")

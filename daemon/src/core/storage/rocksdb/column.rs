@@ -103,6 +103,10 @@ pub enum Column {
     ContractsBalances,
     // {topoheight}{contract}{asset} => {version}
     VersionedContractsBalances,
+    // {contract}{asset}{subkey...} => {topoheight}
+    ContractsAssetExt,
+    // {topoheight}{contract}{asset}{subkey...} => {version}
+    VersionedContractsAssetExt,
 
     // {topoheight}{asset_id} => {version}
     VersionedAssetsSupply,
@@ -184,11 +188,11 @@ pub enum Column {
     // {parent_committee_id (32 bytes)} => {Vec<Hash>}
     ChildCommittees,
 
-    // ===== Native Asset System =====
+    // ===== Contract Asset System =====
 
-    // Native asset data: asset_hash -> NativeAssetData
-    // {prefix}{asset_hash (32 bytes)} => {NativeAssetData}
-    NativeAssets,
+    // Contract asset data: asset_hash -> ContractAssetData
+    // {prefix}{asset_hash (32 bytes)} => {ContractAssetData}
+    ContractAssets,
 
     // ===== TNS (TOS Name Service) =====
 
@@ -220,13 +224,14 @@ impl Column {
             | VersionedAssetsSupply
             | VersionedContracts
             | VersionedContractsBalances
+            | VersionedContractsAssetExt
             | VersionedContractsData
             | PrefixedRegistrations
             | VersionedEnergyResources => Some(PREFIX_TOPOHEIGHT_LEN),
 
             UnoBalances => Some(PREFIX_ID_LEN),
 
-            ContractsBalances => Some(PREFIX_ID_LEN),
+            ContractsBalances | ContractsAssetExt => Some(PREFIX_ID_LEN),
             Balances => Some(PREFIX_ID_LEN),
 
             // Contract events: prefix by contract_id (8 bytes)

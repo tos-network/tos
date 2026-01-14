@@ -251,11 +251,11 @@ fn test_balance_transfer_execution() {
 
     let mut provider = MockProvider::new();
     let contract_hash = Hash::zero();
-    let native_asset = Hash::zero();
+    let contract_asset = Hash::zero();
     let topoheight = 100;
 
     // Set initial balance for the contract
-    provider.set_balance(contract_hash.as_bytes(), native_asset.as_bytes(), 10000);
+    provider.set_balance(contract_hash.as_bytes(), contract_asset.as_bytes(), 10000);
     println!("✓ Set initial contract balance: 10000");
 
     // Execute entrypoint (runs all 6 tests)

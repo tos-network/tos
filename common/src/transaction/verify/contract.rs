@@ -275,7 +275,7 @@ impl Transaction {
                 );
                 debug_assert!(vm_cache.events.is_empty(), "VM cache must not write events");
                 debug_assert!(vm_cache.memory.is_empty(), "VM cache must not write memory");
-                cache.merge_overlay_storage_only(vm_cache);
+                cache.merge_overlay_storage_and_tokens(vm_cache);
             }
             let tracker = chain_state.tracker;
             let assets = chain_state.assets;

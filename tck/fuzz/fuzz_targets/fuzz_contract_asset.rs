@@ -1,6 +1,6 @@
-//! Fuzz target for Native Asset syscall input parsing
+//! Fuzz target for Contract Asset syscall input parsing
 //!
-//! Tests that arbitrary Native Asset syscall inputs do not cause panics.
+//! Tests that arbitrary Contract Asset syscall inputs do not cause panics.
 //! Validates input parsing, boundary conditions, and error handling
 //! for all ERC20-compatible and extended operations.
 
@@ -13,10 +13,10 @@ use libfuzzer_sys::fuzz_target;
 // NATIVE ASSET SYSCALL IDS
 // ============================================================================
 
-/// Native Asset syscall identifiers
+/// Contract Asset syscall identifiers
 #[derive(Debug, Clone, Copy, Arbitrary)]
 #[repr(u32)]
-enum NativeAssetSyscall {
+enum ContractAssetSyscall {
     // Core Operations (ERC20)
     AssetCreate = 0x0100,
     AssetTransfer = 0x0101,
@@ -108,11 +108,11 @@ enum NativeAssetSyscall {
 // INPUT STRUCTURES
 // ============================================================================
 
-/// Fuzz input for Native Asset syscalls
+/// Fuzz input for Contract Asset syscalls
 #[derive(Debug, Arbitrary)]
-struct NativeAssetInput {
+struct ContractAssetInput {
     /// Syscall ID
-    syscall: NativeAssetSyscall,
+    syscall: ContractAssetSyscall,
     /// Asset ID (32 bytes)
     asset_id: [u8; 32],
     /// Sender address (32 bytes)
@@ -229,7 +229,7 @@ fn validate_batch_size(size: usize) -> bool {
 // ============================================================================
 
 /// Parse transfer parameters from input
-fn parse_transfer_params(input: &NativeAssetInput) -> Option<TransferParams> {
+fn parse_transfer_params(input: &ContractAssetInput) -> Option<TransferParams> {
     if !validate_non_zero_address(&input.sender) {
         return None;
     }
@@ -249,7 +249,7 @@ fn parse_transfer_params(input: &NativeAssetInput) -> Option<TransferParams> {
 }
 
 /// Parse allowance parameters from input
-fn parse_allowance_params(input: &NativeAssetInput) -> Option<AllowanceParams> {
+fn parse_allowance_params(input: &ContractAssetInput) -> Option<AllowanceParams> {
     if !validate_non_zero_address(&input.sender) {
         return None;
     }
@@ -269,7 +269,7 @@ fn parse_allowance_params(input: &NativeAssetInput) -> Option<AllowanceParams> {
 }
 
 /// Parse lock parameters from input
-fn parse_lock_params(input: &NativeAssetInput) -> Option<LockParams> {
+fn parse_lock_params(input: &ContractAssetInput) -> Option<LockParams> {
     if !validate_non_zero_address(&input.sender) {
         return None;
     }
@@ -291,7 +291,7 @@ fn parse_lock_params(input: &NativeAssetInput) -> Option<LockParams> {
 }
 
 /// Parse escrow parameters from input
-fn parse_escrow_params(input: &NativeAssetInput) -> Option<EscrowParams> {
+fn parse_escrow_params(input: &ContractAssetInput) -> Option<EscrowParams> {
     if !validate_non_zero_address(&input.sender) {
         return None;
     }
@@ -626,7 +626,7 @@ fn simulate_batch_transfer(
 // FUZZ TARGET
 // ============================================================================
 
-fuzz_target!(|input: NativeAssetInput| {
+fuzz_target!(|input: ContractAssetInput| {
     // Limit data size
     if input.data.len() > 64 * 1024 {
         return;
@@ -638,7 +638,7 @@ fuzz_target!(|input: NativeAssetInput| {
     // Process based on syscall type
     match input.syscall {
         // Core Operations
-        NativeAssetSyscall::AssetTransfer => {
+        ContractAssetSyscall::AssetTransfer => {
             if let Some(params) = parse_transfer_params(&input) {
                 if let Ok(new_balance) = simulate_transfer(&params, input.amount2) {
                     // Verify balance decreased correctly
@@ -647,7 +647,7 @@ fuzz_target!(|input: NativeAssetInput| {
             }
         }
 
-        NativeAssetSyscall::AssetMint => {
+        ContractAssetSyscall::AssetMint => {
             // Validate mint parameters
             let _ = validate_amount(input.amount);
             let _ = validate_non_zero_address(&input.recipient);
@@ -656,7 +656,7 @@ fuzz_target!(|input: NativeAssetInput| {
             let _ = input.amount.checked_add(input.amount2);
         }
 
-        NativeAssetSyscall::AssetBurn => {
+        ContractAssetSyscall::AssetBurn => {
             // Validate burn parameters
             let _ = validate_amount(input.amount);
             let _ = validate_non_zero_address(&input.sender);
@@ -665,7 +665,7 @@ fuzz_target!(|input: NativeAssetInput| {
             let _ = input.amount2.checked_sub(input.amount);
         }
 
-        NativeAssetSyscall::AssetBurnFrom => {
+        ContractAssetSyscall::AssetBurnFrom => {
             if let Some(params) = parse_allowance_params(&input) {
                 if let Ok((new_allowance, new_balance)) =
                     simulate_transfer_from(&params, input.amount2, input.amount)
@@ -678,7 +678,7 @@ fuzz_target!(|input: NativeAssetInput| {
         }
 
         // Metadata
-        NativeAssetSyscall::AssetCreate => {
+        ContractAssetSyscall::AssetCreate => {
             let decimals = (input.amount % 19) as u8;
             // Validate name length
             let _ = validate_string_length(&input.string_data, 64);
@@ -694,43 +694,43 @@ fuzz_target!(|input: NativeAssetInput| {
             let _ = validate_asset_metadata(&input.string_data, symbol, decimals);
         }
 
-        NativeAssetSyscall::AssetName => {
+        ContractAssetSyscall::AssetName => {
             let _ = validate_non_zero_address(&input.asset_id);
             // Name should be valid string
             let _ = validate_string_length(&input.string_data, 64);
         }
 
-        NativeAssetSyscall::AssetSymbol => {
+        ContractAssetSyscall::AssetSymbol => {
             let _ = validate_non_zero_address(&input.asset_id);
             // Symbol should be uppercase alphanumeric
             let _ = validate_symbol(&input.string_data);
             let _ = validate_string_length(&input.string_data, 12);
         }
 
-        NativeAssetSyscall::AssetDecimals => {
+        ContractAssetSyscall::AssetDecimals => {
             let _ = validate_non_zero_address(&input.asset_id);
             // Decimals should be 0-18
             let decimals = (input.amount % 256) as u8;
             assert!(decimals <= 18 || decimals > 18); // Just ensure no panic
         }
 
-        NativeAssetSyscall::AssetMetadataUri => {
+        ContractAssetSyscall::AssetMetadataUri => {
             let _ = validate_non_zero_address(&input.asset_id);
             // URI should be valid length
             let _ = validate_string_length(&input.string_data, 256);
         }
 
-        NativeAssetSyscall::AssetExists | NativeAssetSyscall::AssetGetInfo => {
+        ContractAssetSyscall::AssetExists | ContractAssetSyscall::AssetGetInfo => {
             let _ = validate_non_zero_address(&input.asset_id);
         }
 
-        NativeAssetSyscall::AssetBalanceOf | NativeAssetSyscall::AssetTotalSupply => {
+        ContractAssetSyscall::AssetBalanceOf | ContractAssetSyscall::AssetTotalSupply => {
             let _ = validate_non_zero_address(&input.asset_id);
             let _ = validate_non_zero_address(&input.sender);
         }
 
         // Allowance
-        NativeAssetSyscall::AssetApprove => {
+        ContractAssetSyscall::AssetApprove => {
             if let Some(params) = parse_allowance_params(&input) {
                 if let Ok(approved) = simulate_approve(&params) {
                     assert_eq!(approved, params.amount);
@@ -738,13 +738,13 @@ fuzz_target!(|input: NativeAssetInput| {
             }
         }
 
-        NativeAssetSyscall::AssetAllowance => {
+        ContractAssetSyscall::AssetAllowance => {
             let _ = validate_non_zero_address(&input.sender);
             let _ = validate_non_zero_address(&input.spender);
             let _ = validate_non_zero_address(&input.asset_id);
         }
 
-        NativeAssetSyscall::AssetTransferFrom => {
+        ContractAssetSyscall::AssetTransferFrom => {
             if let Some(params) = parse_allowance_params(&input) {
                 if let Ok((new_allowance, new_balance)) =
                     simulate_transfer_from(&params, input.amount2, input.amount)
@@ -755,7 +755,7 @@ fuzz_target!(|input: NativeAssetInput| {
             }
         }
 
-        NativeAssetSyscall::AssetIncreaseAllowance => {
+        ContractAssetSyscall::AssetIncreaseAllowance => {
             if let Some(params) = parse_allowance_params(&input) {
                 let _ = simulate_approve(&params);
                 // Check overflow when increasing
@@ -765,7 +765,7 @@ fuzz_target!(|input: NativeAssetInput| {
             }
         }
 
-        NativeAssetSyscall::AssetDecreaseAllowance => {
+        ContractAssetSyscall::AssetDecreaseAllowance => {
             if let Some(params) = parse_allowance_params(&input) {
                 let _ = simulate_approve(&params);
                 // Check underflow when decreasing
@@ -775,7 +775,7 @@ fuzz_target!(|input: NativeAssetInput| {
             }
         }
 
-        NativeAssetSyscall::AssetRevokeAllowance => {
+        ContractAssetSyscall::AssetRevokeAllowance => {
             if let Some(params) = parse_allowance_params(&input) {
                 // Revoking sets allowance to 0
                 let _ = simulate_approve(&params);
@@ -783,7 +783,7 @@ fuzz_target!(|input: NativeAssetInput| {
         }
 
         // Batch Operations
-        NativeAssetSyscall::AssetBatchTransfer => {
+        ContractAssetSyscall::AssetBatchTransfer => {
             if let Some(entries) = parse_batch_transfer(&input.data) {
                 if let Ok(remaining) = simulate_batch_transfer(&entries, input.amount) {
                     assert!(remaining <= input.amount);
@@ -791,7 +791,7 @@ fuzz_target!(|input: NativeAssetInput| {
             }
         }
 
-        NativeAssetSyscall::AssetBalanceOfBatch => {
+        ContractAssetSyscall::AssetBalanceOfBatch => {
             let num_addresses = input.data.len() / 32;
             let _ = validate_batch_size(num_addresses);
             // Validate each address in batch
@@ -806,7 +806,7 @@ fuzz_target!(|input: NativeAssetInput| {
         }
 
         // Governance
-        NativeAssetSyscall::AssetDelegate => {
+        ContractAssetSyscall::AssetDelegate => {
             let _ = validate_non_zero_address(&input.sender);
             let _ = validate_non_zero_address(&input.recipient);
             let _ = validate_non_zero_address(&input.asset_id);
@@ -814,32 +814,32 @@ fuzz_target!(|input: NativeAssetInput| {
             let _ = validate_amount(input.amount);
         }
 
-        NativeAssetSyscall::AssetDelegates => {
+        ContractAssetSyscall::AssetDelegates => {
             let _ = validate_non_zero_address(&input.sender);
             let _ = validate_non_zero_address(&input.asset_id);
         }
 
-        NativeAssetSyscall::AssetGetVotes
-        | NativeAssetSyscall::AssetGetPastVotes
-        | NativeAssetSyscall::AssetGetPastTotalSupply => {
+        ContractAssetSyscall::AssetGetVotes
+        | ContractAssetSyscall::AssetGetPastVotes
+        | ContractAssetSyscall::AssetGetPastTotalSupply => {
             let _ = validate_non_zero_address(&input.sender);
             let _ = validate_non_zero_address(&input.asset_id);
             let _ = validate_timestamp(input.timestamp);
         }
 
-        NativeAssetSyscall::AssetNumCheckpoints | NativeAssetSyscall::AssetCheckpointAt => {
+        ContractAssetSyscall::AssetNumCheckpoints | ContractAssetSyscall::AssetCheckpointAt => {
             let _ = validate_non_zero_address(&input.sender);
             let _ = validate_non_zero_address(&input.asset_id);
             // Checkpoint index validation
             let _ = validate_amount(input.amount);
         }
 
-        NativeAssetSyscall::AssetClock | NativeAssetSyscall::AssetClockMode => {
+        ContractAssetSyscall::AssetClock | ContractAssetSyscall::AssetClockMode => {
             let _ = validate_non_zero_address(&input.asset_id);
         }
 
         // Token Locking
-        NativeAssetSyscall::AssetLock => {
+        ContractAssetSyscall::AssetLock => {
             if let Some(params) = parse_lock_params(&input) {
                 if let Ok(locked) = simulate_lock(&params, input.amount2) {
                     assert_eq!(locked, params.amount);
@@ -850,7 +850,7 @@ fuzz_target!(|input: NativeAssetInput| {
             }
         }
 
-        NativeAssetSyscall::AssetUnlock => {
+        ContractAssetSyscall::AssetUnlock => {
             if let Some(params) = parse_lock_params(&input) {
                 // Use timestamp as current time for unlock simulation
                 let current_time = input.timestamp.saturating_add(input.amount2);
@@ -860,14 +860,14 @@ fuzz_target!(|input: NativeAssetInput| {
             }
         }
 
-        NativeAssetSyscall::AssetGetLock => {
+        ContractAssetSyscall::AssetGetLock => {
             let _ = validate_non_zero_address(&input.asset_id);
             let _ = validate_non_zero_address(&input.sender);
             // Use lock_id for query
             let _ = input.lock_id;
         }
 
-        NativeAssetSyscall::AssetExtendLock => {
+        ContractAssetSyscall::AssetExtendLock => {
             let _ = validate_non_zero_address(&input.asset_id);
             let _ = validate_non_zero_address(&input.sender);
             // Validate new unlock time is after current
@@ -875,14 +875,14 @@ fuzz_target!(|input: NativeAssetInput| {
             let _ = input.lock_id;
         }
 
-        NativeAssetSyscall::AssetGetLocks
-        | NativeAssetSyscall::AssetLockedBalance
-        | NativeAssetSyscall::AssetAvailableBalance => {
+        ContractAssetSyscall::AssetGetLocks
+        | ContractAssetSyscall::AssetLockedBalance
+        | ContractAssetSyscall::AssetAvailableBalance => {
             let _ = validate_non_zero_address(&input.asset_id);
             let _ = validate_non_zero_address(&input.sender);
         }
 
-        NativeAssetSyscall::AssetSplitLock => {
+        ContractAssetSyscall::AssetSplitLock => {
             let _ = validate_amount(input.amount);
             let _ = validate_amount(input.amount2);
             let _ = input.lock_id;
@@ -892,7 +892,7 @@ fuzz_target!(|input: NativeAssetInput| {
             }
         }
 
-        NativeAssetSyscall::AssetMergeLocks => {
+        ContractAssetSyscall::AssetMergeLocks => {
             // Parse lock IDs from data
             let num_locks = input.data.len() / 8;
             let _ = validate_batch_size(num_locks);
@@ -901,9 +901,9 @@ fuzz_target!(|input: NativeAssetInput| {
         }
 
         // Role Management
-        NativeAssetSyscall::AssetGrantRole
-        | NativeAssetSyscall::AssetRevokeRole
-        | NativeAssetSyscall::AssetHasRole => {
+        ContractAssetSyscall::AssetGrantRole
+        | ContractAssetSyscall::AssetRevokeRole
+        | ContractAssetSyscall::AssetHasRole => {
             let _ = validate_non_zero_address(&input.asset_id);
             let _ = validate_non_zero_address(&input.sender);
             let _ = validate_non_zero_address(&input.role);
@@ -911,36 +911,36 @@ fuzz_target!(|input: NativeAssetInput| {
             let _ = validate_non_zero_address(&input.recipient);
         }
 
-        NativeAssetSyscall::AssetGetRoleAdmin | NativeAssetSyscall::AssetRenounceRole => {
+        ContractAssetSyscall::AssetGetRoleAdmin | ContractAssetSyscall::AssetRenounceRole => {
             let _ = validate_non_zero_address(&input.asset_id);
             let _ = validate_non_zero_address(&input.role);
             let _ = validate_non_zero_address(&input.sender);
         }
 
         // Pause/Freeze
-        NativeAssetSyscall::AssetPause | NativeAssetSyscall::AssetUnpause => {
+        ContractAssetSyscall::AssetPause | ContractAssetSyscall::AssetUnpause => {
             let _ = validate_non_zero_address(&input.asset_id);
             // Caller must have pauser role
             let _ = validate_non_zero_address(&input.sender);
         }
 
-        NativeAssetSyscall::AssetIsPaused => {
+        ContractAssetSyscall::AssetIsPaused => {
             let _ = validate_non_zero_address(&input.asset_id);
         }
 
-        NativeAssetSyscall::AssetFreeze | NativeAssetSyscall::AssetUnfreeze => {
+        ContractAssetSyscall::AssetFreeze | ContractAssetSyscall::AssetUnfreeze => {
             let _ = validate_non_zero_address(&input.asset_id);
             let _ = validate_non_zero_address(&input.sender);
             // Target account to freeze/unfreeze
             let _ = validate_non_zero_address(&input.recipient);
         }
 
-        NativeAssetSyscall::AssetIsFrozen => {
+        ContractAssetSyscall::AssetIsFrozen => {
             let _ = validate_non_zero_address(&input.asset_id);
             let _ = validate_non_zero_address(&input.sender);
         }
 
-        NativeAssetSyscall::AssetForceTransfer => {
+        ContractAssetSyscall::AssetForceTransfer => {
             if let Some(params) = parse_transfer_params(&input) {
                 // Force transfer bypasses balance checks but validates addresses
                 let _ = validate_non_zero_address(&params.from);
@@ -951,7 +951,7 @@ fuzz_target!(|input: NativeAssetInput| {
         }
 
         // Escrow
-        NativeAssetSyscall::EscrowCreate => {
+        ContractAssetSyscall::EscrowCreate => {
             if let Some(params) = parse_escrow_params(&input) {
                 if let Ok(escrowed) = simulate_escrow_create(&params, input.amount2) {
                     assert_eq!(escrowed, params.amount);
@@ -961,7 +961,7 @@ fuzz_target!(|input: NativeAssetInput| {
             }
         }
 
-        NativeAssetSyscall::EscrowRelease => {
+        ContractAssetSyscall::EscrowRelease => {
             if let Some(params) = parse_escrow_params(&input) {
                 // Sender or arbiter releases to recipient
                 if let Ok(released) = simulate_escrow_release(&params, &input.sender) {
@@ -970,7 +970,7 @@ fuzz_target!(|input: NativeAssetInput| {
             }
         }
 
-        NativeAssetSyscall::EscrowRefund => {
+        ContractAssetSyscall::EscrowRefund => {
             if let Some(params) = parse_escrow_params(&input) {
                 // Use timestamp as current time
                 if let Ok(refunded) =
@@ -981,20 +981,20 @@ fuzz_target!(|input: NativeAssetInput| {
             }
         }
 
-        NativeAssetSyscall::EscrowDispute | NativeAssetSyscall::EscrowResolve => {
+        ContractAssetSyscall::EscrowDispute | ContractAssetSyscall::EscrowResolve => {
             let _ = validate_non_zero_address(&input.asset_id);
             let _ = validate_non_zero_address(&input.sender);
             // Use escrow_id
             let _ = input.escrow_id;
         }
 
-        NativeAssetSyscall::EscrowGet => {
+        ContractAssetSyscall::EscrowGet => {
             let _ = validate_non_zero_address(&input.asset_id);
             let _ = input.escrow_id;
         }
 
         // Permit
-        NativeAssetSyscall::AssetPermit => {
+        ContractAssetSyscall::AssetPermit => {
             let _ = validate_non_zero_address(&input.sender);
             let _ = validate_non_zero_address(&input.spender);
             let _ = validate_non_zero_address(&input.asset_id);
@@ -1007,17 +1007,17 @@ fuzz_target!(|input: NativeAssetInput| {
             }
         }
 
-        NativeAssetSyscall::AssetNonces => {
+        ContractAssetSyscall::AssetNonces => {
             let _ = validate_non_zero_address(&input.sender);
             let _ = validate_non_zero_address(&input.asset_id);
         }
 
-        NativeAssetSyscall::AssetDomainSeparator => {
+        ContractAssetSyscall::AssetDomainSeparator => {
             let _ = validate_non_zero_address(&input.asset_id);
         }
 
         // Timelock
-        NativeAssetSyscall::TimelockSchedule => {
+        ContractAssetSyscall::TimelockSchedule => {
             let _ = validate_non_zero_address(&input.asset_id);
             let _ = validate_non_zero_address(&input.sender);
             let _ = validate_timestamp(input.timestamp);
@@ -1028,20 +1028,20 @@ fuzz_target!(|input: NativeAssetInput| {
             );
         }
 
-        NativeAssetSyscall::TimelockExecute => {
+        ContractAssetSyscall::TimelockExecute => {
             let _ = validate_non_zero_address(&input.asset_id);
             let _ = validate_non_zero_address(&input.sender);
             // Operation ID from role field
             let _ = validate_non_zero_address(&input.role);
         }
 
-        NativeAssetSyscall::TimelockCancel => {
+        ContractAssetSyscall::TimelockCancel => {
             let _ = validate_non_zero_address(&input.asset_id);
             let _ = validate_non_zero_address(&input.sender);
             let _ = validate_non_zero_address(&input.role);
         }
 
-        NativeAssetSyscall::TimelockGetOperation => {
+        ContractAssetSyscall::TimelockGetOperation => {
             let _ = validate_non_zero_address(&input.asset_id);
             let _ = validate_non_zero_address(&input.role);
         }

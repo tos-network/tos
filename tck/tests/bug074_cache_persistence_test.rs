@@ -2,7 +2,7 @@
 //!
 //! These tests verify that:
 //! 1. TAKO executor returns cache with storage writes
-//! 2. merge_overlay_storage_only() correctly merges storage
+//! 2. merge_overlay_storage_and_tokens() correctly merges storage
 //! 3. Cache is NOT merged on execution failure
 //!
 //! Related: /Users/tomisetsu/memo/21-NewEnergy/bugs/ISSUE-074-tako-cache-not-persisted.md
@@ -184,13 +184,13 @@ fn test_success_cache_contains_storage_writes() {
 }
 
 // ============================================================================
-// Category 2: merge_overlay_storage_only() Function Tests
+// Category 2: merge_overlay_storage_and_tokens() Function Tests
 // ============================================================================
 
-/// Test that merge_overlay_storage_only only merges storage field
+/// Test that merge_overlay_storage_and_tokens merges storage field
 #[test]
-fn test_merge_overlay_storage_only() {
-    println!("\n=== ISSUE-074 Test: merge_overlay_storage_only ===");
+fn test_merge_overlay_storage_and_tokens() {
+    println!("\n=== ISSUE-074 Test: merge_overlay_storage_and_tokens ===");
 
     // Create chain_state cache (simulates deposits)
     let mut chain_cache = ContractCache::new();
@@ -213,7 +213,7 @@ fn test_merge_overlay_storage_only() {
     println!("✓ Created vm_cache with storage entry and balance entry");
 
     // Merge
-    chain_cache.merge_overlay_storage_only(vm_cache);
+    chain_cache.merge_overlay_storage_and_tokens(vm_cache);
 
     // Verify storage was merged
     assert!(
@@ -238,10 +238,10 @@ fn test_merge_overlay_storage_only() {
     );
     println!("✓ Balances were NOT merged (correct behavior)");
 
-    println!("\n✅ ISSUE-074 Test PASSED: merge_overlay_storage_only works correctly");
+    println!("\n✅ ISSUE-074 Test PASSED: merge_overlay_storage_and_tokens works correctly");
 }
 
-/// Test merge_overlay_storage_only with multiple storage entries
+/// Test merge_overlay_storage_and_tokens with multiple storage entries
 #[test]
 fn test_merge_overlay_multiple_entries() {
     println!("\n=== ISSUE-074 Test: Merge Multiple Storage Entries ===");
@@ -286,7 +286,7 @@ fn test_merge_overlay_multiple_entries() {
         ),
     );
 
-    chain_cache.merge_overlay_storage_only(vm_cache);
+    chain_cache.merge_overlay_storage_and_tokens(vm_cache);
 
     // Verify all entries
     assert_eq!(
@@ -344,7 +344,7 @@ fn test_failure_cache_not_merged_on_nonzero_exit() {
 
     if is_success {
         // This branch should NOT be taken
-        chain_cache.merge_overlay_storage_only(vm_cache);
+        chain_cache.merge_overlay_storage_and_tokens(vm_cache);
         panic!("Should not merge on failure");
     } else {
         // Failure path: vm_cache is dropped, NOT merged

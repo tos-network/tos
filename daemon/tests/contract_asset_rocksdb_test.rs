@@ -1,6 +1,6 @@
-//! RocksStorage Native Asset Integration Tests
+//! RocksStorage Contract Asset Integration Tests
 //!
-//! These tests verify the RocksStorage implementation of the native asset system,
+//! These tests verify the RocksStorage implementation of the contract asset system,
 //! specifically testing the index operations added for TAKO syscall integration:
 //!
 //! A. Lock Index Operations
@@ -28,18 +28,18 @@
 
 use tempdir::TempDir;
 use tos_common::{
-    crypto::Hash,
-    native_asset::{
-        BalanceCheckpoint, DelegationCheckpoint, Escrow, EscrowStatus, NativeAssetData,
+    contract_asset::{
+        BalanceCheckpoint, ContractAssetData, DelegationCheckpoint, Escrow, EscrowStatus,
         ReleaseCondition, TokenLock,
     },
+    crypto::Hash,
     network::Network,
 };
 use tos_daemon::core::{
     config::RocksDBConfig,
     storage::{
         rocksdb::{CacheMode, CompressionMode, RocksStorage},
-        NativeAssetProvider,
+        ContractAssetProvider,
     },
 };
 
@@ -83,7 +83,7 @@ fn random_account() -> [u8; 32] {
 /// Test A.1: Add and get lock IDs
 #[tokio::test]
 async fn test_lock_index_add_and_get() {
-    let temp_dir = TempDir::new("native_asset_test").expect("Failed to create temp dir");
+    let temp_dir = TempDir::new("contract_asset_test").expect("Failed to create temp dir");
     let mut storage = create_test_storage(&temp_dir);
 
     let asset = random_asset();
@@ -91,28 +91,28 @@ async fn test_lock_index_add_and_get() {
 
     // Initially empty
     let locks = storage
-        .get_native_asset_lock_ids(&asset, &account)
+        .get_contract_asset_lock_ids(&asset, &account)
         .await
         .expect("Should get empty lock list");
     assert!(locks.is_empty(), "Lock list should be empty initially");
 
     // Add some lock IDs
     storage
-        .add_native_asset_lock_id(&asset, &account, 1)
+        .add_contract_asset_lock_id(&asset, &account, 1)
         .await
         .expect("Should add lock ID 1");
     storage
-        .add_native_asset_lock_id(&asset, &account, 5)
+        .add_contract_asset_lock_id(&asset, &account, 5)
         .await
         .expect("Should add lock ID 5");
     storage
-        .add_native_asset_lock_id(&asset, &account, 3)
+        .add_contract_asset_lock_id(&asset, &account, 3)
         .await
         .expect("Should add lock ID 3");
 
     // Verify all IDs are present
     let locks = storage
-        .get_native_asset_lock_ids(&asset, &account)
+        .get_contract_asset_lock_ids(&asset, &account)
         .await
         .expect("Should get lock list");
     assert_eq!(locks.len(), 3, "Should have 3 lock IDs");
@@ -126,7 +126,7 @@ async fn test_lock_index_add_and_get() {
 /// Test A.2: Remove lock IDs
 #[tokio::test]
 async fn test_lock_index_remove() {
-    let temp_dir = TempDir::new("native_asset_test").expect("Failed to create temp dir");
+    let temp_dir = TempDir::new("contract_asset_test").expect("Failed to create temp dir");
     let mut storage = create_test_storage(&temp_dir);
 
     let asset = random_asset();
@@ -135,19 +135,19 @@ async fn test_lock_index_remove() {
     // Add lock IDs
     for id in [1, 2, 3, 4, 5] {
         storage
-            .add_native_asset_lock_id(&asset, &account, id)
+            .add_contract_asset_lock_id(&asset, &account, id)
             .await
             .expect("Should add lock ID");
     }
 
     // Remove middle one
     storage
-        .remove_native_asset_lock_id(&asset, &account, 3)
+        .remove_contract_asset_lock_id(&asset, &account, 3)
         .await
         .expect("Should remove lock ID 3");
 
     let locks = storage
-        .get_native_asset_lock_ids(&asset, &account)
+        .get_contract_asset_lock_ids(&asset, &account)
         .await
         .expect("Should get lock list");
     assert_eq!(locks.len(), 4, "Should have 4 lock IDs after removal");
@@ -156,13 +156,13 @@ async fn test_lock_index_remove() {
     // Remove all remaining
     for id in [1, 2, 4, 5] {
         storage
-            .remove_native_asset_lock_id(&asset, &account, id)
+            .remove_contract_asset_lock_id(&asset, &account, id)
             .await
             .expect("Should remove lock ID");
     }
 
     let locks = storage
-        .get_native_asset_lock_ids(&asset, &account)
+        .get_contract_asset_lock_ids(&asset, &account)
         .await
         .expect("Should get empty lock list");
     assert!(
@@ -176,7 +176,7 @@ async fn test_lock_index_remove() {
 /// Test A.3: Duplicate prevention in lock index
 #[tokio::test]
 async fn test_lock_index_duplicate_prevention() {
-    let temp_dir = TempDir::new("native_asset_test").expect("Failed to create temp dir");
+    let temp_dir = TempDir::new("contract_asset_test").expect("Failed to create temp dir");
     let mut storage = create_test_storage(&temp_dir);
 
     let asset = random_asset();
@@ -184,20 +184,20 @@ async fn test_lock_index_duplicate_prevention() {
 
     // Add same lock ID multiple times
     storage
-        .add_native_asset_lock_id(&asset, &account, 42)
+        .add_contract_asset_lock_id(&asset, &account, 42)
         .await
         .expect("Should add lock ID");
     storage
-        .add_native_asset_lock_id(&asset, &account, 42)
+        .add_contract_asset_lock_id(&asset, &account, 42)
         .await
         .expect("Should handle duplicate");
     storage
-        .add_native_asset_lock_id(&asset, &account, 42)
+        .add_contract_asset_lock_id(&asset, &account, 42)
         .await
         .expect("Should handle duplicate");
 
     let locks = storage
-        .get_native_asset_lock_ids(&asset, &account)
+        .get_contract_asset_lock_ids(&asset, &account)
         .await
         .expect("Should get lock list");
     assert_eq!(locks.len(), 1, "Should have only 1 lock ID (no duplicates)");
@@ -209,7 +209,7 @@ async fn test_lock_index_duplicate_prevention() {
 /// Test A.4: Removing non-existent lock ID is safe
 #[tokio::test]
 async fn test_lock_index_remove_nonexistent() {
-    let temp_dir = TempDir::new("native_asset_test").expect("Failed to create temp dir");
+    let temp_dir = TempDir::new("contract_asset_test").expect("Failed to create temp dir");
     let mut storage = create_test_storage(&temp_dir);
 
     let asset = random_asset();
@@ -217,22 +217,22 @@ async fn test_lock_index_remove_nonexistent() {
 
     // Remove from empty index should succeed silently
     storage
-        .remove_native_asset_lock_id(&asset, &account, 999)
+        .remove_contract_asset_lock_id(&asset, &account, 999)
         .await
         .expect("Should handle removal from empty index");
 
     // Add one, remove different one
     storage
-        .add_native_asset_lock_id(&asset, &account, 1)
+        .add_contract_asset_lock_id(&asset, &account, 1)
         .await
         .expect("Should add lock ID");
     storage
-        .remove_native_asset_lock_id(&asset, &account, 999)
+        .remove_contract_asset_lock_id(&asset, &account, 999)
         .await
         .expect("Should handle removal of non-existent ID");
 
     let locks = storage
-        .get_native_asset_lock_ids(&asset, &account)
+        .get_contract_asset_lock_ids(&asset, &account)
         .await
         .expect("Should get lock list");
     assert_eq!(locks.len(), 1, "Should still have 1 lock ID");
@@ -247,7 +247,7 @@ async fn test_lock_index_remove_nonexistent() {
 /// Test B.1: Add and get user escrows
 #[tokio::test]
 async fn test_user_escrow_index_add_and_get() {
-    let temp_dir = TempDir::new("native_asset_test").expect("Failed to create temp dir");
+    let temp_dir = TempDir::new("contract_asset_test").expect("Failed to create temp dir");
     let mut storage = create_test_storage(&temp_dir);
 
     let asset = random_asset();
@@ -255,23 +255,23 @@ async fn test_user_escrow_index_add_and_get() {
 
     // Initially empty
     let escrows = storage
-        .get_native_asset_user_escrows(&asset, &user)
+        .get_contract_asset_user_escrows(&asset, &user)
         .await
         .expect("Should get empty escrow list");
     assert!(escrows.is_empty(), "Escrow list should be empty initially");
 
     // Add escrow IDs
     storage
-        .add_native_asset_user_escrow(&asset, &user, 100)
+        .add_contract_asset_user_escrow(&asset, &user, 100)
         .await
         .expect("Should add escrow 100");
     storage
-        .add_native_asset_user_escrow(&asset, &user, 200)
+        .add_contract_asset_user_escrow(&asset, &user, 200)
         .await
         .expect("Should add escrow 200");
 
     let escrows = storage
-        .get_native_asset_user_escrows(&asset, &user)
+        .get_contract_asset_user_escrows(&asset, &user)
         .await
         .expect("Should get escrow list");
     assert_eq!(escrows.len(), 2, "Should have 2 escrows");
@@ -284,7 +284,7 @@ async fn test_user_escrow_index_add_and_get() {
 /// Test B.2: Remove user escrows
 #[tokio::test]
 async fn test_user_escrow_index_remove() {
-    let temp_dir = TempDir::new("native_asset_test").expect("Failed to create temp dir");
+    let temp_dir = TempDir::new("contract_asset_test").expect("Failed to create temp dir");
     let mut storage = create_test_storage(&temp_dir);
 
     let asset = random_asset();
@@ -292,21 +292,21 @@ async fn test_user_escrow_index_remove() {
 
     // Add and remove
     storage
-        .add_native_asset_user_escrow(&asset, &user, 1)
+        .add_contract_asset_user_escrow(&asset, &user, 1)
         .await
         .expect("Should add escrow");
     storage
-        .add_native_asset_user_escrow(&asset, &user, 2)
+        .add_contract_asset_user_escrow(&asset, &user, 2)
         .await
         .expect("Should add escrow");
 
     storage
-        .remove_native_asset_user_escrow(&asset, &user, 1)
+        .remove_contract_asset_user_escrow(&asset, &user, 1)
         .await
         .expect("Should remove escrow");
 
     let escrows = storage
-        .get_native_asset_user_escrows(&asset, &user)
+        .get_contract_asset_user_escrows(&asset, &user)
         .await
         .expect("Should get escrow list");
     assert_eq!(escrows.len(), 1);
@@ -319,7 +319,7 @@ async fn test_user_escrow_index_remove() {
 /// Test B.3: Multi-user escrow tracking
 #[tokio::test]
 async fn test_user_escrow_multi_user() {
-    let temp_dir = TempDir::new("native_asset_test").expect("Failed to create temp dir");
+    let temp_dir = TempDir::new("contract_asset_test").expect("Failed to create temp dir");
     let mut storage = create_test_storage(&temp_dir);
 
     let asset = random_asset();
@@ -328,21 +328,21 @@ async fn test_user_escrow_multi_user() {
 
     // Same escrow tracked for both users (sender and recipient)
     storage
-        .add_native_asset_user_escrow(&asset, &user1, 1)
+        .add_contract_asset_user_escrow(&asset, &user1, 1)
         .await
         .expect("Should add escrow for user1");
     storage
-        .add_native_asset_user_escrow(&asset, &user2, 1)
+        .add_contract_asset_user_escrow(&asset, &user2, 1)
         .await
         .expect("Should add escrow for user2");
 
     // Each user should see the escrow
     let escrows1 = storage
-        .get_native_asset_user_escrows(&asset, &user1)
+        .get_contract_asset_user_escrows(&asset, &user1)
         .await
         .expect("Should get escrows for user1");
     let escrows2 = storage
-        .get_native_asset_user_escrows(&asset, &user2)
+        .get_contract_asset_user_escrows(&asset, &user2)
         .await
         .expect("Should get escrows for user2");
 
@@ -359,7 +359,7 @@ async fn test_user_escrow_multi_user() {
 /// Test C.1: Add and get owner agents
 #[tokio::test]
 async fn test_owner_agents_add_and_get() {
-    let temp_dir = TempDir::new("native_asset_test").expect("Failed to create temp dir");
+    let temp_dir = TempDir::new("contract_asset_test").expect("Failed to create temp dir");
     let mut storage = create_test_storage(&temp_dir);
 
     let asset = random_asset();
@@ -369,23 +369,23 @@ async fn test_owner_agents_add_and_get() {
 
     // Initially empty
     let agents = storage
-        .get_native_asset_owner_agents(&asset, &owner)
+        .get_contract_asset_owner_agents(&asset, &owner)
         .await
         .expect("Should get empty agent list");
     assert!(agents.is_empty());
 
     // Add agents
     storage
-        .add_native_asset_owner_agent(&asset, &owner, &agent1)
+        .add_contract_asset_owner_agent(&asset, &owner, &agent1)
         .await
         .expect("Should add agent1");
     storage
-        .add_native_asset_owner_agent(&asset, &owner, &agent2)
+        .add_contract_asset_owner_agent(&asset, &owner, &agent2)
         .await
         .expect("Should add agent2");
 
     let agents = storage
-        .get_native_asset_owner_agents(&asset, &owner)
+        .get_contract_asset_owner_agents(&asset, &owner)
         .await
         .expect("Should get agent list");
     assert_eq!(agents.len(), 2);
@@ -398,7 +398,7 @@ async fn test_owner_agents_add_and_get() {
 /// Test C.2: Remove owner agents
 #[tokio::test]
 async fn test_owner_agents_remove() {
-    let temp_dir = TempDir::new("native_asset_test").expect("Failed to create temp dir");
+    let temp_dir = TempDir::new("contract_asset_test").expect("Failed to create temp dir");
     let mut storage = create_test_storage(&temp_dir);
 
     let asset = random_asset();
@@ -407,21 +407,21 @@ async fn test_owner_agents_remove() {
     let agent2 = random_account();
 
     storage
-        .add_native_asset_owner_agent(&asset, &owner, &agent1)
+        .add_contract_asset_owner_agent(&asset, &owner, &agent1)
         .await
         .expect("Should add agent");
     storage
-        .add_native_asset_owner_agent(&asset, &owner, &agent2)
+        .add_contract_asset_owner_agent(&asset, &owner, &agent2)
         .await
         .expect("Should add agent");
 
     storage
-        .remove_native_asset_owner_agent(&asset, &owner, &agent1)
+        .remove_contract_asset_owner_agent(&asset, &owner, &agent1)
         .await
         .expect("Should remove agent");
 
     let agents = storage
-        .get_native_asset_owner_agents(&asset, &owner)
+        .get_contract_asset_owner_agents(&asset, &owner)
         .await
         .expect("Should get agent list");
     assert_eq!(agents.len(), 1);
@@ -434,7 +434,7 @@ async fn test_owner_agents_remove() {
 /// Test C.3: Agent duplicate prevention
 #[tokio::test]
 async fn test_owner_agents_duplicate_prevention() {
-    let temp_dir = TempDir::new("native_asset_test").expect("Failed to create temp dir");
+    let temp_dir = TempDir::new("contract_asset_test").expect("Failed to create temp dir");
     let mut storage = create_test_storage(&temp_dir);
 
     let asset = random_asset();
@@ -444,13 +444,13 @@ async fn test_owner_agents_duplicate_prevention() {
     // Add same agent multiple times
     for _ in 0..5 {
         storage
-            .add_native_asset_owner_agent(&asset, &owner, &agent)
+            .add_contract_asset_owner_agent(&asset, &owner, &agent)
             .await
             .expect("Should handle duplicate");
     }
 
     let agents = storage
-        .get_native_asset_owner_agents(&asset, &owner)
+        .get_contract_asset_owner_agents(&asset, &owner)
         .await
         .expect("Should get agent list");
     assert_eq!(agents.len(), 1, "Should have only 1 agent (no duplicates)");
@@ -465,38 +465,38 @@ async fn test_owner_agents_duplicate_prevention() {
 /// Test D.1: Add and get role members
 #[tokio::test]
 async fn test_role_members_add_and_get() {
-    let temp_dir = TempDir::new("native_asset_test").expect("Failed to create temp dir");
+    let temp_dir = TempDir::new("contract_asset_test").expect("Failed to create temp dir");
     let mut storage = create_test_storage(&temp_dir);
 
     let asset = random_asset();
-    let role: [u8; 32] = tos_common::native_asset::MINTER_ROLE;
+    let role: [u8; 32] = tos_common::contract_asset::MINTER_ROLE;
     let member1 = random_account();
     let member2 = random_account();
     let member3 = random_account();
 
     // Initially empty
     let members = storage
-        .get_native_asset_role_members(&asset, &role)
+        .get_contract_asset_role_members(&asset, &role)
         .await
         .expect("Should get empty member list");
     assert!(members.is_empty());
 
     // Add members
     storage
-        .add_native_asset_role_member(&asset, &role, &member1)
+        .add_contract_asset_role_member(&asset, &role, &member1)
         .await
         .expect("Should add member1");
     storage
-        .add_native_asset_role_member(&asset, &role, &member2)
+        .add_contract_asset_role_member(&asset, &role, &member2)
         .await
         .expect("Should add member2");
     storage
-        .add_native_asset_role_member(&asset, &role, &member3)
+        .add_contract_asset_role_member(&asset, &role, &member3)
         .await
         .expect("Should add member3");
 
     let members = storage
-        .get_native_asset_role_members(&asset, &role)
+        .get_contract_asset_role_members(&asset, &role)
         .await
         .expect("Should get member list");
     assert_eq!(members.len(), 3);
@@ -510,30 +510,30 @@ async fn test_role_members_add_and_get() {
 /// Test D.2: Get role member by index
 #[tokio::test]
 async fn test_role_members_get_by_index() {
-    let temp_dir = TempDir::new("native_asset_test").expect("Failed to create temp dir");
+    let temp_dir = TempDir::new("contract_asset_test").expect("Failed to create temp dir");
     let mut storage = create_test_storage(&temp_dir);
 
     let asset = random_asset();
-    let role: [u8; 32] = tos_common::native_asset::BURNER_ROLE;
+    let role: [u8; 32] = tos_common::contract_asset::BURNER_ROLE;
     let member1 = random_account();
     let member2 = random_account();
 
     storage
-        .add_native_asset_role_member(&asset, &role, &member1)
+        .add_contract_asset_role_member(&asset, &role, &member1)
         .await
         .expect("Should add member");
     storage
-        .add_native_asset_role_member(&asset, &role, &member2)
+        .add_contract_asset_role_member(&asset, &role, &member2)
         .await
         .expect("Should add member");
 
     // Get by valid indices
     let m0 = storage
-        .get_native_asset_role_member(&asset, &role, 0)
+        .get_contract_asset_role_member(&asset, &role, 0)
         .await
         .expect("Should get member at index 0");
     let m1 = storage
-        .get_native_asset_role_member(&asset, &role, 1)
+        .get_contract_asset_role_member(&asset, &role, 1)
         .await
         .expect("Should get member at index 1");
 
@@ -543,7 +543,7 @@ async fn test_role_members_get_by_index() {
 
     // Get by invalid index should fail
     let result = storage
-        .get_native_asset_role_member(&asset, &role, 999)
+        .get_contract_asset_role_member(&asset, &role, 999)
         .await;
     assert!(result.is_err(), "Should fail for invalid index");
 
@@ -553,30 +553,30 @@ async fn test_role_members_get_by_index() {
 /// Test D.3: Remove role members
 #[tokio::test]
 async fn test_role_members_remove() {
-    let temp_dir = TempDir::new("native_asset_test").expect("Failed to create temp dir");
+    let temp_dir = TempDir::new("contract_asset_test").expect("Failed to create temp dir");
     let mut storage = create_test_storage(&temp_dir);
 
     let asset = random_asset();
-    let role: [u8; 32] = tos_common::native_asset::PAUSER_ROLE;
+    let role: [u8; 32] = tos_common::contract_asset::PAUSER_ROLE;
     let member1 = random_account();
     let member2 = random_account();
 
     storage
-        .add_native_asset_role_member(&asset, &role, &member1)
+        .add_contract_asset_role_member(&asset, &role, &member1)
         .await
         .expect("Should add member");
     storage
-        .add_native_asset_role_member(&asset, &role, &member2)
+        .add_contract_asset_role_member(&asset, &role, &member2)
         .await
         .expect("Should add member");
 
     storage
-        .remove_native_asset_role_member(&asset, &role, &member1)
+        .remove_contract_asset_role_member(&asset, &role, &member1)
         .await
         .expect("Should remove member");
 
     let members = storage
-        .get_native_asset_role_members(&asset, &role)
+        .get_contract_asset_role_members(&asset, &role)
         .await
         .expect("Should get member list");
     assert_eq!(members.len(), 1);
@@ -589,23 +589,23 @@ async fn test_role_members_remove() {
 /// Test D.4: Role member duplicate prevention
 #[tokio::test]
 async fn test_role_members_duplicate_prevention() {
-    let temp_dir = TempDir::new("native_asset_test").expect("Failed to create temp dir");
+    let temp_dir = TempDir::new("contract_asset_test").expect("Failed to create temp dir");
     let mut storage = create_test_storage(&temp_dir);
 
     let asset = random_asset();
-    let role: [u8; 32] = tos_common::native_asset::FREEZER_ROLE;
+    let role: [u8; 32] = tos_common::contract_asset::FREEZER_ROLE;
     let member = random_account();
 
     // Add same member multiple times
     for _ in 0..3 {
         storage
-            .add_native_asset_role_member(&asset, &role, &member)
+            .add_contract_asset_role_member(&asset, &role, &member)
             .await
             .expect("Should handle duplicate");
     }
 
     let members = storage
-        .get_native_asset_role_members(&asset, &role)
+        .get_contract_asset_role_members(&asset, &role)
         .await
         .expect("Should get member list");
     assert_eq!(
@@ -624,7 +624,7 @@ async fn test_role_members_duplicate_prevention() {
 /// Test E.1: Set and get pending admin
 #[tokio::test]
 async fn test_pending_admin_set_and_get() {
-    let temp_dir = TempDir::new("native_asset_test").expect("Failed to create temp dir");
+    let temp_dir = TempDir::new("contract_asset_test").expect("Failed to create temp dir");
     let mut storage = create_test_storage(&temp_dir);
 
     let asset = random_asset();
@@ -632,19 +632,19 @@ async fn test_pending_admin_set_and_get() {
 
     // Initially none
     let pending = storage
-        .get_native_asset_pending_admin(&asset)
+        .get_contract_asset_pending_admin(&asset)
         .await
         .expect("Should get pending admin");
     assert!(pending.is_none(), "Should have no pending admin initially");
 
     // Set pending admin
     storage
-        .set_native_asset_pending_admin(&asset, Some(&new_admin))
+        .set_contract_asset_pending_admin(&asset, Some(&new_admin))
         .await
         .expect("Should set pending admin");
 
     let pending = storage
-        .get_native_asset_pending_admin(&asset)
+        .get_contract_asset_pending_admin(&asset)
         .await
         .expect("Should get pending admin");
     assert_eq!(pending, Some(new_admin), "Should have pending admin set");
@@ -655,7 +655,7 @@ async fn test_pending_admin_set_and_get() {
 /// Test E.2: Clear pending admin
 #[tokio::test]
 async fn test_pending_admin_clear() {
-    let temp_dir = TempDir::new("native_asset_test").expect("Failed to create temp dir");
+    let temp_dir = TempDir::new("contract_asset_test").expect("Failed to create temp dir");
     let mut storage = create_test_storage(&temp_dir);
 
     let asset = random_asset();
@@ -663,17 +663,17 @@ async fn test_pending_admin_clear() {
 
     // Set and then clear
     storage
-        .set_native_asset_pending_admin(&asset, Some(&new_admin))
+        .set_contract_asset_pending_admin(&asset, Some(&new_admin))
         .await
         .expect("Should set pending admin");
 
     storage
-        .set_native_asset_pending_admin(&asset, None)
+        .set_contract_asset_pending_admin(&asset, None)
         .await
         .expect("Should clear pending admin");
 
     let pending = storage
-        .get_native_asset_pending_admin(&asset)
+        .get_contract_asset_pending_admin(&asset)
         .await
         .expect("Should get pending admin");
     assert!(pending.is_none(), "Pending admin should be cleared");
@@ -684,7 +684,7 @@ async fn test_pending_admin_clear() {
 /// Test E.3: Pending admin per asset isolation
 #[tokio::test]
 async fn test_pending_admin_per_asset() {
-    let temp_dir = TempDir::new("native_asset_test").expect("Failed to create temp dir");
+    let temp_dir = TempDir::new("contract_asset_test").expect("Failed to create temp dir");
     let mut storage = create_test_storage(&temp_dir);
 
     let asset1 = random_asset();
@@ -694,20 +694,20 @@ async fn test_pending_admin_per_asset() {
 
     // Set different pending admins for different assets
     storage
-        .set_native_asset_pending_admin(&asset1, Some(&admin1))
+        .set_contract_asset_pending_admin(&asset1, Some(&admin1))
         .await
         .expect("Should set pending admin for asset1");
     storage
-        .set_native_asset_pending_admin(&asset2, Some(&admin2))
+        .set_contract_asset_pending_admin(&asset2, Some(&admin2))
         .await
         .expect("Should set pending admin for asset2");
 
     let pending1 = storage
-        .get_native_asset_pending_admin(&asset1)
+        .get_contract_asset_pending_admin(&asset1)
         .await
         .expect("Should get pending admin for asset1");
     let pending2 = storage
-        .get_native_asset_pending_admin(&asset2)
+        .get_contract_asset_pending_admin(&asset2)
         .await
         .expect("Should get pending admin for asset2");
 
@@ -724,14 +724,14 @@ async fn test_pending_admin_per_asset() {
 /// Test F.1: Full lock lifecycle with index
 #[tokio::test]
 async fn test_lock_lifecycle_with_index() {
-    let temp_dir = TempDir::new("native_asset_test").expect("Failed to create temp dir");
+    let temp_dir = TempDir::new("contract_asset_test").expect("Failed to create temp dir");
     let mut storage = create_test_storage(&temp_dir);
 
     let asset = random_asset();
     let account = random_account();
 
     // Create asset first
-    let data = NativeAssetData {
+    let data = ContractAssetData {
         name: "Test Token".to_string(),
         symbol: "TEST".to_string(),
         decimals: 18,
@@ -748,13 +748,13 @@ async fn test_lock_lifecycle_with_index() {
         created_at: 100,
     };
     storage
-        .set_native_asset(&asset, &data)
+        .set_contract_asset(&asset, &data)
         .await
         .expect("Should create asset");
 
     // Set initial balance
     storage
-        .set_native_asset_balance(&asset, &account, 10000)
+        .set_contract_asset_balance(&asset, &account, 10000)
         .await
         .expect("Should set balance");
 
@@ -769,18 +769,18 @@ async fn test_lock_lifecycle_with_index() {
             created_at: 100,
         };
         storage
-            .set_native_asset_lock(&asset, &account, &lock)
+            .set_contract_asset_lock(&asset, &account, &lock)
             .await
             .expect("Should create lock");
         storage
-            .add_native_asset_lock_id(&asset, &account, lock_id)
+            .add_contract_asset_lock_id(&asset, &account, lock_id)
             .await
             .expect("Should add to index");
     }
 
     // Verify all locks are in index
     let lock_ids = storage
-        .get_native_asset_lock_ids(&asset, &account)
+        .get_contract_asset_lock_ids(&asset, &account)
         .await
         .expect("Should get lock IDs");
     assert_eq!(lock_ids.len(), 5);
@@ -788,18 +788,18 @@ async fn test_lock_lifecycle_with_index() {
     // Unlock (remove) some locks
     for lock_id in [2, 4] {
         storage
-            .delete_native_asset_lock(&asset, &account, lock_id)
+            .delete_contract_asset_lock(&asset, &account, lock_id)
             .await
             .expect("Should delete lock");
         storage
-            .remove_native_asset_lock_id(&asset, &account, lock_id)
+            .remove_contract_asset_lock_id(&asset, &account, lock_id)
             .await
             .expect("Should remove from index");
     }
 
     // Verify remaining locks
     let lock_ids = storage
-        .get_native_asset_lock_ids(&asset, &account)
+        .get_contract_asset_lock_ids(&asset, &account)
         .await
         .expect("Should get lock IDs");
     assert_eq!(lock_ids.len(), 3);
@@ -815,7 +815,7 @@ async fn test_lock_lifecycle_with_index() {
 /// Test F.2: Full escrow lifecycle with user index
 #[tokio::test]
 async fn test_escrow_lifecycle_with_user_index() {
-    let temp_dir = TempDir::new("native_asset_test").expect("Failed to create temp dir");
+    let temp_dir = TempDir::new("contract_asset_test").expect("Failed to create temp dir");
     let mut storage = create_test_storage(&temp_dir);
 
     let asset = random_asset();
@@ -840,27 +840,27 @@ async fn test_escrow_lifecycle_with_user_index() {
     };
 
     storage
-        .set_native_asset_escrow(&asset, &escrow)
+        .set_contract_asset_escrow(&asset, &escrow)
         .await
         .expect("Should create escrow");
 
     // Add to both user indices
     storage
-        .add_native_asset_user_escrow(&asset, &sender, 1)
+        .add_contract_asset_user_escrow(&asset, &sender, 1)
         .await
         .expect("Should add to sender index");
     storage
-        .add_native_asset_user_escrow(&asset, &recipient, 1)
+        .add_contract_asset_user_escrow(&asset, &recipient, 1)
         .await
         .expect("Should add to recipient index");
 
     // Both users should see the escrow
     let sender_escrows = storage
-        .get_native_asset_user_escrows(&asset, &sender)
+        .get_contract_asset_user_escrows(&asset, &sender)
         .await
         .expect("Should get sender escrows");
     let recipient_escrows = storage
-        .get_native_asset_user_escrows(&asset, &recipient)
+        .get_contract_asset_user_escrows(&asset, &recipient)
         .await
         .expect("Should get recipient escrows");
 
@@ -869,20 +869,20 @@ async fn test_escrow_lifecycle_with_user_index() {
 
     // Complete escrow - remove from indices
     storage
-        .remove_native_asset_user_escrow(&asset, &sender, 1)
+        .remove_contract_asset_user_escrow(&asset, &sender, 1)
         .await
         .expect("Should remove from sender index");
     storage
-        .remove_native_asset_user_escrow(&asset, &recipient, 1)
+        .remove_contract_asset_user_escrow(&asset, &recipient, 1)
         .await
         .expect("Should remove from recipient index");
 
     let sender_escrows = storage
-        .get_native_asset_user_escrows(&asset, &sender)
+        .get_contract_asset_user_escrows(&asset, &sender)
         .await
         .expect("Should get sender escrows");
     let recipient_escrows = storage
-        .get_native_asset_user_escrows(&asset, &recipient)
+        .get_contract_asset_user_escrows(&asset, &recipient)
         .await
         .expect("Should get recipient escrows");
 
@@ -895,72 +895,72 @@ async fn test_escrow_lifecycle_with_user_index() {
 /// Test F.3: Role grant/revoke with member index
 #[tokio::test]
 async fn test_role_lifecycle_with_member_index() {
-    let temp_dir = TempDir::new("native_asset_test").expect("Failed to create temp dir");
+    let temp_dir = TempDir::new("contract_asset_test").expect("Failed to create temp dir");
     let mut storage = create_test_storage(&temp_dir);
 
     let asset = random_asset();
-    let role = tos_common::native_asset::MINTER_ROLE;
+    let role = tos_common::contract_asset::MINTER_ROLE;
     let account1 = random_account();
     let account2 = random_account();
 
     // Grant roles with index update
     storage
-        .grant_native_asset_role(&asset, &role, &account1, 100)
+        .grant_contract_asset_role(&asset, &role, &account1, 100)
         .await
         .expect("Should grant role");
     storage
-        .add_native_asset_role_member(&asset, &role, &account1)
+        .add_contract_asset_role_member(&asset, &role, &account1)
         .await
         .expect("Should add to member index");
 
     storage
-        .grant_native_asset_role(&asset, &role, &account2, 100)
+        .grant_contract_asset_role(&asset, &role, &account2, 100)
         .await
         .expect("Should grant role");
     storage
-        .add_native_asset_role_member(&asset, &role, &account2)
+        .add_contract_asset_role_member(&asset, &role, &account2)
         .await
         .expect("Should add to member index");
 
     // Verify both have role
     assert!(storage
-        .has_native_asset_role(&asset, &role, &account1)
+        .has_contract_asset_role(&asset, &role, &account1)
         .await
         .expect("Should check role"));
     assert!(storage
-        .has_native_asset_role(&asset, &role, &account2)
+        .has_contract_asset_role(&asset, &role, &account2)
         .await
         .expect("Should check role"));
 
     // Verify member index
     let members = storage
-        .get_native_asset_role_members(&asset, &role)
+        .get_contract_asset_role_members(&asset, &role)
         .await
         .expect("Should get members");
     assert_eq!(members.len(), 2);
 
     // Revoke one role
     storage
-        .revoke_native_asset_role(&asset, &role, &account1)
+        .revoke_contract_asset_role(&asset, &role, &account1)
         .await
         .expect("Should revoke role");
     storage
-        .remove_native_asset_role_member(&asset, &role, &account1)
+        .remove_contract_asset_role_member(&asset, &role, &account1)
         .await
         .expect("Should remove from member index");
 
     // Verify
     assert!(!storage
-        .has_native_asset_role(&asset, &role, &account1)
+        .has_contract_asset_role(&asset, &role, &account1)
         .await
         .expect("Should check role"));
     assert!(storage
-        .has_native_asset_role(&asset, &role, &account2)
+        .has_contract_asset_role(&asset, &role, &account2)
         .await
         .expect("Should check role"));
 
     let members = storage
-        .get_native_asset_role_members(&asset, &role)
+        .get_contract_asset_role_members(&asset, &role)
         .await
         .expect("Should get members");
     assert_eq!(members.len(), 1);
@@ -976,7 +976,7 @@ async fn test_role_lifecycle_with_member_index() {
 /// Test G.1: Set and get balance checkpoint count
 #[tokio::test]
 async fn test_balance_checkpoint_count() {
-    let temp_dir = TempDir::new("native_asset_test").expect("Failed to create temp dir");
+    let temp_dir = TempDir::new("contract_asset_test").expect("Failed to create temp dir");
     let mut storage = create_test_storage(&temp_dir);
 
     let asset = random_asset();
@@ -984,19 +984,19 @@ async fn test_balance_checkpoint_count() {
 
     // Initially zero
     let count = storage
-        .get_native_asset_balance_checkpoint_count(&asset, &account)
+        .get_contract_asset_balance_checkpoint_count(&asset, &account)
         .await
         .expect("Should get checkpoint count");
     assert_eq!(count, 0, "Count should be 0 initially");
 
     // Set count
     storage
-        .set_native_asset_balance_checkpoint_count(&asset, &account, 5)
+        .set_contract_asset_balance_checkpoint_count(&asset, &account, 5)
         .await
         .expect("Should set checkpoint count");
 
     let count = storage
-        .get_native_asset_balance_checkpoint_count(&asset, &account)
+        .get_contract_asset_balance_checkpoint_count(&asset, &account)
         .await
         .expect("Should get checkpoint count");
     assert_eq!(count, 5, "Count should be 5");
@@ -1007,7 +1007,7 @@ async fn test_balance_checkpoint_count() {
 /// Test G.2: Set and get balance checkpoint
 #[tokio::test]
 async fn test_balance_checkpoint_set_and_get() {
-    let temp_dir = TempDir::new("native_asset_test").expect("Failed to create temp dir");
+    let temp_dir = TempDir::new("contract_asset_test").expect("Failed to create temp dir");
     let mut storage = create_test_storage(&temp_dir);
 
     let asset = random_asset();
@@ -1020,13 +1020,13 @@ async fn test_balance_checkpoint_set_and_get() {
 
     // Set checkpoint at index 0
     storage
-        .set_native_asset_balance_checkpoint(&asset, &account, 0, &checkpoint)
+        .set_contract_asset_balance_checkpoint(&asset, &account, 0, &checkpoint)
         .await
         .expect("Should set checkpoint");
 
     // Get checkpoint at index 0
     let retrieved = storage
-        .get_native_asset_balance_checkpoint(&asset, &account, 0)
+        .get_contract_asset_balance_checkpoint(&asset, &account, 0)
         .await
         .expect("Should get checkpoint");
 
@@ -1039,7 +1039,7 @@ async fn test_balance_checkpoint_set_and_get() {
 /// Test G.3: Multiple balance checkpoints (binary search simulation)
 #[tokio::test]
 async fn test_balance_checkpoint_multiple() {
-    let temp_dir = TempDir::new("native_asset_test").expect("Failed to create temp dir");
+    let temp_dir = TempDir::new("contract_asset_test").expect("Failed to create temp dir");
     let mut storage = create_test_storage(&temp_dir);
 
     let asset = random_asset();
@@ -1068,20 +1068,20 @@ async fn test_balance_checkpoint_multiple() {
     // Store all checkpoints
     for (i, checkpoint) in checkpoints.iter().enumerate() {
         storage
-            .set_native_asset_balance_checkpoint(&asset, &account, i as u32, checkpoint)
+            .set_contract_asset_balance_checkpoint(&asset, &account, i as u32, checkpoint)
             .await
             .expect("Should set checkpoint");
     }
 
     // Update count
     storage
-        .set_native_asset_balance_checkpoint_count(&asset, &account, checkpoints.len() as u32)
+        .set_contract_asset_balance_checkpoint_count(&asset, &account, checkpoints.len() as u32)
         .await
         .expect("Should set count");
 
     // Verify count
     let count = storage
-        .get_native_asset_balance_checkpoint_count(&asset, &account)
+        .get_contract_asset_balance_checkpoint_count(&asset, &account)
         .await
         .expect("Should get count");
     assert_eq!(count, 4);
@@ -1089,7 +1089,7 @@ async fn test_balance_checkpoint_multiple() {
     // Verify each checkpoint
     for (i, expected) in checkpoints.iter().enumerate() {
         let retrieved = storage
-            .get_native_asset_balance_checkpoint(&asset, &account, i as u32)
+            .get_contract_asset_balance_checkpoint(&asset, &account, i as u32)
             .await
             .expect("Should get checkpoint");
         assert_eq!(retrieved.from_block, expected.from_block);
@@ -1102,7 +1102,7 @@ async fn test_balance_checkpoint_multiple() {
 /// Test G.4: Balance checkpoints per asset/account isolation
 #[tokio::test]
 async fn test_balance_checkpoint_isolation() {
-    let temp_dir = TempDir::new("native_asset_test").expect("Failed to create temp dir");
+    let temp_dir = TempDir::new("contract_asset_test").expect("Failed to create temp dir");
     let mut storage = create_test_storage(&temp_dir);
 
     let asset1 = random_asset();
@@ -1116,11 +1116,11 @@ async fn test_balance_checkpoint_isolation() {
         balance: 1000,
     };
     storage
-        .set_native_asset_balance_checkpoint(&asset1, &account1, 0, &cp1)
+        .set_contract_asset_balance_checkpoint(&asset1, &account1, 0, &cp1)
         .await
         .expect("Should set checkpoint");
     storage
-        .set_native_asset_balance_checkpoint_count(&asset1, &account1, 1)
+        .set_contract_asset_balance_checkpoint_count(&asset1, &account1, 1)
         .await
         .expect("Should set count");
 
@@ -1130,27 +1130,27 @@ async fn test_balance_checkpoint_isolation() {
         balance: 2000,
     };
     storage
-        .set_native_asset_balance_checkpoint(&asset2, &account2, 0, &cp2)
+        .set_contract_asset_balance_checkpoint(&asset2, &account2, 0, &cp2)
         .await
         .expect("Should set checkpoint");
     storage
-        .set_native_asset_balance_checkpoint_count(&asset2, &account2, 1)
+        .set_contract_asset_balance_checkpoint_count(&asset2, &account2, 1)
         .await
         .expect("Should set count");
 
     // Verify isolation - asset1/account1 should not see asset2/account2's checkpoints
     let count1 = storage
-        .get_native_asset_balance_checkpoint_count(&asset1, &account1)
+        .get_contract_asset_balance_checkpoint_count(&asset1, &account1)
         .await
         .expect("Should get count");
     let count2 = storage
-        .get_native_asset_balance_checkpoint_count(&asset2, &account2)
+        .get_contract_asset_balance_checkpoint_count(&asset2, &account2)
         .await
         .expect("Should get count");
 
     // asset1/account2 should be zero
     let cross_count = storage
-        .get_native_asset_balance_checkpoint_count(&asset1, &account2)
+        .get_contract_asset_balance_checkpoint_count(&asset1, &account2)
         .await
         .expect("Should get count");
 
@@ -1168,7 +1168,7 @@ async fn test_balance_checkpoint_isolation() {
 /// Test H.1: Set and get delegation checkpoint count
 #[tokio::test]
 async fn test_delegation_checkpoint_count() {
-    let temp_dir = TempDir::new("native_asset_test").expect("Failed to create temp dir");
+    let temp_dir = TempDir::new("contract_asset_test").expect("Failed to create temp dir");
     let mut storage = create_test_storage(&temp_dir);
 
     let asset = random_asset();
@@ -1176,19 +1176,19 @@ async fn test_delegation_checkpoint_count() {
 
     // Initially zero
     let count = storage
-        .get_native_asset_delegation_checkpoint_count(&asset, &account)
+        .get_contract_asset_delegation_checkpoint_count(&asset, &account)
         .await
         .expect("Should get checkpoint count");
     assert_eq!(count, 0, "Count should be 0 initially");
 
     // Set count
     storage
-        .set_native_asset_delegation_checkpoint_count(&asset, &account, 3)
+        .set_contract_asset_delegation_checkpoint_count(&asset, &account, 3)
         .await
         .expect("Should set checkpoint count");
 
     let count = storage
-        .get_native_asset_delegation_checkpoint_count(&asset, &account)
+        .get_contract_asset_delegation_checkpoint_count(&asset, &account)
         .await
         .expect("Should get checkpoint count");
     assert_eq!(count, 3, "Count should be 3");
@@ -1199,7 +1199,7 @@ async fn test_delegation_checkpoint_count() {
 /// Test H.2: Set and get delegation checkpoint
 #[tokio::test]
 async fn test_delegation_checkpoint_set_and_get() {
-    let temp_dir = TempDir::new("native_asset_test").expect("Failed to create temp dir");
+    let temp_dir = TempDir::new("contract_asset_test").expect("Failed to create temp dir");
     let mut storage = create_test_storage(&temp_dir);
 
     let asset = random_asset();
@@ -1213,13 +1213,13 @@ async fn test_delegation_checkpoint_set_and_get() {
 
     // Set checkpoint at index 0
     storage
-        .set_native_asset_delegation_checkpoint(&asset, &account, 0, &checkpoint)
+        .set_contract_asset_delegation_checkpoint(&asset, &account, 0, &checkpoint)
         .await
         .expect("Should set checkpoint");
 
     // Get checkpoint at index 0
     let retrieved = storage
-        .get_native_asset_delegation_checkpoint(&asset, &account, 0)
+        .get_contract_asset_delegation_checkpoint(&asset, &account, 0)
         .await
         .expect("Should get checkpoint");
 
@@ -1232,7 +1232,7 @@ async fn test_delegation_checkpoint_set_and_get() {
 /// Test H.3: Multiple delegation checkpoints (delegation history)
 #[tokio::test]
 async fn test_delegation_checkpoint_multiple() {
-    let temp_dir = TempDir::new("native_asset_test").expect("Failed to create temp dir");
+    let temp_dir = TempDir::new("contract_asset_test").expect("Failed to create temp dir");
     let mut storage = create_test_storage(&temp_dir);
 
     let asset = random_asset();
@@ -1264,20 +1264,20 @@ async fn test_delegation_checkpoint_multiple() {
     // Store all checkpoints
     for (i, checkpoint) in checkpoints.iter().enumerate() {
         storage
-            .set_native_asset_delegation_checkpoint(&asset, &account, i as u32, checkpoint)
+            .set_contract_asset_delegation_checkpoint(&asset, &account, i as u32, checkpoint)
             .await
             .expect("Should set checkpoint");
     }
 
     // Update count
     storage
-        .set_native_asset_delegation_checkpoint_count(&asset, &account, checkpoints.len() as u32)
+        .set_contract_asset_delegation_checkpoint_count(&asset, &account, checkpoints.len() as u32)
         .await
         .expect("Should set count");
 
     // Verify count
     let count = storage
-        .get_native_asset_delegation_checkpoint_count(&asset, &account)
+        .get_contract_asset_delegation_checkpoint_count(&asset, &account)
         .await
         .expect("Should get count");
     assert_eq!(count, 4);
@@ -1285,7 +1285,7 @@ async fn test_delegation_checkpoint_multiple() {
     // Verify each checkpoint
     for (i, expected) in checkpoints.iter().enumerate() {
         let retrieved = storage
-            .get_native_asset_delegation_checkpoint(&asset, &account, i as u32)
+            .get_contract_asset_delegation_checkpoint(&asset, &account, i as u32)
             .await
             .expect("Should get checkpoint");
         assert_eq!(retrieved.from_block, expected.from_block);
@@ -1298,7 +1298,7 @@ async fn test_delegation_checkpoint_multiple() {
 /// Test H.4: Delegation checkpoints per asset/account isolation
 #[tokio::test]
 async fn test_delegation_checkpoint_isolation() {
-    let temp_dir = TempDir::new("native_asset_test").expect("Failed to create temp dir");
+    let temp_dir = TempDir::new("contract_asset_test").expect("Failed to create temp dir");
     let mut storage = create_test_storage(&temp_dir);
 
     let asset1 = random_asset();
@@ -1314,11 +1314,11 @@ async fn test_delegation_checkpoint_isolation() {
         delegatee: delegatee1,
     };
     storage
-        .set_native_asset_delegation_checkpoint(&asset1, &account1, 0, &cp1)
+        .set_contract_asset_delegation_checkpoint(&asset1, &account1, 0, &cp1)
         .await
         .expect("Should set checkpoint");
     storage
-        .set_native_asset_delegation_checkpoint_count(&asset1, &account1, 1)
+        .set_contract_asset_delegation_checkpoint_count(&asset1, &account1, 1)
         .await
         .expect("Should set count");
 
@@ -1328,27 +1328,27 @@ async fn test_delegation_checkpoint_isolation() {
         delegatee: delegatee2,
     };
     storage
-        .set_native_asset_delegation_checkpoint(&asset2, &account2, 0, &cp2)
+        .set_contract_asset_delegation_checkpoint(&asset2, &account2, 0, &cp2)
         .await
         .expect("Should set checkpoint");
     storage
-        .set_native_asset_delegation_checkpoint_count(&asset2, &account2, 1)
+        .set_contract_asset_delegation_checkpoint_count(&asset2, &account2, 1)
         .await
         .expect("Should set count");
 
     // Verify isolation
     let count1 = storage
-        .get_native_asset_delegation_checkpoint_count(&asset1, &account1)
+        .get_contract_asset_delegation_checkpoint_count(&asset1, &account1)
         .await
         .expect("Should get count");
     let count2 = storage
-        .get_native_asset_delegation_checkpoint_count(&asset2, &account2)
+        .get_contract_asset_delegation_checkpoint_count(&asset2, &account2)
         .await
         .expect("Should get count");
 
     // asset1/account2 should be zero
     let cross_count = storage
-        .get_native_asset_delegation_checkpoint_count(&asset1, &account2)
+        .get_contract_asset_delegation_checkpoint_count(&asset1, &account2)
         .await
         .expect("Should get count");
 
@@ -1364,9 +1364,9 @@ async fn test_delegation_checkpoint_isolation() {
 // ============================================================================
 
 #[test]
-fn test_native_asset_rocksdb_test_summary() {
+fn test_contract_asset_rocksdb_test_summary() {
     println!("\n========================================");
-    println!("RocksStorage Native Asset Integration Tests");
+    println!("RocksStorage Contract Asset Integration Tests");
     println!("========================================");
     println!("\nTests implemented for TAKO syscall integration:");
     println!();
@@ -1414,6 +1414,6 @@ fn test_native_asset_rocksdb_test_summary() {
     println!("   H.3 test_delegation_checkpoint_multiple");
     println!("   H.4 test_delegation_checkpoint_isolation");
     println!();
-    println!("These tests verify the storage layer for native asset syscalls.");
+    println!("These tests verify the storage layer for contract asset syscalls.");
     println!("========================================\n");
 }

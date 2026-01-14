@@ -1,3 +1,4 @@
+mod asset_ext;
 mod balance;
 mod data;
 mod supply;
@@ -6,6 +7,7 @@ use crate::core::error::BlockchainError;
 use async_trait::async_trait;
 use tos_common::block::TopoHeight;
 
+pub use asset_ext::*;
 pub use balance::*;
 pub use data::*;
 pub use supply::*;

@@ -22,6 +22,7 @@ use tos_common::{
         AssetChanges, ChainState as ContractChainState, ContractCache, ContractEventTracker,
         ContractOutput, ScheduledExecution,
     },
+    contract_asset::TokenValue,
     crypto::{
         elgamal::{Ciphertext, CompressedPublicKey},
         Hash, PublicKey,
@@ -1486,6 +1487,30 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
                                 VersionedContractBalance::new(balance, state.get_topoheight()),
                             )
                             .await?;
+                    }
+                }
+            }
+
+            for (key, (state, value)) in cache.tokens {
+                if state.should_be_stored() {
+                    match value {
+                        TokenValue::Deleted => {
+                            self.inner
+                                .storage
+                                .delete_contract_asset_ext(&contract, &key, self.inner.topoheight)
+                                .await?;
+                        }
+                        value => {
+                            self.inner
+                                .storage
+                                .set_last_contract_asset_ext_to(
+                                    &contract,
+                                    &key,
+                                    self.inner.topoheight,
+                                    &value,
+                                )
+                                .await?;
+                        }
                     }
                 }
             }

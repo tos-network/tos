@@ -1,6 +1,6 @@
-//! Native Asset Types
+//! Contract Asset Types
 //!
-//! Core data structures for native assets.
+//! Core data structures for contract assets.
 
 use serde::{Deserialize, Serialize};
 
@@ -9,9 +9,9 @@ use crate::serializer::{Reader, ReaderError, Serializer, Writer};
 
 // ===== Extended Asset Data =====
 
-/// Extended native asset data with additional features
+/// Extended contract asset data with additional features
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct NativeAssetData {
+pub struct ContractAssetData {
     /// Asset name
     pub name: String,
     /// Asset symbol/ticker
@@ -44,7 +44,9 @@ pub struct NativeAssetData {
     pub metadata_uri: Option<String>,
 }
 
-impl Default for NativeAssetData {
+const ADMIN_FIELD_TAG: &[u8; 4] = b"CADM";
+
+impl Default for ContractAssetData {
     fn default() -> Self {
         Self {
             name: String::new(),
@@ -65,7 +67,7 @@ impl Default for NativeAssetData {
     }
 }
 
-impl Serializer for NativeAssetData {
+impl Serializer for ContractAssetData {
     fn write(&self, writer: &mut Writer) {
         self.name.write(writer);
         self.symbol.write(writer);
@@ -78,6 +80,9 @@ impl Serializer for NativeAssetData {
         self.freezable.write(writer);
         self.governance.write(writer);
         writer.write_bytes(&self.creator);
+        let payload_len = 32 + 8 + self.metadata_uri.size();
+        writer.write_bytes(ADMIN_FIELD_TAG);
+        writer.write_u32(&(payload_len as u32));
         writer.write_bytes(&self.admin);
         self.created_at.write(writer);
         self.metadata_uri.write(writer);
@@ -96,16 +101,24 @@ impl Serializer for NativeAssetData {
         let governance = reader.read()?;
         let creator = reader.read_bytes_32()?;
 
-        // Backward compatibility: admin field may not exist in old data
-        // If no more data, default admin to creator (migration path)
-        let admin = if reader.size() > 0 {
-            reader.read_bytes_32()?
-        } else {
-            creator
-        };
+        let remaining = reader.size();
+        let tag = reader.read_bytes_ref(ADMIN_FIELD_TAG.len())?;
+        if tag != ADMIN_FIELD_TAG {
+            return Err(ReaderError::InvalidValue);
+        }
+        let payload_len = reader.read_u32()? as usize;
+        let min_payload_len = 32 + 8 + 1;
+        let payload_total = payload_len + ADMIN_FIELD_TAG.len() + 4;
+        if payload_len < min_payload_len || payload_total != remaining {
+            return Err(ReaderError::InvalidSize);
+        }
+        let admin = reader.read_bytes_32()?;
 
         let created_at = reader.read()?;
         let metadata_uri = reader.read()?;
+        if reader.size() != 0 {
+            return Err(ReaderError::InvalidSize);
+        }
 
         Ok(Self {
             name,
@@ -133,6 +146,8 @@ impl Serializer for NativeAssetData {
             + self.max_supply.size()
             + 5 // bool fields
             + 32 // creator
+            + ADMIN_FIELD_TAG.len() // admin tag
+            + 4 // payload length
             + 32 // admin
             + 8 // created_at
             + self.metadata_uri.size()
@@ -398,10 +413,19 @@ impl Serializer for ReleaseCondition {
                 required,
             } => {
                 1u8.write(writer);
-                (approvers.len() as u8).write(writer);
-                for approver in approvers {
+                let count = approvers.len().min(u8::MAX as usize);
+                if approvers.len() > u8::MAX as usize {
+                    log::warn!(
+                        "MultiApproval approvers truncated from {} to {} entries",
+                        approvers.len(),
+                        count
+                    );
+                }
+                (count as u8).write(writer);
+                for approver in approvers.iter().take(count) {
                     writer.write_bytes(approver);
                 }
+                let required = (*required).min(count as u8);
                 required.write(writer);
             }
             Self::HashLock { hash } => {
@@ -424,6 +448,11 @@ impl Serializer for ReleaseCondition {
                     approvers.push(reader.read_bytes_32()?);
                 }
                 let required = reader.read()?;
+                if (count == 0 && required != 0)
+                    || (count > 0 && (required == 0 || required > count))
+                {
+                    return Err(ReaderError::InvalidValue);
+                }
                 Ok(Self::MultiApproval {
                     approvers,
                     required,
@@ -439,7 +468,9 @@ impl Serializer for ReleaseCondition {
     fn size(&self) -> usize {
         match self {
             Self::TimeRelease { .. } => 1 + 8,
-            Self::MultiApproval { approvers, .. } => 1 + 1 + (approvers.len() * 32) + 1,
+            Self::MultiApproval { approvers, .. } => {
+                1 + 1 + (approvers.len().min(u8::MAX as usize) * 32) + 1
+            }
             Self::HashLock { .. } => 1 + 32,
         }
     }
@@ -481,8 +512,16 @@ impl Serializer for Escrow {
         self.amount.write(writer);
         self.condition.write(writer);
         self.status.write(writer);
-        (self.approvals.len() as u8).write(writer);
-        for approval in &self.approvals {
+        let count = self.approvals.len().min(u8::MAX as usize);
+        if self.approvals.len() > u8::MAX as usize {
+            log::warn!(
+                "Escrow approvals truncated from {} to {} entries",
+                self.approvals.len(),
+                count
+            );
+        }
+        (count as u8).write(writer);
+        for approval in self.approvals.iter().take(count) {
             writer.write_bytes(approval);
         }
         self.expires_at.write(writer);
@@ -530,7 +569,7 @@ impl Serializer for Escrow {
             + 8 // amount
             + self.condition.size()
             + self.status.size()
-            + 1 + (self.approvals.len() * 32)
+            + 1 + (self.approvals.len().min(u8::MAX as usize) * 32)
             + self.expires_at.size()
             + 8 // created_at
             + self.metadata.size()
@@ -654,8 +693,16 @@ impl Serializer for AgentAuthorization {
         self.asset.write(writer);
         self.spending_limit.write(writer);
         self.can_delegate.write(writer);
-        (self.allowed_recipients.len() as u8).write(writer);
-        for recipient in &self.allowed_recipients {
+        let count = self.allowed_recipients.len().min(u8::MAX as usize);
+        if self.allowed_recipients.len() > u8::MAX as usize {
+            log::warn!(
+                "AgentAuthorization recipients truncated from {} to {} entries",
+                self.allowed_recipients.len(),
+                count
+            );
+        }
+        (count as u8).write(writer);
+        for recipient in self.allowed_recipients.iter().take(count) {
             writer.write_bytes(recipient);
         }
         self.expires_at.write(writer);
@@ -694,7 +741,7 @@ impl Serializer for AgentAuthorization {
             + self.asset.size()
             + self.spending_limit.size()
             + 1 // can_delegate
-            + 1 + (self.allowed_recipients.len() * 32)
+            + 1 + (self.allowed_recipients.len().min(u8::MAX as usize) * 32)
             + 8 // expires_at
             + 8 // created_at
     }
@@ -923,13 +970,16 @@ pub enum TimelockStatus {
     Done = 3,
 }
 
-impl From<u8> for TimelockStatus {
-    fn from(value: u8) -> Self {
+impl TryFrom<u8> for TimelockStatus {
+    type Error = ReaderError;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
-            1 => TimelockStatus::Pending,
-            2 => TimelockStatus::Ready,
-            3 => TimelockStatus::Done,
-            _ => TimelockStatus::None,
+            0 => Ok(TimelockStatus::None),
+            1 => Ok(TimelockStatus::Pending),
+            2 => Ok(TimelockStatus::Ready),
+            3 => Ok(TimelockStatus::Done),
+            _ => Err(ReaderError::InvalidValue),
         }
     }
 }
@@ -941,7 +991,7 @@ impl Serializer for TimelockStatus {
 
     fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
         let value: u8 = reader.read()?;
-        Ok(Self::from(value))
+        TimelockStatus::try_from(value)
     }
 
     fn size(&self) -> usize {
