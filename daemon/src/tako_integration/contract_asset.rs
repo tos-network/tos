@@ -1330,6 +1330,14 @@ impl<'a, P: ContractAssetProvider + ?Sized> TakoContractAssetProvider
             .checked_add(1)
             .ok_or_else(|| Self::invalid_data_error("Delegation checkpoint count overflow"))?;
 
+        // Ensure vote power is initialized to balance for self-delegation cases
+        if old_delegatee == *delegator && delegator_balance > 0 {
+            let current_votes = self.get_vote_power(&hash, delegator)?;
+            if current_votes < delegator_balance {
+                self.set_vote_power(&hash, delegator, delegator_balance)?;
+            }
+        }
+
         // Phase 2: Update vote power FIRST (if this fails, no state modified)
         self.move_vote_power(&hash, &old_delegatee, &new_delegatee, delegator_balance)?;
 
