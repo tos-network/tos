@@ -14,7 +14,7 @@ use tos_common::{
         AgentAuthorization, Allowance, BalanceCheckpoint, ContractAssetData, Delegation,
         DelegationCheckpoint, Escrow, EscrowStatus, FreezeState, PauseState, ReleaseCondition,
         RoleId, SpendingLimit, SpendingPeriod, SupplyCheckpoint, TimelockOperation, TimelockStatus,
-        TokenLock,
+        TokenLock, MAX_DECIMALS, MAX_METADATA_URI_LENGTH, MAX_NAME_LENGTH, MAX_SYMBOL_LENGTH,
     },
     crypto::Hash,
     serializer::Serializer,
@@ -711,6 +711,19 @@ impl<'a, P: ContractAssetProvider + ?Sized> TakoContractAssetProvider
         metadata_uri: &[u8],
         _block_height: u64,
     ) -> Result<[u8; 32], EbpfError> {
+        if name.len() > MAX_NAME_LENGTH {
+            return Err(Self::invalid_data_error("Name too long"));
+        }
+        if symbol.len() > MAX_SYMBOL_LENGTH {
+            return Err(Self::invalid_data_error("Symbol too long"));
+        }
+        if decimals > MAX_DECIMALS {
+            return Err(Self::invalid_data_error("Invalid decimals"));
+        }
+        if !metadata_uri.is_empty() && metadata_uri.len() > MAX_METADATA_URI_LENGTH {
+            return Err(Self::invalid_data_error("Metadata URI too long"));
+        }
+
         // Generate asset ID from creator and name
         let mut hasher_input = Vec::with_capacity(32 + name.len() + 8);
         hasher_input.extend_from_slice(creator);
@@ -720,11 +733,12 @@ impl<'a, P: ContractAssetProvider + ?Sized> TakoContractAssetProvider
         let asset_id = tos_common::crypto::hash(&hasher_input);
 
         // Check if asset already exists to prevent overwriting
-        if try_block_on(self.provider.get_contract_asset(&asset_id))
+        match try_block_on(self.provider.get_contract_asset(&asset_id))
             .map_err(Self::convert_error)?
-            .is_ok()
         {
-            return Err(Self::invalid_data_error("Asset already exists"));
+            Ok(_) => return Err(Self::invalid_data_error("Asset already exists")),
+            Err(crate::core::error::BlockchainError::AssetNotFound(_)) => {}
+            Err(err) => return Err(Self::convert_error(err)),
         }
 
         // Create asset data
@@ -2685,6 +2699,9 @@ impl<'a, P: ContractAssetProvider + ?Sized> TakoContractAssetProvider
         _caller: &[u8; 32],
         _block_height: u64,
     ) -> Result<(), EbpfError> {
+        if name.len() > MAX_NAME_LENGTH {
+            return Err(Self::invalid_data_error("Name too long"));
+        }
         let hash = Self::bytes_to_hash(asset);
 
         // NOTE: RBAC validation is done at syscall level in TAKO
@@ -2705,6 +2722,9 @@ impl<'a, P: ContractAssetProvider + ?Sized> TakoContractAssetProvider
         _caller: &[u8; 32],
         _block_height: u64,
     ) -> Result<(), EbpfError> {
+        if symbol.len() > MAX_SYMBOL_LENGTH {
+            return Err(Self::invalid_data_error("Symbol too long"));
+        }
         let hash = Self::bytes_to_hash(asset);
 
         // NOTE: RBAC validation is done at syscall level in TAKO
@@ -2730,6 +2750,9 @@ impl<'a, P: ContractAssetProvider + ?Sized> TakoContractAssetProvider
         // NOTE: RBAC validation is done at syscall level in TAKO
         // The caller and block_height params are passed for logging/audit purposes
 
+        if !uri.is_empty() && uri.len() > MAX_METADATA_URI_LENGTH {
+            return Err(Self::invalid_data_error("Metadata URI too long"));
+        }
         let mut data = self.get_asset_data(asset)?;
         let uri_str = if uri.is_empty() {
             None
@@ -3857,6 +3880,15 @@ impl<'a, P: ContractAssetProvider + ?Sized> TakoContractAssetProvider
         let mut admin_delay = try_block_on(self.provider.get_contract_asset_admin_delay(&hash))
             .map_err(Self::convert_error)?
             .map_err(Self::convert_error)?;
+
+        if let (Some(pending), Some(effective_at)) = (
+            admin_delay.pending_delay,
+            admin_delay.pending_delay_effective_at,
+        ) {
+            if self.block_height >= effective_at {
+                admin_delay.delay = pending;
+            }
+        }
 
         // Clear pending delay
         admin_delay.pending_delay = None;
