@@ -1550,6 +1550,7 @@ impl ContractAssetProvider for RocksStorage {
         let mut delegators: Vec<[u8; 32]> = self
             .load_optional_from_disk(Column::ContractAssets, &key)?
             .unwrap_or_default();
+        delegators.sort_unstable();
 
         // Use binary search for O(log n) lookup instead of O(n) contains()
         // Maintains sorted order for deterministic iteration
@@ -1584,6 +1585,7 @@ impl ContractAssetProvider for RocksStorage {
         let mut delegators: Vec<[u8; 32]> = self
             .load_optional_from_disk(Column::ContractAssets, &key)?
             .unwrap_or_default();
+        delegators.sort_unstable();
 
         // Use binary search for O(log n) lookup instead of O(n) position()
         if let Ok(index) = delegators.binary_search(delegator) {
