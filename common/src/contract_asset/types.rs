@@ -44,7 +44,7 @@ pub struct ContractAssetData {
     pub metadata_uri: Option<String>,
 }
 
-const ADMIN_FIELD_TAG: u8 = 0xFF;
+const ADMIN_FIELD_TAG: &[u8; 4] = b"CADM";
 
 impl Default for ContractAssetData {
     fn default() -> Self {
@@ -80,7 +80,7 @@ impl Serializer for ContractAssetData {
         self.freezable.write(writer);
         self.governance.write(writer);
         writer.write_bytes(&self.creator);
-        writer.write_u8(ADMIN_FIELD_TAG);
+        writer.write_bytes(ADMIN_FIELD_TAG);
         writer.write_bytes(&self.admin);
         self.created_at.write(writer);
         self.metadata_uri.write(writer);
@@ -99,9 +99,17 @@ impl Serializer for ContractAssetData {
         let governance = reader.read()?;
         let creator = reader.read_bytes_32()?;
 
-        // Backward compatibility: new layouts write a tag byte before admin.
-        let admin = if reader.size() > 0 && reader.bytes()[reader.total_read()] == ADMIN_FIELD_TAG {
-            reader.read_u8()?;
+        // Backward compatibility:
+        // - New layout writes a tag before admin.
+        // - Old layout writes admin without a tag.
+        let remaining = reader.size();
+        let has_tag = remaining >= ADMIN_FIELD_TAG.len()
+            && reader.bytes()[reader.total_read()..reader.total_read() + ADMIN_FIELD_TAG.len()]
+                == ADMIN_FIELD_TAG[..];
+        let admin = if has_tag {
+            reader.read_bytes_ref(ADMIN_FIELD_TAG.len())?;
+            reader.read_bytes_32()?
+        } else if remaining > 32 + 8 {
             reader.read_bytes_32()?
         } else {
             creator
@@ -136,7 +144,7 @@ impl Serializer for ContractAssetData {
             + self.max_supply.size()
             + 5 // bool fields
             + 32 // creator
-            + 1 // admin tag
+            + ADMIN_FIELD_TAG.len() // admin tag
             + 32 // admin
             + 8 // created_at
             + self.metadata_uri.size()
