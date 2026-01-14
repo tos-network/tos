@@ -1,7 +1,7 @@
 use crate::core::{
     error::BlockchainError,
     storage::{
-        rocksdb::{Column, ContractId},
+        rocksdb::{AssetId, Column, ContractId},
         ContractAssetExtProvider, RocksStorage,
     },
 };
@@ -364,6 +364,32 @@ fn decode_value(key: &TokenKey, bytes: &[u8]) -> Result<TokenValue, BlockchainEr
 }
 
 impl RocksStorage {
+    fn load_contract_asset_ext_chain<F>(
+        &self,
+        pointer_key: Vec<u8>,
+        topoheight: TopoHeight,
+        key: &TokenKey,
+        mut build_versioned_key: F,
+    ) -> Result<Option<(TopoHeight, TokenValue)>, BlockchainError>
+    where
+        F: FnMut(TopoHeight) -> Vec<u8>,
+    {
+        let mut prev_topo =
+            self.load_optional_from_disk(Column::ContractsAssetExt, &pointer_key)?;
+        while let Some(topo) = prev_topo {
+            let versioned_key = build_versioned_key(topo);
+            let versioned: Versioned<Vec<u8>> =
+                self.load_from_disk(Column::VersionedContractsAssetExt, &versioned_key)?;
+            if topo <= topoheight {
+                let value = decode_value(key, versioned.get())?;
+                return Ok(Some((topo, value)));
+            }
+            prev_topo = versioned.get_previous_topoheight();
+        }
+
+        Ok(None)
+    }
+
     fn build_contract_asset_ext_key(
         contract_id: ContractId,
         asset: &Hash,
@@ -386,6 +412,32 @@ impl RocksStorage {
         buf.extend_from_slice(&topoheight.to_be_bytes());
         buf.extend_from_slice(&contract_id.to_be_bytes());
         buf.extend_from_slice(asset.as_bytes());
+        buf.extend_from_slice(subkey);
+        buf
+    }
+
+    fn build_contract_asset_ext_legacy_key(
+        contract_id: ContractId,
+        asset_id: AssetId,
+        subkey: &[u8],
+    ) -> Vec<u8> {
+        let mut buf = Vec::with_capacity(16 + subkey.len());
+        buf.extend_from_slice(&contract_id.to_be_bytes());
+        buf.extend_from_slice(&asset_id.to_be_bytes());
+        buf.extend_from_slice(subkey);
+        buf
+    }
+
+    fn build_versioned_contract_asset_ext_legacy_key(
+        contract_id: ContractId,
+        asset_id: AssetId,
+        topoheight: TopoHeight,
+        subkey: &[u8],
+    ) -> Vec<u8> {
+        let mut buf = Vec::with_capacity(24 + subkey.len());
+        buf.extend_from_slice(&topoheight.to_be_bytes());
+        buf.extend_from_slice(&contract_id.to_be_bytes());
+        buf.extend_from_slice(&asset_id.to_be_bytes());
         buf.extend_from_slice(subkey);
         buf
     }
@@ -412,19 +464,30 @@ impl ContractAssetExtProvider for RocksStorage {
         let asset = asset_from_key(key);
         let subkey = encode_subkey(key)?;
         let pointer_key = Self::build_contract_asset_ext_key(contract_id, asset, &subkey);
-        let mut prev_topo =
-            self.load_optional_from_disk(Column::ContractsAssetExt, &pointer_key)?;
+        if let Some(result) =
+            self.load_contract_asset_ext_chain(pointer_key, topoheight, key, |topo| {
+                Self::build_versioned_contract_asset_ext_key(contract_id, asset, topo, &subkey)
+            })?
+        {
+            return Ok(Some(result));
+        }
 
-        while let Some(topo) = prev_topo {
-            let versioned_key =
-                Self::build_versioned_contract_asset_ext_key(contract_id, asset, topo, &subkey);
-            let versioned: Versioned<Vec<u8>> =
-                self.load_from_disk(Column::VersionedContractsAssetExt, &versioned_key)?;
-            if topo <= topoheight {
-                let value = decode_value(key, versioned.get())?;
-                return Ok(Some((topo, value)));
-            }
-            prev_topo = versioned.get_previous_topoheight();
+        if let Some(asset_id) = self.get_optional_asset_id(asset)? {
+            let legacy_pointer_key =
+                Self::build_contract_asset_ext_legacy_key(contract_id, asset_id, &subkey);
+            return self.load_contract_asset_ext_chain(
+                legacy_pointer_key,
+                topoheight,
+                key,
+                |topo| {
+                    Self::build_versioned_contract_asset_ext_legacy_key(
+                        contract_id,
+                        asset_id,
+                        topo,
+                        &subkey,
+                    )
+                },
+            );
         }
 
         Ok(None)
@@ -497,6 +560,34 @@ impl ContractAssetExtProvider for RocksStorage {
             Column::VersionedContractsAssetExt,
             &versioned_key,
             &versioned,
-        )
+        )?;
+
+        if let Some(asset_id) = self.get_optional_asset_id(asset)? {
+            let legacy_pointer_key =
+                Self::build_contract_asset_ext_legacy_key(contract_id, asset_id, &subkey);
+            let previous_legacy =
+                self.load_optional_from_disk(Column::ContractsAssetExt, &legacy_pointer_key)?;
+            if previous_legacy.is_some() {
+                let legacy_versioned = Versioned::new(Vec::<u8>::new(), previous_legacy);
+                let legacy_versioned_key = Self::build_versioned_contract_asset_ext_legacy_key(
+                    contract_id,
+                    asset_id,
+                    topoheight,
+                    &subkey,
+                );
+                self.insert_into_disk(
+                    Column::ContractsAssetExt,
+                    &legacy_pointer_key,
+                    &topoheight.to_be_bytes(),
+                )?;
+                self.insert_into_disk(
+                    Column::VersionedContractsAssetExt,
+                    &legacy_versioned_key,
+                    &legacy_versioned,
+                )?;
+            }
+        }
+
+        Ok(())
     }
 }
