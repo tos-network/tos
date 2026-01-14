@@ -1550,6 +1550,7 @@ impl ContractAssetProvider for RocksStorage {
         let mut delegators: Vec<[u8; 32]> = self
             .load_optional_from_disk(Column::ContractAssets, &key)?
             .unwrap_or_default();
+        let was_sorted = delegators.windows(2).all(|w| w[0] <= w[1]);
         delegators.sort_unstable();
 
         // Use binary search for O(log n) lookup instead of O(n) contains()
@@ -1557,6 +1558,9 @@ impl ContractAssetProvider for RocksStorage {
         match delegators.binary_search(delegator) {
             Ok(_) => {
                 // Already exists, no-op
+                if !was_sorted && !delegators.is_empty() {
+                    self.insert_into_disk(Column::ContractAssets, &key, &delegators)?;
+                }
             }
             Err(insert_pos) => {
                 // Not found, insert at sorted position
@@ -1585,15 +1589,23 @@ impl ContractAssetProvider for RocksStorage {
         let mut delegators: Vec<[u8; 32]> = self
             .load_optional_from_disk(Column::ContractAssets, &key)?
             .unwrap_or_default();
+        let was_sorted = delegators.windows(2).all(|w| w[0] <= w[1]);
         delegators.sort_unstable();
 
         // Use binary search for O(log n) lookup instead of O(n) position()
-        if let Ok(index) = delegators.binary_search(delegator) {
-            delegators.remove(index);
-            if delegators.is_empty() {
-                self.remove_from_disk(Column::ContractAssets, &key)?;
-            } else {
-                self.insert_into_disk(Column::ContractAssets, &key, &delegators)?;
+        match delegators.binary_search(delegator) {
+            Ok(index) => {
+                delegators.remove(index);
+                if delegators.is_empty() {
+                    self.remove_from_disk(Column::ContractAssets, &key)?;
+                } else {
+                    self.insert_into_disk(Column::ContractAssets, &key, &delegators)?;
+                }
+            }
+            Err(_) => {
+                if !was_sorted && !delegators.is_empty() {
+                    self.insert_into_disk(Column::ContractAssets, &key, &delegators)?;
+                }
             }
         }
         Ok(())

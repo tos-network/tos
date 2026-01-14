@@ -139,10 +139,19 @@ impl Serializer for ContractAssetData {
                 reader.read_bytes_ref(ADMIN_FIELD_TAG.len())?;
                 reader.read_u32()?;
                 reader.read_bytes_32()?
-            } else if remaining > 32 + 8 {
-                reader.read_bytes_32()?
             } else {
-                creator
+                let mut legacy_reader = Reader::new(&reader.bytes()[start..start + remaining]);
+                let legacy_ok = legacy_reader.read_bytes_32().is_ok()
+                    && legacy_reader.read::<u64>().is_ok()
+                    && legacy_reader.read::<Option<String>>().is_ok()
+                    && legacy_reader.size() == 0;
+                if legacy_ok {
+                    reader.read_bytes_32()?
+                } else if remaining <= 32 + 8 {
+                    creator
+                } else {
+                    return Err(ReaderError::InvalidSize);
+                }
             }
         } else if remaining > 32 + 8 {
             reader.read_bytes_32()?
