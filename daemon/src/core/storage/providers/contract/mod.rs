@@ -1,5 +1,5 @@
-mod balance;
 mod asset_ext;
+mod balance;
 mod data;
 mod event;
 mod output;
@@ -13,8 +13,8 @@ use async_trait::async_trait;
 use tos_common::{block::TopoHeight, crypto::Hash, versioned_type::Versioned};
 use tos_kernel::Module;
 
-pub use balance::*;
 pub use asset_ext::*;
+pub use balance::*;
 pub use data::*;
 pub use event::*;
 pub use output::*;

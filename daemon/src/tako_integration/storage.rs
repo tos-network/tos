@@ -1,9 +1,6 @@
 use std::collections::HashMap;
 use tos_common::{
-    block::TopoHeight,
-    contract::ContractProvider,
-    crypto::Hash,
-    versioned_type::VersionedState,
+    block::TopoHeight, contract::ContractProvider, crypto::Hash, versioned_type::VersionedState,
 };
 use tos_kernel::ValueCell;
 /// Storage adapter: TOS ContractProvider → TAKO StorageProvider
@@ -222,7 +219,8 @@ impl<'a> StorageProvider for TosStorageAdapter<'a> {
         };
 
         // Insert into cache (writes are cached, persisted later)
-        self.storage.insert(key_cell, (data_state, Some(value_cell)));
+        self.storage
+            .insert(key_cell, (data_state, Some(value_cell)));
 
         Ok(())
     }

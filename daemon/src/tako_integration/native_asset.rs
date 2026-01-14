@@ -688,9 +688,7 @@ impl<'a, P: NativeAssetProvider + ?Sized> TosNativeAssetAdapter<'a, P> {
     }
 }
 
-impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider
-    for TosNativeAssetAdapter<'a, P>
-{
+impl<'a, P: NativeAssetProvider + ?Sized> TakoNativeAssetProvider for TosNativeAssetAdapter<'a, P> {
     // ========================================
     // Asset Creation (Phase 1)
     // ========================================

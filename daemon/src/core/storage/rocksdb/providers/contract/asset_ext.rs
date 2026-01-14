@@ -113,9 +113,7 @@ fn encode_subkey(key: &TokenKey) -> Result<Vec<u8>, BlockchainError> {
             out.push(TAG_BALANCE);
             out.extend_from_slice(account);
         }
-        TokenKey::Allowance {
-            owner, spender, ..
-        } => {
+        TokenKey::Allowance { owner, spender, .. } => {
             out.push(TAG_ALLOWANCE);
             out.extend_from_slice(owner);
             out.extend_from_slice(spender);
@@ -287,10 +285,9 @@ fn encode_value(key: &TokenKey, value: &TokenValue) -> Result<Vec<u8>, Blockchai
         (TokenKey::TimelockOperation { .. }, TokenValue::TimelockOperation(operation)) => {
             operation.to_bytes()
         }
-        (
-            TokenKey::TimelockOperation { .. },
-            TokenValue::TimelockOperationOpt(Some(operation)),
-        ) => operation.to_bytes(),
+        (TokenKey::TimelockOperation { .. }, TokenValue::TimelockOperationOpt(Some(operation))) => {
+            operation.to_bytes()
+        }
         (TokenKey::MetadataUri(_), TokenValue::MetadataUri(uri)) => uri.to_bytes(),
         (_, TokenValue::Deleted) => return Err(BlockchainError::UnsupportedOperation),
         _ => return Err(BlockchainError::UnsupportedOperation),
@@ -337,9 +334,7 @@ fn decode_value(key: &TokenKey, bytes: &[u8]) -> Result<TokenValue, BlockchainEr
             TokenValue::SupplyCheckpointCount(u32::read(&mut reader)?)
         }
         TokenKey::RoleConfig { .. } => TokenValue::RoleConfig(RoleConfig::read(&mut reader)?),
-        TokenKey::RoleMember { .. } => {
-            TokenValue::RoleMemberGrantedAt(u64::read(&mut reader)?)
-        }
+        TokenKey::RoleMember { .. } => TokenValue::RoleMemberGrantedAt(u64::read(&mut reader)?),
         TokenKey::RoleMembers { .. } => {
             TokenValue::RoleMembers(Vec::<[u8; 32]>::read(&mut reader)?)
         }
@@ -350,14 +345,12 @@ fn decode_value(key: &TokenKey, bytes: &[u8]) -> Result<TokenValue, BlockchainEr
         TokenKey::OwnerAgents { .. } => {
             TokenValue::OwnerAgents(Vec::<[u8; 32]>::read(&mut reader)?)
         }
-        TokenKey::Delegators { .. } => {
-            TokenValue::Delegators(Vec::<[u8; 32]>::read(&mut reader)?)
+        TokenKey::Delegators { .. } => TokenValue::Delegators(Vec::<[u8; 32]>::read(&mut reader)?),
+        TokenKey::PendingAdmin(_) => {
+            TokenValue::PendingAdmin(Option::<[u8; 32]>::read(&mut reader)?)
         }
-        TokenKey::PendingAdmin(_) => TokenValue::PendingAdmin(Option::<[u8; 32]>::read(&mut reader)?),
         TokenKey::AdminDelay(_) => TokenValue::AdminDelay(AdminDelay::read(&mut reader)?),
-        TokenKey::TimelockMinDelay(_) => {
-            TokenValue::TimelockMinDelay(u64::read(&mut reader)?)
-        }
+        TokenKey::TimelockMinDelay(_) => TokenValue::TimelockMinDelay(u64::read(&mut reader)?),
         TokenKey::TimelockOperation { .. } => {
             TokenValue::TimelockOperation(TimelockOperation::read(&mut reader)?)
         }
@@ -455,19 +448,26 @@ impl ContractAssetExtProvider for RocksStorage {
         let asset_id = self.get_asset_id(asset_from_key(key))?;
         let subkey = encode_subkey(key)?;
         let pointer_key = Self::build_contract_asset_ext_key(contract_id, asset_id, &subkey);
-        let previous =
-            self.load_optional_from_disk(Column::ContractsAssetExt, &pointer_key)?;
+        let previous = self.load_optional_from_disk(Column::ContractsAssetExt, &pointer_key)?;
         let encoded = encode_value(key, value)?;
         let versioned = Versioned::new(encoded, previous);
-        let versioned_key =
-            Self::build_versioned_contract_asset_ext_key(contract_id, asset_id, topoheight, &subkey);
+        let versioned_key = Self::build_versioned_contract_asset_ext_key(
+            contract_id,
+            asset_id,
+            topoheight,
+            &subkey,
+        );
 
         self.insert_into_disk(
             Column::ContractsAssetExt,
             &pointer_key,
             &topoheight.to_be_bytes(),
         )?;
-        self.insert_into_disk(Column::VersionedContractsAssetExt, &versioned_key, &versioned)
+        self.insert_into_disk(
+            Column::VersionedContractsAssetExt,
+            &versioned_key,
+            &versioned,
+        )
     }
 
     async fn delete_contract_asset_ext(

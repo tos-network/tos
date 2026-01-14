@@ -24,8 +24,7 @@ use tos_common::{
     crypto::Hash,
 };
 use tos_program_runtime::{
-    invoke_context::InvokeContext,
-    storage::NativeAssetProvider as TakoNativeAssetProvider,
+    invoke_context::InvokeContext, storage::NativeAssetProvider as TakoNativeAssetProvider,
 };
 use tos_tbpf::{
     aligned_memory::AlignedMemory,
@@ -499,7 +498,7 @@ impl TakoExecutor {
         referral_provider: Option<&mut (dyn ReferralProvider + Send + Sync)>,
         nft_provider: Option<&mut N>, // NFT storage provider
         native_asset_provider: Option<&mut dyn NativeAssetProvider>, // Native asset provider
-        vrf_data: Option<&VrfData>, // VRF data for verifiable randomness
+        vrf_data: Option<&VrfData>,   // VRF data for verifiable randomness
         miner_public_key: Option<&[u8; 32]>, // Block producer's key for VRF identity binding
     ) -> Result<ExecutionResult, TakoExecutionError> {
         use log::{debug, error, info, warn};
@@ -557,25 +556,22 @@ impl TakoExecutor {
         let mut contract_token_provider: Option<ContractTokenProvider<'_>> = None;
         let mut native_asset_adapter: Option<Box<dyn TakoNativeAssetProvider>> =
             match native_asset_provider {
-                Some(provider) => Some(Box::new(TosNativeAssetAdapter::new(
-                    provider,
-                    block_height,
-                ))),
-            None => {
-                contract_token_provider = Some(ContractTokenProvider::new(
-                    provider,
-                    contract_hash,
-                    topoheight,
-                    &mut cache.tokens,
-                ));
-                Some(Box::new(TosNativeAssetAdapter::new(
-                    contract_token_provider
-                        .as_mut()
-                        .expect("contract token provider initialized"),
-                    block_height,
-                )))
-            }
-        };
+                Some(provider) => {
+                    Some(Box::new(TosNativeAssetAdapter::new(provider, block_height)))
+                }
+                None => {
+                    contract_token_provider = Some(ContractTokenProvider::new(
+                        provider,
+                        contract_hash,
+                        topoheight,
+                        &mut cache.tokens,
+                    ));
+                    contract_token_provider.as_mut().map(|provider| {
+                        Box::new(TosNativeAssetAdapter::new(provider, block_height))
+                            as Box<dyn TakoNativeAssetProvider>
+                    })
+                }
+            };
 
         // 4. Create TBPF loader with syscalls (needed for InvokeContext creation)
         // Note: JIT compilation is enabled via the "jit" feature in Cargo.toml

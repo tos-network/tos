@@ -1,8 +1,4 @@
-use std::{
-    collections::HashMap,
-    io,
-    sync::Mutex,
-};
+use std::{collections::HashMap, io, sync::Mutex};
 
 use async_trait::async_trait;
 use tos_common::{
@@ -12,7 +8,7 @@ use tos_common::{
     native_asset::{
         AdminDelay, AgentAuthorization, Allowance, BalanceCheckpoint, Checkpoint, Delegation,
         DelegationCheckpoint, Escrow, FreezeState, NativeAssetData, PauseState, RoleConfig, RoleId,
-        SupplyCheckpoint, TimelockOperation, TokenKey, TokenValue, TokenLock,
+        SupplyCheckpoint, TimelockOperation, TokenKey, TokenLock, TokenValue,
     },
     versioned_type::VersionedState,
 };
@@ -48,7 +44,10 @@ impl<'a> ContractTokenProvider<'a> {
     where
         F: FnOnce(&mut HashMap<TokenKey, (VersionedState, TokenValue)>) -> R,
     {
-        let mut cache_ref = self.cache.lock().expect("token cache mutex poisoned");
+        let mut cache_ref = match self.cache.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
         f(&mut *cache_ref)
     }
 
@@ -56,7 +55,10 @@ impl<'a> ContractTokenProvider<'a> {
         BlockchainError::ErrorStd(io::Error::new(io::ErrorKind::Other, err.to_string()))
     }
 
-    async fn get_cached_value(&self, key: &TokenKey) -> Result<Option<TokenValue>, BlockchainError> {
+    async fn get_cached_value(
+        &self,
+        key: &TokenKey,
+    ) -> Result<Option<TokenValue>, BlockchainError> {
         if let Some((_, value)) = self.with_cache(|cache| cache.get(key).cloned()) {
             return match value {
                 TokenValue::Deleted => Ok(None),
@@ -71,7 +73,10 @@ impl<'a> ContractTokenProvider<'a> {
 
         if let Some((topo, value)) = fetched {
             self.with_cache(|cache| {
-                cache.insert(key.clone(), (VersionedState::FetchedAt(topo), value.clone()));
+                cache.insert(
+                    key.clone(),
+                    (VersionedState::FetchedAt(topo), value.clone()),
+                );
             });
             return Ok(Some(value));
         }
@@ -131,8 +136,11 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
         asset: &Hash,
         data: &NativeAssetData,
     ) -> Result<(), BlockchainError> {
-        self.set_cached_value(TokenKey::Asset(asset.clone()), TokenValue::Asset(data.clone()))
-            .await
+        self.set_cached_value(
+            TokenKey::Asset(asset.clone()),
+            TokenValue::Asset(data.clone()),
+        )
+        .await
     }
 
     async fn get_native_asset_supply(&self, asset: &Hash) -> Result<u64, BlockchainError> {
@@ -177,7 +185,8 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
             asset: asset.clone(),
             account: *account,
         };
-        self.set_cached_value(key, TokenValue::Balance(balance)).await
+        self.set_cached_value(key, TokenValue::Balance(balance))
+            .await
     }
 
     async fn has_native_asset_balance(
@@ -498,10 +507,7 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
             .await
     }
 
-    async fn get_native_asset_escrow_counter(
-        &self,
-        asset: &Hash,
-    ) -> Result<u64, BlockchainError> {
+    async fn get_native_asset_escrow_counter(&self, asset: &Hash) -> Result<u64, BlockchainError> {
         let key = TokenKey::EscrowCounter(asset.clone());
         match self.get_cached_value(&key).await? {
             Some(TokenValue::EscrowCounter(value)) => Ok(value),
@@ -878,7 +884,8 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
             asset: asset.clone(),
             account: *account,
         };
-        self.set_cached_value(key, TokenValue::VotePower(votes)).await
+        self.set_cached_value(key, TokenValue::VotePower(votes))
+            .await
     }
 
     async fn get_native_asset_role_members(
@@ -947,11 +954,8 @@ impl NativeAssetProvider for ContractTokenProvider<'_> {
         admin: Option<&[u8; 32]>,
     ) -> Result<(), BlockchainError> {
         let key = TokenKey::PendingAdmin(asset.clone());
-        self.set_cached_value(
-            key,
-            TokenValue::PendingAdmin(admin.map(|a| *a)),
-        )
-        .await
+        self.set_cached_value(key, TokenValue::PendingAdmin(admin.map(|a| *a)))
+            .await
     }
 
     async fn get_native_asset_metadata_uri(

@@ -7,7 +7,6 @@ mod kyc;
 mod loader;
 mod native_asset;
 mod nft;
-mod token_provider;
 pub mod precompile_cost;
 mod precompile_verifier;
 mod referral;
@@ -43,6 +42,7 @@ mod scheduled_execution;
 /// - `precompile_verifier`: Transaction-level precompile verification (Ed25519, secp256k1, secp256r1)
 /// - `native_asset`: Adapts TOS native asset storage to TAKO's asset syscalls
 mod storage;
+mod token_provider;
 pub mod transaction_cost;
 
 pub use accounts::TosAccountAdapter;
