@@ -1154,6 +1154,88 @@ async fn aa_admin_03_rotate_controller_success() {
     assert_eq!(updated_meta.controller, new_controller);
 }
 
+/// Test that rotating controller clears energy_pool if it was set to old controller
+/// Per spec Section 2.5: energy_pool must be owner or controller
+#[tokio::test]
+async fn aa_admin_03b_rotate_controller_clears_energy_pool() {
+    let owner = create_public_key();
+    let controller = create_public_key();
+    let new_controller = create_public_key();
+    let policy_hash = create_policy_hash();
+
+    let mut state = MockVerificationState::new(100);
+    state.register_account(&owner);
+    state.register_account(&controller);
+    state.register_account(&new_controller);
+
+    // Set energy_pool to the controller
+    let meta = AgentAccountMeta {
+        owner: owner.clone(),
+        controller: controller.clone(),
+        policy_hash,
+        status: 0,
+        energy_pool: Some(controller.clone()),
+        session_key_root: None,
+    };
+    state.set_agent_meta(&owner, meta);
+
+    let payload = AgentAccountPayload::RotateController {
+        new_controller: new_controller.clone(),
+    };
+
+    let result = verify_agent_account_payload(&payload, &owner, &mut state).await;
+    assert!(result.is_ok(), "RotateController should succeed");
+
+    let updated_meta = state.agent_accounts.get(&owner).unwrap();
+    assert_eq!(updated_meta.controller, new_controller);
+    // energy_pool should be cleared since it pointed to old controller
+    assert_eq!(
+        updated_meta.energy_pool, None,
+        "energy_pool should be cleared when it pointed to old controller"
+    );
+}
+
+/// Test that rotating controller preserves energy_pool if it was set to owner
+#[tokio::test]
+async fn aa_admin_03c_rotate_controller_preserves_owner_energy_pool() {
+    let owner = create_public_key();
+    let controller = create_public_key();
+    let new_controller = create_public_key();
+    let policy_hash = create_policy_hash();
+
+    let mut state = MockVerificationState::new(100);
+    state.register_account(&owner);
+    state.register_account(&controller);
+    state.register_account(&new_controller);
+
+    // Set energy_pool to the owner (not controller)
+    let meta = AgentAccountMeta {
+        owner: owner.clone(),
+        controller,
+        policy_hash,
+        status: 0,
+        energy_pool: Some(owner.clone()),
+        session_key_root: None,
+    };
+    state.set_agent_meta(&owner, meta);
+
+    let payload = AgentAccountPayload::RotateController {
+        new_controller: new_controller.clone(),
+    };
+
+    let result = verify_agent_account_payload(&payload, &owner, &mut state).await;
+    assert!(result.is_ok(), "RotateController should succeed");
+
+    let updated_meta = state.agent_accounts.get(&owner).unwrap();
+    assert_eq!(updated_meta.controller, new_controller);
+    // energy_pool should be preserved since it pointed to owner
+    assert_eq!(
+        updated_meta.energy_pool,
+        Some(owner),
+        "energy_pool should be preserved when it pointed to owner"
+    );
+}
+
 #[tokio::test]
 async fn aa_admin_04_rotate_controller_to_owner_fails() {
     let owner = create_public_key();
