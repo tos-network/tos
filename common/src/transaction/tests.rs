@@ -1,7 +1,7 @@
 #![allow(clippy::disallowed_methods)]
 
 use crate::{
-    account::Nonce,
+    account::{AgentAccountMeta, Nonce, SessionKey},
     api::{DataElement, DataValue},
     block::BlockVersion,
     config::{BURN_PER_CONTRACT, COIN_VALUE, TOS_ASSET},
@@ -55,6 +55,99 @@ fn create_mock_elf_bytecode() -> Vec<u8> {
     ]
 }
 
+#[tokio::test]
+async fn test_agent_account_register_and_session_key_lifecycle() {
+    let mut state = ChainState::new();
+    let source = KeyPair::new().get_public_key().compress();
+    let controller = KeyPair::new().get_public_key().compress();
+    let policy_hash = Hash::new([1u8; 32]);
+
+    let payload = crate::transaction::AgentAccountPayload::Register {
+        controller,
+        policy_hash,
+        energy_pool: None,
+        session_key_root: None,
+    };
+    crate::transaction::verify::agent_account::verify_agent_account_payload(
+        &payload, &source, &mut state,
+    )
+    .await
+    .expect("register agent account");
+
+    let meta = state
+        .agent_account_meta
+        .get(&source)
+        .expect("agent meta stored");
+    assert_eq!(meta.policy_hash, Hash::new([1u8; 32]));
+
+    let session_key = SessionKey {
+        key_id: 1,
+        public_key: KeyPair::new().get_public_key().compress(),
+        expiry_topoheight: state.topoheight + 10,
+        max_value_per_window: 100,
+        allowed_targets: vec![KeyPair::new().get_public_key().compress()],
+        allowed_assets: vec![TOS_ASSET],
+    };
+
+    let payload = crate::transaction::AgentAccountPayload::AddSessionKey { key: session_key };
+    crate::transaction::verify::agent_account::verify_agent_account_payload(
+        &payload, &source, &mut state,
+    )
+    .await
+    .expect("add session key");
+
+    assert!(state.agent_session_keys.contains_key(&(source.clone(), 1)));
+
+    let payload = crate::transaction::AgentAccountPayload::RevokeSessionKey { key_id: 1 };
+    crate::transaction::verify::agent_account::verify_agent_account_payload(
+        &payload, &source, &mut state,
+    )
+    .await
+    .expect("revoke session key");
+
+    assert!(!state.agent_session_keys.contains_key(&(source.clone(), 1)));
+}
+
+#[tokio::test]
+async fn test_agent_account_rejects_expired_session_key() {
+    let mut state = ChainState::new();
+    let source = KeyPair::new().get_public_key().compress();
+    let controller = KeyPair::new().get_public_key().compress();
+
+    let payload = crate::transaction::AgentAccountPayload::Register {
+        controller,
+        policy_hash: Hash::new([3u8; 32]),
+        energy_pool: None,
+        session_key_root: None,
+    };
+    crate::transaction::verify::agent_account::verify_agent_account_payload(
+        &payload, &source, &mut state,
+    )
+    .await
+    .expect("register agent account");
+
+    let session_key = SessionKey {
+        key_id: 2,
+        public_key: KeyPair::new().get_public_key().compress(),
+        expiry_topoheight: state.topoheight,
+        max_value_per_window: 100,
+        allowed_targets: vec![],
+        allowed_assets: vec![TOS_ASSET],
+    };
+
+    let payload = crate::transaction::AgentAccountPayload::AddSessionKey { key: session_key };
+    let err = crate::transaction::verify::agent_account::verify_agent_account_payload(
+        &payload, &source, &mut state,
+    )
+    .await
+    .expect_err("expired session key should fail");
+
+    assert!(matches!(
+        err,
+        crate::transaction::verify::VerificationError::AgentAccountSessionKeyExpired
+    ));
+}
+
 // Create a newtype wrapper to avoid orphan rule violation
 #[derive(Debug, Clone)]
 struct TestError(());
@@ -81,6 +174,8 @@ struct AccountChainState {
 struct ChainState {
     accounts: HashMap<PublicKey, AccountChainState>,
     multisig: HashMap<PublicKey, MultiSigPayload>,
+    agent_account_meta: HashMap<PublicKey, AgentAccountMeta>,
+    agent_session_keys: HashMap<(PublicKey, u64), SessionKey>,
     contracts: HashMap<Hash, Module>,
     energy_resources: HashMap<PublicKey, crate::account::EnergyResource>,
     env: Environment,
@@ -92,6 +187,8 @@ impl ChainState {
         Self {
             accounts: HashMap::new(),
             multisig: HashMap::new(),
+            agent_account_meta: HashMap::new(),
+            agent_session_keys: HashMap::new(),
             contracts: HashMap::new(),
             energy_resources: HashMap::new(),
             env: Environment::new(),
@@ -1640,6 +1737,61 @@ impl<'a> BlockchainVerificationState<'a, TestError> for ChainState {
         } else {
             Ok(false)
         }
+    }
+
+    async fn get_agent_account_meta(
+        &mut self,
+        account: &'a CompressedPublicKey,
+    ) -> Result<Option<AgentAccountMeta>, TestError> {
+        Ok(self.agent_account_meta.get(account).cloned())
+    }
+
+    async fn set_agent_account_meta(
+        &mut self,
+        account: &'a CompressedPublicKey,
+        meta: &AgentAccountMeta,
+    ) -> Result<(), TestError> {
+        self.agent_account_meta
+            .insert(account.clone(), meta.clone());
+        Ok(())
+    }
+
+    async fn delete_agent_account_meta(
+        &mut self,
+        account: &'a CompressedPublicKey,
+    ) -> Result<(), TestError> {
+        self.agent_account_meta.remove(account);
+        Ok(())
+    }
+
+    async fn get_session_key(
+        &mut self,
+        account: &'a CompressedPublicKey,
+        key_id: u64,
+    ) -> Result<Option<SessionKey>, TestError> {
+        Ok(self
+            .agent_session_keys
+            .get(&(account.clone(), key_id))
+            .cloned())
+    }
+
+    async fn set_session_key(
+        &mut self,
+        account: &'a CompressedPublicKey,
+        session_key: &SessionKey,
+    ) -> Result<(), TestError> {
+        self.agent_session_keys
+            .insert((account.clone(), session_key.key_id), session_key.clone());
+        Ok(())
+    }
+
+    async fn delete_session_key(
+        &mut self,
+        account: &'a CompressedPublicKey,
+        key_id: u64,
+    ) -> Result<(), TestError> {
+        self.agent_session_keys.remove(&(account.clone(), key_id));
+        Ok(())
     }
 
     fn get_block_version(&self) -> BlockVersion {

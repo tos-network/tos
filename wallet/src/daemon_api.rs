@@ -540,6 +540,53 @@ impl DaemonAPI {
         Ok(multisig)
     }
 
+    pub async fn get_agent_account(&self, address: &Address) -> Result<GetAgentAccountResult> {
+        trace!("get_agent_account");
+        let meta = self
+            .client
+            .call_with(
+                "get_agent_account",
+                &GetAgentAccountParams {
+                    address: Cow::Borrowed(address),
+                },
+            )
+            .await?;
+        Ok(meta)
+    }
+
+    pub async fn has_agent_account(&self, address: &Address) -> Result<HasAgentAccountResult> {
+        trace!("has_agent_account");
+        let has_agent_account = self
+            .client
+            .call_with(
+                "has_agent_account",
+                &HasAgentAccountParams {
+                    address: Cow::Borrowed(address),
+                },
+            )
+            .await?;
+        Ok(has_agent_account)
+    }
+
+    pub async fn get_agent_session_key(
+        &self,
+        address: &Address,
+        key_id: u64,
+    ) -> Result<GetAgentSessionKeyResult> {
+        trace!("get_agent_session_key");
+        let key = self
+            .client
+            .call_with(
+                "get_agent_session_key",
+                &GetAgentSessionKeyParams {
+                    address: Cow::Borrowed(address),
+                    key_id,
+                },
+            )
+            .await?;
+        Ok(key)
+    }
+
     /// Get account history from daemon
     pub async fn get_account_history(
         &self,

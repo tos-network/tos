@@ -2781,7 +2781,7 @@ impl Transaction {
         'a,
         P: ContractProvider + NftStorageProvider + Send,
         E,
-        B: BlockchainApplyState<'a, P, E>,
+        B: BlockchainApplyState<'a, P, E> + Send,
     >(
         self: &'a Arc<Self>,
         tx_hash: &'a Hash,
@@ -3139,8 +3139,8 @@ impl Transaction {
                     .await
                     .map_err(VerificationError::State)?;
             }
-            TransactionType::AgentAccount(_payload) => {
-                // State updates for agent accounts are handled in chain_state apply.
+            TransactionType::AgentAccount(payload) => {
+                verify_agent_account_payload(payload, &self.source, state).await?;
             }
             TransactionType::InvokeContract(payload) => {
                 if self.is_contract_available(state, &payload.contract).await? {
@@ -4547,7 +4547,7 @@ impl Transaction {
         'a,
         P: ContractProvider + NftStorageProvider + Send,
         E,
-        B: BlockchainApplyState<'a, P, E>,
+        B: BlockchainApplyState<'a, P, E> + Send,
     >(
         self: &'a Arc<Self>,
         tx_hash: &'a Hash,
@@ -4761,7 +4761,7 @@ impl Transaction {
         'a,
         P: ContractProvider + NftStorageProvider + Send,
         E,
-        B: BlockchainApplyState<'a, P, E>,
+        B: BlockchainApplyState<'a, P, E> + Send,
     >(
         self: &'a Arc<Self>,
         tx_hash: &'a Hash,

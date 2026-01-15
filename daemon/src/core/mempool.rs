@@ -5,7 +5,7 @@ use log::{debug, info, trace, warn};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, mem, sync::Arc};
 use tos_common::{
-    account::{EnergyResource, Nonce},
+    account::{AgentAccountMeta, EnergyResource, Nonce, SessionKey},
     api::daemon::FeeRatesEstimated,
     block::{BlockVersion, TopoHeight},
     config::{BYTES_PER_KB, FEE_PER_KB},
@@ -45,6 +45,10 @@ pub struct AccountCache {
     multisig: Option<MultiSigPayload>,
     // Expected energy resource after all txs in this cache
     energy_resource: Option<tos_common::account::EnergyResource>,
+    // Expected agent account meta after all txs in this cache
+    agent_account_meta: Option<AgentAccountMeta>,
+    // Agent session key updates (None = delete)
+    agent_session_keys: HashMap<u64, Option<SessionKey>>,
 }
 
 // Mempool is used to store all TXs waiting to be included in a block
@@ -155,7 +159,7 @@ impl Mempool {
         state.consume_energy_for_transaction(&tx).await?;
         state.apply_energy_payload(&tx).await?;
 
-        let (balances, multisig, energy_resource) =
+        let (balances, multisig, energy_resource, agent_account_meta, agent_session_keys) =
             state.get_sender_cache(tx.get_source()).ok_or_else(|| {
                 BlockchainError::AccountNotFound(tx.get_source().as_address(self.mainnet))
             })?;
@@ -173,6 +177,8 @@ impl Mempool {
             balances,
             multisig,
             energy_resource,
+            agent_account_meta,
+            agent_session_keys,
         );
 
         let sorted_tx = SortedTx {
@@ -195,6 +201,8 @@ impl Mempool {
         balances: HashMap<Hash, u64>,
         multisig: Option<MultiSigPayload>,
         energy_resource: Option<EnergyResource>,
+        agent_account_meta: Option<AgentAccountMeta>,
+        agent_session_keys: HashMap<u64, Option<SessionKey>>,
     ) {
         if let Some(cache) = self.caches.get_mut(sender) {
             if log::log_enabled!(log::Level::Debug) {
@@ -213,6 +221,12 @@ impl Mempool {
             if energy_resource.is_some() {
                 cache.set_energy_resource(energy_resource);
             }
+            if agent_account_meta.is_some() {
+                cache.set_agent_account_meta(agent_account_meta);
+            }
+            if !agent_session_keys.is_empty() {
+                cache.merge_agent_session_keys(agent_session_keys);
+            }
         } else {
             let mut txs = IndexSet::new();
             txs.insert(hash);
@@ -224,6 +238,8 @@ impl Mempool {
                 balances,
                 multisig,
                 energy_resource,
+                agent_account_meta,
+                agent_session_keys,
             };
             self.caches.insert(sender.clone(), cache);
         }
@@ -736,6 +752,24 @@ impl AccountCache {
         self.energy_resource.as_ref()
     }
 
+    pub fn set_agent_account_meta(&mut self, meta: Option<AgentAccountMeta>) {
+        self.agent_account_meta = meta;
+    }
+
+    pub fn get_agent_account_meta(&self) -> Option<&AgentAccountMeta> {
+        self.agent_account_meta.as_ref()
+    }
+
+    pub fn merge_agent_session_keys(&mut self, updates: HashMap<u64, Option<SessionKey>>) {
+        for (key_id, entry) in updates {
+            self.agent_session_keys.insert(key_id, entry);
+        }
+    }
+
+    pub fn get_agent_session_keys(&self) -> &HashMap<u64, Option<SessionKey>> {
+        &self.agent_session_keys
+    }
+
     // Update the cache with a new TX
     fn update(&mut self, nonce: u64, hash: Arc<Hash>) {
         self.update_nonce_range(nonce);
@@ -847,11 +881,22 @@ mod tests {
             balances: balances.clone(),
             multisig: None,
             energy_resource: Some(energy_resource),
+            agent_account_meta: None,
+            agent_session_keys: HashMap::new(),
         };
         mempool.caches.insert(sender.clone(), cache);
 
         let hash = Arc::new(Hash::new([1u8; 32]));
-        mempool.update_cache_for_sender(&sender, 1, hash, balances, None, None);
+        mempool.update_cache_for_sender(
+            &sender,
+            1,
+            hash,
+            balances,
+            None,
+            None,
+            None,
+            HashMap::new(),
+        );
 
         let cache = mempool.get_cache_for(&sender).unwrap();
         assert_eq!(cache.get_energy_resource().unwrap().energy, 42);

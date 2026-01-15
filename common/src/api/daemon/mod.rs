@@ -1107,6 +1107,61 @@ pub struct HasMultisigAtTopoHeightParams<'a> {
     pub topoheight: TopoHeight,
 }
 
+// ============================================================================
+// Agent Account RPC Types
+// ============================================================================
+
+#[derive(Serialize, Deserialize)]
+pub struct AgentAccountMetaRpc {
+    pub owner: Address,
+    pub controller: Address,
+    pub policy_hash: Hash,
+    pub status: u8,
+    pub energy_pool: Option<Address>,
+    pub session_key_root: Option<Hash>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct AgentSessionKeyRpc {
+    pub key_id: u64,
+    pub public_key: Address,
+    pub expiry_topoheight: u64,
+    pub max_value_per_window: u64,
+    pub allowed_targets: Vec<Address>,
+    pub allowed_assets: Vec<Hash>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct GetAgentAccountParams<'a> {
+    pub address: Cow<'a, Address>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct GetAgentAccountResult {
+    pub meta: Option<AgentAccountMetaRpc>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct HasAgentAccountParams<'a> {
+    pub address: Cow<'a, Address>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct HasAgentAccountResult {
+    pub has_agent_account: bool,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct GetAgentSessionKeyParams<'a> {
+    pub address: Cow<'a, Address>,
+    pub key_id: u64,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct GetAgentSessionKeyResult {
+    pub key: Option<AgentSessionKeyRpc>,
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct GetContractOutputsParams<'a> {
     pub transaction: Cow<'a, Hash>,

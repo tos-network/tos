@@ -101,10 +101,32 @@ impl<'a, S: Storage> MempoolState<'a, S> {
         HashMap<&Hash, u64>,
         Option<MultiSigPayload>,
         Option<EnergyResource>,
+        Option<AgentAccountMeta>,
+        HashMap<u64, Option<SessionKey>>,
     )> {
         let account = self.accounts.remove(key)?;
         let energy_resource = self.energy_resources.remove(key);
-        Some((account.assets, account.multisig, energy_resource))
+        let agent_account_meta = self.agent_account_meta.remove(key).flatten();
+
+        let mut agent_session_keys = HashMap::new();
+        let mut keys_to_remove = Vec::new();
+        for ((account_key, key_id), entry) in self.agent_session_keys.iter() {
+            if account_key == key {
+                agent_session_keys.insert(*key_id, entry.clone());
+                keys_to_remove.push((account_key.clone(), *key_id));
+            }
+        }
+        for key in keys_to_remove {
+            self.agent_session_keys.remove(&key);
+        }
+
+        Some((
+            account.assets,
+            account.multisig,
+            energy_resource,
+            agent_account_meta,
+            agent_session_keys,
+        ))
     }
 
     // Retrieve the receiver balance
@@ -785,6 +807,11 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Mempoo
         if let Some(meta) = self.agent_account_meta.get(account) {
             return Ok(meta.clone());
         }
+        if let Some(cache) = self.mempool.get_cache_for(account) {
+            if let Some(meta) = cache.get_agent_account_meta() {
+                return Ok(Some(meta.clone()));
+            }
+        }
         self.storage.get_agent_account_meta(account).await
     }
 
@@ -814,6 +841,11 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Mempoo
         let key = (account.clone(), key_id);
         if let Some(session_key) = self.agent_session_keys.get(&key) {
             return Ok(session_key.clone());
+        }
+        if let Some(cache) = self.mempool.get_cache_for(account) {
+            if let Some(session_key) = cache.get_agent_session_keys().get(&key_id) {
+                return Ok(session_key.clone());
+            }
         }
         self.storage.get_session_key(account, key_id).await
     }

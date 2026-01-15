@@ -3263,7 +3263,7 @@ async fn transaction(
         manager.message(format!("Reference: {}", tx.get_reference()));
 
         // Display transaction type details
-        use tos_common::transaction::TransactionType;
+        use tos_common::transaction::{AgentAccountPayload, TransactionType};
         match tx.get_data() {
             TransactionType::Transfers(transfers) => {
                 manager.message(format!("Type: Transfers ({} outputs)", transfers.len()));
@@ -3356,6 +3356,80 @@ async fn transaction(
                 manager.message(format!("  Asset: {}", payload.get_asset()));
                 manager.message(format!("  Total Amount: {}", payload.get_total_amount()));
                 manager.message(format!("  Levels: {}", payload.get_levels()));
+            }
+            TransactionType::AgentAccount(payload) => {
+                manager.message("Type: AgentAccount".to_string());
+                match payload {
+                    AgentAccountPayload::Register {
+                        controller,
+                        policy_hash,
+                        energy_pool,
+                        session_key_root,
+                    } => {
+                        manager.message("  Action: Register".to_string());
+                        manager.message(format!(
+                            "  Controller: {}",
+                            controller.as_address(wallet.get_network().is_mainnet())
+                        ));
+                        manager.message(format!("  Policy Hash: {}", policy_hash));
+                        if let Some(pool) = energy_pool.as_ref() {
+                            manager.message(format!(
+                                "  Energy Pool: {}",
+                                pool.as_address(wallet.get_network().is_mainnet())
+                            ));
+                        }
+                        if let Some(root) = session_key_root.as_ref() {
+                            manager.message(format!("  Session Key Root: {}", root));
+                        }
+                    }
+                    AgentAccountPayload::UpdatePolicy { policy_hash } => {
+                        manager.message("  Action: UpdatePolicy".to_string());
+                        manager.message(format!("  Policy Hash: {}", policy_hash));
+                    }
+                    AgentAccountPayload::RotateController { new_controller } => {
+                        manager.message("  Action: RotateController".to_string());
+                        manager.message(format!(
+                            "  New Controller: {}",
+                            new_controller.as_address(wallet.get_network().is_mainnet())
+                        ));
+                    }
+                    AgentAccountPayload::SetStatus { status } => {
+                        manager.message("  Action: SetStatus".to_string());
+                        manager.message(format!("  Status: {}", status));
+                    }
+                    AgentAccountPayload::SetEnergyPool { energy_pool } => {
+                        manager.message("  Action: SetEnergyPool".to_string());
+                        if let Some(pool) = energy_pool.as_ref() {
+                            manager.message(format!(
+                                "  Energy Pool: {}",
+                                pool.as_address(wallet.get_network().is_mainnet())
+                            ));
+                        } else {
+                            manager.message("  Energy Pool: none".to_string());
+                        }
+                    }
+                    AgentAccountPayload::SetSessionKeyRoot { session_key_root } => {
+                        manager.message("  Action: SetSessionKeyRoot".to_string());
+                        if let Some(root) = session_key_root.as_ref() {
+                            manager.message(format!("  Session Key Root: {}", root));
+                        } else {
+                            manager.message("  Session Key Root: none".to_string());
+                        }
+                    }
+                    AgentAccountPayload::AddSessionKey { key } => {
+                        manager.message("  Action: AddSessionKey".to_string());
+                        manager.message(format!("  Key ID: {}", key.key_id));
+                        manager.message(format!(
+                            "  Public Key: {}",
+                            key.public_key.as_address(wallet.get_network().is_mainnet())
+                        ));
+                        manager.message(format!("  Expiry Topoheight: {}", key.expiry_topoheight));
+                    }
+                    AgentAccountPayload::RevokeSessionKey { key_id } => {
+                        manager.message("  Action: RevokeSessionKey".to_string());
+                        manager.message(format!("  Key ID: {}", key_id));
+                    }
+                }
             }
             TransactionType::SetKyc(payload) => {
                 manager.message("Type: SetKyc".to_string());
