@@ -281,6 +281,21 @@ Multisig (2-of-N threshold signatures):
   multisig_create_tx <asset> <amount> <address> - Create unsigned TX for signing
   multisig_sign <tx_hash> [source] [signatures] - Sign or submit multisig TX
 
+Agent Account:
+  agent_show [address]                   - Show agent account metadata
+  agent_session_key <key_id> [address]   - Show a session key by key ID
+  agent_register <controller> <policy_hash> [energy_pool] [session_key_root]
+                                        - Register agent account
+  agent_update_policy <policy_hash>      - Update policy hash
+  agent_rotate_controller <controller>   - Rotate controller address
+  agent_set_status <status>              - Set status (0=active,1=frozen)
+  agent_set_energy_pool [energy_pool]    - Set energy pool (use 'none' to clear)
+  agent_set_session_key_root [root]      - Set session key root (use 'none' to clear)
+  agent_add_session_key <key_id> <public_key> <expiry_topoheight> <max_value_per_window>
+                                        [allowed_targets] [allowed_assets]
+                                        - Add session key
+  agent_revoke_session_key <key_id>      - Revoke session key
+
 ═══════════════════════════════════════════════════════════════════════════════
 NETWORK OPTIONS:
 ═══════════════════════════════════════════════════════════════════════════════
