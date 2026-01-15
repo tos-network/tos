@@ -17,7 +17,7 @@
 //!
 //! # Usage
 //!
-//! ```rust,ignore
+//! ```rust
 //! # use tos_daemon::rpc::ws_security::security::{WebSocketSecurity, WebSocketSecurityConfig};
 //! # use std::net::{IpAddr, Ipv4Addr};
 //! # tokio::runtime::Runtime::new().unwrap().block_on(async {

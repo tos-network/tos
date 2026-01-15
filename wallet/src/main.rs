@@ -11,6 +11,7 @@ use indexmap::IndexSet;
 use log::{error, info, warn};
 use std::{borrow::Cow, fs::File, io::Write, path::Path, sync::Arc};
 use tos_common::{
+    account::SessionKey,
     async_handler,
     config::{init, TOS_ASSET},
     contract::Module,
@@ -30,7 +31,7 @@ use tos_common::{
             UnoTransferBuilder,
         },
         multisig::{MultiSig, SignatureId},
-        BurnPayload, DelegationEntry, MultiSigPayload, Transaction, TxVersion,
+        AgentAccountPayload, BurnPayload, DelegationEntry, MultiSigPayload, Transaction, TxVersion,
     },
     utils::{format_coin, format_tos, from_coin},
 };
@@ -105,6 +106,67 @@ fn get_optional_arg(
         return Ok(Some(args.get_value(name)?.to_string_value()?));
     }
     Ok(None)
+}
+
+fn parse_optional_address(value: Option<String>) -> Result<Option<Address>, CommandError> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    if value.eq_ignore_ascii_case("none") || value.eq_ignore_ascii_case("null") {
+        return Ok(None);
+    }
+    Address::from_string(&value)
+        .map(Some)
+        .context("Invalid address")
+        .map_err(CommandError::Any)
+}
+
+fn parse_optional_hash(value: Option<String>) -> Result<Option<Hash>, CommandError> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    if value.eq_ignore_ascii_case("none") || value.eq_ignore_ascii_case("null") {
+        return Ok(None);
+    }
+    let hash = value
+        .parse::<Hash>()
+        .map_err(|_| CommandError::InvalidArgument("Invalid hash".to_string()))?;
+    Ok(Some(hash))
+}
+
+fn parse_address_list(value: Option<String>) -> Result<Vec<Address>, CommandError> {
+    let Some(value) = value else {
+        return Ok(Vec::new());
+    };
+    if value.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+    value
+        .split(',')
+        .map(|item| {
+            let item = item.trim();
+            Address::from_string(item)
+                .context("Invalid address")
+                .map_err(CommandError::Any)
+        })
+        .collect::<Result<Vec<_>, _>>()
+}
+
+fn parse_hash_list(value: Option<String>) -> Result<Vec<Hash>, CommandError> {
+    let Some(value) = value else {
+        return Ok(Vec::new());
+    };
+    if value.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+    value
+        .split(',')
+        .map(|item| {
+            let item = item.trim();
+            item.parse::<Hash>()
+                .map_err(|_| CommandError::InvalidArgument("Invalid hash".to_string()))
+        })
+        .collect()
 }
 
 /// Get password from config with priority: CLI > File > Env > Error (batch mode only)
@@ -1159,6 +1221,147 @@ async fn setup_wallet_command_manager(
             Arg::new("address", ArgType::String, "Recipient address"),
         ],
         CommandHandler::Async(async_handler!(multisig_create_tx)),
+    ))?;
+
+    // Agent account commands
+    command_manager.add_command(Command::with_optional_arguments(
+        "agent_show",
+        "Show agent account metadata (defaults to wallet address)",
+        vec![Arg::new(
+            "address",
+            ArgType::String,
+            "Agent account address (optional)",
+        )],
+        CommandHandler::Async(async_handler!(agent_show)),
+    ))?;
+    command_manager.add_command(Command::with_arguments(
+        "agent_session_key",
+        "Get agent session key details by key ID",
+        vec![Arg::new(
+            "key_id",
+            ArgType::Number,
+            "Session key ID to query",
+        )],
+        vec![Arg::new(
+            "address",
+            ArgType::String,
+            "Agent account address (optional)",
+        )],
+        CommandHandler::Async(async_handler!(agent_session_key)),
+    ))?;
+    command_manager.add_command(Command::with_optional_arguments(
+        "agent_session_keys",
+        "List agent session keys",
+        vec![Arg::new(
+            "address",
+            ArgType::String,
+            "Agent account address (optional)",
+        )],
+        CommandHandler::Async(async_handler!(agent_session_keys)),
+    ))?;
+    command_manager.add_command(Command::with_arguments(
+        "agent_register",
+        "Register agent account (owner is wallet address)",
+        vec![
+            Arg::new(
+                "controller",
+                ArgType::String,
+                "Controller address (must be different from owner)",
+            ),
+            Arg::new("policy_hash", ArgType::Hash, "Policy hash"),
+        ],
+        vec![
+            Arg::new(
+                "energy_pool",
+                ArgType::String,
+                "Energy pool address (optional, use 'none' to clear)",
+            ),
+            Arg::new(
+                "session_key_root",
+                ArgType::String,
+                "Session key root hash (optional, use 'none' to clear)",
+            ),
+        ],
+        CommandHandler::Async(async_handler!(agent_register)),
+    ))?;
+    command_manager.add_command(Command::with_arguments(
+        "agent_update_policy",
+        "Update agent account policy hash",
+        vec![Arg::new("policy_hash", ArgType::Hash, "Policy hash")],
+        vec![],
+        CommandHandler::Async(async_handler!(agent_update_policy)),
+    ))?;
+    command_manager.add_command(Command::with_arguments(
+        "agent_rotate_controller",
+        "Rotate agent account controller",
+        vec![Arg::new(
+            "controller",
+            ArgType::String,
+            "New controller address",
+        )],
+        vec![],
+        CommandHandler::Async(async_handler!(agent_rotate_controller)),
+    ))?;
+    command_manager.add_command(Command::with_arguments(
+        "agent_set_status",
+        "Set agent account status (0=active,1=frozen)",
+        vec![Arg::new("status", ArgType::Number, "Status value (0 or 1)")],
+        vec![],
+        CommandHandler::Async(async_handler!(agent_set_status)),
+    ))?;
+    command_manager.add_command(Command::with_optional_arguments(
+        "agent_set_energy_pool",
+        "Set agent account energy pool (use 'none' to clear)",
+        vec![Arg::new(
+            "energy_pool",
+            ArgType::String,
+            "Energy pool address or 'none'",
+        )],
+        CommandHandler::Async(async_handler!(agent_set_energy_pool)),
+    ))?;
+    command_manager.add_command(Command::with_optional_arguments(
+        "agent_set_session_key_root",
+        "Set agent session key root (use 'none' to clear)",
+        vec![Arg::new(
+            "session_key_root",
+            ArgType::String,
+            "Session key root hash or 'none'",
+        )],
+        CommandHandler::Async(async_handler!(agent_set_session_key_root)),
+    ))?;
+    command_manager.add_command(Command::with_arguments(
+        "agent_add_session_key",
+        "Add a session key to agent account",
+        vec![
+            Arg::new("key_id", ArgType::Number, "Session key ID"),
+            Arg::new("public_key", ArgType::String, "Session key public address"),
+            Arg::new("expiry_topoheight", ArgType::Number, "Expiry topoheight"),
+            Arg::new(
+                "max_value_per_window",
+                ArgType::Number,
+                "Max value per window",
+            ),
+        ],
+        vec![
+            Arg::new(
+                "allowed_targets",
+                ArgType::String,
+                "Comma-separated allowed target addresses",
+            ),
+            Arg::new(
+                "allowed_assets",
+                ArgType::String,
+                "Comma-separated allowed asset hashes",
+            ),
+        ],
+        CommandHandler::Async(async_handler!(agent_add_session_key)),
+    ))?;
+    command_manager.add_command(Command::with_arguments(
+        "agent_revoke_session_key",
+        "Revoke a session key from agent account",
+        vec![Arg::new("key_id", ArgType::Number, "Session key ID")],
+        vec![],
+        CommandHandler::Async(async_handler!(agent_revoke_session_key)),
     ))?;
 
     command_manager.add_command(Command::new(
@@ -3263,7 +3466,7 @@ async fn transaction(
         manager.message(format!("Reference: {}", tx.get_reference()));
 
         // Display transaction type details
-        use tos_common::transaction::TransactionType;
+        use tos_common::transaction::{AgentAccountPayload, TransactionType};
         match tx.get_data() {
             TransactionType::Transfers(transfers) => {
                 manager.message(format!("Type: Transfers ({} outputs)", transfers.len()));
@@ -3356,6 +3559,80 @@ async fn transaction(
                 manager.message(format!("  Asset: {}", payload.get_asset()));
                 manager.message(format!("  Total Amount: {}", payload.get_total_amount()));
                 manager.message(format!("  Levels: {}", payload.get_levels()));
+            }
+            TransactionType::AgentAccount(payload) => {
+                manager.message("Type: AgentAccount".to_string());
+                match payload {
+                    AgentAccountPayload::Register {
+                        controller,
+                        policy_hash,
+                        energy_pool,
+                        session_key_root,
+                    } => {
+                        manager.message("  Action: Register".to_string());
+                        manager.message(format!(
+                            "  Controller: {}",
+                            controller.as_address(wallet.get_network().is_mainnet())
+                        ));
+                        manager.message(format!("  Policy Hash: {}", policy_hash));
+                        if let Some(pool) = energy_pool.as_ref() {
+                            manager.message(format!(
+                                "  Energy Pool: {}",
+                                pool.as_address(wallet.get_network().is_mainnet())
+                            ));
+                        }
+                        if let Some(root) = session_key_root.as_ref() {
+                            manager.message(format!("  Session Key Root: {}", root));
+                        }
+                    }
+                    AgentAccountPayload::UpdatePolicy { policy_hash } => {
+                        manager.message("  Action: UpdatePolicy".to_string());
+                        manager.message(format!("  Policy Hash: {}", policy_hash));
+                    }
+                    AgentAccountPayload::RotateController { new_controller } => {
+                        manager.message("  Action: RotateController".to_string());
+                        manager.message(format!(
+                            "  New Controller: {}",
+                            new_controller.as_address(wallet.get_network().is_mainnet())
+                        ));
+                    }
+                    AgentAccountPayload::SetStatus { status } => {
+                        manager.message("  Action: SetStatus".to_string());
+                        manager.message(format!("  Status: {}", status));
+                    }
+                    AgentAccountPayload::SetEnergyPool { energy_pool } => {
+                        manager.message("  Action: SetEnergyPool".to_string());
+                        if let Some(pool) = energy_pool.as_ref() {
+                            manager.message(format!(
+                                "  Energy Pool: {}",
+                                pool.as_address(wallet.get_network().is_mainnet())
+                            ));
+                        } else {
+                            manager.message("  Energy Pool: none".to_string());
+                        }
+                    }
+                    AgentAccountPayload::SetSessionKeyRoot { session_key_root } => {
+                        manager.message("  Action: SetSessionKeyRoot".to_string());
+                        if let Some(root) = session_key_root.as_ref() {
+                            manager.message(format!("  Session Key Root: {}", root));
+                        } else {
+                            manager.message("  Session Key Root: none".to_string());
+                        }
+                    }
+                    AgentAccountPayload::AddSessionKey { key } => {
+                        manager.message("  Action: AddSessionKey".to_string());
+                        manager.message(format!("  Key ID: {}", key.key_id));
+                        manager.message(format!(
+                            "  Public Key: {}",
+                            key.public_key.as_address(wallet.get_network().is_mainnet())
+                        ));
+                        manager.message(format!("  Expiry Topoheight: {}", key.expiry_topoheight));
+                    }
+                    AgentAccountPayload::RevokeSessionKey { key_id } => {
+                        manager.message("  Action: RevokeSessionKey".to_string());
+                        manager.message(format!("  Key ID: {}", key_id));
+                    }
+                }
             }
             TransactionType::SetKyc(payload) => {
                 manager.message("Type: SetKyc".to_string());
@@ -5104,6 +5381,458 @@ async fn energy_info(manager: &CommandManager, _args: ArgumentManager) -> Result
     Ok(())
 }
 
+// ===== Agent Account Commands =====
+
+async fn agent_show(
+    manager: &CommandManager,
+    mut args: ArgumentManager,
+) -> Result<(), CommandError> {
+    let context = manager.get_context().lock()?;
+    let wallet: &Arc<Wallet> = context.get()?;
+
+    let address = if let Some(address_str) = get_optional_arg(&mut args, "address")? {
+        Address::from_string(&address_str)
+            .context("Invalid address")
+            .map_err(CommandError::Any)?
+    } else {
+        wallet.get_address()
+    };
+
+    let network_handler = wallet.get_network_handler().lock().await;
+    let handler = network_handler.as_ref().ok_or_else(|| {
+        CommandError::InvalidArgument("Wallet not connected to daemon".to_string())
+    })?;
+
+    let api = handler.get_api();
+    let result = api
+        .get_agent_account(&address)
+        .await
+        .map_err(|e| CommandError::InvalidArgument(format!("Failed to get agent account: {e}")))?;
+
+    match result.meta {
+        Some(meta) => {
+            let address_str = address
+                .as_string()
+                .unwrap_or_else(|_| "invalid-address".to_string());
+            manager.message(format!("AgentAccount: {}", address_str));
+            manager.message(format!("  Owner: {}", meta.owner));
+            manager.message(format!("  Controller: {}", meta.controller));
+            manager.message(format!("  Policy Hash: {}", meta.policy_hash));
+            manager.message(format!("  Status: {}", meta.status));
+            manager.message(format!(
+                "  Energy Pool: {}",
+                meta.energy_pool
+                    .map(|addr| addr.to_string())
+                    .unwrap_or_else(|| "none".to_string())
+            ));
+            manager.message(format!(
+                "  Session Key Root: {}",
+                meta.session_key_root
+                    .map(|hash| hash.to_string())
+                    .unwrap_or_else(|| "none".to_string())
+            ));
+        }
+        None => {
+            manager.message("Agent account not registered".to_string());
+        }
+    }
+
+    Ok(())
+}
+
+async fn agent_session_key(
+    manager: &CommandManager,
+    mut args: ArgumentManager,
+) -> Result<(), CommandError> {
+    let context = manager.get_context().lock()?;
+    let wallet: &Arc<Wallet> = context.get()?;
+
+    let key_id = args.get_value("key_id")?.to_number()?;
+    let address = if let Some(address_str) = get_optional_arg(&mut args, "address")? {
+        Address::from_string(&address_str)
+            .context("Invalid address")
+            .map_err(CommandError::Any)?
+    } else {
+        wallet.get_address()
+    };
+
+    let network_handler = wallet.get_network_handler().lock().await;
+    let handler = network_handler.as_ref().ok_or_else(|| {
+        CommandError::InvalidArgument("Wallet not connected to daemon".to_string())
+    })?;
+
+    let api = handler.get_api();
+    let result = api
+        .get_agent_session_key(&address, key_id)
+        .await
+        .map_err(|e| {
+            CommandError::InvalidArgument(format!("Failed to get agent session key: {e}"))
+        })?;
+
+    match result.key {
+        Some(key) => {
+            manager.message(format!("Session Key ID: {}", key.key_id));
+            manager.message(format!("  Public Key: {}", key.public_key));
+            manager.message(format!("  Expiry Topoheight: {}", key.expiry_topoheight));
+            manager.message(format!(
+                "  Max Value Per Window: {}",
+                key.max_value_per_window
+            ));
+            manager.message(format!("  Allowed Targets: {}", key.allowed_targets.len()));
+            manager.message(format!("  Allowed Assets: {}", key.allowed_assets.len()));
+        }
+        None => manager.message("Session key not found".to_string()),
+    }
+
+    Ok(())
+}
+
+async fn agent_session_keys(
+    manager: &CommandManager,
+    mut args: ArgumentManager,
+) -> Result<(), CommandError> {
+    let context = manager.get_context().lock()?;
+    let wallet: &Arc<Wallet> = context.get()?;
+
+    let address = if let Some(address_str) = get_optional_arg(&mut args, "address")? {
+        Address::from_string(&address_str)
+            .context("Invalid address")
+            .map_err(CommandError::Any)?
+    } else {
+        wallet.get_address()
+    };
+
+    let network_handler = wallet.get_network_handler().lock().await;
+    let handler = network_handler.as_ref().ok_or_else(|| {
+        CommandError::InvalidArgument("Wallet not connected to daemon".to_string())
+    })?;
+
+    let api = handler.get_api();
+    let result = api.get_agent_session_keys(&address).await.map_err(|e| {
+        CommandError::InvalidArgument(format!("Failed to get agent session keys: {e}"))
+    })?;
+
+    if result.keys.is_empty() {
+        manager.message("No session keys found".to_string());
+        return Ok(());
+    }
+
+    manager.message(format!("Session Keys: {}", result.keys.len()));
+    for key in result.keys {
+        manager.message(format!("  - Key ID: {}", key.key_id));
+        manager.message(format!("    Public Key: {}", key.public_key));
+        manager.message(format!("    Expiry Topoheight: {}", key.expiry_topoheight));
+        manager.message(format!(
+            "    Max Value Per Window: {}",
+            key.max_value_per_window
+        ));
+        manager.message(format!(
+            "    Allowed Targets: {}",
+            key.allowed_targets.len()
+        ));
+        manager.message(format!("    Allowed Assets: {}", key.allowed_assets.len()));
+    }
+
+    Ok(())
+}
+
+async fn agent_register(
+    manager: &CommandManager,
+    mut args: ArgumentManager,
+) -> Result<(), CommandError> {
+    let context = manager.get_context().lock()?;
+    let wallet: &Arc<Wallet> = context.get()?;
+
+    let controller_str = args.get_value("controller")?.to_string_value()?;
+    let controller = Address::from_string(&controller_str)
+        .context("Invalid controller address")
+        .map_err(CommandError::Any)?;
+    let policy_hash = args.get_value("policy_hash")?.to_hash()?;
+    let energy_pool = parse_optional_address(get_optional_arg(&mut args, "energy_pool")?)?
+        .map(|addr| addr.to_public_key());
+    let session_key_root = parse_optional_hash(get_optional_arg(&mut args, "session_key_root")?)?;
+    let owner_pub = wallet.get_public_key().clone();
+    let controller_pub = controller.to_public_key();
+
+    if let Some(pool) = energy_pool.as_ref() {
+        if pool != &owner_pub && pool != &controller_pub {
+            manager.error("energy_pool must be owner or controller");
+            return Ok(());
+        }
+    }
+
+    let payload = AgentAccountPayload::Register {
+        controller: controller_pub,
+        policy_hash,
+        energy_pool,
+        session_key_root,
+    };
+    let tx_type = TransactionTypeBuilder::AgentAccount(payload);
+    let fee = FeeBuilder::default();
+
+    let tx = match wallet.create_transaction(tx_type, fee).await {
+        Ok(tx) => tx,
+        Err(e) => {
+            manager.error(format!("Error while creating transaction: {}", e));
+            return Ok(());
+        }
+    };
+
+    manager.message(format!("AgentAccount register tx: {}", tx.hash()));
+    broadcast_tx(wallet, manager, tx).await;
+
+    Ok(())
+}
+
+async fn agent_update_policy(
+    manager: &CommandManager,
+    mut args: ArgumentManager,
+) -> Result<(), CommandError> {
+    let context = manager.get_context().lock()?;
+    let wallet: &Arc<Wallet> = context.get()?;
+
+    let policy_hash = args.get_value("policy_hash")?.to_hash()?;
+    let payload = AgentAccountPayload::UpdatePolicy { policy_hash };
+    let tx_type = TransactionTypeBuilder::AgentAccount(payload);
+    let fee = FeeBuilder::default();
+
+    let tx = match wallet.create_transaction(tx_type, fee).await {
+        Ok(tx) => tx,
+        Err(e) => {
+            manager.error(format!("Error while creating transaction: {}", e));
+            return Ok(());
+        }
+    };
+
+    manager.message(format!("AgentAccount update policy tx: {}", tx.hash()));
+    broadcast_tx(wallet, manager, tx).await;
+
+    Ok(())
+}
+
+async fn agent_rotate_controller(
+    manager: &CommandManager,
+    mut args: ArgumentManager,
+) -> Result<(), CommandError> {
+    let context = manager.get_context().lock()?;
+    let wallet: &Arc<Wallet> = context.get()?;
+
+    let controller_str = args.get_value("controller")?.to_string_value()?;
+    let controller = Address::from_string(&controller_str)
+        .context("Invalid controller address")
+        .map_err(CommandError::Any)?;
+
+    let payload = AgentAccountPayload::RotateController {
+        new_controller: controller.to_public_key(),
+    };
+    let tx_type = TransactionTypeBuilder::AgentAccount(payload);
+    let fee = FeeBuilder::default();
+
+    let tx = match wallet.create_transaction(tx_type, fee).await {
+        Ok(tx) => tx,
+        Err(e) => {
+            manager.error(format!("Error while creating transaction: {}", e));
+            return Ok(());
+        }
+    };
+
+    manager.message(format!("AgentAccount rotate controller tx: {}", tx.hash()));
+    broadcast_tx(wallet, manager, tx).await;
+
+    Ok(())
+}
+
+async fn agent_set_status(
+    manager: &CommandManager,
+    mut args: ArgumentManager,
+) -> Result<(), CommandError> {
+    let context = manager.get_context().lock()?;
+    let wallet: &Arc<Wallet> = context.get()?;
+
+    let status = args.get_value("status")?.to_number()? as u8;
+    if status > 1 {
+        return Err(CommandError::InvalidArgument(
+            "status must be 0 or 1".to_string(),
+        ));
+    }
+
+    let payload = AgentAccountPayload::SetStatus { status };
+    let tx_type = TransactionTypeBuilder::AgentAccount(payload);
+    let fee = FeeBuilder::default();
+
+    let tx = match wallet.create_transaction(tx_type, fee).await {
+        Ok(tx) => tx,
+        Err(e) => {
+            manager.error(format!("Error while creating transaction: {}", e));
+            return Ok(());
+        }
+    };
+
+    manager.message(format!("AgentAccount set status tx: {}", tx.hash()));
+    broadcast_tx(wallet, manager, tx).await;
+
+    Ok(())
+}
+
+async fn agent_set_energy_pool(
+    manager: &CommandManager,
+    mut args: ArgumentManager,
+) -> Result<(), CommandError> {
+    let context = manager.get_context().lock()?;
+    let wallet: &Arc<Wallet> = context.get()?;
+
+    let energy_pool = parse_optional_address(get_optional_arg(&mut args, "energy_pool")?)?
+        .map(|addr| addr.to_public_key());
+    if let Some(pool) = energy_pool.as_ref() {
+        let address = wallet.get_address();
+        let network_handler = wallet.get_network_handler().lock().await;
+        let handler = network_handler.as_ref().ok_or_else(|| {
+            CommandError::InvalidArgument("Wallet not connected to daemon".to_string())
+        })?;
+        let api = handler.get_api();
+        let meta = api
+            .get_agent_account(&address)
+            .await
+            .map_err(|e| {
+                CommandError::InvalidArgument(format!("Failed to get agent account: {e}"))
+            })?
+            .meta;
+
+        let Some(meta) = meta else {
+            manager.error("Agent account not registered");
+            return Ok(());
+        };
+
+        let owner_pub = meta.owner.get_public_key().clone();
+        let controller_pub = meta.controller.get_public_key().clone();
+        if pool != &owner_pub && pool != &controller_pub {
+            manager.error("energy_pool must be owner or controller");
+            return Ok(());
+        }
+    }
+
+    let payload = AgentAccountPayload::SetEnergyPool { energy_pool };
+    let tx_type = TransactionTypeBuilder::AgentAccount(payload);
+    let fee = FeeBuilder::default();
+
+    let tx = match wallet.create_transaction(tx_type, fee).await {
+        Ok(tx) => tx,
+        Err(e) => {
+            manager.error(format!("Error while creating transaction: {}", e));
+            return Ok(());
+        }
+    };
+
+    manager.message(format!("AgentAccount set energy pool tx: {}", tx.hash()));
+    broadcast_tx(wallet, manager, tx).await;
+
+    Ok(())
+}
+
+async fn agent_set_session_key_root(
+    manager: &CommandManager,
+    mut args: ArgumentManager,
+) -> Result<(), CommandError> {
+    let context = manager.get_context().lock()?;
+    let wallet: &Arc<Wallet> = context.get()?;
+
+    let session_key_root = parse_optional_hash(get_optional_arg(&mut args, "session_key_root")?)?;
+
+    let payload = AgentAccountPayload::SetSessionKeyRoot { session_key_root };
+    let tx_type = TransactionTypeBuilder::AgentAccount(payload);
+    let fee = FeeBuilder::default();
+
+    let tx = match wallet.create_transaction(tx_type, fee).await {
+        Ok(tx) => tx,
+        Err(e) => {
+            manager.error(format!("Error while creating transaction: {}", e));
+            return Ok(());
+        }
+    };
+
+    manager.message(format!(
+        "AgentAccount set session key root tx: {}",
+        tx.hash()
+    ));
+    broadcast_tx(wallet, manager, tx).await;
+
+    Ok(())
+}
+
+async fn agent_add_session_key(
+    manager: &CommandManager,
+    mut args: ArgumentManager,
+) -> Result<(), CommandError> {
+    let context = manager.get_context().lock()?;
+    let wallet: &Arc<Wallet> = context.get()?;
+
+    let key_id = args.get_value("key_id")?.to_number()?;
+    let public_key_str = args.get_value("public_key")?.to_string_value()?;
+    let public_key = Address::from_string(&public_key_str)
+        .context("Invalid public key address")
+        .map_err(CommandError::Any)?;
+    let expiry_topoheight = args.get_value("expiry_topoheight")?.to_number()?;
+    let max_value_per_window = args.get_value("max_value_per_window")?.to_number()?;
+
+    let allowed_targets = parse_address_list(get_optional_arg(&mut args, "allowed_targets")?)?;
+    let allowed_assets = parse_hash_list(get_optional_arg(&mut args, "allowed_assets")?)?;
+
+    let session_key = SessionKey {
+        key_id,
+        public_key: public_key.to_public_key(),
+        expiry_topoheight,
+        max_value_per_window,
+        allowed_targets: allowed_targets
+            .into_iter()
+            .map(|addr| addr.to_public_key())
+            .collect(),
+        allowed_assets,
+    };
+
+    let payload = AgentAccountPayload::AddSessionKey { key: session_key };
+    let tx_type = TransactionTypeBuilder::AgentAccount(payload);
+    let fee = FeeBuilder::default();
+
+    let tx = match wallet.create_transaction(tx_type, fee).await {
+        Ok(tx) => tx,
+        Err(e) => {
+            manager.error(format!("Error while creating transaction: {}", e));
+            return Ok(());
+        }
+    };
+
+    manager.message(format!("AgentAccount add session key tx: {}", tx.hash()));
+    broadcast_tx(wallet, manager, tx).await;
+
+    Ok(())
+}
+
+async fn agent_revoke_session_key(
+    manager: &CommandManager,
+    mut args: ArgumentManager,
+) -> Result<(), CommandError> {
+    let context = manager.get_context().lock()?;
+    let wallet: &Arc<Wallet> = context.get()?;
+
+    let key_id = args.get_value("key_id")?.to_number()?;
+    let payload = AgentAccountPayload::RevokeSessionKey { key_id };
+    let tx_type = TransactionTypeBuilder::AgentAccount(payload);
+    let fee = FeeBuilder::default();
+
+    let tx = match wallet.create_transaction(tx_type, fee).await {
+        Ok(tx) => tx,
+        Err(e) => {
+            manager.error(format!("Error while creating transaction: {}", e));
+            return Ok(());
+        }
+    };
+
+    manager.message(format!("AgentAccount revoke session key tx: {}", tx.hash()));
+    broadcast_tx(wallet, manager, tx).await;
+
+    Ok(())
+}
+
 /// Bind a referrer to the sender account (one-time, immutable)
 async fn bind_referrer(
     manager: &CommandManager,
@@ -6532,7 +7261,10 @@ async fn read_message(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{
+        unfreeze_tos_delegate_args, ArgumentManager, Command, CommandError, CommandHandler,
+        CommandManager, Prompt, PromptConfig,
+    };
     use std::fs;
     use tos_common::prompt::{default_logs_datetime_format, LogLevel, ShareablePrompt};
 
@@ -6562,7 +7294,7 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test]
+    #[::tokio::test]
     async fn unfreeze_tos_delegate_parses_optional_args() {
         let prompt = build_test_prompt().expect("prompt init");
         let manager = CommandManager::new_with_batch_mode(prompt, true);

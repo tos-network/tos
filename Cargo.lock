@@ -5661,8 +5661,10 @@ dependencies = [
  "strum",
  "tempfile",
  "thiserror 2.0.17",
+ "tokio",
  "tokio-tungstenite-wasm",
  "tos_common",
+ "tos_daemon",
  "wasm-bindgen-futures",
  "web-sys",
 ]

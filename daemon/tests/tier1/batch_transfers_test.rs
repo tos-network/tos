@@ -11,7 +11,6 @@ use anyhow::Result;
 /// - Correct balance updates for all accounts
 /// - Nonce progression for each sender
 #[tokio::test]
-#[ignore] // TODO: Enable when TestBlockchain is fully implemented
 async fn test_batch_independent_transfers() -> Result<()> {
     // TODO: Implement when TestBlockchain is complete
     // Structure:
@@ -29,7 +28,6 @@ async fn test_batch_independent_transfers() -> Result<()> {
 
 /// Test sequential transfers (chain dependency)
 #[tokio::test]
-#[ignore] // TODO: Enable when TestBlockchain is fully implemented
 async fn test_batch_sequential_transfers() -> Result<()> {
     // TODO: Test alice → bob → charlie chain
     // Bob spends received funds in same block
@@ -39,7 +37,6 @@ async fn test_batch_sequential_transfers() -> Result<()> {
 
 /// Test batch with one failing transaction
 #[tokio::test]
-#[ignore] // TODO: Enable when TestBlockchain is fully implemented
 async fn test_batch_with_failure() -> Result<()> {
     // TODO: Multiple transfers, one has insufficient balance
     // Verify only valid ones execute

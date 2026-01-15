@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "alloc-oom",
     "access-control",
     "access-control-erc1155",
     "amm-dex",

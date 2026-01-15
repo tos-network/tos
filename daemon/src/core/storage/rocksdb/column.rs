@@ -54,6 +54,12 @@ pub enum Column {
 
     // {account_key} => {account}
     Account,
+    // Agent account metadata
+    // {account_key} => {AgentAccountMeta}
+    AgentAccountMeta,
+    // Agent session keys
+    // {account_key}{key_id} => {SessionKey}
+    AgentSessionKeys,
     // Column used as a "versioned" as its
     // prefixed with a topoheight to have
     // easier search per topoheight
@@ -313,6 +319,8 @@ impl Column {
             // Child committees: prefix by parent committee ID (32 bytes)
             ChildCommittees => Some(32),
 
+            // Agent session keys: prefix by account public key (32 bytes)
+            AgentSessionKeys => Some(32),
             // TNS ephemeral messages: prefix by recipient name hash (32 bytes)
             TnsEphemeralMessages => Some(32),
 

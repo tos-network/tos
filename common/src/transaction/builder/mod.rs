@@ -17,8 +17,8 @@ pub use unsigned::UnsignedTransaction;
 use super::{
     extra_data::{ExtraDataType, PlaintextData, UnknownExtraDataFormat},
     payload::{ShieldTransferPayload, UnoTransferPayload, UnshieldTransferPayload},
-    BatchReferralRewardPayload, BindReferrerPayload, BurnPayload, ContractDeposit,
-    DeployContractPayload, EnergyPayload, EphemeralMessagePayload, FeeType,
+    AgentAccountPayload, BatchReferralRewardPayload, BindReferrerPayload, BurnPayload,
+    ContractDeposit, DeployContractPayload, EnergyPayload, EphemeralMessagePayload, FeeType,
     InvokeConstructorPayload, InvokeContractPayload, MultiSigPayload, RegisterNamePayload, Role,
     SourceCommitment, Transaction, TransactionType, TransferPayload, TxVersion,
     EXTRA_DATA_LIMIT_SIZE, EXTRA_DATA_LIMIT_SUM_SIZE, MAX_MULTISIG_PARTICIPANTS,
@@ -130,6 +130,7 @@ pub enum TransactionTypeBuilder {
     Energy(EnergyBuilder),
     BindReferrer(BindReferrerPayload),
     BatchReferralReward(BatchReferralRewardPayload),
+    AgentAccount(AgentAccountPayload),
     /// TNS: Register a human-readable name (e.g., alice@tos.network)
     RegisterName(RegisterNamePayload),
     /// TNS: Send an ephemeral message to a registered name
@@ -368,6 +369,9 @@ impl TransactionBuilder {
             }
             TransactionTypeBuilder::BatchReferralReward(payload) => {
                 // BatchReferralReward payload size
+                size += payload.size();
+            }
+            TransactionTypeBuilder::AgentAccount(payload) => {
                 size += payload.size();
             }
             TransactionTypeBuilder::ShieldTransfers(transfers) => {
@@ -680,6 +684,7 @@ impl TransactionBuilder {
             TransactionTypeBuilder::BindReferrer(_) => {}
             // BatchReferralReward - asset costs are handled during distribution
             TransactionTypeBuilder::BatchReferralReward(_) => {}
+            TransactionTypeBuilder::AgentAccount(_) => {}
             // Shield transfers consume TOS (plaintext) amount
             TransactionTypeBuilder::ShieldTransfers(transfers) => {
                 for transfer in transfers {
@@ -1000,6 +1005,9 @@ impl TransactionBuilder {
             }
             TransactionTypeBuilder::BatchReferralReward(ref payload) => {
                 TransactionType::BatchReferralReward(payload.clone())
+            }
+            TransactionTypeBuilder::AgentAccount(ref payload) => {
+                TransactionType::AgentAccount(payload.clone())
             }
             TransactionTypeBuilder::UnoTransfers(_) => {
                 // UNO transfers require UnoAccountState which provides ciphertext access

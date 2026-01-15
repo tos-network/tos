@@ -758,6 +758,16 @@ pub fn register_methods<S: Storage>(
         "has_multisig_at_topoheight",
         async_handler!(has_multisig_at_topoheight::<S>),
     );
+    handler.register_method("get_agent_account", async_handler!(get_agent_account::<S>));
+    handler.register_method("has_agent_account", async_handler!(has_agent_account::<S>));
+    handler.register_method(
+        "get_agent_session_key",
+        async_handler!(get_agent_session_key::<S>),
+    );
+    handler.register_method(
+        "get_agent_session_keys",
+        async_handler!(get_agent_session_keys::<S>),
+    );
 
     // Contracts
     handler.register_method(
@@ -2459,7 +2469,8 @@ async fn get_account_history<S: Storage>(
                 | TransactionType::BootstrapCommittee(_)
                 | TransactionType::RegisterCommittee(_)
                 | TransactionType::UpdateCommittee(_)
-                | TransactionType::EmergencySuspend(_) => {
+                | TransactionType::EmergencySuspend(_)
+                | TransactionType::AgentAccount(_) => {
                     // KYC transactions don't affect account history for now
                     // This could be extended to track KYC activities
                 }
@@ -2972,6 +2983,108 @@ async fn has_multisig_at_topoheight<S: Storage>(
         .context("Error while checking if account has multisig at topoheight")?;
 
     Ok(json!(multisig))
+}
+
+async fn get_agent_account<S: Storage>(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    let params: GetAgentAccountParams = parse_params(body)?;
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let storage = blockchain.get_storage().read().await;
+    let meta = storage
+        .get_agent_account_meta(&params.address.get_public_key())
+        .await
+        .context("Error while retrieving agent account meta")?;
+
+    let mainnet = storage.is_mainnet();
+    let meta = meta.map(|meta| AgentAccountMetaRpc {
+        owner: meta.owner.to_address(mainnet),
+        controller: meta.controller.to_address(mainnet),
+        policy_hash: meta.policy_hash,
+        status: meta.status,
+        energy_pool: meta.energy_pool.map(|pool| pool.to_address(mainnet)),
+        session_key_root: meta.session_key_root,
+    });
+
+    Ok(json!(GetAgentAccountResult { meta }))
+}
+
+async fn has_agent_account<S: Storage>(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    let params: HasAgentAccountParams = parse_params(body)?;
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let storage = blockchain.get_storage().read().await;
+    let has_agent_account = storage
+        .get_agent_account_meta(&params.address.get_public_key())
+        .await
+        .context("Error while checking agent account meta")?
+        .is_some();
+
+    Ok(json!(HasAgentAccountResult { has_agent_account }))
+}
+
+async fn get_agent_session_key<S: Storage>(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    let params: GetAgentSessionKeyParams = parse_params(body)?;
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let storage = blockchain.get_storage().read().await;
+    let key = storage
+        .get_session_key(&params.address.get_public_key(), params.key_id)
+        .await
+        .context("Error while retrieving agent session key")?;
+
+    let mainnet = storage.is_mainnet();
+    let key = key.map(|key| AgentSessionKeyRpc {
+        key_id: key.key_id,
+        public_key: key.public_key.to_address(mainnet),
+        expiry_topoheight: key.expiry_topoheight,
+        max_value_per_window: key.max_value_per_window,
+        allowed_targets: key
+            .allowed_targets
+            .into_iter()
+            .map(|target| target.to_address(mainnet))
+            .collect(),
+        allowed_assets: key.allowed_assets,
+    });
+
+    Ok(json!(GetAgentSessionKeyResult { key }))
+}
+
+async fn get_agent_session_keys<S: Storage>(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    let params: GetAgentSessionKeysParams = parse_params(body)?;
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let storage = blockchain.get_storage().read().await;
+    let keys = storage
+        .get_session_keys_for_account(&params.address.get_public_key())
+        .await
+        .context("Error while retrieving agent session keys")?;
+
+    let mainnet = storage.is_mainnet();
+    let keys = keys
+        .into_iter()
+        .map(|key| AgentSessionKeyRpc {
+            key_id: key.key_id,
+            public_key: key.public_key.to_address(mainnet),
+            expiry_topoheight: key.expiry_topoheight,
+            max_value_per_window: key.max_value_per_window,
+            allowed_targets: key
+                .allowed_targets
+                .into_iter()
+                .map(|target| target.to_address(mainnet))
+                .collect(),
+            allowed_assets: key.allowed_assets,
+        })
+        .collect();
+
+    Ok(json!(GetAgentSessionKeysResult { keys }))
 }
 
 async fn get_contract_outputs<S: Storage>(

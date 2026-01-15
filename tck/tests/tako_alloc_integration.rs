@@ -220,9 +220,47 @@ fn test_alloc_heap_usage() {
 }
 
 #[test]
-#[ignore] // Run manually: cargo test --test tako_alloc_integration test_alloc_out_of_memory -- --ignored
 fn test_alloc_out_of_memory() {
-    // TODO: Create contract that allocates until OOM
-    // Verify it returns null_mut() and handles gracefully instead of panicking
-    unimplemented!("OOM test contract not yet created");
+    let bytecode = load_example_contract("oom");
+    let mut provider = MockProvider;
+
+    let contract_hash = Hash::zero();
+    let block_hash = Hash::zero();
+    let tx_hash = Hash::zero();
+    let tx_sender = Hash::zero();
+
+    let result = TakoExecutor::execute(
+        &bytecode,
+        &mut provider,
+        0,
+        &contract_hash,
+        &block_hash,
+        0,
+        0,
+        &tx_hash,
+        &tx_sender,
+        &[],
+        None,
+    );
+
+    assert!(
+        result.is_ok(),
+        "OOM contract execution failed: {:?}",
+        result.err()
+    );
+
+    let exec_result = result.unwrap();
+    assert_eq!(
+        exec_result.return_value, 0,
+        "OOM contract returned error code: {}",
+        exec_result.return_value
+    );
+
+    assert!(
+        exec_result
+            .log_messages
+            .iter()
+            .any(|log| log.contains("OOM handled")),
+        "Expected OOM handling log message not found"
+    );
 }

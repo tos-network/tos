@@ -66,6 +66,7 @@ pub enum TransactionType {
     RegisterCommittee(RegisterCommitteePayload),
     UpdateCommittee(UpdateCommitteePayload),
     EmergencySuspend(EmergencySuspendPayload),
+    AgentAccount(AgentAccountPayload),
     /// UNO privacy transfers (encrypted amounts)
     UnoTransfers(Vec<UnoTransferPayload>),
     /// Shield transfers: TOS (plaintext) -> UNO (encrypted)
@@ -551,6 +552,10 @@ impl Serializer for TransactionType {
                 writer.write_u8(15);
                 payload.write(writer);
             }
+            TransactionType::AgentAccount(payload) => {
+                writer.write_u8(23);
+                payload.write(writer);
+            }
             TransactionType::UnoTransfers(transfers) => {
                 writer.write_u8(18);
                 let len: u16 = transfers.len() as u16;
@@ -620,6 +625,7 @@ impl Serializer for TransactionType {
             15 => TransactionType::EmergencySuspend(EmergencySuspendPayload::read(reader)?),
             16 => TransactionType::TransferKyc(TransferKycPayload::read(reader)?),
             17 => TransactionType::AppealKyc(AppealKycPayload::read(reader)?),
+            23 => TransactionType::AgentAccount(AgentAccountPayload::read(reader)?),
             18 => {
                 let txs_count = reader.read_u16()?;
                 if txs_count == 0 || txs_count as usize > MAX_TRANSFER_COUNT {
@@ -689,6 +695,7 @@ impl Serializer for TransactionType {
             TransactionType::RegisterCommittee(payload) => payload.size(),
             TransactionType::UpdateCommittee(payload) => payload.size(),
             TransactionType::EmergencySuspend(payload) => payload.size(),
+            TransactionType::AgentAccount(payload) => payload.size(),
             TransactionType::UnoTransfers(txs) => {
                 // 2 bytes for count of transfers (u16)
                 let mut size = 2;

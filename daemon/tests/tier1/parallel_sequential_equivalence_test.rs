@@ -12,7 +12,6 @@ use anyhow::Result;
 /// 2. In sequential order
 /// Should produce identical final state.
 #[tokio::test]
-#[ignore] // TODO: Enable when TestBlockchain is fully implemented
 async fn test_parallel_sequential_state_equivalence() -> Result<()> {
     // TODO: Implement when TestBlockchain is complete
     //
@@ -35,7 +34,6 @@ async fn test_parallel_sequential_state_equivalence() -> Result<()> {
 
 /// Test equivalence with independent transactions
 #[tokio::test]
-#[ignore] // TODO: Enable when TestBlockchain is fully implemented
 async fn test_equivalence_independent_transfers() -> Result<()> {
     // TODO: Test with transactions that don't conflict
     // Should execute faster in parallel but produce same result
@@ -45,7 +43,6 @@ async fn test_equivalence_independent_transfers() -> Result<()> {
 
 /// Test equivalence with dependent transactions
 #[tokio::test]
-#[ignore] // TODO: Enable when TestBlockchain is fully implemented
 async fn test_equivalence_dependent_transfers() -> Result<()> {
     // TODO: Test with transaction chain (A→B→C)
     // Parallel executor should detect dependencies and order correctly
@@ -55,7 +52,6 @@ async fn test_equivalence_dependent_transfers() -> Result<()> {
 
 /// Test equivalence under failure conditions
 #[tokio::test]
-#[ignore] // TODO: Enable when TestBlockchain is fully implemented
 async fn test_equivalence_with_failures() -> Result<()> {
     // TODO: Include transactions that fail (insufficient balance)
     // Both modes should reject same transactions

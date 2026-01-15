@@ -433,7 +433,6 @@ fn test_referral_contract_loads() {
 //
 // The referral syscall implementation itself is correct - this is a toolchain issue.
 #[test]
-#[ignore = "TAKO SDK build issue - contract execution fails due to TBPF interpreter compatibility"]
 fn test_referral_execution_no_provider() {
     let contract_path = "tests/fixtures/test_referral.so";
     let bytecode = std::fs::read(contract_path).expect("Failed to read test_referral.so");
@@ -483,7 +482,6 @@ fn test_referral_execution_no_provider() {
 // ===================================================================
 
 #[test]
-#[ignore = "TAKO SDK build issue - contract execution fails due to TBPF interpreter compatibility"]
 fn test_referral_execution_with_provider() {
     let contract_path = "tests/fixtures/test_referral.so";
     let bytecode = std::fs::read(contract_path).expect("Failed to read test_referral.so");

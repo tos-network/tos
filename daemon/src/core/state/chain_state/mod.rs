@@ -9,7 +9,10 @@ use std::{
     collections::{hash_map::Entry, HashMap},
 };
 use tos_common::{
-    account::{EnergyResource, Nonce, VersionedBalance, VersionedNonce, VersionedUnoBalance},
+    account::{
+        AgentAccountMeta, EnergyResource, Nonce, SessionKey, VersionedBalance, VersionedNonce,
+        VersionedUnoBalance,
+    },
     block::{BlockVersion, TopoHeight},
     config::TOS_ASSET,
     crypto::{
@@ -146,9 +149,13 @@ pub struct ChainState<'a, S: Storage> {
     receiver_uno_balances: HashMap<Cow<'a, PublicKey>, HashMap<Cow<'a, Hash>, VersionedUnoBalance>>,
     // Sender accounts
     // This is used to verify ZK Proofs and store/update nonces
-    accounts: HashMap<&'a PublicKey, Account<'a>>,
+    accounts: HashMap<Cow<'a, PublicKey>, Account<'a>>,
     // Cached energy resources
     energy_resources: HashMap<Cow<'a, PublicKey>, EnergyResource>,
+    // Agent account metadata updates (None = delete)
+    agent_account_meta: HashMap<Cow<'a, PublicKey>, Option<AgentAccountMeta>>,
+    // Agent session key updates (None = delete)
+    agent_session_keys: HashMap<(PublicKey, u64), Option<SessionKey>>,
     // Current stable topoheight of the snapshot
     stable_topoheight: TopoHeight,
     // Current topoheight of the snapshot
@@ -180,6 +187,8 @@ impl<'a, S: Storage> ChainState<'a, S> {
             receiver_uno_balances: HashMap::new(),
             accounts: HashMap::new(),
             energy_resources: HashMap::new(),
+            agent_account_meta: HashMap::new(),
+            agent_session_keys: HashMap::new(),
             stable_topoheight,
             topoheight,
             contracts: HashMap::new(),
@@ -255,8 +264,8 @@ impl<'a, S: Storage> ChainState<'a, S> {
     // Create a sender echange
     async fn create_sender_echange(
         storage: &S,
-        key: &'a PublicKey,
-        asset: &'a Hash,
+        key: &PublicKey,
+        asset: &Hash,
         current_topoheight: TopoHeight,
         reference: &Reference,
     ) -> Result<Echange, BlockchainError> {
@@ -463,19 +472,19 @@ impl<'a, S: Storage> ChainState<'a, S> {
     // This depends on the transaction and can be final balance or output balance
     async fn internal_get_sender_verification_balance<'b>(
         &'b mut self,
-        key: &'a PublicKey,
+        key: Cow<'a, PublicKey>,
         asset: &'a Hash,
         reference: &Reference,
     ) -> Result<&'b mut u64, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!(
                 "getting sender verification balance for {} at topoheight {}, reference: {}",
-                key.as_address(self.storage.is_mainnet()),
+                key.as_ref().as_address(self.storage.is_mainnet()),
                 self.topoheight,
                 reference.topoheight
             );
         }
-        match self.accounts.entry(key) {
+        match self.accounts.entry(key.clone()) {
             Entry::Occupied(o) => {
                 let account = o.into_mut();
                 match account.assets.entry(asset) {
@@ -483,7 +492,7 @@ impl<'a, S: Storage> ChainState<'a, S> {
                     Entry::Vacant(e) => {
                         let echange = Self::create_sender_echange(
                             &self.storage,
-                            key,
+                            key.as_ref(),
                             asset,
                             self.topoheight,
                             reference,
@@ -496,7 +505,7 @@ impl<'a, S: Storage> ChainState<'a, S> {
             Entry::Vacant(e) => {
                 // Create a new account for the sender
                 let account = Self::create_sender_account(
-                    key,
+                    key.as_ref(),
                     &self.storage,
                     self.topoheight,
                     &self.receiver_balances,
@@ -506,7 +515,7 @@ impl<'a, S: Storage> ChainState<'a, S> {
                 // Create a new echange for the asset
                 let echange = Self::create_sender_echange(
                     &self.storage,
-                    key,
+                    key.as_ref(),
                     asset,
                     self.topoheight,
                     reference,
@@ -551,7 +560,7 @@ impl<'a, S: Storage> ChainState<'a, S> {
     // Account must have been fetched before calling this function
     async fn internal_update_sender_echange(
         &mut self,
-        key: &'a PublicKey,
+        key: Cow<'a, PublicKey>,
         asset: &'a Hash,
         new_ct: u64,
     ) -> Result<(), BlockchainError> {
@@ -560,10 +569,10 @@ impl<'a, S: Storage> ChainState<'a, S> {
         }
         let change = self
             .accounts
-            .get_mut(key)
+            .get_mut(key.as_ref())
             .and_then(|a| a.assets.get_mut(asset))
             .ok_or_else(|| {
-                BlockchainError::NoTxSender(key.as_address(self.storage.is_mainnet()))
+                BlockchainError::NoTxSender(key.as_ref().as_address(self.storage.is_mainnet()))
             })?;
 
         // Increase the total output
@@ -660,7 +669,7 @@ impl<'a, S: Storage> ChainState<'a, S> {
             .and_then(|assets| assets.get(asset))
             .map(|v| v.clone());
 
-        match self.accounts.entry(key) {
+        match self.accounts.entry(Cow::Borrowed(key)) {
             Entry::Occupied(o) => {
                 let account = o.into_mut();
                 match account.uno_assets.entry(asset) {
@@ -764,7 +773,7 @@ impl<'a, S: Storage> ChainState<'a, S> {
         &mut self,
         key: &'a PublicKey,
     ) -> Result<&mut Account<'a>, BlockchainError> {
-        match self.accounts.entry(key) {
+        match self.accounts.entry(Cow::Borrowed(key)) {
             Entry::Occupied(o) => Ok(o.into_mut()),
             Entry::Vacant(e) => {
                 let account = Self::create_sender_account(
@@ -956,10 +965,14 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for ChainS
     /// Get the balance for a sender account
     async fn get_sender_balance<'b>(
         &'b mut self,
-        account: &'a PublicKey,
-        asset: &'a Hash,
+        account: Cow<'a, PublicKey>,
+        asset: Cow<'a, Hash>,
         reference: &Reference,
     ) -> Result<&'b mut u64, BlockchainError> {
+        let asset = match asset {
+            Cow::Borrowed(asset) => asset,
+            Cow::Owned(_) => return Err(BlockchainError::CorruptedData),
+        };
         Ok(self
             .internal_get_sender_verification_balance(account, asset, reference)
             .await?)
@@ -968,10 +981,14 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for ChainS
     /// Apply new output to a sender account
     async fn add_sender_output(
         &mut self,
-        account: &'a PublicKey,
-        asset: &'a Hash,
+        account: Cow<'a, PublicKey>,
+        asset: Cow<'a, Hash>,
         output: u64,
     ) -> Result<(), BlockchainError> {
+        let asset = match asset {
+            Cow::Borrowed(asset) => asset,
+            Cow::Owned(_) => return Err(BlockchainError::CorruptedData),
+        };
         self.internal_update_sender_echange(account, asset, output)
             .await
     }
@@ -1056,6 +1073,96 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for ChainS
         } else {
             Ok(false)
         }
+    }
+
+    async fn get_agent_account_meta(
+        &mut self,
+        account: &'a CompressedPublicKey,
+    ) -> Result<Option<AgentAccountMeta>, BlockchainError> {
+        if let Some(meta) = self.agent_account_meta.get(account) {
+            return Ok(meta.clone());
+        }
+        self.storage.get_agent_account_meta(account).await
+    }
+
+    async fn set_agent_account_meta(
+        &mut self,
+        account: &'a CompressedPublicKey,
+        meta: &AgentAccountMeta,
+    ) -> Result<(), BlockchainError> {
+        self.agent_account_meta
+            .insert(Cow::Borrowed(account), Some(meta.clone()));
+        Ok(())
+    }
+
+    async fn delete_agent_account_meta(
+        &mut self,
+        account: &'a CompressedPublicKey,
+    ) -> Result<(), BlockchainError> {
+        self.agent_account_meta.insert(Cow::Borrowed(account), None);
+        Ok(())
+    }
+
+    async fn get_session_key(
+        &mut self,
+        account: &'a CompressedPublicKey,
+        key_id: u64,
+    ) -> Result<Option<SessionKey>, BlockchainError> {
+        let key = (account.clone(), key_id);
+        if let Some(session_key) = self.agent_session_keys.get(&key) {
+            return Ok(session_key.clone());
+        }
+        self.storage.get_session_key(account, key_id).await
+    }
+
+    async fn set_session_key(
+        &mut self,
+        account: &'a CompressedPublicKey,
+        session_key: &SessionKey,
+    ) -> Result<(), BlockchainError> {
+        let key = (account.clone(), session_key.key_id);
+        self.agent_session_keys
+            .insert(key, Some(session_key.clone()));
+        Ok(())
+    }
+
+    async fn delete_session_key(
+        &mut self,
+        account: &'a CompressedPublicKey,
+        key_id: u64,
+    ) -> Result<(), BlockchainError> {
+        let key = (account.clone(), key_id);
+        self.agent_session_keys.insert(key, None);
+        Ok(())
+    }
+
+    async fn get_session_keys_for_account(
+        &mut self,
+        account: &'a CompressedPublicKey,
+    ) -> Result<Vec<SessionKey>, BlockchainError> {
+        let mut keys: HashMap<u64, SessionKey> = self
+            .storage
+            .get_session_keys_for_account(account)
+            .await?
+            .into_iter()
+            .map(|key| (key.key_id, key))
+            .collect();
+
+        for ((cached_account, key_id), entry) in &self.agent_session_keys {
+            if cached_account != account {
+                continue;
+            }
+            match entry {
+                Some(key) => {
+                    keys.insert(*key_id, key.clone());
+                }
+                None => {
+                    keys.remove(key_id);
+                }
+            }
+        }
+
+        Ok(keys.into_values().collect())
     }
 
     /// Get the block version

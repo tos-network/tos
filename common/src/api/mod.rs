@@ -17,13 +17,14 @@ use crate::{
     crypto::{Address, Hash, Signature},
     serializer::Serializer,
     transaction::{
-        extra_data::UnknownExtraDataFormat, multisig::MultiSig, AppealKycPayload,
-        BatchReferralRewardPayload, BindReferrerPayload, BootstrapCommitteePayload, BurnPayload,
-        DeployContractPayload, EmergencySuspendPayload, EnergyPayload, EphemeralMessagePayload,
-        FeeType, InvokeContractPayload, MultiSigPayload, Reference, RegisterCommitteePayload,
-        RegisterNamePayload, RenewKycPayload, RevokeKycPayload, SetKycPayload,
-        ShieldTransferPayload, Transaction, TransactionType, TransferKycPayload, TransferPayload,
-        TxVersion, UnoTransferPayload, UnshieldTransferPayload, UpdateCommitteePayload,
+        extra_data::UnknownExtraDataFormat, multisig::MultiSig, AgentAccountPayload,
+        AppealKycPayload, BatchReferralRewardPayload, BindReferrerPayload,
+        BootstrapCommitteePayload, BurnPayload, DeployContractPayload, EmergencySuspendPayload,
+        EnergyPayload, EphemeralMessagePayload, FeeType, InvokeContractPayload, MultiSigPayload,
+        Reference, RegisterCommitteePayload, RegisterNamePayload, RenewKycPayload,
+        RevokeKycPayload, SetKycPayload, ShieldTransferPayload, Transaction, TransactionType,
+        TransferKycPayload, TransferPayload, TxVersion, UnoTransferPayload,
+        UnshieldTransferPayload, UpdateCommitteePayload,
     },
 };
 pub use data::*;
@@ -87,6 +88,7 @@ pub enum RPCTransactionType<'a> {
     RegisterCommittee(Cow<'a, RegisterCommitteePayload>),
     UpdateCommittee(Cow<'a, UpdateCommitteePayload>),
     EmergencySuspend(Cow<'a, EmergencySuspendPayload>),
+    AgentAccount(Cow<'a, AgentAccountPayload>),
     // UNO (Privacy Balance) transaction types
     UnoTransfers(Cow<'a, Vec<UnoTransferPayload>>),
     ShieldTransfers(Cow<'a, Vec<ShieldTransferPayload>>),
@@ -142,6 +144,7 @@ impl<'a> RPCTransactionType<'a> {
             TransactionType::EmergencySuspend(payload) => {
                 Self::EmergencySuspend(Cow::Borrowed(payload))
             }
+            TransactionType::AgentAccount(payload) => Self::AgentAccount(Cow::Borrowed(payload)),
             TransactionType::UnoTransfers(transfers) => {
                 Self::UnoTransfers(Cow::Borrowed(transfers))
             }
@@ -210,6 +213,9 @@ impl From<RPCTransactionType<'_>> for TransactionType {
             }
             RPCTransactionType::EmergencySuspend(payload) => {
                 TransactionType::EmergencySuspend(payload.into_owned())
+            }
+            RPCTransactionType::AgentAccount(payload) => {
+                TransactionType::AgentAccount(payload.into_owned())
             }
             RPCTransactionType::UnoTransfers(transfers) => {
                 TransactionType::UnoTransfers(transfers.into_owned())

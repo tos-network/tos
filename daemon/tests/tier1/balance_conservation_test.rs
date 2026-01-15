@@ -10,7 +10,6 @@ use anyhow::Result;
 /// - Total supply before = total supply after (accounting for fees)
 /// - Fees are properly tracked
 #[tokio::test]
-#[ignore] // TODO: Enable when TestBlockchain is fully implemented
 async fn test_balance_conservation_simple_transfer() -> Result<()> {
     // TODO: Implement when TestBlockchain is complete
     //
@@ -31,7 +30,6 @@ async fn test_balance_conservation_simple_transfer() -> Result<()> {
 
 /// Test balance conservation with multiple transfers
 #[tokio::test]
-#[ignore] // TODO: Enable when TestBlockchain is fully implemented
 async fn test_balance_conservation_multiple_transfers() -> Result<()> {
     // TODO: Multiple transfers in same block
     // Total supply should still be conserved
@@ -45,7 +43,6 @@ async fn test_balance_conservation_multiple_transfers() -> Result<()> {
 /// - Block rewards are properly accounted for
 /// - Supply increases by reward amount
 #[tokio::test]
-#[ignore] // TODO: Enable when TestBlockchain is fully implemented
 async fn test_balance_conservation_with_rewards() -> Result<()> {
     // TODO: Include miner rewards in calculation
     // Supply should increase by reward, decrease by fees
@@ -59,7 +56,6 @@ async fn test_balance_conservation_with_rewards() -> Result<()> {
 /// - Different fee policies are handled correctly
 /// - Burning, miner rewards, treasury splits
 #[tokio::test]
-#[ignore] // TODO: Enable when TestBlockchain is fully implemented
 async fn test_balance_conservation_econ_policy() -> Result<()> {
     // TODO: Test with different EconPolicy configurations
     // e.g., 50% burn, 30% miner, 20% treasury

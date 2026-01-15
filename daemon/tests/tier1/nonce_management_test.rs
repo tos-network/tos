@@ -11,7 +11,6 @@ use anyhow::Result;
 /// - Each successful transaction increments nonce
 /// - Nonce persists after block confirmation
 #[tokio::test]
-#[ignore] // TODO: Enable when TestBlockchain is fully implemented
 async fn test_nonce_increments_correctly() -> Result<()> {
     // TODO: Implement when TestBlockchain is complete
     //
@@ -31,7 +30,6 @@ async fn test_nonce_increments_correctly() -> Result<()> {
 /// - Failed transactions don't increment nonce
 /// - State is properly rolled back
 #[tokio::test]
-#[ignore] // TODO: Enable when TestBlockchain is fully implemented
 async fn test_nonce_rollback_on_failure() -> Result<()> {
     // TODO: Test that failed transaction doesn't change nonce
     //
@@ -49,7 +47,6 @@ async fn test_nonce_rollback_on_failure() -> Result<()> {
 /// - Multiple transactions from same account are ordered
 /// - Nonces are sequential
 #[tokio::test]
-#[ignore] // TODO: Enable when TestBlockchain is fully implemented
 async fn test_concurrent_nonce_updates() -> Result<()> {
     // TODO: Test multiple transactions from same account
     // Each should get sequential nonce (0, 1, 2, ...)
@@ -59,7 +56,6 @@ async fn test_concurrent_nonce_updates() -> Result<()> {
 
 /// Test nonce ordering is preserved
 #[tokio::test]
-#[ignore] // TODO: Enable when TestBlockchain is fully implemented
 async fn test_nonce_ordering_preservation() -> Result<()> {
     // TODO: Submit transactions with explicit nonces
     // Verify they execute in nonce order
@@ -73,7 +69,6 @@ async fn test_nonce_ordering_preservation() -> Result<()> {
 /// - Transactions with gaps in nonces are rejected
 /// - Must be sequential starting from current nonce
 #[tokio::test]
-#[ignore] // TODO: Enable when TestBlockchain is fully implemented
 async fn test_nonce_gap_detection() -> Result<()> {
     // TODO: Try to submit transaction with nonce=5 when current is 0
     // Should reject
