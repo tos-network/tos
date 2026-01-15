@@ -33,6 +33,11 @@ pub async fn verify_agent_account_payload<'a, E, B: BlockchainVerificationState<
                 return Err(VerificationError::AgentAccountAlreadyRegistered);
             }
 
+            // Reject zero owner key (source is the owner)
+            if is_zero_key(source) {
+                return Err(VerificationError::AgentAccountInvalidParameter);
+            }
+
             if is_zero_key(controller) || controller == source {
                 return Err(VerificationError::AgentAccountInvalidController);
             }
@@ -95,6 +100,11 @@ pub async fn verify_agent_account_payload<'a, E, B: BlockchainVerificationState<
                 || &meta.controller == new_controller
             {
                 return Err(VerificationError::AgentAccountInvalidController);
+            }
+            // Clear energy_pool if it was set to the old controller
+            // (energy_pool must be owner or controller per spec Section 2.5)
+            if meta.energy_pool.as_ref() == Some(&meta.controller) {
+                meta.energy_pool = None;
             }
             meta.controller = new_controller.clone();
             state
