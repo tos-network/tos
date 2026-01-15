@@ -2459,7 +2459,8 @@ async fn get_account_history<S: Storage>(
                 | TransactionType::BootstrapCommittee(_)
                 | TransactionType::RegisterCommittee(_)
                 | TransactionType::UpdateCommittee(_)
-                | TransactionType::EmergencySuspend(_) => {
+                | TransactionType::EmergencySuspend(_)
+                | TransactionType::AgentAccount(_) => {
                     // KYC transactions don't affect account history for now
                     // This could be extended to track KYC activities
                 }

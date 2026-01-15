@@ -46,6 +46,22 @@ pub enum VerificationError<T> {
     AnyError(#[from] AnyError),
     #[error("Invalid invoke contract")]
     InvalidInvokeContract,
+    #[error("Agent account already registered")]
+    AgentAccountAlreadyRegistered,
+    #[error("Invalid agent account controller")]
+    AgentAccountInvalidController,
+    #[error("Agent account is frozen")]
+    AgentAccountFrozen,
+    #[error("Agent account policy violation")]
+    AgentAccountPolicyViolation,
+    #[error("Agent session key expired")]
+    AgentAccountSessionKeyExpired,
+    #[error("Agent session key not found")]
+    AgentAccountSessionKeyNotFound,
+    #[error("Agent session key already exists")]
+    AgentAccountSessionKeyExists,
+    #[error("Agent account invalid parameter")]
+    AgentAccountInvalidParameter,
     #[error("overflow during gas calculation")]
     GasOverflow,
     #[error("Deposit decompressed not found")]

@@ -1,3 +1,4 @@
+mod agent_account;
 mod contract;
 mod error;
 mod kyc;
@@ -40,6 +41,7 @@ use crate::{
         MAX_MULTISIG_PARTICIPANTS, MAX_TRANSFER_COUNT,
     },
 };
+use agent_account::verify_agent_account_payload;
 use contract::InvokeContract;
 
 pub use error::*;
@@ -126,6 +128,7 @@ impl Transaction {
                     | TransactionType::RegisterCommittee(_)
                     | TransactionType::UpdateCommittee(_)
                     | TransactionType::EmergencySuspend(_)
+                    | TransactionType::AgentAccount(_)
                     | TransactionType::UnoTransfers(_)
                     | TransactionType::ShieldTransfers(_)
                     | TransactionType::UnshieldTransfers(_)
@@ -653,6 +656,9 @@ impl Transaction {
                 let current_time = state.get_verification_timestamp();
                 kyc::verify_appeal_kyc(payload, current_time)?;
             }
+            TransactionType::AgentAccount(payload) => {
+                verify_agent_account_payload(payload, state).await?;
+            }
             TransactionType::UnoTransfers(transfers) => {
                 // UNO transfers: privacy-preserving transfers with ZKP proofs
                 // Validation of extra data size and destination checks
@@ -964,7 +970,8 @@ impl Transaction {
             | TransactionType::BootstrapCommittee(_)
             | TransactionType::RegisterCommittee(_)
             | TransactionType::UpdateCommittee(_)
-            | TransactionType::EmergencySuspend(_) => {
+            | TransactionType::EmergencySuspend(_)
+            | TransactionType::AgentAccount(_) => {
                 // No asset spending for these types
             }
             TransactionType::BatchReferralReward(payload) => {
@@ -1992,6 +1999,9 @@ impl Transaction {
                 let current_time = state.get_verification_timestamp();
                 kyc::verify_emergency_suspend(payload, current_time)?;
             }
+            TransactionType::AgentAccount(payload) => {
+                verify_agent_account_payload(payload, state).await?;
+            }
             TransactionType::UnoTransfers(transfers) => {
                 // UNO transfers: privacy-preserving transfers with ZKP proofs
                 if transfers.len() > MAX_TRANSFER_COUNT || transfers.is_empty() {
@@ -2372,7 +2382,8 @@ impl Transaction {
             | TransactionType::BootstrapCommittee(_)
             | TransactionType::RegisterCommittee(_)
             | TransactionType::UpdateCommittee(_)
-            | TransactionType::EmergencySuspend(_) => {
+            | TransactionType::EmergencySuspend(_)
+            | TransactionType::AgentAccount(_) => {
                 // KYC transactions are logged at execution time
             }
             TransactionType::UnoTransfers(_)
@@ -2499,7 +2510,8 @@ impl Transaction {
             | TransactionType::BootstrapCommittee(_)
             | TransactionType::RegisterCommittee(_)
             | TransactionType::UpdateCommittee(_)
-            | TransactionType::EmergencySuspend(_) => {
+            | TransactionType::EmergencySuspend(_)
+            | TransactionType::AgentAccount(_) => {
                 // No asset spending for these types
             }
             TransactionType::BatchReferralReward(payload) => {
@@ -2894,7 +2906,8 @@ impl Transaction {
             | TransactionType::BootstrapCommittee(_)
             | TransactionType::RegisterCommittee(_)
             | TransactionType::UpdateCommittee(_)
-            | TransactionType::EmergencySuspend(_) => {
+            | TransactionType::EmergencySuspend(_)
+            | TransactionType::AgentAccount(_) => {
                 // No asset spending for these types
             }
             TransactionType::BatchReferralReward(payload) => {
@@ -3125,6 +3138,9 @@ impl Transaction {
                     .set_multisig_state(&self.source, payload)
                     .await
                     .map_err(VerificationError::State)?;
+            }
+            TransactionType::AgentAccount(_payload) => {
+                // State updates for agent accounts are handled in chain_state apply.
             }
             TransactionType::InvokeContract(payload) => {
                 if self.is_contract_available(state, &payload.contract).await? {
@@ -4661,7 +4677,8 @@ impl Transaction {
             | TransactionType::BootstrapCommittee(_)
             | TransactionType::RegisterCommittee(_)
             | TransactionType::UpdateCommittee(_)
-            | TransactionType::EmergencySuspend(_) => {
+            | TransactionType::EmergencySuspend(_)
+            | TransactionType::AgentAccount(_) => {
                 // No asset spending for these types
             }
             TransactionType::BatchReferralReward(payload) => {

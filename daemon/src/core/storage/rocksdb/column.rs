@@ -54,6 +54,12 @@ pub enum Column {
 
     // {account_key} => {account}
     Account,
+    // Agent account metadata
+    // {account_key} => {AgentAccountMeta}
+    AgentAccountMeta,
+    // Agent session keys
+    // {account_key}{key_id} => {SessionKey}
+    AgentSessionKeys,
     // Column used as a "versioned" as its
     // prefixed with a topoheight to have
     // easier search per topoheight

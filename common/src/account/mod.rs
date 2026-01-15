@@ -1,3 +1,4 @@
+mod agent_account;
 mod balance;
 mod energy;
 mod nonce;
@@ -11,6 +12,7 @@ use std::{
     fmt::{self, Display, Formatter},
 };
 
+pub use agent_account::{AgentAccountMeta, SessionKey};
 pub use balance::{AccountSummary, Balance, BalanceType, VersionedBalance};
 pub use energy::{
     DelegateRecordEntry, DelegatedFreezeRecord, EnergyLease, EnergyResource, FreezeDuration,

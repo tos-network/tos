@@ -28,6 +28,7 @@ pub trait Storage:
     + PrunedTopoheightProvider
     + NonceProvider
     + AccountProvider
+    + AgentAccountProvider
     + ClientProtocolProvider
     + BlockDagProvider
     + MerkleHashProvider
