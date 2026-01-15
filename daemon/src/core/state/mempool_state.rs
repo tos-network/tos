@@ -6,7 +6,7 @@ use std::{
     collections::{hash_map::Entry, HashMap},
 };
 use tos_common::{
-    account::{DelegateRecordEntry, EnergyResource, Nonce},
+    account::{AgentAccountMeta, DelegateRecordEntry, EnergyResource, Nonce, SessionKey},
     block::{BlockVersion, TopoHeight},
     config::{COIN_VALUE, TOS_ASSET},
     crypto::{
@@ -51,6 +51,10 @@ pub struct MempoolState<'a, S: Storage> {
     accounts: HashMap<&'a PublicKey, Account<'a>>,
     // Sender energy resources (used for energy fee validation)
     energy_resources: HashMap<&'a PublicKey, EnergyResource>,
+    // Agent account metadata updates (None = delete)
+    agent_account_meta: HashMap<Cow<'a, PublicKey>, Option<AgentAccountMeta>>,
+    // Agent session key updates (None = delete)
+    agent_session_keys: HashMap<(PublicKey, u64), Option<SessionKey>>,
     // Contract modules
     contracts: HashMap<Hash, Cow<'a, Module>>,
     // The current stable topoheight of the chain
@@ -80,6 +84,8 @@ impl<'a, S: Storage> MempoolState<'a, S> {
             receiver_uno_balances: HashMap::new(),
             accounts: HashMap::new(),
             energy_resources: HashMap::new(),
+            agent_account_meta: HashMap::new(),
+            agent_session_keys: HashMap::new(),
             contracts: HashMap::new(),
             stable_topoheight,
             topoheight,
@@ -770,6 +776,67 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Mempoo
         } else {
             Ok(false)
         }
+    }
+
+    async fn get_agent_account_meta(
+        &mut self,
+        account: &'a CompressedPublicKey,
+    ) -> Result<Option<AgentAccountMeta>, BlockchainError> {
+        if let Some(meta) = self.agent_account_meta.get(account) {
+            return Ok(meta.clone());
+        }
+        self.storage.get_agent_account_meta(account).await
+    }
+
+    async fn set_agent_account_meta(
+        &mut self,
+        account: &'a CompressedPublicKey,
+        meta: &AgentAccountMeta,
+    ) -> Result<(), BlockchainError> {
+        self.agent_account_meta
+            .insert(Cow::Borrowed(account), Some(meta.clone()));
+        Ok(())
+    }
+
+    async fn delete_agent_account_meta(
+        &mut self,
+        account: &'a CompressedPublicKey,
+    ) -> Result<(), BlockchainError> {
+        self.agent_account_meta.insert(Cow::Borrowed(account), None);
+        Ok(())
+    }
+
+    async fn get_session_key(
+        &mut self,
+        account: &'a CompressedPublicKey,
+        key_id: u64,
+    ) -> Result<Option<SessionKey>, BlockchainError> {
+        let key = (account.clone(), key_id);
+        if let Some(session_key) = self.agent_session_keys.get(&key) {
+            return Ok(session_key.clone());
+        }
+        self.storage.get_session_key(account, key_id).await
+    }
+
+    async fn set_session_key(
+        &mut self,
+        account: &'a CompressedPublicKey,
+        session_key: &SessionKey,
+    ) -> Result<(), BlockchainError> {
+        let key = (account.clone(), session_key.key_id);
+        self.agent_session_keys
+            .insert(key, Some(session_key.clone()));
+        Ok(())
+    }
+
+    async fn delete_session_key(
+        &mut self,
+        account: &'a CompressedPublicKey,
+        key_id: u64,
+    ) -> Result<(), BlockchainError> {
+        let key = (account.clone(), key_id);
+        self.agent_session_keys.insert(key, None);
+        Ok(())
     }
 
     /// Get the block version

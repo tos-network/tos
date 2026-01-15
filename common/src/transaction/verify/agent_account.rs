@@ -6,12 +6,206 @@ use crate::{
 
 use super::{state::BlockchainVerificationState, VerificationError};
 
-pub async fn verify_agent_account_payload<'a, E, B: BlockchainVerificationState<'a, E>>(
-    _payload: &'a AgentAccountPayload,
-    _state: &mut B,
+const MAX_ALLOWED_TARGETS: usize = 64;
+const MAX_ALLOWED_ASSETS: usize = 64;
+
+pub async fn verify_agent_account_payload<'a, E, B: BlockchainVerificationState<'a, E> + Send>(
+    payload: &'a AgentAccountPayload,
+    source: &'a PublicKey,
+    state: &mut B,
 ) -> Result<(), VerificationError<E>> {
-    // Skeleton validation hook.
-    // Full checks are defined in AGENT-ACCOUNT-PROTOCOL.md.
+    let current_topoheight = state.get_verification_topoheight();
+    let existing_meta = state
+        .get_agent_account_meta(source)
+        .await
+        .map_err(VerificationError::State)?;
+
+    match payload {
+        AgentAccountPayload::Register {
+            controller,
+            policy_hash,
+            energy_pool,
+            session_key_root,
+        } => {
+            if existing_meta.is_some() {
+                return Err(VerificationError::AgentAccountAlreadyRegistered);
+            }
+
+            if is_zero_key(controller) || controller == source {
+                return Err(VerificationError::AgentAccountInvalidController);
+            }
+
+            if is_zero_hash(policy_hash) {
+                return Err(VerificationError::AgentAccountInvalidParameter);
+            }
+
+            if let Some(energy_pool) = energy_pool.as_ref() {
+                if is_zero_key(energy_pool)
+                    || !state
+                        .account_exists(energy_pool)
+                        .await
+                        .map_err(VerificationError::State)?
+                {
+                    return Err(VerificationError::AgentAccountInvalidParameter);
+                }
+            }
+
+            if let Some(session_key_root) = session_key_root.as_ref() {
+                if is_zero_hash(session_key_root) {
+                    return Err(VerificationError::AgentAccountInvalidParameter);
+                }
+            }
+
+            let meta = AgentAccountMeta {
+                owner: source.clone(),
+                controller: controller.clone(),
+                policy_hash: policy_hash.clone(),
+                status: 0,
+                energy_pool: energy_pool.clone(),
+                session_key_root: session_key_root.clone(),
+            };
+
+            state
+                .set_agent_account_meta(source, &meta)
+                .await
+                .map_err(VerificationError::State)?;
+        }
+        AgentAccountPayload::UpdatePolicy { policy_hash } => {
+            let Some(mut meta) = existing_meta else {
+                return Err(VerificationError::AgentAccountInvalidParameter);
+            };
+            if is_zero_hash(policy_hash) {
+                return Err(VerificationError::AgentAccountInvalidParameter);
+            }
+            meta.policy_hash = policy_hash.clone();
+            state
+                .set_agent_account_meta(source, &meta)
+                .await
+                .map_err(VerificationError::State)?;
+        }
+        AgentAccountPayload::RotateController { new_controller } => {
+            let Some(mut meta) = existing_meta else {
+                return Err(VerificationError::AgentAccountInvalidParameter);
+            };
+            if is_zero_key(new_controller)
+                || new_controller == source
+                || &meta.controller == new_controller
+            {
+                return Err(VerificationError::AgentAccountInvalidController);
+            }
+            meta.controller = new_controller.clone();
+            state
+                .set_agent_account_meta(source, &meta)
+                .await
+                .map_err(VerificationError::State)?;
+        }
+        AgentAccountPayload::SetStatus { status } => {
+            let Some(mut meta) = existing_meta else {
+                return Err(VerificationError::AgentAccountInvalidParameter);
+            };
+            if *status > 1 {
+                return Err(VerificationError::AgentAccountInvalidParameter);
+            }
+            meta.status = *status;
+            state
+                .set_agent_account_meta(source, &meta)
+                .await
+                .map_err(VerificationError::State)?;
+        }
+        AgentAccountPayload::SetEnergyPool { energy_pool } => {
+            let Some(mut meta) = existing_meta else {
+                return Err(VerificationError::AgentAccountInvalidParameter);
+            };
+            if let Some(energy_pool) = energy_pool.as_ref() {
+                if is_zero_key(energy_pool)
+                    || !state
+                        .account_exists(energy_pool)
+                        .await
+                        .map_err(VerificationError::State)?
+                {
+                    return Err(VerificationError::AgentAccountInvalidParameter);
+                }
+            }
+            meta.energy_pool = energy_pool.clone();
+            state
+                .set_agent_account_meta(source, &meta)
+                .await
+                .map_err(VerificationError::State)?;
+        }
+        AgentAccountPayload::SetSessionKeyRoot { session_key_root } => {
+            let Some(mut meta) = existing_meta else {
+                return Err(VerificationError::AgentAccountInvalidParameter);
+            };
+            if let Some(session_key_root) = session_key_root.as_ref() {
+                if is_zero_hash(session_key_root) {
+                    return Err(VerificationError::AgentAccountInvalidParameter);
+                }
+            }
+            meta.session_key_root = session_key_root.clone();
+            state
+                .set_agent_account_meta(source, &meta)
+                .await
+                .map_err(VerificationError::State)?;
+        }
+        AgentAccountPayload::AddSessionKey { key } => {
+            let Some(meta) = existing_meta else {
+                return Err(VerificationError::AgentAccountInvalidParameter);
+            };
+            if meta.session_key_root.is_some() {
+                return Err(VerificationError::AgentAccountInvalidParameter);
+            }
+            if is_zero_key(&key.public_key) {
+                return Err(VerificationError::AgentAccountInvalidParameter);
+            }
+            if key.expiry_topoheight <= current_topoheight {
+                return Err(VerificationError::AgentAccountSessionKeyExpired);
+            }
+            if key.max_value_per_window == 0 {
+                return Err(VerificationError::AgentAccountInvalidParameter);
+            }
+            if key.allowed_targets.len() > MAX_ALLOWED_TARGETS
+                || key.allowed_assets.len() > MAX_ALLOWED_ASSETS
+            {
+                return Err(VerificationError::AgentAccountInvalidParameter);
+            }
+            if key.allowed_targets.iter().any(is_zero_key) {
+                return Err(VerificationError::AgentAccountInvalidParameter);
+            }
+            if key.allowed_assets.iter().any(is_zero_hash) {
+                return Err(VerificationError::AgentAccountInvalidParameter);
+            }
+            if state
+                .get_session_key(source, key.key_id)
+                .await
+                .map_err(VerificationError::State)?
+                .is_some()
+            {
+                return Err(VerificationError::AgentAccountSessionKeyExists);
+            }
+            state
+                .set_session_key(source, key)
+                .await
+                .map_err(VerificationError::State)?;
+        }
+        AgentAccountPayload::RevokeSessionKey { key_id } => {
+            let Some(_meta) = existing_meta else {
+                return Err(VerificationError::AgentAccountInvalidParameter);
+            };
+            if state
+                .get_session_key(source, *key_id)
+                .await
+                .map_err(VerificationError::State)?
+                .is_none()
+            {
+                return Err(VerificationError::AgentAccountSessionKeyNotFound);
+            }
+            state
+                .delete_session_key(source, *key_id)
+                .await
+                .map_err(VerificationError::State)?;
+        }
+    }
+
     Ok(())
 }
 

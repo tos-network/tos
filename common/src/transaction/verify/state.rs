@@ -1,7 +1,7 @@
 use std::{borrow::Cow, collections::HashMap};
 
 use crate::{
-    account::Nonce,
+    account::{AgentAccountMeta, Nonce, SessionKey},
     block::{Block, BlockVersion},
     contract::{
         AssetChanges, ChainState, ContractCache, ContractEventTracker, ContractOutput,
@@ -102,6 +102,54 @@ pub trait BlockchainVerificationState<'a, E> {
         expected: Nonce,
         new_value: Nonce,
     ) -> Result<bool, E>;
+
+    // ===== Agent Account Methods =====
+
+    async fn get_agent_account_meta(
+        &mut self,
+        _account: &'a CompressedPublicKey,
+    ) -> Result<Option<AgentAccountMeta>, E> {
+        Ok(None)
+    }
+
+    async fn set_agent_account_meta(
+        &mut self,
+        _account: &'a CompressedPublicKey,
+        _meta: &AgentAccountMeta,
+    ) -> Result<(), E> {
+        Ok(())
+    }
+
+    async fn delete_agent_account_meta(
+        &mut self,
+        _account: &'a CompressedPublicKey,
+    ) -> Result<(), E> {
+        Ok(())
+    }
+
+    async fn get_session_key(
+        &mut self,
+        _account: &'a CompressedPublicKey,
+        _key_id: u64,
+    ) -> Result<Option<SessionKey>, E> {
+        Ok(None)
+    }
+
+    async fn set_session_key(
+        &mut self,
+        _account: &'a CompressedPublicKey,
+        _session_key: &SessionKey,
+    ) -> Result<(), E> {
+        Ok(())
+    }
+
+    async fn delete_session_key(
+        &mut self,
+        _account: &'a CompressedPublicKey,
+        _key_id: u64,
+    ) -> Result<(), E> {
+        Ok(())
+    }
 
     /// Get the block version in which TX is executed
     fn get_block_version(&self) -> BlockVersion;

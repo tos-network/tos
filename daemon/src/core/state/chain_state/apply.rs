@@ -15,7 +15,7 @@ use std::{
     ops::{Deref, DerefMut},
 };
 use tos_common::{
-    account::{BalanceType, EnergyResource, Nonce, VersionedNonce},
+    account::{AgentAccountMeta, BalanceType, EnergyResource, Nonce, SessionKey, VersionedNonce},
     asset::VersionedAssetData,
     block::{Block, BlockVersion, TopoHeight},
     contract::{
@@ -174,6 +174,52 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError>
         self.inner
             .compare_and_swap_nonce(account, expected, new_value)
             .await
+    }
+
+    async fn get_agent_account_meta(
+        &mut self,
+        account: &'a CompressedPublicKey,
+    ) -> Result<Option<AgentAccountMeta>, BlockchainError> {
+        self.inner.get_agent_account_meta(account).await
+    }
+
+    async fn set_agent_account_meta(
+        &mut self,
+        account: &'a CompressedPublicKey,
+        meta: &AgentAccountMeta,
+    ) -> Result<(), BlockchainError> {
+        self.inner.set_agent_account_meta(account, meta).await
+    }
+
+    async fn delete_agent_account_meta(
+        &mut self,
+        account: &'a CompressedPublicKey,
+    ) -> Result<(), BlockchainError> {
+        self.inner.delete_agent_account_meta(account).await
+    }
+
+    async fn get_session_key(
+        &mut self,
+        account: &'a CompressedPublicKey,
+        key_id: u64,
+    ) -> Result<Option<SessionKey>, BlockchainError> {
+        self.inner.get_session_key(account, key_id).await
+    }
+
+    async fn set_session_key(
+        &mut self,
+        account: &'a CompressedPublicKey,
+        session_key: &SessionKey,
+    ) -> Result<(), BlockchainError> {
+        self.inner.set_session_key(account, session_key).await
+    }
+
+    async fn delete_session_key(
+        &mut self,
+        account: &'a CompressedPublicKey,
+        key_id: u64,
+    ) -> Result<(), BlockchainError> {
+        self.inner.delete_session_key(account, key_id).await
     }
 
     /// Get the block version
@@ -1886,6 +1932,42 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
                     .storage
                     .set_last_uno_balance_to(&account, &asset, self.inner.topoheight, &version)
                     .await?;
+            }
+        }
+
+        // Apply agent account metadata changes
+        for (account, meta) in self.inner.agent_account_meta {
+            match meta {
+                Some(meta) => {
+                    self.inner
+                        .storage
+                        .set_agent_account_meta(&account, &meta)
+                        .await?;
+                }
+                None => {
+                    self.inner
+                        .storage
+                        .delete_agent_account_meta(&account)
+                        .await?;
+                }
+            }
+        }
+
+        // Apply agent session key changes
+        for ((account, key_id), session_key) in self.inner.agent_session_keys {
+            match session_key {
+                Some(session_key) => {
+                    self.inner
+                        .storage
+                        .set_session_key(&account, &session_key)
+                        .await?;
+                }
+                None => {
+                    self.inner
+                        .storage
+                        .delete_session_key(&account, key_id)
+                        .await?;
+                }
             }
         }
 

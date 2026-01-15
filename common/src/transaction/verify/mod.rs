@@ -505,7 +505,7 @@ impl Transaction {
         Ok(())
     }
 
-    async fn verify_dynamic_parts<'a, E, B: BlockchainVerificationState<'a, E>>(
+    async fn verify_dynamic_parts<'a, E, B: BlockchainVerificationState<'a, E> + Send>(
         &'a self,
         tx_hash: &'a Hash,
         state: &mut B,
@@ -657,7 +657,7 @@ impl Transaction {
                 kyc::verify_appeal_kyc(payload, current_time)?;
             }
             TransactionType::AgentAccount(payload) => {
-                verify_agent_account_payload(payload, state).await?;
+                verify_agent_account_payload(payload, &self.source, state).await?;
             }
             TransactionType::UnoTransfers(transfers) => {
                 // UNO transfers: privacy-preserving transfers with ZKP proofs
@@ -1701,7 +1701,7 @@ impl Transaction {
 
     // This method no longer needs to return transcript or commitments
     // Signature kept for compatibility during refactoring
-    async fn pre_verify<'a, E, B: BlockchainVerificationState<'a, E>>(
+    async fn pre_verify<'a, E, B: BlockchainVerificationState<'a, E> + Send>(
         &'a self,
         tx_hash: &'a Hash,
         state: &mut B,
@@ -2000,7 +2000,7 @@ impl Transaction {
                 kyc::verify_emergency_suspend(payload, current_time)?;
             }
             TransactionType::AgentAccount(payload) => {
-                verify_agent_account_payload(payload, state).await?;
+                verify_agent_account_payload(payload, &self.source, state).await?;
             }
             TransactionType::UnoTransfers(transfers) => {
                 // UNO transfers: privacy-preserving transfers with ZKP proofs
@@ -2594,7 +2594,7 @@ impl Transaction {
     ) -> Result<(), VerificationError<E>>
     where
         H: AsRef<Hash> + 'a,
-        B: BlockchainVerificationState<'a, E>,
+        B: BlockchainVerificationState<'a, E> + Send,
         C: ZKPCache<E>,
     {
         trace!("Verifying batch of transactions");
@@ -2686,7 +2686,7 @@ impl Transaction {
         cache: &C,
     ) -> Result<(), VerificationError<E>>
     where
-        B: BlockchainVerificationState<'a, E>,
+        B: BlockchainVerificationState<'a, E> + Send,
         C: ZKPCache<E>,
     {
         let dynamic_parts_only = cache
