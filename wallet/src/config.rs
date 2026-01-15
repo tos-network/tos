@@ -404,6 +404,56 @@ CLI example (agent_add_session_key):
     --wallet-path my_wallet --password mypass123 \
     --exec "agent_add_session_key key_id=1 public_key=tst1... expiry_topoheight=100000 max_value_per_window=1000000 allowed_targets=tst1...,tst1... allowed_assets=0000000000000000000000000000000000000000000000000000000000000001"
 
+CLI example (agent_register):
+./tos_wallet --network devnet --daemon-address http://127.0.0.1:8080 \
+    --wallet-path my_wallet --password mypass123 \
+    --exec "agent_register controller=tst1... policy_hash=0000000000000000000000000000000000000000000000000000000000000001 energy_pool=none session_key_root=none"
+
+CLI example (agent_update_policy):
+./tos_wallet --network devnet --daemon-address http://127.0.0.1:8080 \
+    --wallet-path my_wallet --password mypass123 \
+    --exec "agent_update_policy policy_hash=0000000000000000000000000000000000000000000000000000000000000002"
+
+CLI example (agent_rotate_controller):
+./tos_wallet --network devnet --daemon-address http://127.0.0.1:8080 \
+    --wallet-path my_wallet --password mypass123 \
+    --exec "agent_rotate_controller controller=tst1..."
+
+CLI example (agent_set_status):
+./tos_wallet --network devnet --daemon-address http://127.0.0.1:8080 \
+    --wallet-path my_wallet --password mypass123 \
+    --exec "agent_set_status status=0"
+
+CLI example (agent_set_energy_pool):
+./tos_wallet --network devnet --daemon-address http://127.0.0.1:8080 \
+    --wallet-path my_wallet --password mypass123 \
+    --exec "agent_set_energy_pool energy_pool=tst1..."
+
+CLI example (agent_set_session_key_root):
+./tos_wallet --network devnet --daemon-address http://127.0.0.1:8080 \
+    --wallet-path my_wallet --password mypass123 \
+    --exec "agent_set_session_key_root session_key_root=0000000000000000000000000000000000000000000000000000000000000003"
+
+CLI example (agent_revoke_session_key):
+./tos_wallet --network devnet --daemon-address http://127.0.0.1:8080 \
+    --wallet-path my_wallet --password mypass123 \
+    --exec "agent_revoke_session_key key_id=1"
+
+CLI example (agent_show):
+./tos_wallet --network devnet --daemon-address http://127.0.0.1:8080 \
+    --wallet-path my_wallet --password mypass123 \
+    --exec "agent_show"
+
+CLI example (agent_session_key):
+./tos_wallet --network devnet --daemon-address http://127.0.0.1:8080 \
+    --wallet-path my_wallet --password mypass123 \
+    --exec "agent_session_key key_id=1"
+
+CLI example (agent_session_keys):
+./tos_wallet --network devnet --daemon-address http://127.0.0.1:8080 \
+    --wallet-path my_wallet --password mypass123 \
+    --exec "agent_session_keys"
+
 ═══════════════════════════════════════════════════════════════════════════════
 
 For more help on specific commands, use: --exec "help <command>"
