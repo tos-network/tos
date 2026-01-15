@@ -9,6 +9,7 @@ use super::{state::BlockchainVerificationState, VerificationError};
 
 const MAX_ALLOWED_TARGETS: usize = 64;
 const MAX_ALLOWED_ASSETS: usize = 64;
+const MAX_SESSION_KEYS_PER_ACCOUNT: usize = 1024;
 
 pub async fn verify_agent_account_payload<'a, E, B: BlockchainVerificationState<'a, E> + Send>(
     payload: &'a AgentAccountPayload,
@@ -46,6 +47,7 @@ pub async fn verify_agent_account_payload<'a, E, B: BlockchainVerificationState<
                         .account_exists(energy_pool)
                         .await
                         .map_err(VerificationError::State)?
+                    || (energy_pool != source && energy_pool != controller)
                 {
                     return Err(VerificationError::AgentAccountInvalidParameter);
                 }
@@ -123,6 +125,7 @@ pub async fn verify_agent_account_payload<'a, E, B: BlockchainVerificationState<
                         .account_exists(energy_pool)
                         .await
                         .map_err(VerificationError::State)?
+                    || (energy_pool != source && energy_pool != &meta.controller)
                 {
                     return Err(VerificationError::AgentAccountInvalidParameter);
                 }
@@ -141,11 +144,13 @@ pub async fn verify_agent_account_payload<'a, E, B: BlockchainVerificationState<
                 if is_zero_hash(session_key_root) {
                     return Err(VerificationError::AgentAccountInvalidParameter);
                 }
-                if !state
+                let existing = state
                     .get_session_keys_for_account(source)
                     .await
-                    .map_err(VerificationError::State)?
-                    .is_empty()
+                    .map_err(VerificationError::State)?;
+                if existing
+                    .iter()
+                    .any(|key| key.expiry_topoheight > current_topoheight)
                 {
                     return Err(VerificationError::AgentAccountInvalidParameter);
                 }
@@ -162,6 +167,23 @@ pub async fn verify_agent_account_payload<'a, E, B: BlockchainVerificationState<
             };
             if meta.session_key_root.is_some() {
                 return Err(VerificationError::AgentAccountInvalidParameter);
+            }
+            let existing = state
+                .get_session_keys_for_account(source)
+                .await
+                .map_err(VerificationError::State)?;
+            let active_keys = existing
+                .iter()
+                .filter(|key| key.expiry_topoheight > current_topoheight)
+                .count();
+            if active_keys >= MAX_SESSION_KEYS_PER_ACCOUNT {
+                return Err(VerificationError::AgentAccountInvalidParameter);
+            }
+            if existing
+                .iter()
+                .any(|existing_key| existing_key.public_key == key.public_key)
+            {
+                return Err(VerificationError::AgentAccountSessionKeyExists);
             }
             if is_zero_key(&key.public_key) {
                 return Err(VerificationError::AgentAccountInvalidParameter);

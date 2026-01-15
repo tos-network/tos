@@ -219,11 +219,10 @@ async fn test_agent_account_admin_requires_owner_signature() {
 async fn test_agent_account_energy_pool_pays_fee() {
     let owner = KeyPair::new();
     let controller = KeyPair::new();
-    let energy_pool = KeyPair::new();
     let recipient = KeyPair::new();
 
     let owner_pub = owner.get_public_key().compress();
-    let energy_pool_pub = energy_pool.get_public_key().compress();
+    let controller_pub = controller.get_public_key().compress();
 
     let mut verify_state = ChainState::new();
     verify_state.accounts.insert(
@@ -234,7 +233,7 @@ async fn test_agent_account_energy_pool_pays_fee() {
         },
     );
     verify_state.accounts.insert(
-        energy_pool_pub.clone(),
+        controller_pub.clone(),
         AccountChainState {
             balances: HashMap::from([(TOS_ASSET, 10)]),
             nonce: 0,
@@ -244,10 +243,10 @@ async fn test_agent_account_energy_pool_pays_fee() {
         owner_pub.clone(),
         AgentAccountMeta {
             owner: owner_pub.clone(),
-            controller: controller.get_public_key().compress(),
+            controller: controller_pub.clone(),
             policy_hash: Hash::new([1u8; 32]),
             status: 0,
-            energy_pool: Some(energy_pool_pub.clone()),
+            energy_pool: Some(controller_pub.clone()),
             session_key_root: None,
         },
     );
@@ -288,7 +287,7 @@ async fn test_agent_account_energy_pool_pays_fee() {
         .unwrap_or(0);
     let energy_pool_balance = verify_state
         .accounts
-        .get(&energy_pool_pub)
+        .get(&controller_pub)
         .and_then(|account| account.balances.get(&TOS_ASSET))
         .copied()
         .unwrap_or(0);

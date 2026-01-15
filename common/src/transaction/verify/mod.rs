@@ -487,7 +487,7 @@ impl Transaction {
 
     async fn enforce_agent_rules<'a, E, B: BlockchainVerificationState<'a, E> + Send>(
         &'a self,
-        _state: &mut B,
+        state: &mut B,
         auth: &AgentAuthContext,
     ) -> Result<(), VerificationError<E>> {
         let is_frozen = auth.meta.status == 1;
@@ -506,7 +506,36 @@ impl Transaction {
                 return Err(VerificationError::AgentAccountPolicyViolation);
             }
 
-            let policy_view = self.collect_agent_policy_view()?;
+            let mut policy_view = self.collect_agent_policy_view()?;
+
+            if !self.get_fee_type().is_energy() && self.fee > 0 {
+                let mut fee_charged_to_source = true;
+                if let Some(payer) = auth.meta.energy_pool.as_ref() {
+                    if payer != &self.source {
+                        let payer_balance = state
+                            .get_sender_balance(
+                                Cow::Owned(payer.clone()),
+                                Cow::Borrowed(&TOS_ASSET),
+                                &self.reference,
+                            )
+                            .await
+                            .map_err(VerificationError::State)?;
+                        if *payer_balance >= self.fee {
+                            fee_charged_to_source = false;
+                        }
+                    }
+                }
+
+                if fee_charged_to_source {
+                    if !policy_view.assets.contains(&TOS_ASSET) {
+                        policy_view.assets.push(TOS_ASSET);
+                    }
+                    policy_view.total_spend = policy_view
+                        .total_spend
+                        .checked_add(self.fee)
+                        .ok_or(VerificationError::Overflow)?;
+                }
+            }
 
             if policy_view.has_hidden_amounts && session_key.max_value_per_window > 0 {
                 return Err(VerificationError::AgentAccountPolicyViolation);

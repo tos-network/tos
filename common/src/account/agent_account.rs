@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 pub struct AgentAccountMeta {
     pub owner: PublicKey,
     pub controller: PublicKey,
+    // Off-chain policy reference; consensus only enforces session-key constraints.
     pub policy_hash: Hash,
     pub status: u8,
     pub energy_pool: Option<PublicKey>,
@@ -50,6 +51,7 @@ pub struct SessionKey {
     pub key_id: u64,
     pub public_key: PublicKey,
     pub expiry_topoheight: u64,
+    // Per-transaction spending cap for session key enforcement.
     pub max_value_per_window: u64,
     pub allowed_targets: Vec<PublicKey>,
     pub allowed_assets: Vec<Hash>,

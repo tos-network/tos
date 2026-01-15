@@ -5551,9 +5551,18 @@ async fn agent_register(
     let energy_pool = parse_optional_address(get_optional_arg(&mut args, "energy_pool")?)?
         .map(|addr| addr.to_public_key());
     let session_key_root = parse_optional_hash(get_optional_arg(&mut args, "session_key_root")?)?;
+    let owner_pub = wallet.get_public_key().clone();
+    let controller_pub = controller.to_public_key();
+
+    if let Some(pool) = energy_pool.as_ref() {
+        if pool != &owner_pub && pool != &controller_pub {
+            manager.error("energy_pool must be owner or controller");
+            return Ok(());
+        }
+    }
 
     let payload = AgentAccountPayload::Register {
-        controller: controller.to_public_key(),
+        controller: controller_pub,
         policy_hash,
         energy_pool,
         session_key_root,
@@ -5674,6 +5683,33 @@ async fn agent_set_energy_pool(
 
     let energy_pool = parse_optional_address(get_optional_arg(&mut args, "energy_pool")?)?
         .map(|addr| addr.to_public_key());
+    if let Some(pool) = energy_pool.as_ref() {
+        let address = wallet.get_address();
+        let network_handler = wallet.get_network_handler().lock().await;
+        let handler = network_handler.as_ref().ok_or_else(|| {
+            CommandError::InvalidArgument("Wallet not connected to daemon".to_string())
+        })?;
+        let api = handler.get_api();
+        let meta = api
+            .get_agent_account(&address)
+            .await
+            .map_err(|e| {
+                CommandError::InvalidArgument(format!("Failed to get agent account: {e}"))
+            })?
+            .meta;
+
+        let Some(meta) = meta else {
+            manager.error("Agent account not registered");
+            return Ok(());
+        };
+
+        let owner_pub = meta.owner.get_public_key().clone();
+        let controller_pub = meta.controller.get_public_key().clone();
+        if pool != &owner_pub && pool != &controller_pub {
+            manager.error("energy_pool must be owner or controller");
+            return Ok(());
+        }
+    }
 
     let payload = AgentAccountPayload::SetEnergyPool { energy_pool };
     let tx_type = TransactionTypeBuilder::AgentAccount(payload);

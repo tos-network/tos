@@ -286,11 +286,11 @@ Agent Account:
   agent_session_key <key_id> [address]   - Show a session key by key ID
   agent_session_keys [address]           - List session keys
   agent_register <controller> <policy_hash> [energy_pool] [session_key_root]
-                                        - Register agent account
+                                        - Register agent account (energy_pool must be owner/controller)
   agent_update_policy <policy_hash>      - Update policy hash
   agent_rotate_controller <controller>   - Rotate controller address
   agent_set_status <status>              - Set status (0=active,1=frozen)
-  agent_set_energy_pool [energy_pool]    - Set energy pool (use 'none' to clear)
+  agent_set_energy_pool [energy_pool]    - Set energy pool (owner/controller, use 'none' to clear)
   agent_set_session_key_root [root]      - Set session key root (use 'none' to clear)
   agent_add_session_key <key_id> <public_key> <expiry_topoheight> <max_value_per_window>
                                         [allowed_targets] [allowed_assets]
@@ -425,6 +425,7 @@ CLI example (agent_set_status):
     --exec "agent_set_status status=0"
 
 CLI example (agent_set_energy_pool):
+  # energy_pool must be owner/controller
 ./tos_wallet --network devnet --daemon-address http://127.0.0.1:8080 \
     --wallet-path my_wallet --password mypass123 \
     --exec "agent_set_energy_pool energy_pool=tst1..."
