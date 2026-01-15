@@ -1163,6 +1163,16 @@ pub struct GetAgentSessionKeyResult {
 }
 
 #[derive(Serialize, Deserialize)]
+pub struct GetAgentSessionKeysParams<'a> {
+    pub address: Cow<'a, Address>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct GetAgentSessionKeysResult {
+    pub keys: Vec<AgentSessionKeyRpc>,
+}
+
+#[derive(Serialize, Deserialize)]
 pub struct GetContractOutputsParams<'a> {
     pub transaction: Cow<'a, Hash>,
 }

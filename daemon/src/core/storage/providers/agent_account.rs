@@ -40,4 +40,9 @@ pub trait AgentAccountProvider {
         account: &PublicKey,
         key_id: u64,
     ) -> Result<(), BlockchainError>;
+
+    async fn get_session_keys_for_account(
+        &self,
+        account: &PublicKey,
+    ) -> Result<Vec<SessionKey>, BlockchainError>;
 }

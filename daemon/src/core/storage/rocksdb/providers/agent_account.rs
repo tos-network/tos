@@ -1,12 +1,13 @@
 use crate::core::{
     error::BlockchainError,
     storage::{
-        rocksdb::{Column, RocksStorage},
+        rocksdb::{Column, IteratorMode, RocksStorage},
         AgentAccountProvider, NetworkProvider,
     },
 };
 use async_trait::async_trait;
 use log::trace;
+use rocksdb::Direction;
 use tos_common::{
     account::{AgentAccountMeta, SessionKey},
     crypto::PublicKey,
@@ -107,5 +108,31 @@ impl AgentAccountProvider for RocksStorage {
         }
         let key = session_key_storage_key(account, key_id);
         self.remove_from_disk(Column::AgentSessionKeys, &key)
+    }
+
+    async fn get_session_keys_for_account(
+        &self,
+        account: &PublicKey,
+    ) -> Result<Vec<SessionKey>, BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "get agent session keys for {}",
+                account.as_address(self.is_mainnet())
+            );
+        }
+        let prefix = account.as_bytes().to_vec();
+        let iter = self.iter::<Vec<u8>, SessionKey>(
+            Column::AgentSessionKeys,
+            IteratorMode::WithPrefix(&prefix, Direction::Forward),
+        )?;
+        let mut keys = Vec::new();
+        for result in iter {
+            let (key, value) = result?;
+            if !key.starts_with(&prefix) {
+                break;
+            }
+            keys.push(value);
+        }
+        Ok(keys)
     }
 }

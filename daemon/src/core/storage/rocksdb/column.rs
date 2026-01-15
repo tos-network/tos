@@ -319,6 +319,8 @@ impl Column {
             // Child committees: prefix by parent committee ID (32 bytes)
             ChildCommittees => Some(32),
 
+            // Agent session keys: prefix by account public key (32 bytes)
+            AgentSessionKeys => Some(32),
             // TNS ephemeral messages: prefix by recipient name hash (32 bytes)
             TnsEphemeralMessages => Some(32),
 

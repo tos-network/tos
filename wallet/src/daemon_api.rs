@@ -587,6 +587,23 @@ impl DaemonAPI {
         Ok(key)
     }
 
+    pub async fn get_agent_session_keys(
+        &self,
+        address: &Address,
+    ) -> Result<GetAgentSessionKeysResult> {
+        trace!("get_agent_session_keys");
+        let keys = self
+            .client
+            .call_with(
+                "get_agent_session_keys",
+                &GetAgentSessionKeysParams {
+                    address: Cow::Borrowed(address),
+                },
+            )
+            .await?;
+        Ok(keys)
+    }
+
     /// Get account history from daemon
     pub async fn get_account_history(
         &self,

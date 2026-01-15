@@ -1249,6 +1249,16 @@ async fn setup_wallet_command_manager(
         )],
         CommandHandler::Async(async_handler!(agent_session_key)),
     ))?;
+    command_manager.add_command(Command::with_optional_arguments(
+        "agent_session_keys",
+        "List agent session keys",
+        vec![Arg::new(
+            "address",
+            ArgType::String,
+            "Agent account address (optional)",
+        )],
+        CommandHandler::Async(async_handler!(agent_session_keys)),
+    ))?;
     command_manager.add_command(Command::with_arguments(
         "agent_register",
         "Register agent account (owner is wallet address)",
@@ -5472,6 +5482,55 @@ async fn agent_session_key(
             manager.message(format!("  Allowed Assets: {}", key.allowed_assets.len()));
         }
         None => manager.message("Session key not found".to_string()),
+    }
+
+    Ok(())
+}
+
+async fn agent_session_keys(
+    manager: &CommandManager,
+    mut args: ArgumentManager,
+) -> Result<(), CommandError> {
+    let context = manager.get_context().lock()?;
+    let wallet: &Arc<Wallet> = context.get()?;
+
+    let address = if let Some(address_str) = get_optional_arg(&mut args, "address")? {
+        Address::from_string(&address_str)
+            .context("Invalid address")
+            .map_err(CommandError::Any)?
+    } else {
+        wallet.get_address()
+    };
+
+    let network_handler = wallet.get_network_handler().lock().await;
+    let handler = network_handler.as_ref().ok_or_else(|| {
+        CommandError::InvalidArgument("Wallet not connected to daemon".to_string())
+    })?;
+
+    let api = handler.get_api();
+    let result = api.get_agent_session_keys(&address).await.map_err(|e| {
+        CommandError::InvalidArgument(format!("Failed to get agent session keys: {e}"))
+    })?;
+
+    if result.keys.is_empty() {
+        manager.message("No session keys found".to_string());
+        return Ok(());
+    }
+
+    manager.message(format!("Session Keys: {}", result.keys.len()));
+    for key in result.keys {
+        manager.message(format!("  - Key ID: {}", key.key_id));
+        manager.message(format!("    Public Key: {}", key.public_key));
+        manager.message(format!("    Expiry Topoheight: {}", key.expiry_topoheight));
+        manager.message(format!(
+            "    Max Value Per Window: {}",
+            key.max_value_per_window
+        ));
+        manager.message(format!(
+            "    Allowed Targets: {}",
+            key.allowed_targets.len()
+        ));
+        manager.message(format!("    Allowed Assets: {}", key.allowed_assets.len()));
     }
 
     Ok(())

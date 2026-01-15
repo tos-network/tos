@@ -284,6 +284,7 @@ Multisig (2-of-N threshold signatures):
 Agent Account:
   agent_show [address]                   - Show agent account metadata
   agent_session_key <key_id> [address]   - Show a session key by key ID
+  agent_session_keys [address]           - List session keys
   agent_register <controller> <policy_hash> [energy_pool] [session_key_root]
                                         - Register agent account
   agent_update_policy <policy_hash>      - Update policy hash
@@ -382,6 +383,21 @@ Create a JSON file (transfer.json):
 Execute:
 ./tos_wallet --network devnet --daemon-address http://127.0.0.1:8080 \
     --wallet-path my_wallet --password mypass123 --json-file transfer.json
+
+Create a JSON file (agent_register.json):
+{
+  "command": "agent_register",
+  "params": {
+    "controller": "tst1yp0hc5z0csf2jk2ze9tjjxkjg8gawt2upltksyegffmudm29z38qqrkvqzk",
+    "policy_hash": "0000000000000000000000000000000000000000000000000000000000000001",
+    "energy_pool": "none",
+    "session_key_root": "none"
+  }
+}
+
+Execute:
+./tos_wallet --network devnet --daemon-address http://127.0.0.1:8080 \
+    --wallet-path my_wallet --password mypass123 --json-file agent_register.json
 
 ═══════════════════════════════════════════════════════════════════════════════
 

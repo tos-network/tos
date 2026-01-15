@@ -764,6 +764,10 @@ pub fn register_methods<S: Storage>(
         "get_agent_session_key",
         async_handler!(get_agent_session_key::<S>),
     );
+    handler.register_method(
+        "get_agent_session_keys",
+        async_handler!(get_agent_session_keys::<S>),
+    );
 
     // Contracts
     handler.register_method(
@@ -3049,6 +3053,38 @@ async fn get_agent_session_key<S: Storage>(
     });
 
     Ok(json!(GetAgentSessionKeyResult { key }))
+}
+
+async fn get_agent_session_keys<S: Storage>(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    let params: GetAgentSessionKeysParams = parse_params(body)?;
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let storage = blockchain.get_storage().read().await;
+    let keys = storage
+        .get_session_keys_for_account(&params.address.get_public_key())
+        .await
+        .context("Error while retrieving agent session keys")?;
+
+    let mainnet = storage.is_mainnet();
+    let keys = keys
+        .into_iter()
+        .map(|key| AgentSessionKeyRpc {
+            key_id: key.key_id,
+            public_key: key.public_key.to_address(mainnet),
+            expiry_topoheight: key.expiry_topoheight,
+            max_value_per_window: key.max_value_per_window,
+            allowed_targets: key
+                .allowed_targets
+                .into_iter()
+                .map(|target| target.to_address(mainnet))
+                .collect(),
+            allowed_assets: key.allowed_assets,
+        })
+        .collect();
+
+    Ok(json!(GetAgentSessionKeysResult { keys }))
 }
 
 async fn get_contract_outputs<S: Storage>(
