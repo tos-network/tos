@@ -387,8 +387,28 @@ impl Transaction {
                     add_spend(transfer.get_amount())?;
                 }
             }
+            TransactionType::Energy(payload) => {
+                // Energy operations involve TOS_ASSET
+                push_asset(&TOS_ASSET);
+
+                match payload {
+                    EnergyPayload::FreezeTos { amount, .. } => {
+                        // Self-freeze: spends TOS from account balance
+                        add_spend(*amount)?;
+                    }
+                    EnergyPayload::FreezeTosDelegate { delegatees, .. } => {
+                        // Delegation: spends TOS and targets delegatees
+                        for entry in delegatees {
+                            push_target(&entry.delegatee);
+                            add_spend(entry.amount)?;
+                        }
+                    }
+                    EnergyPayload::UnfreezeTos { .. } | EnergyPayload::WithdrawUnfrozen => {
+                        // Unfreeze/withdraw: returns TOS to account, no spend
+                    }
+                }
+            }
             TransactionType::MultiSig(_)
-            | TransactionType::Energy(_)
             | TransactionType::BindReferrer(_)
             | TransactionType::BatchReferralReward(_)
             | TransactionType::SetKyc(_)
