@@ -7261,7 +7261,10 @@ async fn read_message(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{
+        unfreeze_tos_delegate_args, ArgumentManager, Command, CommandError, CommandHandler,
+        CommandManager, Prompt, PromptConfig,
+    };
     use std::fs;
     use tos_common::prompt::{default_logs_datetime_format, LogLevel, ShareablePrompt};
 
@@ -7291,7 +7294,7 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test]
+    #[::tokio::test]
     async fn unfreeze_tos_delegate_parses_optional_args() {
         let prompt = build_test_prompt().expect("prompt init");
         let manager = CommandManager::new_with_batch_mode(prompt, true);

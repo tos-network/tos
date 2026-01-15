@@ -62,3 +62,8 @@ tokio-multi-thread = ["tos_common/tokio-multi-thread"]
 
 [lib]
 crate-type = ["cdylib", "rlib"]
+
+[dev-dependencies]
+tempfile = "3.8"
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tos_daemon = { path = "../daemon" }

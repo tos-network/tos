@@ -11,6 +11,7 @@ use rocksdb::Direction;
 use tos_common::{
     account::{AgentAccountMeta, SessionKey},
     crypto::PublicKey,
+    serializer::RawBytes,
 };
 
 fn session_key_storage_key(account: &PublicKey, key_id: u64) -> [u8; 40] {
@@ -121,14 +122,14 @@ impl AgentAccountProvider for RocksStorage {
             );
         }
         let prefix = account.as_bytes().to_vec();
-        let iter = self.iter::<Vec<u8>, SessionKey>(
+        let iter = self.iter::<RawBytes, SessionKey>(
             Column::AgentSessionKeys,
             IteratorMode::WithPrefix(&prefix, Direction::Forward),
         )?;
         let mut keys = Vec::new();
         for result in iter {
             let (key, value) = result?;
-            if !key.starts_with(&prefix) {
+            if !key.as_ref().starts_with(&prefix) {
                 break;
             }
             keys.push(value);

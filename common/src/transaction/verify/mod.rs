@@ -1,4 +1,4 @@
-pub(crate) mod agent_account;
+pub mod agent_account;
 mod contract;
 mod error;
 mod kyc;

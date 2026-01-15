@@ -149,6 +149,152 @@ async fn test_agent_account_rejects_expired_session_key() {
 }
 
 #[tokio::test]
+async fn test_agent_account_register_rejects_existing_meta() {
+    let mut state = ChainState::new();
+    let source = KeyPair::new().get_public_key().compress();
+    let controller = KeyPair::new().get_public_key().compress();
+
+    let payload = crate::transaction::AgentAccountPayload::Register {
+        controller,
+        policy_hash: Hash::new([4u8; 32]),
+        energy_pool: None,
+        session_key_root: None,
+    };
+    crate::transaction::verify::agent_account::verify_agent_account_payload(
+        &payload, &source, &mut state,
+    )
+    .await
+    .expect("register agent account");
+
+    let err = crate::transaction::verify::agent_account::verify_agent_account_payload(
+        &payload, &source, &mut state,
+    )
+    .await
+    .expect_err("duplicate register should fail");
+
+    assert!(matches!(
+        err,
+        crate::transaction::verify::VerificationError::AgentAccountAlreadyRegistered
+    ));
+}
+
+#[tokio::test]
+async fn test_agent_account_rejects_invalid_session_key_limits() {
+    let mut state = ChainState::new();
+    let source = KeyPair::new().get_public_key().compress();
+    let controller = KeyPair::new().get_public_key().compress();
+
+    let payload = crate::transaction::AgentAccountPayload::Register {
+        controller,
+        policy_hash: Hash::new([5u8; 32]),
+        energy_pool: None,
+        session_key_root: None,
+    };
+    crate::transaction::verify::agent_account::verify_agent_account_payload(
+        &payload, &source, &mut state,
+    )
+    .await
+    .expect("register agent account");
+
+    let session_key = SessionKey {
+        key_id: 10,
+        public_key: KeyPair::new().get_public_key().compress(),
+        expiry_topoheight: state.topoheight + 10,
+        max_value_per_window: 0,
+        allowed_targets: vec![],
+        allowed_assets: vec![TOS_ASSET],
+    };
+    let payload = crate::transaction::AgentAccountPayload::AddSessionKey { key: session_key };
+    let err = crate::transaction::verify::agent_account::verify_agent_account_payload(
+        &payload, &source, &mut state,
+    )
+    .await
+    .expect_err("max_value_per_window=0 should fail");
+    assert!(matches!(
+        err,
+        crate::transaction::verify::VerificationError::AgentAccountInvalidParameter
+    ));
+
+    let mut targets = Vec::new();
+    for _ in 0..65 {
+        targets.push(KeyPair::new().get_public_key().compress());
+    }
+    let session_key = SessionKey {
+        key_id: 11,
+        public_key: KeyPair::new().get_public_key().compress(),
+        expiry_topoheight: state.topoheight + 10,
+        max_value_per_window: 1,
+        allowed_targets: targets,
+        allowed_assets: vec![TOS_ASSET],
+    };
+    let payload = crate::transaction::AgentAccountPayload::AddSessionKey { key: session_key };
+    let err = crate::transaction::verify::agent_account::verify_agent_account_payload(
+        &payload, &source, &mut state,
+    )
+    .await
+    .expect_err("allowed_targets over limit should fail");
+    assert!(matches!(
+        err,
+        crate::transaction::verify::VerificationError::AgentAccountInvalidParameter
+    ));
+
+    let mut assets = Vec::new();
+    for i in 0..65u8 {
+        assets.push(Hash::new([i; 32]));
+    }
+    let session_key = SessionKey {
+        key_id: 12,
+        public_key: KeyPair::new().get_public_key().compress(),
+        expiry_topoheight: state.topoheight + 10,
+        max_value_per_window: 1,
+        allowed_targets: vec![],
+        allowed_assets: assets,
+    };
+    let payload = crate::transaction::AgentAccountPayload::AddSessionKey { key: session_key };
+    let err = crate::transaction::verify::agent_account::verify_agent_account_payload(
+        &payload, &source, &mut state,
+    )
+    .await
+    .expect_err("allowed_assets over limit should fail");
+    assert!(matches!(
+        err,
+        crate::transaction::verify::VerificationError::AgentAccountInvalidParameter
+    ));
+}
+
+#[tokio::test]
+async fn test_agent_account_register_rejects_invalid_energy_pool() {
+    let mut state = ChainState::new();
+    let owner = KeyPair::new().get_public_key().compress();
+    let controller = KeyPair::new().get_public_key().compress();
+    let energy_pool = KeyPair::new().get_public_key().compress();
+
+    state.accounts.insert(
+        energy_pool.clone(),
+        AccountChainState {
+            balances: HashMap::new(),
+            nonce: 0,
+        },
+    );
+
+    let payload = crate::transaction::AgentAccountPayload::Register {
+        controller,
+        policy_hash: Hash::new([6u8; 32]),
+        energy_pool: Some(energy_pool),
+        session_key_root: None,
+    };
+    let err = crate::transaction::verify::agent_account::verify_agent_account_payload(
+        &payload, &owner, &mut state,
+    )
+    .await
+    .expect_err("energy_pool not owner/controller should fail");
+    assert!(matches!(
+        err,
+        crate::transaction::verify::VerificationError::AgentAccountInvalidParameter
+    ));
+}
+
+#[tokio::test]
 async fn test_agent_account_admin_requires_owner_signature() {
     let owner = KeyPair::new();
     let controller = KeyPair::new();
@@ -191,6 +337,70 @@ async fn test_agent_account_admin_requires_owner_signature() {
         policy_hash: Hash::new([2u8; 32]),
     });
 
+    let builder = TransactionBuilder::new(
+        TxVersion::T0,
+        0,
+        owner_pub,
+        None,
+        data,
+        FeeBuilder::Value(0),
+    );
+    let unsigned = builder
+        .build_unsigned(&mut builder_state, &owner)
+        .expect("build unsigned");
+    let tx = unsigned.finalize(&controller);
+    let tx_hash = tx.hash();
+
+    let result = Arc::new(tx)
+        .verify(&tx_hash, &mut verify_state, &NoZKPCache)
+        .await;
+
+    assert!(matches!(
+        result,
+        Err(VerificationError::AgentAccountUnauthorized)
+    ));
+}
+
+#[tokio::test]
+async fn test_agent_account_admin_set_status_requires_owner_signature() {
+    let owner = KeyPair::new();
+    let controller = KeyPair::new();
+    let owner_pub = owner.get_public_key().compress();
+    let controller_pub = controller.get_public_key().compress();
+
+    let mut verify_state = ChainState::new();
+    verify_state.accounts.insert(
+        owner_pub.clone(),
+        AccountChainState {
+            balances: HashMap::new(),
+            nonce: 0,
+        },
+    );
+    verify_state.agent_account_meta.insert(
+        owner_pub.clone(),
+        AgentAccountMeta {
+            owner: owner_pub.clone(),
+            controller: controller_pub,
+            policy_hash: Hash::new([1u8; 32]),
+            status: 0,
+            energy_pool: None,
+            session_key_root: None,
+        },
+    );
+
+    let mut builder_state = AccountStateImpl {
+        balances: HashMap::new(),
+        nonce: 0,
+        reference: Reference {
+            topoheight: 0,
+            hash: Hash::zero(),
+        },
+    };
+    builder_state
+        .balances
+        .insert(TOS_ASSET, Balance { balance: 0 });
+
+    let data = TransactionTypeBuilder::AgentAccount(AgentAccountPayload::SetStatus { status: 1 });
     let builder = TransactionBuilder::new(
         TxVersion::T0,
         0,
@@ -355,6 +565,77 @@ async fn test_agent_account_frozen_blocks_controller_tx() {
 }
 
 #[tokio::test]
+async fn test_agent_account_frozen_blocks_session_key_tx() {
+    let owner = KeyPair::new();
+    let controller = KeyPair::new();
+    let session_key = KeyPair::new();
+    let recipient = KeyPair::new();
+
+    let owner_pub = owner.get_public_key().compress();
+    let session_key_pub = session_key.get_public_key().compress();
+
+    let mut verify_state = ChainState::new();
+    verify_state.accounts.insert(
+        owner_pub.clone(),
+        AccountChainState {
+            balances: HashMap::from([(TOS_ASSET, 100)]),
+            nonce: 0,
+        },
+    );
+    verify_state.agent_account_meta.insert(
+        owner_pub.clone(),
+        AgentAccountMeta {
+            owner: owner_pub.clone(),
+            controller: controller.get_public_key().compress(),
+            policy_hash: Hash::new([1u8; 32]),
+            status: 1,
+            energy_pool: None,
+            session_key_root: None,
+        },
+    );
+    verify_state.agent_session_keys.insert(
+        (owner_pub.clone(), 1),
+        SessionKey {
+            key_id: 1,
+            public_key: session_key_pub,
+            expiry_topoheight: verify_state.topoheight + 100,
+            max_value_per_window: 100,
+            allowed_targets: vec![],
+            allowed_assets: vec![TOS_ASSET],
+        },
+    );
+
+    let data = TransactionType::Transfers(vec![TransferPayload::new(
+        TOS_ASSET,
+        recipient.get_public_key().compress(),
+        10,
+        None,
+    )]);
+
+    let unsigned = UnsignedTransaction::new_with_fee_type(
+        TxVersion::T0,
+        0,
+        owner_pub,
+        data,
+        0,
+        FeeType::TOS,
+        0,
+        Reference {
+            topoheight: 0,
+            hash: Hash::zero(),
+        },
+    );
+    let tx = unsigned.finalize(&session_key);
+    let tx_hash = tx.hash();
+
+    let result = Arc::new(tx)
+        .verify(&tx_hash, &mut verify_state, &NoZKPCache)
+        .await;
+
+    assert!(matches!(result, Err(VerificationError::AgentAccountFrozen)));
+}
+
+#[tokio::test]
 async fn test_agent_account_session_key_scope_enforced() {
     let owner = KeyPair::new();
     let controller = KeyPair::new();
@@ -415,6 +696,80 @@ async fn test_agent_account_session_key_scope_enforced() {
         },
     );
     let tx = unsigned.finalize(&session_keypair);
+    let tx_hash = tx.hash();
+
+    let result = Arc::new(tx)
+        .verify(&tx_hash, &mut verify_state, &NoZKPCache)
+        .await;
+
+    assert!(matches!(
+        result,
+        Err(VerificationError::AgentAccountPolicyViolation)
+    ));
+}
+
+#[tokio::test]
+async fn test_agent_account_session_key_disallows_asset() {
+    let owner = KeyPair::new();
+    let controller = KeyPair::new();
+    let session_key = KeyPair::new();
+    let recipient = KeyPair::new();
+
+    let owner_pub = owner.get_public_key().compress();
+    let session_key_pub = session_key.get_public_key().compress();
+
+    let mut verify_state = ChainState::new();
+    verify_state.accounts.insert(
+        owner_pub.clone(),
+        AccountChainState {
+            balances: HashMap::from([(TOS_ASSET, 100)]),
+            nonce: 0,
+        },
+    );
+    verify_state.agent_account_meta.insert(
+        owner_pub.clone(),
+        AgentAccountMeta {
+            owner: owner_pub.clone(),
+            controller: controller.get_public_key().compress(),
+            policy_hash: Hash::new([1u8; 32]),
+            status: 0,
+            energy_pool: None,
+            session_key_root: None,
+        },
+    );
+    verify_state.agent_session_keys.insert(
+        (owner_pub.clone(), 1),
+        SessionKey {
+            key_id: 1,
+            public_key: session_key_pub,
+            expiry_topoheight: verify_state.topoheight + 100,
+            max_value_per_window: 100,
+            allowed_targets: vec![],
+            allowed_assets: vec![Hash::new([9u8; 32])],
+        },
+    );
+
+    let data = TransactionType::Transfers(vec![TransferPayload::new(
+        TOS_ASSET,
+        recipient.get_public_key().compress(),
+        10,
+        None,
+    )]);
+
+    let unsigned = UnsignedTransaction::new_with_fee_type(
+        TxVersion::T0,
+        0,
+        owner_pub,
+        data,
+        0,
+        FeeType::TOS,
+        0,
+        Reference {
+            topoheight: 0,
+            hash: Hash::zero(),
+        },
+    );
+    let tx = unsigned.finalize(&session_key);
     let tx_hash = tx.hash();
 
     let result = Arc::new(tx)
