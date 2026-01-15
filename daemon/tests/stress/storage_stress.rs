@@ -8,7 +8,6 @@ use tokio::task::JoinSet;
 
 /// Stress Test 1: Rapid concurrent writes (storage I/O stress)
 #[tokio::test]
-#[ignore] // Stress test - run explicitly
 async fn stress_rapid_concurrent_writes() {
     // Test storage performance with high concurrent write load
 
@@ -99,7 +98,6 @@ async fn stress_rapid_concurrent_writes() {
 
 /// Stress Test 2: Mixed read/write workload
 #[tokio::test]
-#[ignore] // Stress test
 async fn stress_mixed_read_write_workload() {
     // Test storage with concurrent reads and writes
 
@@ -210,7 +208,6 @@ async fn stress_mixed_read_write_workload() {
 
 /// Stress Test 3: Large dataset storage (memory pressure)
 #[tokio::test]
-#[ignore] // Stress test
 async fn stress_large_dataset_storage() {
     // Test storage with very large dataset
 
@@ -294,7 +291,6 @@ async fn stress_large_dataset_storage() {
 
 /// Stress Test 4: Rapid delete and compact operations
 #[tokio::test]
-#[ignore] // Stress test
 async fn stress_delete_and_compact() {
     // Test storage compaction under load
 
@@ -369,7 +365,6 @@ async fn stress_delete_and_compact() {
 
 /// Stress Test 5: Storage recovery after simulated crashes
 #[tokio::test]
-#[ignore] // Stress test
 async fn stress_storage_recovery() {
     // Test storage recovery mechanisms
 

@@ -388,23 +388,29 @@ impl<'a> BlockchainVerificationState<'a, TestError> for TestChainState {
 
     async fn get_sender_balance<'b>(
         &'b mut self,
-        account: &'a PublicKey,
-        asset: &'a Hash,
+        account: Cow<'a, PublicKey>,
+        asset: Cow<'a, Hash>,
         _reference: &Reference,
     ) -> Result<&'b mut u64, TestError> {
-        let _asset = asset.clone();
-        let entry = self.sender_balances.entry(account.clone()).or_insert(0);
+        let _asset = asset.as_ref().clone();
+        let entry = self
+            .sender_balances
+            .entry(account.as_ref().clone())
+            .or_insert(0);
         Ok(entry)
     }
 
     async fn add_sender_output(
         &mut self,
-        account: &'a PublicKey,
-        asset: &'a Hash,
+        account: Cow<'a, PublicKey>,
+        asset: Cow<'a, Hash>,
         output: u64,
     ) -> Result<(), TestError> {
-        let _asset = asset.clone();
-        let balance = self.sender_balances.entry(account.clone()).or_insert(0);
+        let _asset = asset.as_ref().clone();
+        let balance = self
+            .sender_balances
+            .entry(account.as_ref().clone())
+            .or_insert(0);
         *balance = balance.checked_add(output).ok_or(TestError::Overflow)?;
         Ok(())
     }

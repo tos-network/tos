@@ -247,10 +247,16 @@ pub trait TnsProvider: Send + Sync {
 /// - In-memory storage for fast test execution
 ///
 /// # Example
-/// ```ignore
+/// ```rust
+/// use tos_common::crypto::{Hash, KeyPair};
+/// use tos_daemon::core::storage::ConfigurableTnsProvider;
+///
+/// let name_hash = Hash::zero();
+/// let keypair = KeyPair::new();
+/// let owner = keypair.get_public_key().compress();
+///
 /// let provider = ConfigurableTnsProvider::new()
-///     .with_registered_name(name_hash, owner)
-///     .with_stored_message(message_id, message)
+///     .with_registered_name(name_hash, &owner)
 ///     .fail_on_register();
 /// ```
 #[derive(Default)]

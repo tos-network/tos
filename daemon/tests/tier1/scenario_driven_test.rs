@@ -7,7 +7,6 @@ use tos_testing_framework::scenarios::{parse_scenario, ScenarioExecutor};
 
 /// Load and execute simple_transfer.yaml scenario
 #[tokio::test]
-#[ignore] // TODO: Enable when TestBlockchain integration is complete
 async fn test_scenario_simple_transfer() -> Result<()> {
     let yaml = include_str!("../scenarios/simple_transfer.yaml");
     let scenario = parse_scenario(yaml)?;
@@ -20,7 +19,6 @@ async fn test_scenario_simple_transfer() -> Result<()> {
 
 /// Load and execute receive_then_spend.yaml scenario
 #[tokio::test]
-#[ignore] // TODO: Enable when TestBlockchain integration is complete
 async fn test_scenario_receive_then_spend() -> Result<()> {
     let yaml = include_str!("../scenarios/receive_then_spend.yaml");
     let scenario = parse_scenario(yaml)?;
@@ -33,7 +31,6 @@ async fn test_scenario_receive_then_spend() -> Result<()> {
 
 /// Load and execute parallel_transfers.yaml scenario
 #[tokio::test]
-#[ignore] // TODO: Enable when TestBlockchain integration is complete
 async fn test_scenario_parallel_transfers() -> Result<()> {
     let yaml = include_str!("../scenarios/parallel_transfers.yaml");
     let scenario = parse_scenario(yaml)?;

@@ -300,20 +300,20 @@ impl<'a> tos_common::transaction::verify::BlockchainVerificationState<'a, ()>
 
     async fn get_sender_balance<'b>(
         &'b mut self,
-        account: &'a CompressedPublicKey,
-        asset: &'a Hash,
+        account: Cow<'a, CompressedPublicKey>,
+        asset: Cow<'a, Hash>,
         _reference: &Reference,
     ) -> Result<&'b mut u64, ()> {
         self.accounts
-            .get_mut(account)
-            .and_then(|account| account.balances.get_mut(asset))
+            .get_mut(account.as_ref())
+            .and_then(|account| account.balances.get_mut(asset.as_ref()))
             .ok_or(())
     }
 
     async fn add_sender_output(
         &mut self,
-        _account: &'a CompressedPublicKey,
-        _asset: &'a Hash,
+        _account: Cow<'a, CompressedPublicKey>,
+        _asset: Cow<'a, Hash>,
         _output: u64,
     ) -> Result<(), ()> {
         Ok(())

@@ -8,7 +8,6 @@ use tokio::task::JoinSet;
 
 /// Stress Test 1: High peer count simulation (100+ concurrent peers)
 #[tokio::test]
-#[ignore] // Stress test - run explicitly
 async fn stress_high_peer_count() {
     // Test system with many concurrent peer connections
 
@@ -94,7 +93,6 @@ async fn stress_high_peer_count() {
 
 /// Stress Test 2: High message volume (rapid message propagation)
 #[tokio::test]
-#[ignore] // Stress test
 async fn stress_high_message_volume() {
     // Test network with very high message throughput
 
@@ -185,7 +183,6 @@ async fn stress_high_message_volume() {
 
 /// Stress Test 3: Network partition and recovery
 #[tokio::test]
-#[ignore] // Stress test
 async fn stress_network_partition_recovery() {
     // Test network behavior during partitions and recovery
 
@@ -260,7 +257,6 @@ async fn stress_network_partition_recovery() {
 
 /// Stress Test 4: Block propagation under load
 #[tokio::test]
-#[ignore] // Stress test
 async fn stress_block_propagation() {
     // Test block propagation performance across network
 
@@ -356,7 +352,6 @@ async fn stress_block_propagation() {
 
 /// Stress Test 5: Connection churn (peers joining and leaving)
 #[tokio::test]
-#[ignore] // Stress test
 async fn stress_connection_churn() {
     // Test network stability with high peer churn rate
 

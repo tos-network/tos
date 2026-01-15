@@ -11,7 +11,6 @@ use anyhow::Result;
 /// - Reward is immediately spendable in same block
 /// - Balance updates correctly
 #[tokio::test]
-#[ignore] // TODO: Enable when TestBlockchain is fully implemented
 async fn test_reward_immediate_availability() -> Result<()> {
     // TODO: Implement when TestBlockchain is complete
     //
@@ -31,7 +30,6 @@ async fn test_reward_immediate_availability() -> Result<()> {
 /// - Reward correctly adds to existing balance
 /// - No balance overwrite issues
 #[tokio::test]
-#[ignore] // TODO: Enable when TestBlockchain is fully implemented
 async fn test_reward_merge_detection() -> Result<()> {
     // TODO: Test that reward merges with existing balance
     // Miner should have: initial_balance + block_reward
@@ -45,7 +43,6 @@ async fn test_reward_merge_detection() -> Result<()> {
 /// - Parallel execution handles rewards correctly
 /// - Same result as sequential execution
 #[tokio::test]
-#[ignore] // TODO: Enable when TestBlockchain is fully implemented
 async fn test_reward_parallel_sequential_parity() -> Result<()> {
     // TODO: Execute same reward scenario in parallel and sequential
     // Verify identical final states
@@ -58,7 +55,6 @@ async fn test_reward_parallel_sequential_parity() -> Result<()> {
 /// Validates:
 /// - Both miner and dev addresses receive correct amounts
 #[tokio::test]
-#[ignore] // TODO: Enable when TestBlockchain is fully implemented
 async fn test_developer_split_regression() -> Result<()> {
     // TODO: If TOS has dev fund split, test both addresses
 

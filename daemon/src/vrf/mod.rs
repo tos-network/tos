@@ -23,24 +23,30 @@
 //!
 //! # Usage
 //!
-//! ```rust,ignore
+//! ```rust
 //! use tos_daemon::vrf::VrfKeyManager;
+//! use tos_common::crypto::KeyPair;
 //!
 //! // Create from config
-//! let manager = VrfKeyManager::new()?;
+//! let manager = VrfKeyManager::new();
 //!
 //! // Or load from hex private key
-//! let manager = VrfKeyManager::from_hex("deadbeef...")?;
+//! // let manager = VrfKeyManager::from_hex("deadbeef...").expect("valid hex");
 //!
 //! // Sign a block hash to produce VRF data
 //! let block_hash = [0u8; 32];
-//! let vrf_data = manager.sign(&block_hash)?;
+//! let miner_keypair = KeyPair::new();
+//! let miner = miner_keypair.get_public_key().compress();
+//! let chain_id = 0;
+//! let vrf_data = manager
+//!     .sign(chain_id, &block_hash, &miner, &miner_keypair)
+//!     .expect("sign vrf data");
 //!
 //! // Inject into InvokeContext
-//! invoke_context.vrf_public_key = Some(vrf_data.public_key);
-//! invoke_context.vrf_output = Some(vrf_data.output);
-//! invoke_context.vrf_proof = Some(vrf_data.proof);
-//! invoke_context.validate_vrf()?;
+//! // invoke_context.vrf_public_key = Some(vrf_data.public_key);
+//! // invoke_context.vrf_output = Some(vrf_data.output);
+//! // invoke_context.vrf_proof = Some(vrf_data.proof);
+//! // invoke_context.validate_vrf()?;
 //! ```
 
 mod keypair;

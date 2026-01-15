@@ -25,6 +25,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "alloc-oom"
+version = "0.1.0"
+dependencies = [
+ "tako-sdk",
+]
+
+[[package]]
 name = "amm-dex"
 version = "0.1.0"
 dependencies = [
@@ -291,7 +298,7 @@ dependencies = [
 [[package]]
 name = "tako-macros"
 version = "0.1.0"
-source = "git+https://github.com/tos-network/tako?rev=3a980a7#3a980a7f0c6c551fcf01c81c3799885cef3e528f"
+source = "git+https://github.com/tos-network/tako?branch=main#06c1b038c5b45e6eef79871e11a82523b08b768c"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -302,7 +309,7 @@ dependencies = [
 [[package]]
 name = "tako-sdk"
 version = "0.2.1"
-source = "git+https://github.com/tos-network/tako?rev=3a980a7#3a980a7f0c6c551fcf01c81c3799885cef3e528f"
+source = "git+https://github.com/tos-network/tako?branch=main#06c1b038c5b45e6eef79871e11a82523b08b768c"
 
 [[package]]
 name = "test-balance-transfer"

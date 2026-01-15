@@ -597,18 +597,20 @@ pub struct DevFeeThreshold {
 ///
 /// # Examples
 ///
-/// ```ignore
+/// ```rust
+/// use tos_common::api::daemon::ForkCondition;
+///
 /// // Activate at block height 1,000,000
-/// ForkCondition::Block(1_000_000)
+/// let _ = ForkCondition::Block(1_000_000);
 ///
 /// // Activate at Unix timestamp (2026-01-01 00:00:00 UTC)
-/// ForkCondition::Timestamp(1767225600000)
+/// let _ = ForkCondition::Timestamp(1_767_225_600_000);
 ///
 /// // Activate when cumulative difficulty reaches threshold
-/// ForkCondition::TCD(1_000_000_000)
+/// let _ = ForkCondition::TCD(1_000_000_000);
 ///
 /// // Never activate (disabled feature)
-/// ForkCondition::Never
+/// let _ = ForkCondition::Never;
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ForkCondition {
@@ -796,10 +798,19 @@ impl HardFork {
 ///
 /// # Examples
 ///
-/// ```ignore
-/// // Check if a TIP is active at a specific height
-/// if chain_tips.is_active(TosHardfork::SomeFutureTip, height, timestamp, tcd) {
-///     // Feature is enabled
+/// ```rust
+/// use tos_common::api::daemon::{ChainTips, ForkCondition, TosHardfork};
+///
+/// let height = 1_000_000;
+/// let timestamp = 1_767_225_600_000;
+/// let tcd = 1_000_000_000;
+///
+/// // Check if a TIP is active at a specific height (when tips exist)
+/// if let Some(tip) = TosHardfork::all().first().copied() {
+///     let chain_tips = ChainTips::new(vec![(tip, ForkCondition::Block(height))]);
+///     if chain_tips.is_active(tip, height, timestamp, tcd) {
+///         // Feature is enabled
+///     }
 /// }
 /// ```
 ///
@@ -857,14 +868,20 @@ impl std::fmt::Display for TosHardfork {
 ///
 /// # Examples
 ///
-/// ```ignore
-/// // When TIPs are added, configure them like this:
-/// let tips = ChainTips::new(vec![
-///     (TosHardfork::SomeFutureTip, ForkCondition::Block(100000)),
-/// ]);
+/// ```rust
+/// use tos_common::api::daemon::{ChainTips, ForkCondition, TosHardfork};
 ///
-/// if tips.is_active(TosHardfork::SomeFutureTip, height, timestamp, tcd) {
-///     // Feature is active
+/// let height = 100_000;
+/// let timestamp = 1_767_225_600_000;
+/// let tcd = 1_000_000_000;
+///
+/// // When TIPs are added, configure them like this:
+/// if let Some(tip) = TosHardfork::all().first().copied() {
+///     let tips = ChainTips::new(vec![(tip, ForkCondition::Block(height))]);
+///
+///     if tips.is_active(tip, height, timestamp, tcd) {
+///         // Feature is active
+///     }
 /// }
 /// ```
 #[derive(Debug, Clone, Default)]

@@ -10,8 +10,8 @@ fn agent_account_register_roundtrip() {
     let controller = KeyPair::new().get_public_key().compress();
     let policy_hash = Hash::new([1u8; 32]);
     let payload = AgentAccountPayload::Register {
-        controller,
-        policy_hash,
+        controller: controller.clone(),
+        policy_hash: policy_hash.clone(),
         energy_pool: None,
         session_key_root: None,
     };

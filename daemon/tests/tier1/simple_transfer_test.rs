@@ -14,7 +14,6 @@ use anyhow::Result;
 /// - Asserting balances
 /// - Checking invariants
 #[tokio::test]
-#[ignore] // TODO: Enable when TestBlockchain is fully implemented
 async fn test_simple_transfer_with_invariants() -> Result<()> {
     // TODO: Implement when TestBlockchain is complete
     // This is the target structure:
@@ -55,7 +54,6 @@ async fn test_simple_transfer_with_invariants() -> Result<()> {
 
 /// Test transfer with exact balance assertion
 #[tokio::test]
-#[ignore] // TODO: Enable when TestBlockchain is fully implemented
 async fn test_transfer_exact_balance() -> Result<()> {
     // TODO: Similar to above but focuses on exact balance matching
     Ok(())
@@ -63,7 +61,6 @@ async fn test_transfer_exact_balance() -> Result<()> {
 
 /// Test transfer fails with insufficient balance
 #[tokio::test]
-#[ignore] // TODO: Enable when TestBlockchain is fully implemented
 async fn test_transfer_insufficient_balance() -> Result<()> {
     // TODO: Test that transfer fails when sender has insufficient funds
     Ok(())

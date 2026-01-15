@@ -52,6 +52,8 @@ pub enum VerificationError<T> {
     AgentAccountInvalidController,
     #[error("Agent account is frozen")]
     AgentAccountFrozen,
+    #[error("Agent account unauthorized")]
+    AgentAccountUnauthorized,
     #[error("Agent account policy violation")]
     AgentAccountPolicyViolation,
     #[error("Agent session key expired")]

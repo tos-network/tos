@@ -1123,7 +1123,6 @@ async fn test_storage_consistency_integration() {
 ///
 /// Measures transaction throughput with all security validations enabled.
 #[tokio::test]
-#[ignore] // Performance benchmark
 async fn test_transaction_throughput_with_security() {
     use std::collections::HashMap;
     use std::time::Instant;

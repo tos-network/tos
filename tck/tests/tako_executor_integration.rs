@@ -186,7 +186,6 @@ async fn test_tako_executor_hello_world() {
 }
 
 #[tokio::test]
-#[ignore] // Disabled: executor_for_bytecode method no longer exists in TakoContractExecutor
 async fn test_multi_executor_format_detection() {
     // Load ELF contract from test fixtures
     let manifest_dir = env!("CARGO_MANIFEST_DIR");

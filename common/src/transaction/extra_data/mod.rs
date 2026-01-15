@@ -214,7 +214,6 @@ mod tests {
     }
 
     // Balance simplification: Test disabled pending proof system migration to plaintext
-    #[ignore]
     #[test]
     fn test_encrypt_decrypt_extra_data() {
         let alice = KeyPair::new();

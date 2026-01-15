@@ -34,6 +34,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Contract directories to build
 CONTRACTS=(
+    "alloc-oom"
     "counter"
     "token"
     "test-environment"

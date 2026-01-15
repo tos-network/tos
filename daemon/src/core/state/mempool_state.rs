@@ -48,7 +48,7 @@ pub struct MempoolState<'a, S: Storage> {
     receiver_uno_balances: HashMap<Cow<'a, PublicKey>, HashMap<Cow<'a, Hash>, Ciphertext>>,
     // Sender accounts
     // This is used to verify ZK Proofs and store/update nonces
-    accounts: HashMap<&'a PublicKey, Account<'a>>,
+    accounts: HashMap<Cow<'a, PublicKey>, Account<'a>>,
     // Sender energy resources (used for energy fee validation)
     energy_resources: HashMap<&'a PublicKey, EnergyResource>,
     // Agent account metadata updates (None = delete)
@@ -180,7 +180,7 @@ impl<'a, S: Storage> MempoolState<'a, S> {
     async fn create_sender_account(
         mempool: &Mempool,
         storage: &S,
-        key: &'a PublicKey,
+        key: &PublicKey,
         topoheight: TopoHeight,
     ) -> Result<Account<'a>, BlockchainError> {
         let (nonce, multisig) = if let Some(cache) = mempool.get_cache_for(key) {
@@ -227,23 +227,23 @@ impl<'a, S: Storage> MempoolState<'a, S> {
     // Which version to use
     async fn internal_get_sender_balance<'b>(
         &'b mut self,
-        key: &'a PublicKey,
+        key: Cow<'a, PublicKey>,
         asset: &'a Hash,
         reference: &Reference,
     ) -> Result<&'b mut u64, BlockchainError> {
-        match self.accounts.entry(key) {
+        match self.accounts.entry(key.clone()) {
             Entry::Occupied(o) => {
                 let account = o.into_mut();
                 match account.assets.entry(asset) {
                     Entry::Occupied(entry) => Ok(entry.into_mut()),
-                    Entry::Vacant(entry) => match self.mempool.get_cache_for(key) {
+                    Entry::Vacant(entry) => match self.mempool.get_cache_for(key.as_ref()) {
                         Some(cache) => {
                             if let Some(version) = cache.get_balances().get(asset) {
                                 Ok(entry.insert(version.clone()))
                             } else {
                                 let ct = Self::get_versioned_balance_for_reference(
                                     &self.storage,
-                                    key,
+                                    key.as_ref(),
                                     asset,
                                     self.topoheight,
                                     reference,
@@ -255,7 +255,7 @@ impl<'a, S: Storage> MempoolState<'a, S> {
                         None => {
                             let ct = Self::get_versioned_balance_for_reference(
                                 &self.storage,
-                                key,
+                                key.as_ref(),
                                 asset,
                                 self.topoheight,
                                 reference,
@@ -268,8 +268,13 @@ impl<'a, S: Storage> MempoolState<'a, S> {
             }
             Entry::Vacant(e) => {
                 let account = e.insert(
-                    Self::create_sender_account(&self.mempool, &self.storage, key, self.topoheight)
-                        .await?,
+                    Self::create_sender_account(
+                        &self.mempool,
+                        &self.storage,
+                        key.as_ref(),
+                        self.topoheight,
+                    )
+                    .await?,
                 );
 
                 match account.assets.entry(asset) {
@@ -277,7 +282,7 @@ impl<'a, S: Storage> MempoolState<'a, S> {
                     Entry::Vacant(entry) => {
                         let (version, new) = self
                             .storage
-                            .get_new_versioned_balance(key, asset, self.topoheight)
+                            .get_new_versioned_balance(key.as_ref(), asset, self.topoheight)
                             .await?;
                         if new {
                             return Err(BlockchainError::NoPreviousBalanceFound);
@@ -296,7 +301,7 @@ impl<'a, S: Storage> MempoolState<'a, S> {
         &mut self,
         key: &'a PublicKey,
     ) -> Result<Nonce, BlockchainError> {
-        match self.accounts.entry(key) {
+        match self.accounts.entry(Cow::Borrowed(key)) {
             Entry::Occupied(o) => Ok(o.get().nonce),
             Entry::Vacant(e) => {
                 let account =
@@ -632,10 +637,14 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Mempoo
     /// Get the balance used for verification of funds for the sender account
     async fn get_sender_balance<'b>(
         &'b mut self,
-        account: &'a PublicKey,
-        asset: &'a Hash,
+        account: Cow<'a, PublicKey>,
+        asset: Cow<'a, Hash>,
         reference: &Reference,
     ) -> Result<&'b mut u64, BlockchainError> {
+        let asset = match asset {
+            Cow::Borrowed(asset) => asset,
+            Cow::Owned(_) => return Err(BlockchainError::CorruptedData),
+        };
         self.internal_get_sender_balance(account, asset, reference)
             .await
     }
@@ -644,8 +653,8 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Mempoo
     /// In this state, we don't need to store the output
     async fn add_sender_output(
         &mut self,
-        _: &'a PublicKey,
-        _: &'a Hash,
+        _: Cow<'a, PublicKey>,
+        _: Cow<'a, Hash>,
         _: u64,
     ) -> Result<(), BlockchainError> {
         Ok(())
@@ -698,7 +707,7 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Mempoo
         _reference: &Reference,
     ) -> Result<&'b mut Ciphertext, BlockchainError> {
         // Get or create account
-        let acc = match self.accounts.entry(account) {
+        let acc = match self.accounts.entry(Cow::Borrowed(account)) {
             Entry::Occupied(o) => o.into_mut(),
             Entry::Vacant(e) => {
                 let acc = Self::create_sender_account(
@@ -869,6 +878,48 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Mempoo
         let key = (account.clone(), key_id);
         self.agent_session_keys.insert(key, None);
         Ok(())
+    }
+
+    async fn get_session_keys_for_account(
+        &mut self,
+        account: &'a CompressedPublicKey,
+    ) -> Result<Vec<SessionKey>, BlockchainError> {
+        let mut keys: HashMap<u64, SessionKey> = self
+            .storage
+            .get_session_keys_for_account(account)
+            .await?
+            .into_iter()
+            .map(|key| (key.key_id, key))
+            .collect();
+
+        if let Some(cache) = self.mempool.get_cache_for(account) {
+            for (key_id, entry) in cache.get_agent_session_keys() {
+                match entry {
+                    Some(key) => {
+                        keys.insert(*key_id, key.clone());
+                    }
+                    None => {
+                        keys.remove(key_id);
+                    }
+                }
+            }
+        }
+
+        for ((cached_account, key_id), entry) in &self.agent_session_keys {
+            if cached_account != account {
+                continue;
+            }
+            match entry {
+                Some(key) => {
+                    keys.insert(*key_id, key.clone());
+                }
+                None => {
+                    keys.remove(key_id);
+                }
+            }
+        }
+
+        Ok(keys.into_values().collect())
     }
 
     /// Get the block version

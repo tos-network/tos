@@ -11,7 +11,7 @@ use indexmap::IndexMap;
 use log::{debug, trace};
 use std::{
     borrow::Cow,
-    collections::{hash_map::Entry, HashMap},
+    collections::{hash_map::Entry, HashMap, HashSet},
     ops::{Deref, DerefMut},
 };
 use tos_common::{
@@ -89,8 +89,8 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError>
     /// Get the balance used for verification of funds for the sender account
     async fn get_sender_balance<'b>(
         &'b mut self,
-        account: &'a PublicKey,
-        asset: &'a Hash,
+        account: Cow<'a, PublicKey>,
+        asset: Cow<'a, Hash>,
         reference: &Reference,
     ) -> Result<&'b mut u64, BlockchainError> {
         self.inner
@@ -101,8 +101,8 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError>
     /// Apply new output to a sender account
     async fn add_sender_output(
         &mut self,
-        account: &'a PublicKey,
-        asset: &'a Hash,
+        account: Cow<'a, PublicKey>,
+        asset: Cow<'a, Hash>,
         output: u64,
     ) -> Result<(), BlockchainError> {
         self.inner.add_sender_output(account, asset, output).await
@@ -1170,7 +1170,11 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
     // In case of incoming and outgoing transactions in same state, the final balance will be computed
     pub async fn apply_changes(mut self) -> Result<(), BlockchainError> {
         // Apply changes for sender accounts
-        for (key, account) in &mut self.inner.accounts {
+        let accounts = std::mem::take(&mut self.inner.accounts);
+        let account_keys: HashSet<PublicKey> =
+            accounts.keys().map(|key| key.as_ref().clone()).collect();
+        for (key, mut account) in accounts {
+            let key = key.into_owned();
             if log::log_enabled!(log::Level::Trace) {
                 trace!(
                     "Saving nonce {} for {} at topoheight {}",
@@ -1181,7 +1185,7 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
             }
             self.inner
                 .storage
-                .set_last_nonce_to(key, self.inner.topoheight, &account.nonce)
+                .set_last_nonce_to(&key, self.inner.topoheight, &account.nonce)
                 .await?;
 
             // Save the multisig state if needed
@@ -1201,14 +1205,14 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
                 let versioned = VersionedMultiSig::new(multisig, state.get_topoheight());
                 self.inner
                     .storage
-                    .set_last_multisig_to(key, self.inner.topoheight, versioned)
+                    .set_last_multisig_to(&key, self.inner.topoheight, versioned)
                     .await?;
             }
 
             let balances = self
                 .inner
                 .receiver_balances
-                .entry(Cow::Borrowed(key))
+                .entry(Cow::Owned(key.clone()))
                 .or_insert_with(HashMap::new);
             // Because account balances are only used to verify the validity of ZK Proofs, we can't store them
             // We have to recompute the final balance for each asset using the existing current balance
@@ -1235,7 +1239,7 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
                 if log::log_enabled!(log::Level::Trace) {
                     trace!("sender output sum: {}", output_sum);
                 }
-                match balances.entry(Cow::Borrowed(asset)) {
+                match balances.entry(Cow::Borrowed(asset.as_ref())) {
                     Entry::Occupied(mut o) => {
                         if log::log_enabled!(log::Level::Trace) {
                             trace!(
@@ -1298,7 +1302,11 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
                             let (mut new_version, _) = self
                                 .inner
                                 .storage
-                                .get_new_versioned_balance(key, asset, self.inner.topoheight)
+                                .get_new_versioned_balance(
+                                    &key,
+                                    asset.as_ref(),
+                                    self.inner.topoheight,
+                                )
                                 .await?;
                             // Substract the output sum
                             if log::log_enabled!(log::Level::Trace) {
@@ -1350,7 +1358,7 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
             let uno_balances = self
                 .inner
                 .receiver_uno_balances
-                .entry(Cow::Borrowed(key))
+                .entry(Cow::Owned(key.clone()))
                 .or_insert_with(HashMap::new);
 
             for (asset, uno_echange) in account.uno_assets.drain() {
@@ -1370,7 +1378,7 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
                     ..
                 } = uno_echange;
 
-                match uno_balances.entry(Cow::Borrowed(asset)) {
+                match uno_balances.entry(Cow::Borrowed(asset.as_ref())) {
                     Entry::Occupied(mut o) => {
                         if log::log_enabled!(log::Level::Trace) {
                             trace!(
@@ -1404,7 +1412,11 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
                             let (mut new_version, _) = self
                                 .inner
                                 .storage
-                                .get_new_versioned_uno_balance(key, asset, self.inner.topoheight)
+                                .get_new_versioned_uno_balance(
+                                    &key,
+                                    asset.as_ref(),
+                                    self.inner.topoheight,
+                                )
                                 .await?;
                             // Subtract output_sum (homomorphic subtraction)
                             new_version.sub_ciphertext_from_balance(&output_sum)?;
@@ -1835,7 +1847,7 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
         // We injected the sender balances in the receiver balances previously
         for (account, balances) in self.inner.receiver_balances {
             // If the account has no nonce set, set it to 0
-            if !self.inner.accounts.contains_key(account.as_ref())
+            if !account_keys.contains(account.as_ref())
                 && !self.inner.storage.has_nonce(&account).await?
             {
                 if log::log_enabled!(log::Level::Debug) {
@@ -1887,7 +1899,7 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
         // Similar to plaintext balances but stored in UNO-specific columns
         for (account, uno_balances) in self.inner.receiver_uno_balances {
             // UNO balances: If account has no nonce, set default nonce
-            if !self.inner.accounts.contains_key(account.as_ref())
+            if !account_keys.contains(account.as_ref())
                 && !self.inner.storage.has_nonce(&account).await?
             {
                 if log::log_enabled!(log::Level::Debug) {

@@ -7,7 +7,6 @@ use std::time::Instant;
 
 /// Memory Stress Test 1: Memory pressure with large DAG
 #[tokio::test]
-#[ignore] // Stress test
 async fn stress_memory_large_dag() {
     // Test memory usage with a very large DAG
 
@@ -36,7 +35,6 @@ async fn stress_memory_large_dag() {
 
 /// Memory Stress Test 2: Memory leak detection
 #[tokio::test]
-#[ignore] // Long-running stress test
 async fn stress_memory_leak_detection() {
     // Test for memory leaks during normal operation
 
@@ -66,7 +64,6 @@ async fn stress_memory_leak_detection() {
 
 /// Memory Stress Test 3: Cache pressure test
 #[tokio::test]
-#[ignore] // Stress test
 async fn stress_cache_pressure() {
     // Test cache behavior under memory pressure
 
@@ -95,7 +92,6 @@ async fn stress_cache_pressure() {
 
 /// Memory Stress Test 4: Large block processing
 #[tokio::test]
-#[ignore] // Stress test
 async fn stress_large_block_processing() {
     // Test processing of blocks with large transaction sets
 
@@ -124,7 +120,6 @@ async fn stress_large_block_processing() {
 
 /// Memory Stress Test 5: Recovery from memory pressure
 #[tokio::test]
-#[ignore] // Stress test
 async fn stress_memory_recovery() {
     // Test system recovery from memory pressure
 

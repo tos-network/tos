@@ -1,5 +1,6 @@
 use crate::{
     account::{AgentAccountMeta, SessionKey},
+    config::TOS_ASSET,
     crypto::{Hash, PublicKey},
     transaction::payload::AgentAccountPayload,
 };
@@ -140,6 +141,14 @@ pub async fn verify_agent_account_payload<'a, E, B: BlockchainVerificationState<
                 if is_zero_hash(session_key_root) {
                     return Err(VerificationError::AgentAccountInvalidParameter);
                 }
+                if !state
+                    .get_session_keys_for_account(source)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .is_empty()
+                {
+                    return Err(VerificationError::AgentAccountInvalidParameter);
+                }
             }
             meta.session_key_root = session_key_root.clone();
             state
@@ -171,7 +180,11 @@ pub async fn verify_agent_account_payload<'a, E, B: BlockchainVerificationState<
             if key.allowed_targets.iter().any(is_zero_key) {
                 return Err(VerificationError::AgentAccountInvalidParameter);
             }
-            if key.allowed_assets.iter().any(is_zero_hash) {
+            if key
+                .allowed_assets
+                .iter()
+                .any(|asset| is_zero_hash(asset) && asset != &TOS_ASSET)
+            {
                 return Err(VerificationError::AgentAccountInvalidParameter);
             }
             if state

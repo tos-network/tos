@@ -8,7 +8,6 @@ use tokio::task::JoinSet;
 
 /// Stress Test 1: High concurrent transaction submissions (1000+ concurrent)
 #[tokio::test]
-#[ignore] // Stress test - run explicitly
 async fn stress_concurrent_transaction_submissions() {
     // Test concurrent submission of thousands of transactions
 
@@ -86,7 +85,6 @@ async fn stress_concurrent_transaction_submissions() {
 
 /// Stress Test 2: Transaction validation under pressure
 #[tokio::test]
-#[ignore] // Stress test
 async fn stress_transaction_validation_pressure() {
     // Test transaction validation with various edge cases under load
 
@@ -159,7 +157,6 @@ async fn stress_transaction_validation_pressure() {
 
 /// Stress Test 3: Mempool saturation test
 #[tokio::test]
-#[ignore] // Stress test
 async fn stress_mempool_saturation() {
     // Test mempool behavior when saturated with transactions
 
@@ -249,7 +246,6 @@ async fn stress_mempool_saturation() {
 
 /// Stress Test 4: Double-spend detection under concurrent load
 #[tokio::test]
-#[ignore] // Stress test
 async fn stress_double_spend_detection() {
     // Test concurrent double-spend attempts
 

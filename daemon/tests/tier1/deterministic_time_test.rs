@@ -10,7 +10,6 @@ use anyhow::Result;
 /// - TestBlockchain uses injected clock
 /// - Time is deterministic
 #[tokio::test]
-#[ignore] // TODO: Enable when TestBlockchain is fully implemented
 async fn test_clock_injection() -> Result<()> {
     // TODO: Implement when TestBlockchain is complete
     //
@@ -38,7 +37,6 @@ async fn test_clock_injection() -> Result<()> {
 /// - Test time can be paused and advanced
 /// - Deterministic behavior in tests
 #[tokio::test(start_paused = true)]
-#[ignore] // TODO: Enable when TestBlockchain is fully implemented
 async fn test_time_advancement() -> Result<()> {
     // TODO: Test tokio::time::advance()
     // Verify blockchain observes time changes
@@ -52,7 +50,6 @@ async fn test_time_advancement() -> Result<()> {
 /// - Same operations with same time produce same results
 /// - Reproducibility
 #[tokio::test]
-#[ignore] // TODO: Enable when TestBlockchain is fully implemented
 async fn test_time_dependent_determinism() -> Result<()> {
     // TODO: Run same scenario twice with same clock
     // Verify identical results

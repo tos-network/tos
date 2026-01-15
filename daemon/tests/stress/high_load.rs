@@ -7,7 +7,6 @@ use std::time::{Duration, Instant};
 
 /// Stress Test 1: High block rate (100+ blocks/sec)
 #[tokio::test]
-#[ignore] // Stress test - run explicitly
 async fn stress_high_block_rate() {
     // Test the system can handle a high rate of incoming blocks
 
@@ -39,7 +38,6 @@ async fn stress_high_block_rate() {
 
 /// Stress Test 2: Large DAG depth (10,000+ blocks)
 #[tokio::test]
-#[ignore] // Long-running stress test
 async fn stress_large_dag_depth() {
     // Test performance with a very deep DAG
 
@@ -69,7 +67,6 @@ async fn stress_large_dag_depth() {
 
 /// Stress Test 3: High parent count (32 parents)
 #[tokio::test]
-#[ignore] // Stress test
 async fn stress_high_parent_count() {
     // Test blocks with maximum parent count
 
@@ -99,7 +96,6 @@ async fn stress_high_parent_count() {
 
 /// Stress Test 4: Concurrent block processing
 #[tokio::test]
-#[ignore] // Stress test
 async fn stress_concurrent_block_processing() {
     // Test concurrent processing of multiple blocks
 
@@ -129,7 +125,6 @@ async fn stress_concurrent_block_processing() {
 
 /// Stress Test 5: Long-running stability test
 #[tokio::test]
-#[ignore] // Very long-running test
 async fn stress_long_running_stability() {
     // Test system stability over extended period
 

@@ -42,16 +42,16 @@ pub trait BlockchainVerificationState<'a, E> {
     /// Get the balance used for verification of funds for the sender account (plaintext u64)
     async fn get_sender_balance<'b>(
         &'b mut self,
-        account: &'a CompressedPublicKey,
-        asset: &'a Hash,
+        account: Cow<'a, CompressedPublicKey>,
+        asset: Cow<'a, Hash>,
         reference: &Reference,
     ) -> Result<&'b mut u64, E>;
 
     /// Apply new output to a sender account (plaintext u64)
     async fn add_sender_output(
         &mut self,
-        account: &'a CompressedPublicKey,
-        asset: &'a Hash,
+        account: Cow<'a, CompressedPublicKey>,
+        asset: Cow<'a, Hash>,
         output: u64,
     ) -> Result<(), E>;
 
@@ -149,6 +149,13 @@ pub trait BlockchainVerificationState<'a, E> {
         _key_id: u64,
     ) -> Result<(), E> {
         Ok(())
+    }
+
+    async fn get_session_keys_for_account(
+        &mut self,
+        _account: &'a CompressedPublicKey,
+    ) -> Result<Vec<SessionKey>, E> {
+        Ok(Vec::new())
     }
 
     /// Get the block version in which TX is executed
