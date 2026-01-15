@@ -399,6 +399,11 @@ Execute:
 ./tos_wallet --network devnet --daemon-address http://127.0.0.1:8080 \
     --wallet-path my_wallet --password mypass123 --json-file agent_register.json
 
+CLI example (agent_add_session_key):
+./tos_wallet --network devnet --daemon-address http://127.0.0.1:8080 \
+    --wallet-path my_wallet --password mypass123 \
+    --exec "agent_add_session_key key_id=1 public_key=tst1... expiry_topoheight=100000 max_value_per_window=1000000 allowed_targets=tst1...,tst1... allowed_assets=0000000000000000000000000000000000000000000000000000000000000001"
+
 ═══════════════════════════════════════════════════════════════════════════════
 
 For more help on specific commands, use: --exec "help <command>"
