@@ -12,6 +12,7 @@
 
 extern crate log;
 
+pub mod a2a;
 pub mod config;
 
 // VRF (Verifiable Random Function) module for block producers

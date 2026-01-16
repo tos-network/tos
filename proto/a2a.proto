@@ -1,0 +1,410 @@
+syntax = "proto3";
+
+package tos.a2a;
+
+import "google/protobuf/struct.proto";
+
+service A2AService {
+  rpc SendMessage(SendMessageRequest) returns (SendMessageResponse);
+  rpc SendStreamingMessage(SendMessageRequest) returns (stream StreamResponse);
+  rpc GetTask(GetTaskRequest) returns (Task);
+  rpc ListTasks(ListTasksRequest) returns (ListTasksResponse);
+  rpc CancelTask(CancelTaskRequest) returns (Task);
+  rpc SubscribeToTask(SubscribeToTaskRequest) returns (stream StreamResponse);
+  rpc SetTaskPushNotificationConfig(SetTaskPushNotificationConfigRequest) returns (TaskPushNotificationConfig);
+  rpc GetTaskPushNotificationConfig(GetTaskPushNotificationConfigRequest) returns (TaskPushNotificationConfig);
+  rpc ListTaskPushNotificationConfig(ListTaskPushNotificationConfigRequest) returns (ListTaskPushNotificationConfigResponse);
+  rpc DeleteTaskPushNotificationConfig(DeleteTaskPushNotificationConfigRequest) returns (Empty);
+  rpc GetExtendedAgentCard(GetExtendedAgentCardRequest) returns (AgentCard);
+}
+
+enum Role {
+  ROLE_UNSPECIFIED = 0;
+  ROLE_USER = 1;
+  ROLE_AGENT = 2;
+}
+
+enum TaskState {
+  TASK_STATE_UNSPECIFIED = 0;
+  TASK_STATE_SUBMITTED = 1;
+  TASK_STATE_WORKING = 2;
+  TASK_STATE_COMPLETED = 3;
+  TASK_STATE_FAILED = 4;
+  TASK_STATE_CANCELLED = 5;
+  TASK_STATE_INPUT_REQUIRED = 6;
+  TASK_STATE_REJECTED = 7;
+  TASK_STATE_AUTH_REQUIRED = 8;
+}
+
+enum SettlementStatus {
+  SETTLEMENT_STATUS_NONE = 0;
+  SETTLEMENT_STATUS_ESCROW_LOCKED = 1;
+  SETTLEMENT_STATUS_CLAIMED = 2;
+  SETTLEMENT_STATUS_REFUNDED = 3;
+  SETTLEMENT_STATUS_DISPUTED = 4;
+}
+
+message TextPart {
+  string text = 1;
+}
+
+message DataPart {
+  map<string, google.protobuf.Value> data = 1;
+}
+
+message FilePart {
+  oneof file {
+    string file_with_uri = 1;
+    bytes file_with_bytes = 2;
+  }
+  string media_type = 3;
+  string name = 4;
+}
+
+message Part {
+  oneof content {
+    TextPart text = 1;
+    FilePart file = 2;
+    DataPart data = 3;
+  }
+  map<string, google.protobuf.Value> metadata = 4;
+}
+
+message Message {
+  string message_id = 1;
+  string context_id = 2;
+  string task_id = 3;
+  Role role = 4;
+  repeated Part parts = 5;
+  map<string, google.protobuf.Value> metadata = 6;
+  repeated string extensions = 7;
+  repeated string reference_task_ids = 8;
+}
+
+message Artifact {
+  string artifact_id = 1;
+  string name = 2;
+  string description = 3;
+  repeated Part parts = 4;
+  map<string, google.protobuf.Value> metadata = 5;
+  repeated string extensions = 6;
+}
+
+message TaskStatus {
+  TaskState state = 1;
+  Message message = 2;
+  string timestamp = 3;
+}
+
+message TosTaskAnchor {
+  uint64 escrow_id = 1;
+  bytes agent_account = 2;
+  SettlementStatus settlement_status = 3;
+}
+
+message Task {
+  string id = 1;
+  string context_id = 2;
+  TaskStatus status = 3;
+  repeated Artifact artifacts = 4;
+  repeated Message history = 5;
+  map<string, google.protobuf.Value> metadata = 6;
+  TosTaskAnchor tos_task_anchor = 7;
+}
+
+message TaskStatusUpdateEvent {
+  string task_id = 1;
+  string context_id = 2;
+  TaskStatus status = 3;
+  bool final = 4;
+  map<string, google.protobuf.Value> metadata = 5;
+}
+
+message TaskArtifactUpdateEvent {
+  string task_id = 1;
+  string context_id = 2;
+  Artifact artifact = 3;
+  bool append = 4;
+  bool last_chunk = 5;
+  map<string, google.protobuf.Value> metadata = 6;
+}
+
+message StreamResponse {
+  oneof response {
+    Task task = 1;
+    Message message = 2;
+    TaskStatusUpdateEvent status_update = 3;
+    TaskArtifactUpdateEvent artifact_update = 4;
+  }
+}
+
+message SendMessageConfiguration {
+  int32 history_length = 1;
+  repeated string accepted_output_modes = 2;
+  PushNotificationConfig push_notification_config = 3;
+  bool blocking = 4;
+}
+
+message SendMessageRequest {
+  string tenant = 1;
+  Message message = 2;
+  SendMessageConfiguration configuration = 3;
+  map<string, google.protobuf.Value> metadata = 4;
+}
+
+message SendMessageResponse {
+  oneof response {
+    Task task = 1;
+    Message message = 2;
+  }
+}
+
+message GetTaskRequest {
+  string tenant = 1;
+  string name = 2;
+  int32 history_length = 3;
+}
+
+message ListTasksRequest {
+  string tenant = 1;
+  string context_id = 2;
+  TaskState status = 3;
+  int32 page_size = 4;
+  string page_token = 5;
+  int32 history_length = 6;
+  int64 last_updated_after = 7;
+  bool include_artifacts = 8;
+}
+
+message ListTasksResponse {
+  repeated Task tasks = 1;
+  string next_page_token = 2;
+  int32 page_size = 3;
+  int32 total_size = 4;
+}
+
+message CancelTaskRequest {
+  string tenant = 1;
+  string name = 2;
+}
+
+message SubscribeToTaskRequest {
+  string tenant = 1;
+  string name = 2;
+}
+
+message PushNotificationConfig {
+  string id = 1;
+  string url = 2;
+  string token = 3;
+  AuthenticationInfo authentication = 4;
+}
+
+message AuthenticationInfo {
+  repeated string schemes = 1;
+  string credentials = 2;
+}
+
+message TaskPushNotificationConfig {
+  string name = 1;
+  PushNotificationConfig push_notification_config = 2;
+}
+
+message SetTaskPushNotificationConfigRequest {
+  string tenant = 1;
+  string parent = 2;
+  string config_id = 3;
+  TaskPushNotificationConfig config = 4;
+}
+
+message GetTaskPushNotificationConfigRequest {
+  string tenant = 1;
+  string name = 2;
+}
+
+message ListTaskPushNotificationConfigRequest {
+  string tenant = 1;
+  string parent = 2;
+  int32 page_size = 3;
+  string page_token = 4;
+}
+
+message ListTaskPushNotificationConfigResponse {
+  repeated TaskPushNotificationConfig configs = 1;
+  string next_page_token = 2;
+}
+
+message DeleteTaskPushNotificationConfigRequest {
+  string tenant = 1;
+  string name = 2;
+}
+
+message Empty {}
+
+message AgentInterface {
+  string url = 1;
+  string protocol_binding = 2;
+  string tenant = 3;
+}
+
+message AgentProvider {
+  string url = 1;
+  string organization = 2;
+}
+
+message AgentExtension {
+  string uri = 1;
+  string description = 2;
+  bool required = 3;
+  map<string, google.protobuf.Value> params = 4;
+}
+
+message AgentCapabilities {
+  bool streaming = 1;
+  bool push_notifications = 2;
+  bool state_transition_history = 3;
+  repeated AgentExtension extensions = 4;
+  bool tos_on_chain_settlement = 5;
+}
+
+message StringList {
+  repeated string list = 1;
+}
+
+message Security {
+  map<string, StringList> schemes = 1;
+}
+
+message ApiKeySecurityScheme {
+  string description = 1;
+  string location = 2;
+  string name = 3;
+}
+
+message HttpAuthSecurityScheme {
+  string description = 1;
+  string scheme = 2;
+  string bearer_format = 3;
+}
+
+message OAuthFlows {
+  oneof flow {
+    AuthorizationCodeFlow authorization_code = 1;
+    ClientCredentialsFlow client_credentials = 2;
+    ImplicitFlow implicit = 3;
+    PasswordFlow password = 4;
+  }
+}
+
+message OAuth2SecurityScheme {
+  string description = 1;
+  OAuthFlows flows = 2;
+  string oauth2_metadata_url = 3;
+}
+
+message AuthorizationCodeFlow {
+  string authorization_url = 1;
+  string token_url = 2;
+  string refresh_url = 3;
+  map<string, string> scopes = 4;
+}
+
+message ClientCredentialsFlow {
+  string token_url = 1;
+  string refresh_url = 2;
+  map<string, string> scopes = 3;
+}
+
+message ImplicitFlow {
+  string authorization_url = 1;
+  string refresh_url = 2;
+  map<string, string> scopes = 3;
+}
+
+message PasswordFlow {
+  string token_url = 1;
+  string refresh_url = 2;
+  map<string, string> scopes = 3;
+}
+
+message OpenIdConnectSecurityScheme {
+  string description = 1;
+  string open_id_connect_url = 2;
+}
+
+message MutualTlsSecurityScheme {
+  string description = 1;
+}
+
+message TosSignatureSecurityScheme {
+  string description = 1;
+  uint64 chain_id = 2;
+  repeated string allowed_signers = 3;
+}
+
+message SecurityScheme {
+  oneof scheme {
+    ApiKeySecurityScheme api_key_security_scheme = 1;
+    HttpAuthSecurityScheme http_auth_security_scheme = 2;
+    OAuth2SecurityScheme oauth2_security_scheme = 3;
+    OpenIdConnectSecurityScheme open_id_connect_security_scheme = 4;
+    MutualTlsSecurityScheme mutual_tls_security_scheme = 5;
+    TosSignatureSecurityScheme tos_signature_security_scheme = 6;
+  }
+}
+
+message AgentSkill {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  repeated string tags = 4;
+  repeated string examples = 5;
+  repeated string input_modes = 6;
+  repeated string output_modes = 7;
+  repeated Security security = 8;
+  uint64 tos_base_cost = 9;
+}
+
+message AgentCardSignature {
+  string protected = 1;
+  string signature = 2;
+  map<string, google.protobuf.Value> header = 3;
+}
+
+message TosIdentityProof {
+  string proof_type = 1;
+  string signature = 2;
+  uint64 created_at_block = 3;
+  uint64 expires_at_block = 4;
+}
+
+message TosAgentIdentity {
+  bytes agent_account = 1;
+  bytes controller = 2;
+  uint32 reputation_score_bps = 3;
+  TosIdentityProof identity_proof = 4;
+}
+
+message AgentCard {
+  string protocol_version = 1;
+  string name = 2;
+  string description = 3;
+  string version = 4;
+  repeated AgentInterface supported_interfaces = 5;
+  AgentProvider provider = 6;
+  string icon_url = 7;
+  string documentation_url = 8;
+  AgentCapabilities capabilities = 9;
+  map<string, SecurityScheme> security_schemes = 10;
+  repeated Security security = 11;
+  repeated string default_input_modes = 12;
+  repeated string default_output_modes = 13;
+  repeated AgentSkill skills = 14;
+  bool supports_extended_agent_card = 15;
+  repeated AgentCardSignature signatures = 16;
+  TosAgentIdentity tos_identity = 17;
+}
+
+message GetExtendedAgentCardRequest {
+  string tenant = 1;
+}

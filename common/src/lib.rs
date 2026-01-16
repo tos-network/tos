@@ -6,6 +6,7 @@
 #![allow(clippy::ptr_arg)] // API compatibility
 #![allow(clippy::owned_cow)] // Cow usage pattern
 
+pub mod a2a;
 pub mod account;
 pub mod api;
 pub mod block;

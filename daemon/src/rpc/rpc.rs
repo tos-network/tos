@@ -1,4 +1,4 @@
-use super::{ApiError, InternalRpcError};
+use super::{a2a as a2a_rpc, ApiError, InternalRpcError};
 use crate::{
     config::{
         get_hard_forks as get_configured_hard_forks, DEV_FEES, DEV_PUBLIC_KEY, MILLIS_PER_SECOND,
@@ -593,6 +593,7 @@ pub fn register_methods<S: Storage>(
     handler: &mut RPCHandler<Arc<Blockchain<S>>>,
     allow_mining_methods: bool,
     allow_admin_methods: bool,
+    enable_a2a: bool,
 ) {
     info!("Registering RPC methods...");
     handler.register_method("get_version", async_handler!(version::<S>));
@@ -937,6 +938,10 @@ pub fn register_methods<S: Storage>(
     handler.register_method("get_messages", async_handler!(get_messages::<S>));
     handler.register_method("get_message_count", async_handler!(get_message_count::<S>));
     handler.register_method("get_message_by_id", async_handler!(get_message_by_id::<S>));
+
+    if enable_a2a {
+        a2a_rpc::register_a2a_methods::<S>(handler);
+    }
 
     if allow_mining_methods {
         handler.register_method(

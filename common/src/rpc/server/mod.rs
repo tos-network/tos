@@ -4,7 +4,7 @@ use actix_web::{
     web::{self, Data, Payload},
     HttpRequest, HttpResponse, Responder,
 };
-use std::net::IpAddr;
+use std::{collections::HashMap, net::IpAddr};
 
 use self::websocket::{WebSocketHandler, WebSocketServerShared};
 use super::{RPCHandler, RpcResponseError};
@@ -27,6 +27,52 @@ pub trait RPCServerHandler<T: Send + Clone> {
     fn get_rpc_handler(&self) -> &RPCHandler<T>;
 }
 
+/// Basic request metadata available to RPC methods.
+#[derive(Debug, Clone)]
+pub struct RequestMetadata {
+    pub method: String,
+    pub path: String,
+    pub query: String,
+    pub headers: HashMap<String, String>,
+    pub body: Vec<u8>,
+}
+
+impl RequestMetadata {
+    pub fn from_http_request(request: &HttpRequest, body: &[u8]) -> Self {
+        let mut headers = HashMap::new();
+        for (name, value) in request.headers().iter() {
+            if let Ok(value) = value.to_str() {
+                headers.insert(name.as_str().to_ascii_lowercase(), value.to_string());
+            }
+        }
+
+        Self {
+            method: request.method().to_string(),
+            path: request.uri().path().to_string(),
+            query: request.uri().query().unwrap_or("").to_string(),
+            headers,
+            body: body.to_vec(),
+        }
+    }
+
+    pub fn from_websocket_request(request: &websocket::HttpRequest) -> Self {
+        let mut headers = HashMap::new();
+        for (name, value) in request.headers().iter() {
+            if let Ok(value) = value.to_str() {
+                headers.insert(name.as_str().to_ascii_lowercase(), value.to_string());
+            }
+        }
+
+        Self {
+            method: request.method().to_string(),
+            path: request.uri().path().to_string(),
+            query: request.uri().query().unwrap_or("").to_string(),
+            headers,
+            body: Vec::new(),
+        }
+    }
+}
+
 // JSON RPC handler endpoint
 pub async fn json_rpc<T, H>(
     server: Data<H>,
@@ -44,6 +90,7 @@ where
     let mut context = Context::new();
     context.store(server.get_rpc_handler().get_data().clone());
     context.store(client_addr);
+    context.store(RequestMetadata::from_http_request(&request, &body));
 
     let result = server
         .get_rpc_handler()
