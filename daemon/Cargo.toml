@@ -44,6 +44,7 @@ human_bytes = "0.4.2"
 tokio-socks = "0.5.2"
 num_cpus = "1.16"
 reqwest = { version = "0.12", features = ["json"] }
+url = "2"
 jsonwebtoken = "9.3"
 env_logger = "0.11"
 tempdir = "0.3"

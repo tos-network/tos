@@ -1,7 +1,9 @@
+use std::net::IpAddr;
 use std::time::Duration;
 
 use reqwest::Client;
 use tokio::time::sleep;
+use url::Url;
 
 use tos_common::a2a::{
     ListTaskPushNotificationConfigResponse, StreamResponse, TaskPushNotificationConfig,
@@ -11,6 +13,58 @@ use super::storage::A2AStore;
 
 const RETRY_DELAYS_MS: [u64; 3] = [200, 1000, 3000];
 const REQUEST_TIMEOUT_SECS: u64 = 5;
+
+/// Validate push notification URL for SSRF protection
+fn is_safe_url(url_str: &str) -> bool {
+    let url = match Url::parse(url_str) {
+        Ok(u) => u,
+        Err(_) => return false,
+    };
+
+    // Only allow HTTPS
+    if url.scheme() != "https" {
+        return false;
+    }
+
+    // Check for private/internal IPs
+    if let Some(host) = url.host_str() {
+        // Block localhost
+        if host == "localhost" || host == "127.0.0.1" || host == "::1" {
+            return false;
+        }
+
+        // Try to parse as IP and check for private ranges
+        if let Ok(ip) = host.parse::<IpAddr>() {
+            if is_private_ip(&ip) {
+                return false;
+            }
+        }
+
+        // Block internal hostnames
+        if host.ends_with(".local") || host.ends_with(".internal") || host.ends_with(".localhost") {
+            return false;
+        }
+    }
+
+    true
+}
+
+/// Check if IP address is in private range
+fn is_private_ip(ip: &IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            v4.is_private()
+                || v4.is_loopback()
+                || v4.is_link_local()
+                || v4.is_broadcast()
+                || v4.is_documentation()
+                || v4.is_unspecified()
+                // 169.254.0.0/16 link-local
+                || (v4.octets()[0] == 169 && v4.octets()[1] == 254)
+        }
+        IpAddr::V6(v6) => v6.is_loopback() || v6.is_unspecified(),
+    }
+}
 
 pub async fn notify_task_event(store: &A2AStore, task_id: &str, event: StreamResponse) {
     let configs = list_all_configs(store, task_id).await;
@@ -58,6 +112,17 @@ async fn send_with_retry(
     config: &TaskPushNotificationConfig,
     event: &StreamResponse,
 ) {
+    // SSRF protection: validate URL before sending
+    if !is_safe_url(&config.push_notification_config.url) {
+        if log::log_enabled!(log::Level::Warn) {
+            log::warn!(
+                "Push notification URL blocked by SSRF protection: {}",
+                config.push_notification_config.url
+            );
+        }
+        return;
+    }
+
     for (idx, delay) in RETRY_DELAYS_MS.iter().enumerate() {
         let mut request = client.post(&config.push_notification_config.url);
         if let Some(token) = config.push_notification_config.token.as_ref() {

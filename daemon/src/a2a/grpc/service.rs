@@ -8,6 +8,7 @@ use futures::StreamExt;
 use prost_types::{value, Struct, Value};
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
+use tos_common::rpc::server::RequestMetadata;
 
 use crate::a2a::grpc::proto;
 use crate::a2a::grpc::proto::a2a_service_server::A2aService;
@@ -18,6 +19,53 @@ use tos_common::a2a as common;
 use tos_common::a2a::A2AService;
 use tos_common::crypto::elgamal::CompressedPublicKey;
 use tos_crypto::curve25519_dalek::ristretto::CompressedRistretto;
+
+/// Extract authentication metadata from gRPC request and verify
+async fn verify_grpc_auth<T>(request: &Request<T>) -> Result<(), Status> {
+    let metadata = request.metadata();
+
+    // Convert gRPC metadata to HashMap for auth verification
+    let mut headers = HashMap::new();
+
+    // Extract standard auth headers from gRPC metadata
+    if let Some(auth) = metadata.get("authorization") {
+        if let Ok(v) = auth.to_str() {
+            headers.insert("authorization".to_string(), v.to_string());
+        }
+    }
+    if let Some(api_key) = metadata.get("x-api-key") {
+        if let Ok(v) = api_key.to_str() {
+            headers.insert("x-api-key".to_string(), v.to_string());
+        }
+    }
+    // TOS signature headers
+    for key in [
+        "tos-timestamp",
+        "tos-nonce",
+        "tos-public-key",
+        "tos-signature",
+    ] {
+        if let Some(value) = metadata.get(key) {
+            if let Ok(v) = value.to_str() {
+                headers.insert(key.to_string(), v.to_string());
+            }
+        }
+    }
+
+    let meta = RequestMetadata {
+        headers,
+        body: Vec::new(), // gRPC body is not used for auth
+        method: "POST".to_string(),
+        path: "/grpc".to_string(),
+        query: String::new(),
+    };
+
+    crate::a2a::auth::authorize_metadata(&meta)
+        .await
+        .map_err(|_| Status::unauthenticated("invalid or missing authentication"))?;
+
+    Ok(())
+}
 
 pub struct A2AGrpcService<S: Storage> {
     service: A2ADaemonService<S>,
@@ -40,6 +88,7 @@ impl<S: Storage + Send + Sync + 'static> A2aService for A2AGrpcService<S> {
         &self,
         request: Request<proto::SendMessageRequest>,
     ) -> Result<Response<proto::SendMessageResponse>, Status> {
+        verify_grpc_auth(&request).await?;
         let request = proto_send_message_request_to_common(request.into_inner())?;
         let response = self
             .service
@@ -55,6 +104,7 @@ impl<S: Storage + Send + Sync + 'static> A2aService for A2AGrpcService<S> {
         &self,
         request: Request<proto::SendMessageRequest>,
     ) -> Result<Response<Self::SendStreamingMessageStream>, Status> {
+        verify_grpc_auth(&request).await?;
         let request = proto_send_message_request_to_common(request.into_inner())?;
         let mut stream = self
             .service
@@ -74,6 +124,7 @@ impl<S: Storage + Send + Sync + 'static> A2aService for A2AGrpcService<S> {
         &self,
         request: Request<proto::GetTaskRequest>,
     ) -> Result<Response<proto::Task>, Status> {
+        verify_grpc_auth(&request).await?;
         let request = proto_get_task_request_to_common(request.into_inner());
         let response = self
             .service
@@ -87,6 +138,7 @@ impl<S: Storage + Send + Sync + 'static> A2aService for A2AGrpcService<S> {
         &self,
         request: Request<proto::ListTasksRequest>,
     ) -> Result<Response<proto::ListTasksResponse>, Status> {
+        verify_grpc_auth(&request).await?;
         let request = proto_list_tasks_request_to_common(request.into_inner());
         let response = self
             .service
@@ -100,6 +152,7 @@ impl<S: Storage + Send + Sync + 'static> A2aService for A2AGrpcService<S> {
         &self,
         request: Request<proto::CancelTaskRequest>,
     ) -> Result<Response<proto::Task>, Status> {
+        verify_grpc_auth(&request).await?;
         let request = proto_cancel_task_request_to_common(request.into_inner());
         let response = self
             .service
@@ -113,6 +166,7 @@ impl<S: Storage + Send + Sync + 'static> A2aService for A2AGrpcService<S> {
         &self,
         request: Request<proto::SubscribeToTaskRequest>,
     ) -> Result<Response<Self::SubscribeToTaskStream>, Status> {
+        verify_grpc_auth(&request).await?;
         let request = proto_subscribe_request_to_common(request.into_inner());
         let mut stream = self
             .service
@@ -132,6 +186,7 @@ impl<S: Storage + Send + Sync + 'static> A2aService for A2AGrpcService<S> {
         &self,
         request: Request<proto::SetTaskPushNotificationConfigRequest>,
     ) -> Result<Response<proto::TaskPushNotificationConfig>, Status> {
+        verify_grpc_auth(&request).await?;
         let request = proto_set_push_request_to_common(request.into_inner())?;
         let response = self
             .service
@@ -145,6 +200,7 @@ impl<S: Storage + Send + Sync + 'static> A2aService for A2AGrpcService<S> {
         &self,
         request: Request<proto::GetTaskPushNotificationConfigRequest>,
     ) -> Result<Response<proto::TaskPushNotificationConfig>, Status> {
+        verify_grpc_auth(&request).await?;
         let request = proto_get_push_request_to_common(request.into_inner());
         let response = self
             .service
@@ -158,6 +214,7 @@ impl<S: Storage + Send + Sync + 'static> A2aService for A2AGrpcService<S> {
         &self,
         request: Request<proto::ListTaskPushNotificationConfigRequest>,
     ) -> Result<Response<proto::ListTaskPushNotificationConfigResponse>, Status> {
+        verify_grpc_auth(&request).await?;
         let request = proto_list_push_request_to_common(request.into_inner());
         let response = self
             .service
@@ -171,6 +228,7 @@ impl<S: Storage + Send + Sync + 'static> A2aService for A2AGrpcService<S> {
         &self,
         request: Request<proto::DeleteTaskPushNotificationConfigRequest>,
     ) -> Result<Response<proto::Empty>, Status> {
+        verify_grpc_auth(&request).await?;
         let request = proto_delete_push_request_to_common(request.into_inner());
         self.service
             .delete_task_push_notification_config(request)

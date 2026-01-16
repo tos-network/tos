@@ -21,8 +21,9 @@ use tos_common::{
         SendMessageRequest, SendMessageResponse, SetTaskPushNotificationConfigRequest,
         StreamResponse, SubscribeToTaskRequest, Task, TaskArtifactUpdateEvent,
         TaskPushNotificationConfig, TaskState, TaskStatus, TaskStatusUpdateEvent,
-        TosSignatureSecurityScheme, MAX_DATA_PART_BYTES, MAX_FILE_INLINE_BYTES, MAX_HISTORY_LENGTH,
-        MAX_METADATA_KEYS, MAX_PARTS_PER_MESSAGE, MAX_TEXT_PART_BYTES,
+        TosSignatureSecurityScheme, MAX_ARTIFACTS_PER_TASK, MAX_DATA_PART_BYTES,
+        MAX_FILE_INLINE_BYTES, MAX_HISTORY_LENGTH, MAX_METADATA_KEYS, MAX_PARTS_PER_MESSAGE,
+        MAX_PUSH_CONFIGS_PER_TASK, MAX_TEXT_PART_BYTES,
     },
     config::VERSION,
 };
@@ -460,6 +461,17 @@ async fn execute_task_flow(
     // Check history limit before adding assistant message
     check_history_limit(&task)?;
     task.history.push(result.assistant_message.clone());
+
+    // Check artifacts limit
+    let new_artifact_count = task.artifacts.len().saturating_add(result.artifacts.len());
+    if new_artifact_count > MAX_ARTIFACTS_PER_TASK {
+        return Err(A2AError::InvalidParams {
+            message: format!(
+                "task would have {} artifacts, maximum is {}",
+                new_artifact_count, MAX_ARTIFACTS_PER_TASK
+            ),
+        });
+    }
     task.artifacts.extend(result.artifacts.clone());
     task.status = executor::build_final_status(&task, result.assistant_message.clone());
 
@@ -493,6 +505,19 @@ impl<S: Storage + Send + Sync + 'static> A2AService for A2ADaemonService<S> {
 
         // Validate Anti-DoS limits
         validate_message_limits(&message)?;
+
+        // Validate request metadata keys limit
+        if let Some(metadata) = &request.metadata {
+            if metadata.len() > MAX_METADATA_KEYS {
+                return Err(A2AError::InvalidParams {
+                    message: format!(
+                        "request has {} metadata keys, maximum is {}",
+                        metadata.len(),
+                        MAX_METADATA_KEYS
+                    ),
+                });
+            }
+        }
 
         let (task_id, context_id, mut task) = if let Some(task_id) = message.task_id.clone() {
             let Some(task) = store.get_task(&task_id).map_err(map_store_error)? else {
@@ -633,6 +658,19 @@ impl<S: Storage + Send + Sync + 'static> A2AService for A2ADaemonService<S> {
 
         // Validate Anti-DoS limits
         validate_message_limits(&message)?;
+
+        // Validate request metadata keys limit
+        if let Some(metadata) = &request.metadata {
+            if metadata.len() > MAX_METADATA_KEYS {
+                return Err(A2AError::InvalidParams {
+                    message: format!(
+                        "request has {} metadata keys, maximum is {}",
+                        metadata.len(),
+                        MAX_METADATA_KEYS
+                    ),
+                });
+            }
+        }
 
         let (task_id, context_id, mut task) = if let Some(task_id) = message.task_id.clone() {
             let Some(task) = store.get_task(&task_id).map_err(map_store_error)? else {
@@ -845,6 +883,21 @@ impl<S: Storage + Send + Sync + 'static> A2AService for A2ADaemonService<S> {
         let mut config = request.config.clone();
         config.name = make_push_name(task_id, &config_id);
         let store = self.store()?;
+
+        // Check push config count limit
+        let existing = store
+            .list_push_configs(task_id, Some(MAX_PUSH_CONFIGS_PER_TASK as i32), None)
+            .map_err(map_store_error)?;
+        if existing.configs.len() >= MAX_PUSH_CONFIGS_PER_TASK {
+            return Err(A2AError::InvalidParams {
+                message: format!(
+                    "task has {} push configs, maximum is {}",
+                    existing.configs.len(),
+                    MAX_PUSH_CONFIGS_PER_TASK
+                ),
+            });
+        }
+
         store
             .set_push_config(task_id, &config_id, config.clone())
             .map_err(map_store_error)?;
