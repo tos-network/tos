@@ -16,11 +16,13 @@ use tos_common::{
         A2AError, A2AResult, A2AService, AgentCapabilities, AgentCard, AgentInterface,
         AgentProvider, ApiKeySecurityScheme, Artifact, CancelTaskRequest,
         GetExtendedAgentCardRequest, GetTaskRequest, HttpAuthSecurityScheme, ListTasksRequest,
-        ListTasksResponse, Message, OAuth2SecurityScheme, OAuthFlows, PushNotificationConfig, Role,
-        Security, SecurityScheme, SendMessageConfiguration, SendMessageRequest,
-        SendMessageResponse, SetTaskPushNotificationConfigRequest, StreamResponse,
-        SubscribeToTaskRequest, Task, TaskArtifactUpdateEvent, TaskPushNotificationConfig,
-        TaskState, TaskStatus, TaskStatusUpdateEvent, TosSignatureSecurityScheme,
+        ListTasksResponse, Message, OAuth2SecurityScheme, OAuthFlows, PartContent,
+        PushNotificationConfig, Role, Security, SecurityScheme, SendMessageConfiguration,
+        SendMessageRequest, SendMessageResponse, SetTaskPushNotificationConfigRequest,
+        StreamResponse, SubscribeToTaskRequest, Task, TaskArtifactUpdateEvent,
+        TaskPushNotificationConfig, TaskState, TaskStatus, TaskStatusUpdateEvent,
+        TosSignatureSecurityScheme, MAX_DATA_PART_BYTES, MAX_FILE_INLINE_BYTES, MAX_HISTORY_LENGTH,
+        MAX_METADATA_KEYS, MAX_PARTS_PER_MESSAGE, MAX_TEXT_PART_BYTES,
     },
     config::VERSION,
 };
@@ -131,22 +133,21 @@ impl<S: Storage> A2ADaemonService<S> {
                 )]),
             });
         }
+        // TOS signature is an optional extension scheme (not required by default per spec)
         security_schemes.insert(
             "tosSignature".to_string(),
             SecurityScheme::TosSignature {
                 tos_signature_security_scheme: TosSignatureSecurityScheme {
-                    description: Some("TOS signature over request metadata".to_string()),
+                    description: Some(
+                        "TOS signature over request metadata (optional extension)".to_string(),
+                    ),
                     chain_id: self.blockchain.get_network().chain_id(),
                     allowed_signers: Vec::new(),
                 },
             },
         );
-        security.push(Security {
-            schemes: std::collections::HashMap::from([(
-                "tosSignature".to_string(),
-                tos_common::a2a::StringList { list: Vec::new() },
-            )]),
-        });
+        // Note: tosSignature is NOT added to required security list per spec
+        // "extensions MUST NOT be required by default"
 
         AgentCard {
             protocol_version: "1.0".to_string(),
@@ -166,7 +167,7 @@ impl<S: Storage> A2ADaemonService<S> {
                 },
                 AgentInterface {
                     url: format!("{base_url}/a2a/ws"),
-                    protocol_binding: "WEBSOCKET".to_string(),
+                    protocol_binding: "JSONRPC".to_string(), // WebSocket uses JSON-RPC protocol
                     tenant: None,
                 },
                 AgentInterface {
@@ -316,6 +317,96 @@ fn blocking_enabled(config: Option<&SendMessageConfiguration>) -> bool {
     config.map(|cfg| cfg.blocking).unwrap_or(true)
 }
 
+/// Validate message against Anti-DoS limits
+fn validate_message_limits(message: &Message) -> A2AResult<()> {
+    // Check parts count
+    if message.parts.len() > MAX_PARTS_PER_MESSAGE {
+        return Err(A2AError::InvalidParams {
+            message: format!(
+                "message has {} parts, maximum is {}",
+                message.parts.len(),
+                MAX_PARTS_PER_MESSAGE
+            ),
+        });
+    }
+
+    // Check individual part sizes
+    for (i, part) in message.parts.iter().enumerate() {
+        match &part.content {
+            PartContent::Text { text } => {
+                if text.len() > MAX_TEXT_PART_BYTES {
+                    return Err(A2AError::InvalidParams {
+                        message: format!(
+                            "part {} text size {} exceeds maximum {}",
+                            i,
+                            text.len(),
+                            MAX_TEXT_PART_BYTES
+                        ),
+                    });
+                }
+            }
+            PartContent::File { file } => {
+                let size = match &file.file {
+                    tos_common::a2a::FileContent::Bytes { file_with_bytes } => {
+                        file_with_bytes.len()
+                    }
+                    tos_common::a2a::FileContent::Uri { .. } => 0, // URI references don't count
+                };
+                if size > MAX_FILE_INLINE_BYTES {
+                    return Err(A2AError::InvalidParams {
+                        message: format!(
+                            "part {} file size {} exceeds maximum {}",
+                            i, size, MAX_FILE_INLINE_BYTES
+                        ),
+                    });
+                }
+            }
+            PartContent::Data { data } => {
+                let size = serde_json::to_string(&data.data)
+                    .map(|s| s.len())
+                    .unwrap_or(0);
+                if size > MAX_DATA_PART_BYTES {
+                    return Err(A2AError::InvalidParams {
+                        message: format!(
+                            "part {} data size {} exceeds maximum {}",
+                            i, size, MAX_DATA_PART_BYTES
+                        ),
+                    });
+                }
+            }
+        }
+    }
+
+    // Check metadata keys count
+    if let Some(metadata) = &message.metadata {
+        if metadata.len() > MAX_METADATA_KEYS {
+            return Err(A2AError::InvalidParams {
+                message: format!(
+                    "message has {} metadata keys, maximum is {}",
+                    metadata.len(),
+                    MAX_METADATA_KEYS
+                ),
+            });
+        }
+    }
+
+    Ok(())
+}
+
+/// Check if adding a message would exceed history limit
+fn check_history_limit(task: &Task) -> A2AResult<()> {
+    if task.history.len() >= MAX_HISTORY_LENGTH {
+        return Err(A2AError::InvalidParams {
+            message: format!(
+                "task has {} history entries, maximum is {}",
+                task.history.len(),
+                MAX_HISTORY_LENGTH
+            ),
+        });
+    }
+    Ok(())
+}
+
 fn register_temp_push_configs(
     store: &storage::A2AStore,
     task_id: &str,
@@ -366,6 +457,8 @@ async fn execute_task_flow(
         }
     };
 
+    // Check history limit before adding assistant message
+    check_history_limit(&task)?;
     task.history.push(result.assistant_message.clone());
     task.artifacts.extend(result.artifacts.clone());
     task.status = executor::build_final_status(&task, result.assistant_message.clone());
@@ -397,6 +490,9 @@ impl<S: Storage + Send + Sync + 'static> A2AService for A2ADaemonService<S> {
     async fn send_message(&self, request: SendMessageRequest) -> A2AResult<SendMessageResponse> {
         let store = self.store()?;
         let mut message = request.message;
+
+        // Validate Anti-DoS limits
+        validate_message_limits(&message)?;
 
         let (task_id, context_id, mut task) = if let Some(task_id) = message.task_id.clone() {
             let Some(task) = store.get_task(&task_id).map_err(map_store_error)? else {
@@ -442,6 +538,8 @@ impl<S: Storage + Send + Sync + 'static> A2AService for A2ADaemonService<S> {
             });
         }
 
+        // Check history limit before adding
+        check_history_limit(&task)?;
         task.history.push(message);
 
         task.status.state = TaskState::Working;
@@ -533,6 +631,9 @@ impl<S: Storage + Send + Sync + 'static> A2AService for A2ADaemonService<S> {
         let store = self.store()?;
         let mut message = request.message;
 
+        // Validate Anti-DoS limits
+        validate_message_limits(&message)?;
+
         let (task_id, context_id, mut task) = if let Some(task_id) = message.task_id.clone() {
             let Some(task) = store.get_task(&task_id).map_err(map_store_error)? else {
                 return Err(A2AError::TaskNotFoundError { task_id });
@@ -577,6 +678,8 @@ impl<S: Storage + Send + Sync + 'static> A2AService for A2ADaemonService<S> {
             });
         }
 
+        // Check history limit before adding
+        check_history_limit(&task)?;
         task.history.push(message);
 
         task.status.state = TaskState::Working;
@@ -618,31 +721,41 @@ impl<S: Storage + Send + Sync + 'static> A2AService for A2ADaemonService<S> {
             }
         }
 
+        // Build stream events per spec: Task/Message first, then status updates, artifacts, final status
         let mut events = Vec::new();
-        events.push(make_status_event_with(
-            &task_id,
-            &context_id,
-            working_status,
-            false,
-        ));
+
+        // First event MUST be Task or Message (per A2A spec)
+        let initial_task = Task {
+            id: task_id.clone(),
+            context_id: context_id.clone(),
+            status: working_status.clone(),
+            artifacts: Vec::new(),
+            history: Vec::new(),
+            metadata: None,
+            tos_task_anchor: None,
+        };
+        events.push(StreamResponse::Task { task: initial_task });
+
+        // Stream artifacts if requested
         if should_stream_artifacts(&output_modes) {
             for artifact in result.artifacts.clone() {
                 events.push(make_artifact_event(&task_id, &context_id, artifact));
             }
         }
-        if !matches!(preferred_output_mode(&output_modes), OutputMode::Artifact) {
-            events.push(make_status_event_with(
-                &task_id,
-                &context_id,
-                response_task.status.clone(),
-                true,
-            ));
-        }
+
+        // Final status update (always required per spec)
+        events.push(make_status_event_with(
+            &task_id,
+            &context_id,
+            response_task.status.clone(),
+            true,
+        ));
+
+        // Final Task or Message based on output mode
         match preferred_output_mode(&output_modes) {
             OutputMode::Message => events.push(StreamResponse::Message {
                 message: result.assistant_message.clone(),
             }),
-            OutputMode::Artifact => {}
             _ => events.push(StreamResponse::Task {
                 task: response_task,
             }),

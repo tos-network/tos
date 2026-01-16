@@ -69,6 +69,8 @@ pub enum AuthError {
     TosNonceInvalid,
     #[error("TOS public key is invalid")]
     TosPublicKeyInvalid,
+    #[error("TOS public key is not registered on-chain")]
+    TosPublicKeyNotRegistered,
     #[error("TOS signature is expired")]
     TosSignatureExpired,
     #[error("failed to fetch JWKS")]
@@ -100,6 +102,29 @@ pub fn get_auth_config() -> Option<A2AAuthConfig> {
 pub async fn authorize_metadata(meta: &RequestMetadata) -> Result<AuthMethod, AuthError> {
     let auth = AUTH.get().ok_or(AuthError::MissingAuth)?;
     auth.authorize(meta).await
+}
+
+/// Authorize with on-chain verification for TOS signatures.
+/// The `is_registered` callback should check if the public key is registered
+/// as a controller or session key in the on-chain AgentAccountMeta.
+pub async fn authorize_metadata_with_chain_check<F>(
+    meta: &RequestMetadata,
+    is_registered: F,
+) -> Result<AuthMethod, AuthError>
+where
+    F: Fn(&tos_common::crypto::PublicKey) -> bool,
+{
+    let auth = AUTH.get().ok_or(AuthError::MissingAuth)?;
+    auth.authorize_with_chain_check(meta, is_registered).await
+}
+
+/// Extract the TOS signer's public key from request headers.
+/// Returns the verified public key if TOS signature headers are present and valid.
+pub fn extract_tos_signer_pubkey(
+    meta: &RequestMetadata,
+) -> Result<tos_common::crypto::PublicKey, AuthError> {
+    let auth = AUTH.get().ok_or(AuthError::MissingAuth)?;
+    auth.extract_and_verify_tos_pubkey(meta)
 }
 
 impl A2AAuth {
@@ -150,6 +175,65 @@ impl A2AAuth {
         } else {
             Err(AuthError::InvalidAuth)
         }
+    }
+
+    async fn authorize_with_chain_check<F>(
+        &self,
+        meta: &RequestMetadata,
+        is_registered: F,
+    ) -> Result<AuthMethod, AuthError>
+    where
+        F: Fn(&tos_common::crypto::PublicKey) -> bool,
+    {
+        let mut errors = Vec::new();
+
+        if let Some(token) = extract_bearer_token(&meta.headers) {
+            if !self.config.api_keys.is_empty() {
+                if self.config.api_keys.contains(token) {
+                    return Ok(AuthMethod::ApiKey);
+                }
+                errors.push(AuthError::ApiKeyInvalid);
+            }
+
+            if self.oauth_configured() {
+                if self.verify_oauth(token).await.is_ok() {
+                    return Ok(AuthMethod::OAuth);
+                }
+                errors.push(AuthError::OAuthInvalid);
+            }
+        }
+
+        if let Some(key) = meta.headers.get("x-api-key") {
+            if !self.config.api_keys.is_empty() && self.config.api_keys.contains(key) {
+                return Ok(AuthMethod::ApiKey);
+            }
+            errors.push(AuthError::ApiKeyInvalid);
+        }
+
+        if has_tos_signature_headers(&meta.headers) {
+            match self.verify_tos_signature_and_get_pubkey(meta) {
+                Ok(pubkey) => {
+                    if is_registered(&pubkey) {
+                        return Ok(AuthMethod::TosSignature);
+                    }
+                    errors.push(AuthError::TosPublicKeyNotRegistered);
+                }
+                Err(e) => errors.push(e),
+            }
+        }
+
+        if errors.is_empty() {
+            Err(AuthError::MissingAuth)
+        } else {
+            Err(AuthError::InvalidAuth)
+        }
+    }
+
+    fn extract_and_verify_tos_pubkey(
+        &self,
+        meta: &RequestMetadata,
+    ) -> Result<tos_common::crypto::PublicKey, AuthError> {
+        self.verify_tos_signature_and_get_pubkey(meta)
     }
 
     fn oauth_configured(&self) -> bool {
@@ -267,6 +351,68 @@ impl A2AAuth {
 
         if signature.verify(canonical.as_bytes(), &public_key) {
             Ok(())
+        } else {
+            Err(AuthError::TosSignatureInvalid)
+        }
+    }
+
+    fn verify_tos_signature_and_get_pubkey(
+        &self,
+        meta: &RequestMetadata,
+    ) -> Result<tos_common::crypto::PublicKey, AuthError> {
+        let timestamp = parse_header_i64(&meta.headers, "tos-timestamp")?;
+        let nonce = meta
+            .headers
+            .get("tos-nonce")
+            .ok_or(AuthError::TosSignatureMissing)?
+            .to_string();
+        let pubkey_hex = meta
+            .headers
+            .get("tos-public-key")
+            .ok_or(AuthError::TosSignatureMissing)?;
+        let signature_hex = meta
+            .headers
+            .get("tos-signature")
+            .ok_or(AuthError::TosSignatureMissing)?;
+
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+        let skew = (now - timestamp).abs();
+        if skew > self.config.tos_skew_secs {
+            return Err(AuthError::TosSignatureExpired);
+        }
+
+        self.check_and_store_nonce(&nonce, now)?;
+
+        let body_hash = hex::encode(Sha256::digest(&meta.body));
+        let canonical = format!(
+            "{}\n{}\n{}\n{}\n{}\n{}",
+            meta.method.to_uppercase(),
+            meta.path,
+            meta.query,
+            timestamp,
+            nonce,
+            body_hash
+        );
+
+        let signature =
+            Signature::from_hex(signature_hex).map_err(|_| AuthError::TosSignatureInvalid)?;
+
+        let pubkey_bytes = hex::decode(pubkey_hex).map_err(|_| AuthError::TosPublicKeyInvalid)?;
+        if pubkey_bytes.len() != 32 {
+            return Err(AuthError::TosPublicKeyInvalid);
+        }
+        let compressed = CompressedRistretto::from_slice(&pubkey_bytes)
+            .map_err(|_| AuthError::TosPublicKeyInvalid)?;
+        let compressed_key = CompressedPublicKey::new(compressed);
+        let decompressed = compressed_key
+            .decompress()
+            .map_err(|_| AuthError::TosPublicKeyInvalid)?;
+
+        if signature.verify(canonical.as_bytes(), &decompressed) {
+            Ok(compressed_key)
         } else {
             Err(AuthError::TosSignatureInvalid)
         }

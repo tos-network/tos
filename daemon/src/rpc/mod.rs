@@ -198,6 +198,7 @@ impl<S: Storage> DaemonRpcServer<S> {
                     .service(index);
 
                 if enable_a2a {
+                    // Unversioned A2A endpoints
                     app = app
                         .route(
                             "/.well-known/agent-card.json",
@@ -236,6 +237,46 @@ impl<S: Storage> DaemonRpcServer<S> {
                         )
                         .route(
                             "/extendedAgentCard",
+                            web::get().to(a2a::get_extended_agent_card_http::<S>),
+                        );
+                    // Versioned A2A endpoints (/v1/...)
+                    app = app
+                        .route(
+                            "/v1/message:send",
+                            web::post().to(a2a::send_message_http::<S>),
+                        )
+                        .route(
+                            "/v1/message:stream",
+                            web::post().to(a2a::send_streaming_message_http::<S>),
+                        )
+                        .route("/v1/tasks", web::get().to(a2a::list_tasks_http::<S>))
+                        .route("/v1/tasks/{id}", web::get().to(a2a::get_task_http::<S>))
+                        .route(
+                            "/v1/tasks/{id}:cancel",
+                            web::post().to(a2a::cancel_task_http::<S>),
+                        )
+                        .route(
+                            "/v1/tasks/{id}:subscribe",
+                            web::post().to(a2a::subscribe_task_http::<S>),
+                        )
+                        .route(
+                            "/v1/tasks/{id}/pushNotificationConfigs",
+                            web::post().to(a2a::set_task_push_config_http::<S>),
+                        )
+                        .route(
+                            "/v1/tasks/{id}/pushNotificationConfigs",
+                            web::get().to(a2a::list_task_push_config_http::<S>),
+                        )
+                        .route(
+                            "/v1/tasks/{id}/pushNotificationConfigs/{configId}",
+                            web::get().to(a2a::get_task_push_config_http::<S>),
+                        )
+                        .route(
+                            "/v1/tasks/{id}/pushNotificationConfigs/{configId}",
+                            web::delete().to(a2a::delete_task_push_config_http::<S>),
+                        )
+                        .route(
+                            "/v1/extendedAgentCard",
                             web::get().to(a2a::get_extended_agent_card_http::<S>),
                         );
                     app = app.route("/a2a/ws", web::get().to(a2a::a2a_websocket::<S>));
