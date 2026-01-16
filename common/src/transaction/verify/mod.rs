@@ -1,6 +1,7 @@
 pub mod agent_account;
 mod contract;
 mod error;
+pub mod escrow;
 mod kyc;
 mod state;
 mod tns;
