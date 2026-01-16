@@ -241,6 +241,7 @@ impl<S: Storage + Send + Sync + 'static> A2aService for A2AGrpcService<S> {
         &self,
         request: Request<proto::GetExtendedAgentCardRequest>,
     ) -> Result<Response<proto::AgentCard>, Status> {
+        verify_grpc_auth(&request).await?;
         let request = proto_get_extended_card_request_to_common(request.into_inner());
         let response = self
             .service

@@ -326,11 +326,11 @@ fn parse_push_name(name: &str) -> Option<(&str, &str)> {
     Some((task_id, config_id))
 }
 
+/// Public agent card discovery endpoint (no authentication required)
+/// Per A2A spec, /.well-known/agent-card.json SHOULD be publicly accessible
 pub async fn agent_card<S: Storage>(
     server: web::Data<DaemonRpcServer<S>>,
-    request: HttpRequest,
 ) -> Result<HttpResponse, Error> {
-    require_a2a_auth_http(&request, &[]).await?;
     let service = service_from_server(&server);
     let request = GetExtendedAgentCardRequest { tenant: None };
     match service.get_extended_agent_card(request).await {
