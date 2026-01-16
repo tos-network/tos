@@ -1,4 +1,4 @@
-use super::{a2a as a2a_rpc, ApiError, InternalRpcError};
+use super::{a2a as a2a_rpc, agent_registry as agent_registry_rpc, ApiError, InternalRpcError};
 use crate::{
     config::{
         get_hard_forks as get_configured_hard_forks, DEV_FEES, DEV_PUBLIC_KEY, MILLIS_PER_SECOND,
@@ -941,6 +941,7 @@ pub fn register_methods<S: Storage>(
 
     if enable_a2a {
         a2a_rpc::register_a2a_methods::<S>(handler);
+        agent_registry_rpc::register_agent_registry_methods::<S>(handler);
     }
 
     if allow_mining_methods {

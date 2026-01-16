@@ -1,4 +1,5 @@
 pub mod a2a;
+pub mod agent_registry;
 pub mod callback;
 pub mod getwork;
 pub mod rpc;
@@ -204,6 +205,22 @@ impl<S: Storage> DaemonRpcServer<S> {
                             "/.well-known/agent-card.json",
                             web::get().to(a2a::agent_card::<S>),
                         )
+                        .route(
+                            "/agents:register",
+                            web::post().to(agent_registry::register_agent_http::<S>),
+                        )
+                        .route(
+                            "/agents:discover",
+                            web::post().to(agent_registry::discover_agents_http::<S>),
+                        )
+                        .route(
+                            "/agents/{id}",
+                            web::get().to(agent_registry::get_agent_http::<S>),
+                        )
+                        .route(
+                            "/agents/{id}",
+                            web::delete().to(agent_registry::unregister_agent_http::<S>),
+                        )
                         .route("/message:send", web::post().to(a2a::send_message_http::<S>))
                         .route(
                             "/message:stream",
@@ -241,6 +258,22 @@ impl<S: Storage> DaemonRpcServer<S> {
                         );
                     // Versioned A2A endpoints (/v1/...)
                     app = app
+                        .route(
+                            "/v1/agents:register",
+                            web::post().to(agent_registry::register_agent_http::<S>),
+                        )
+                        .route(
+                            "/v1/agents:discover",
+                            web::post().to(agent_registry::discover_agents_http::<S>),
+                        )
+                        .route(
+                            "/v1/agents/{id}",
+                            web::get().to(agent_registry::get_agent_http::<S>),
+                        )
+                        .route(
+                            "/v1/agents/{id}",
+                            web::delete().to(agent_registry::unregister_agent_http::<S>),
+                        )
                         .route(
                             "/v1/message:send",
                             web::post().to(a2a::send_message_http::<S>),

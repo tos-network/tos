@@ -2,6 +2,7 @@ pub mod auth;
 pub mod executor;
 pub mod grpc;
 mod notify;
+pub mod registry;
 mod storage;
 
 use std::sync::Arc;
