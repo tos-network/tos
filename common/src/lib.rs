@@ -12,6 +12,7 @@ pub mod api;
 pub mod block;
 pub mod contract;
 pub mod crypto;
+pub mod escrow;
 pub mod serializer;
 pub mod transaction;
 
