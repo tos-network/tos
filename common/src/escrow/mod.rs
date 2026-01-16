@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 
-use crate::crypto::{Hash, PublicKey};
+use crate::{
+    crypto::{Hash, PublicKey},
+    serializer::{Reader, ReaderError, Serializer, Writer},
+};
 
 /// Escrow state for on-chain settlement.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -24,6 +27,41 @@ pub enum EscrowState {
     Expired,
 }
 
+impl Serializer for EscrowState {
+    fn write(&self, writer: &mut Writer) {
+        let value = match self {
+            EscrowState::Created => 0u8,
+            EscrowState::Funded => 1u8,
+            EscrowState::PendingRelease => 2u8,
+            EscrowState::Challenged => 3u8,
+            EscrowState::Released => 4u8,
+            EscrowState::Refunded => 5u8,
+            EscrowState::Resolved => 6u8,
+            EscrowState::Expired => 7u8,
+        };
+        value.write(writer);
+    }
+
+    fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
+        let value = u8::read(reader)?;
+        match value {
+            0 => Ok(EscrowState::Created),
+            1 => Ok(EscrowState::Funded),
+            2 => Ok(EscrowState::PendingRelease),
+            3 => Ok(EscrowState::Challenged),
+            4 => Ok(EscrowState::Released),
+            5 => Ok(EscrowState::Refunded),
+            6 => Ok(EscrowState::Resolved),
+            7 => Ok(EscrowState::Expired),
+            _ => Err(ReaderError::InvalidValue),
+        }
+    }
+
+    fn size(&self) -> usize {
+        1
+    }
+}
+
 /// Arbitration configuration for an escrow.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -42,6 +80,39 @@ pub struct ArbitrationConfig {
     pub allow_appeal: bool,
 }
 
+impl Serializer for ArbitrationConfig {
+    fn write(&self, writer: &mut Writer) {
+        self.mode.write(writer);
+        self.arbiters.write(writer);
+        self.threshold.write(writer);
+        self.fee_amount.write(writer);
+        self.allow_appeal.write(writer);
+    }
+
+    fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
+        let mode = ArbitrationMode::read(reader)?;
+        let arbiters = Vec::read(reader)?;
+        let threshold = Option::read(reader)?;
+        let fee_amount = u64::read(reader)?;
+        let allow_appeal = bool::read(reader)?;
+        Ok(Self {
+            mode,
+            arbiters,
+            threshold,
+            fee_amount,
+            allow_appeal,
+        })
+    }
+
+    fn size(&self) -> usize {
+        self.mode.size()
+            + self.arbiters.size()
+            + self.threshold.size()
+            + self.fee_amount.size()
+            + self.allow_appeal.size()
+    }
+}
+
 /// Arbitration mode enumeration.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
@@ -54,6 +125,33 @@ pub enum ArbitrationMode {
     Committee,
     /// TOS DAO governance (for high-value disputes).
     DaoGovernance,
+}
+
+impl Serializer for ArbitrationMode {
+    fn write(&self, writer: &mut Writer) {
+        let value = match self {
+            ArbitrationMode::None => 0u8,
+            ArbitrationMode::Single => 1u8,
+            ArbitrationMode::Committee => 2u8,
+            ArbitrationMode::DaoGovernance => 3u8,
+        };
+        value.write(writer);
+    }
+
+    fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
+        let value = u8::read(reader)?;
+        match value {
+            0 => Ok(ArbitrationMode::None),
+            1 => Ok(ArbitrationMode::Single),
+            2 => Ok(ArbitrationMode::Committee),
+            3 => Ok(ArbitrationMode::DaoGovernance),
+            _ => Err(ReaderError::InvalidValue),
+        }
+    }
+
+    fn size(&self) -> usize {
+        1
+    }
 }
 
 /// On-chain escrow account state.
