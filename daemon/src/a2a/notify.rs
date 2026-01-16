@@ -2,6 +2,7 @@ use std::net::IpAddr;
 use std::time::Duration;
 
 use reqwest::Client;
+use tokio::net::lookup_host;
 use tokio::time::sleep;
 use url::Url;
 
@@ -14,13 +15,8 @@ use super::storage::A2AStore;
 const RETRY_DELAYS_MS: [u64; 3] = [200, 1000, 3000];
 const REQUEST_TIMEOUT_SECS: u64 = 5;
 
-/// Validate push notification URL for SSRF protection
-fn is_safe_url(url_str: &str) -> bool {
-    let url = match Url::parse(url_str) {
-        Ok(u) => u,
-        Err(_) => return false,
-    };
-
+/// Validate push notification URL for SSRF protection (basic hostname check)
+fn is_safe_url_hostname(url: &Url) -> bool {
     // Only allow HTTPS
     if url.scheme() != "https" {
         return false;
@@ -47,6 +43,45 @@ fn is_safe_url(url_str: &str) -> bool {
     }
 
     true
+}
+
+/// Validate push notification URL with DNS resolution for SSRF/DNS rebinding protection
+async fn validate_url_with_dns(url_str: &str) -> Result<Url, &'static str> {
+    let url = Url::parse(url_str).map_err(|_| "invalid URL")?;
+
+    // Basic hostname validation
+    if !is_safe_url_hostname(&url) {
+        return Err("URL blocked by SSRF protection");
+    }
+
+    // Get host and port for DNS resolution
+    let host = url.host_str().ok_or("no host in URL")?;
+    let port = url.port_or_known_default().unwrap_or(443);
+
+    // Skip DNS check if already an IP address
+    if host.parse::<IpAddr>().is_ok() {
+        return Ok(url);
+    }
+
+    // Resolve DNS and check all resolved IPs
+    let addr_str = format!("{}:{}", host, port);
+    let addrs = lookup_host(&addr_str)
+        .await
+        .map_err(|_| "DNS resolution failed")?;
+
+    let resolved: Vec<_> = addrs.collect();
+    if resolved.is_empty() {
+        return Err("DNS resolution returned no addresses");
+    }
+
+    // Check all resolved IPs are safe (prevent DNS rebinding)
+    for addr in &resolved {
+        if is_private_ip(&addr.ip()) {
+            return Err("DNS resolved to private IP");
+        }
+    }
+
+    Ok(url)
 }
 
 /// Check if IP address is in private range
@@ -112,19 +147,23 @@ async fn send_with_retry(
     config: &TaskPushNotificationConfig,
     event: &StreamResponse,
 ) {
-    // SSRF protection: validate URL before sending
-    if !is_safe_url(&config.push_notification_config.url) {
-        if log::log_enabled!(log::Level::Warn) {
-            log::warn!(
-                "Push notification URL blocked by SSRF protection: {}",
-                config.push_notification_config.url
-            );
+    // SSRF protection with DNS rebinding prevention: validate URL and resolve DNS
+    let url = match validate_url_with_dns(&config.push_notification_config.url).await {
+        Ok(u) => u,
+        Err(reason) => {
+            if log::log_enabled!(log::Level::Warn) {
+                log::warn!(
+                    "Push notification URL blocked ({}): {}",
+                    reason,
+                    config.push_notification_config.url
+                );
+            }
+            return;
         }
-        return;
-    }
+    };
 
     for (idx, delay) in RETRY_DELAYS_MS.iter().enumerate() {
-        let mut request = client.post(&config.push_notification_config.url);
+        let mut request = client.post(url.as_str());
         if let Some(token) = config.push_notification_config.token.as_ref() {
             request = request.bearer_auth(token);
         }

@@ -18,8 +18,8 @@ use tos_common::{
         A2AError, CancelTaskRequest, GetExtendedAgentCardRequest,
         GetTaskPushNotificationConfigRequest, GetTaskRequest,
         ListTaskPushNotificationConfigRequest, ListTasksRequest, SendMessageRequest,
-        SetTaskPushNotificationConfigRequest, StreamResponse, SubscribeToTaskRequest,
-        TaskPushNotificationConfig,
+        SetTaskPushNotificationConfigRequest, SubscribeToTaskRequest, TaskPushNotificationConfig,
+        HEADER_VERSION, PROTOCOL_VERSION,
     },
     async_handler,
     context::Context,
@@ -53,8 +53,26 @@ fn map_auth_error(_err: crate::a2a::auth::AuthError) -> InternalRpcError {
     InternalRpcError::CustomStr(-32098, "Unauthorized")
 }
 
+/// Validate A2A version header
+fn validate_a2a_version(
+    headers: &std::collections::HashMap<String, String>,
+) -> Result<(), A2AError> {
+    if let Some(version) = headers.get(HEADER_VERSION) {
+        // Check if version is compatible (currently only 1.0)
+        if version != PROTOCOL_VERSION && !version.starts_with("1.") {
+            return Err(A2AError::VersionNotSupportedError {
+                version: version.clone(),
+            });
+        }
+    }
+    // Version header is optional - if not present, assume compatible
+    Ok(())
+}
+
 async fn require_a2a_auth_http(request: &HttpRequest, body: &[u8]) -> Result<(), Error> {
     let meta = RequestMetadata::from_http_request(request, body);
+    // Validate A2A version header
+    validate_a2a_version(&meta.headers).map_err(|e| ErrorBadRequest(e.to_string()))?;
     crate::a2a::auth::authorize_metadata(&meta)
         .await
         .map_err(|e| ErrorUnauthorized(e.to_string()))?;
@@ -65,6 +83,8 @@ async fn require_a2a_auth_context(context: &Context) -> Result<(), InternalRpcEr
     let meta = context
         .get::<RequestMetadata>()
         .map_err(|_| InternalRpcError::InvalidContext)?;
+    // Validate A2A version header
+    validate_a2a_version(&meta.headers).map_err(map_a2a_error)?;
     crate::a2a::auth::authorize_metadata(meta)
         .await
         .map_err(map_auth_error)?;
@@ -131,18 +151,15 @@ async fn send_message<S: Storage>(
 }
 
 async fn send_streaming_message<S: Storage>(
-    context: &Context,
-    body: Value,
+    _context: &Context,
+    _body: Value,
 ) -> Result<Value, InternalRpcError> {
-    require_a2a_auth_context(context).await?;
-    let request: SendMessageRequest = parse_params(body)?;
-    let service = service_from_context::<S>(context)?;
-    let stream = service
-        .send_streaming_message(request)
-        .await
-        .map_err(map_a2a_error)?;
-    let events: Vec<StreamResponse> = stream.collect().await;
-    serde_json::to_value(events).map_err(InternalRpcError::SerializeResponse)
+    // Streaming is not supported over plain JSON-RPC.
+    // Use the HTTP SSE endpoint (POST /a2a/tasks:sendStreamingMessage) or WebSocket instead.
+    Err(InternalRpcError::Custom(
+        -32600,
+        "Streaming not supported over JSON-RPC. Use HTTP SSE endpoint or WebSocket.".to_string(),
+    ))
 }
 
 async fn get_task<S: Storage>(context: &Context, body: Value) -> Result<Value, InternalRpcError> {
@@ -173,18 +190,15 @@ async fn cancel_task<S: Storage>(
 }
 
 async fn subscribe_to_task<S: Storage>(
-    context: &Context,
-    body: Value,
+    _context: &Context,
+    _body: Value,
 ) -> Result<Value, InternalRpcError> {
-    require_a2a_auth_context(context).await?;
-    let request: SubscribeToTaskRequest = parse_params(body)?;
-    let service = service_from_context::<S>(context)?;
-    let stream = service
-        .subscribe_to_task(request)
-        .await
-        .map_err(map_a2a_error)?;
-    let events: Vec<StreamResponse> = stream.collect().await;
-    serde_json::to_value(events).map_err(InternalRpcError::SerializeResponse)
+    // Streaming is not supported over plain JSON-RPC.
+    // Use the HTTP SSE endpoint (GET /a2a/tasks/{id}:subscribe) or WebSocket instead.
+    Err(InternalRpcError::Custom(
+        -32600,
+        "Streaming not supported over JSON-RPC. Use HTTP SSE endpoint or WebSocket.".to_string(),
+    ))
 }
 
 async fn set_task_push_notification_config<S: Storage>(
