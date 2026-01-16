@@ -8,8 +8,8 @@ use crate::{
     api::{EventResult, SubscribeParams},
     context::Context,
     rpc::{
-        server::ClientAddr, Id, InternalRpcError, RPCHandler, RpcRequest, RpcResponse,
-        RpcResponseError,
+        server::{ClientAddr, RequestMetadata},
+        Id, InternalRpcError, RPCHandler, RpcRequest, RpcResponse, RpcResponseError,
     },
     tokio::sync::RwLock,
 };
@@ -245,6 +245,9 @@ where
         // Inject client address for security checks (e.g., localhost-only admin methods)
         let client_addr = ClientAddr(session.get_peer_addr().map(|addr| addr.ip()));
         context.store(client_addr);
+        context.store(RequestMetadata::from_websocket_request(
+            session.get_request(),
+        ));
 
         match request {
             e @ Value::Object(_) => self

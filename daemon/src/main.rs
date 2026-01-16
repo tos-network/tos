@@ -6,6 +6,7 @@
 
 pub mod config;
 // VRF must be declared before core (core/config.rs uses WrappedVrfSecret)
+pub mod a2a;
 pub mod core;
 pub mod p2p;
 pub mod rpc;
@@ -235,6 +236,7 @@ async fn main() -> Result<()> {
     info!("----------------------------------------------");
 
     let dir_path = blockchain_config.dir_path.as_deref().unwrap_or_default();
+    crate::a2a::set_base_dir(dir_path);
     if !matches!(blockchain_config.use_db_backend, StorageBackend::RocksDB) {
         warn!(
             "use_db_backend is set to {:?}, but only rocksdb is supported; continuing with RocksDB",

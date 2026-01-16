@@ -1,3 +1,4 @@
+pub mod a2a;
 pub mod callback;
 pub mod getwork;
 pub mod rpc;
@@ -18,7 +19,10 @@ use getwork::GetWorkServer;
 use log::{error, info, warn};
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use serde_json::{json, Value};
-use std::{collections::HashSet, sync::Arc, time::Duration};
+use std::{collections::HashSet, net::SocketAddr, sync::Arc, time::Duration};
+use tokio::sync::oneshot;
+use tonic::transport::Server;
+use tonic_reflection::server::Builder as ReflectionBuilder;
 use tos_common::{
     api::daemon::NotifyEvent,
     config,
@@ -42,6 +46,7 @@ pub struct DaemonRpcServer<S: Storage> {
     websocket: WebSocketServerShared<EventWebSocketHandler<Arc<Blockchain<S>>, NotifyEvent>>,
     getwork: Option<WebSocketServerShared<GetWorkServer<S>>>,
     websocket_security: Arc<WebSocketSecurity>,
+    a2a_grpc_shutdown: Mutex<Option<oneshot::Sender<()>>>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -94,6 +99,15 @@ impl<S: Storage> DaemonRpcServer<S> {
                 ws_security_config.max_messages_per_connection_per_second
             );
         }
+        info!("A2A service enabled: {}", config.enable_a2a);
+        if config.enable_a2a {
+            crate::a2a::auth::set_auth_config(crate::a2a::auth::A2AAuthConfig::from_rpc_config(
+                &config,
+            ));
+            crate::a2a::executor::set_executor(crate::a2a::executor::default_executor(
+                config.a2a_executor_concurrency,
+            ));
+        }
 
         let websocket_security = Arc::new(WebSocketSecurity::new(ws_security_config));
 
@@ -109,11 +123,12 @@ impl<S: Storage> DaemonRpcServer<S> {
         };
 
         // create the RPC Handler which will register and contains all available methods
-        let mut rpc_handler = RPCHandler::new(blockchain);
+        let mut rpc_handler = RPCHandler::new(Arc::clone(&blockchain));
         rpc::register_methods(
             &mut rpc_handler,
             !config.getwork.disable,
             config.enable_admin_rpc,
+            config.enable_a2a,
         );
 
         // create the default websocket server (support event & rpc methods)
@@ -127,6 +142,7 @@ impl<S: Storage> DaemonRpcServer<S> {
             websocket: ws,
             getwork,
             websocket_security: Arc::clone(&websocket_security),
+            a2a_grpc_shutdown: Mutex::new(None),
         });
 
         // Spawn a background task to periodically clean up rate limiter entries
@@ -160,6 +176,7 @@ impl<S: Storage> DaemonRpcServer<S> {
 
         {
             let clone = Arc::clone(&server);
+            let enable_a2a = config.enable_a2a;
             let builder = HttpServer::new(move || {
                 let server = Arc::clone(&clone);
                 let mut app = App::new()
@@ -180,6 +197,90 @@ impl<S: Storage> DaemonRpcServer<S> {
                     )
                     .service(index);
 
+                if enable_a2a {
+                    // Unversioned A2A endpoints
+                    app = app
+                        .route(
+                            "/.well-known/agent-card.json",
+                            web::get().to(a2a::agent_card::<S>),
+                        )
+                        .route("/message:send", web::post().to(a2a::send_message_http::<S>))
+                        .route(
+                            "/message:stream",
+                            web::post().to(a2a::send_streaming_message_http::<S>),
+                        )
+                        .route("/tasks", web::get().to(a2a::list_tasks_http::<S>))
+                        .route("/tasks/{id}", web::get().to(a2a::get_task_http::<S>))
+                        .route(
+                            "/tasks/{id}:cancel",
+                            web::post().to(a2a::cancel_task_http::<S>),
+                        )
+                        .route(
+                            "/tasks/{id}:subscribe",
+                            web::post().to(a2a::subscribe_task_http::<S>),
+                        )
+                        .route(
+                            "/tasks/{id}/pushNotificationConfigs",
+                            web::post().to(a2a::set_task_push_config_http::<S>),
+                        )
+                        .route(
+                            "/tasks/{id}/pushNotificationConfigs",
+                            web::get().to(a2a::list_task_push_config_http::<S>),
+                        )
+                        .route(
+                            "/tasks/{id}/pushNotificationConfigs/{configId}",
+                            web::get().to(a2a::get_task_push_config_http::<S>),
+                        )
+                        .route(
+                            "/tasks/{id}/pushNotificationConfigs/{configId}",
+                            web::delete().to(a2a::delete_task_push_config_http::<S>),
+                        )
+                        .route(
+                            "/extendedAgentCard",
+                            web::get().to(a2a::get_extended_agent_card_http::<S>),
+                        );
+                    // Versioned A2A endpoints (/v1/...)
+                    app = app
+                        .route(
+                            "/v1/message:send",
+                            web::post().to(a2a::send_message_http::<S>),
+                        )
+                        .route(
+                            "/v1/message:stream",
+                            web::post().to(a2a::send_streaming_message_http::<S>),
+                        )
+                        .route("/v1/tasks", web::get().to(a2a::list_tasks_http::<S>))
+                        .route("/v1/tasks/{id}", web::get().to(a2a::get_task_http::<S>))
+                        .route(
+                            "/v1/tasks/{id}:cancel",
+                            web::post().to(a2a::cancel_task_http::<S>),
+                        )
+                        .route(
+                            "/v1/tasks/{id}:subscribe",
+                            web::post().to(a2a::subscribe_task_http::<S>),
+                        )
+                        .route(
+                            "/v1/tasks/{id}/pushNotificationConfigs",
+                            web::post().to(a2a::set_task_push_config_http::<S>),
+                        )
+                        .route(
+                            "/v1/tasks/{id}/pushNotificationConfigs",
+                            web::get().to(a2a::list_task_push_config_http::<S>),
+                        )
+                        .route(
+                            "/v1/tasks/{id}/pushNotificationConfigs/{configId}",
+                            web::get().to(a2a::get_task_push_config_http::<S>),
+                        )
+                        .route(
+                            "/v1/tasks/{id}/pushNotificationConfigs/{configId}",
+                            web::delete().to(a2a::delete_task_push_config_http::<S>),
+                        )
+                        .route(
+                            "/v1/extendedAgentCard",
+                            web::get().to(a2a::get_extended_agent_card_http::<S>),
+                        );
+                    app = app.route("/a2a/ws", web::get().to(a2a::a2a_websocket::<S>));
+                }
                 if let Some((route, _)) = &prometheus {
                     app = app.route(route, web::get().to(prometheus_metrics));
                 }
@@ -197,6 +298,47 @@ impl<S: Storage> DaemonRpcServer<S> {
                 *lock = Some(handle);
             }
             spawn_task("rpc-server", http_server);
+        }
+        if config.enable_a2a {
+            let addr: SocketAddr = config
+                .a2a_grpc_bind_address
+                .parse::<SocketAddr>()
+                .map_err(|e: std::net::AddrParseError| BlockchainError::Any(e.into()))?;
+            let (tx, rx) = oneshot::channel::<()>();
+            {
+                let mut lock = server.a2a_grpc_shutdown.lock().await;
+                *lock = Some(tx);
+            }
+            let blockchain = Arc::clone(&blockchain);
+            spawn_task("a2a-grpc", async move {
+                let service = crate::a2a::grpc::service::A2AGrpcService::new(blockchain);
+                let svc =
+                    crate::a2a::grpc::proto::a2a_service_server::A2aServiceServer::new(service);
+                let reflection = match ReflectionBuilder::configure()
+                    .register_encoded_file_descriptor_set(
+                        crate::a2a::grpc::proto::FILE_DESCRIPTOR_SET,
+                    )
+                    .build_v1()
+                {
+                    Ok(r) => r,
+                    Err(err) => {
+                        log::error!("Failed to build a2a grpc reflection: {err}");
+                        return;
+                    }
+                };
+                if let Err(err) = Server::builder()
+                    .add_service(svc)
+                    .add_service(reflection)
+                    .serve_with_shutdown(addr, async move {
+                        let _ = rx.await;
+                    })
+                    .await
+                {
+                    if log::log_enabled!(log::Level::Error) {
+                        error!("A2A gRPC server error: {}", err);
+                    }
+                }
+            });
         }
         Ok(server)
     }
@@ -238,6 +380,10 @@ impl<S: Storage> DaemonRpcServer<S> {
     pub async fn stop(&self) {
         if log::log_enabled!(log::Level::Info) {
             info!("Stopping RPC Server...");
+        }
+        let mut grpc = self.a2a_grpc_shutdown.lock().await;
+        if let Some(shutdown) = grpc.take() {
+            let _ = shutdown.send(());
         }
         let mut handle = self.handle.lock().await;
         if let Some(handle) = handle.take() {

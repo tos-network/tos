@@ -87,6 +87,22 @@ const fn default_ws_max_messages_per_second() -> u32 {
     10
 }
 
+const fn default_a2a_tos_skew_secs() -> u64 {
+    300
+}
+
+const fn default_a2a_tos_nonce_ttl_secs() -> u64 {
+    600
+}
+
+fn default_a2a_grpc_bind_address() -> String {
+    "127.0.0.1:9090".to_string()
+}
+
+const fn default_a2a_executor_concurrency() -> usize {
+    4
+}
+
 #[derive(Debug, Clone, clap::Args, Serialize, Deserialize)]
 pub struct GetWorkConfig {
     /// Disable GetWork Server (WebSocket for miners).
@@ -199,6 +215,58 @@ pub struct RPCConfig {
     #[clap(name = "enable-admin-rpc", long)]
     #[serde(default)]
     pub enable_admin_rpc: bool,
+    /// Enable the A2A service endpoints (HTTP+JSON and JSON-RPC).
+    #[clap(name = "enable-a2a", long)]
+    #[serde(default)]
+    pub enable_a2a: bool,
+    /// A2A API keys (repeatable).
+    #[clap(name = "a2a-api-key", long)]
+    #[serde(default)]
+    pub a2a_api_keys: Vec<String>,
+    /// OAuth2 issuer for A2A JWT validation.
+    #[clap(name = "a2a-oauth-issuer", long)]
+    #[serde(default)]
+    pub a2a_oauth_issuer: Option<String>,
+    /// OAuth2 JWKS URL for A2A JWT validation.
+    #[clap(name = "a2a-oauth-jwks-url", long)]
+    #[serde(default)]
+    pub a2a_oauth_jwks_url: Option<String>,
+    /// OAuth2 audience for A2A JWT validation (optional).
+    #[clap(name = "a2a-oauth-audience", long)]
+    #[serde(default)]
+    pub a2a_oauth_audience: Option<String>,
+    /// Allowed clock skew in seconds for TOS signatures.
+    #[clap(
+        name = "a2a-tos-skew-secs",
+        long,
+        default_value_t = default_a2a_tos_skew_secs()
+    )]
+    #[serde(default = "default_a2a_tos_skew_secs")]
+    pub a2a_tos_skew_secs: u64,
+    /// Nonce time-to-live in seconds for TOS signatures.
+    #[clap(
+        name = "a2a-tos-nonce-ttl-secs",
+        long,
+        default_value_t = default_a2a_tos_nonce_ttl_secs()
+    )]
+    #[serde(default = "default_a2a_tos_nonce_ttl_secs")]
+    pub a2a_tos_nonce_ttl_secs: u64,
+    /// A2A gRPC bind address.
+    #[clap(
+        name = "a2a-grpc-bind-address",
+        long,
+        default_value_t = default_a2a_grpc_bind_address()
+    )]
+    #[serde(default = "default_a2a_grpc_bind_address")]
+    pub a2a_grpc_bind_address: String,
+    /// A2A executor concurrency limit.
+    #[clap(
+        name = "a2a-executor-concurrency",
+        long,
+        default_value_t = default_a2a_executor_concurrency()
+    )]
+    #[serde(default = "default_a2a_executor_concurrency")]
+    pub a2a_executor_concurrency: usize,
 }
 
 #[derive(Debug, Clone, Copy, clap::ValueEnum, Serialize, Deserialize, strum::Display)]
