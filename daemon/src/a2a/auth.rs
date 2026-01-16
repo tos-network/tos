@@ -322,7 +322,8 @@ impl A2AAuth {
             return Err(AuthError::TosSignatureExpired);
         }
 
-        self.check_and_store_nonce(&nonce, now)?;
+        // Check nonce uniqueness without storing (stores after signature verification)
+        self.check_nonce_unique(&nonce, now)?;
 
         let body_hash = hex::encode(Sha256::digest(&meta.body));
         let canonical = format!(
@@ -350,6 +351,8 @@ impl A2AAuth {
             .map_err(|_| AuthError::TosPublicKeyInvalid)?;
 
         if signature.verify(canonical.as_bytes(), &public_key) {
+            // Only store nonce after successful signature verification
+            self.store_nonce(&nonce, now);
             Ok(())
         } else {
             Err(AuthError::TosSignatureInvalid)
@@ -384,7 +387,8 @@ impl A2AAuth {
             return Err(AuthError::TosSignatureExpired);
         }
 
-        self.check_and_store_nonce(&nonce, now)?;
+        // Check nonce uniqueness without storing (stores after signature verification)
+        self.check_nonce_unique(&nonce, now)?;
 
         let body_hash = hex::encode(Sha256::digest(&meta.body));
         let canonical = format!(
@@ -412,21 +416,45 @@ impl A2AAuth {
             .map_err(|_| AuthError::TosPublicKeyInvalid)?;
 
         if signature.verify(canonical.as_bytes(), &decompressed) {
+            // Only store nonce after successful signature verification
+            self.store_nonce(&nonce, now);
             Ok(compressed_key)
         } else {
             Err(AuthError::TosSignatureInvalid)
         }
     }
 
-    fn check_and_store_nonce(&self, nonce: &str, now: i64) -> Result<(), AuthError> {
+    /// Check if nonce is unique without storing (to prevent memory exhaustion DoS)
+    fn check_nonce_unique(&self, nonce: &str, now: i64) -> Result<(), AuthError> {
         let mut guard = self.nonces.lock().map_err(|_| AuthError::TosNonceInvalid)?;
         let ttl = self.config.tos_nonce_ttl_secs;
         guard.retain(|_, ts| now.saturating_sub(*ts) <= ttl);
         if guard.contains_key(nonce) {
             return Err(AuthError::TosNonceInvalid);
         }
-        guard.insert(nonce.to_string(), now);
         Ok(())
+    }
+
+    /// Store nonce after successful signature verification
+    fn store_nonce(&self, nonce: &str, now: i64) {
+        const MAX_NONCES: usize = 10000;
+        if let Ok(mut guard) = self.nonces.lock() {
+            // Enforce max cache size to prevent memory growth
+            if guard.len() >= MAX_NONCES {
+                // Remove oldest entries
+                let mut entries: Vec<_> = guard.iter().map(|(k, v)| (k.clone(), *v)).collect();
+                entries.sort_by_key(|(_, ts)| *ts);
+                let to_remove: Vec<_> = entries
+                    .iter()
+                    .take(entries.len().saturating_sub(MAX_NONCES / 2))
+                    .map(|(k, _)| k.clone())
+                    .collect();
+                for k in to_remove {
+                    guard.remove(&k);
+                }
+            }
+            guard.insert(nonce.to_string(), now);
+        }
     }
 }
 

@@ -349,7 +349,9 @@ fn validate_message_limits(message: &Message) -> A2AResult<()> {
             PartContent::File { file } => {
                 let size = match &file.file {
                     tos_common::a2a::FileContent::Bytes { file_with_bytes } => {
-                        file_with_bytes.len()
+                        // Calculate decoded size from base64: approximately (len * 3) / 4
+                        // Account for padding by being conservative
+                        file_with_bytes.len().saturating_mul(3) / 4
                     }
                     tos_common::a2a::FileContent::Uri { .. } => 0, // URI references don't count
                 };

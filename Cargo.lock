@@ -5716,6 +5716,7 @@ dependencies = [
  "tos-tbpf",
  "tos-tck",
  "tos_common",
+ "url",
  "x25519-dalek",
  "xxhash-rust",
 ]
