@@ -252,6 +252,9 @@ pub enum Column {
     // Escrow accounts storage
     // {escrow_id (32 bytes)} => {EscrowAccount}
     EscrowAccounts,
+    // Escrow history index
+    // {escrow_id (32 bytes)}{topoheight (8 bytes)}{tx_hash (32 bytes)} => {tx_hash}
+    EscrowHistory,
     // Pending releases index (by release_at)
     // {release_at (8 bytes)}{escrow_id (32 bytes)} => {escrow_id}
     EscrowPendingRelease,
@@ -341,6 +344,8 @@ impl Column {
 
             // Escrow pending release: prefix by release_at (8 bytes)
             EscrowPendingRelease => Some(PREFIX_TOPOHEIGHT_LEN),
+            // Escrow history: prefix by escrow_id (32 bytes)
+            EscrowHistory => Some(32),
 
             _ => None,
         }

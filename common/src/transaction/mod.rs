@@ -87,6 +87,10 @@ pub enum TransactionType {
     RefundEscrow(RefundEscrowPayload),
     /// A2A escrow: challenge optimistic release
     ChallengeEscrow(ChallengeEscrowPayload),
+    /// A2A escrow: dispute escrow
+    DisputeEscrow(DisputeEscrowPayload),
+    /// A2A escrow: appeal resolved dispute
+    AppealEscrow(AppealEscrowPayload),
     /// A2A escrow: submit arbitration verdict
     SubmitVerdict(SubmitVerdictPayload),
     /// Arbitration: register arbiter
@@ -596,6 +600,14 @@ impl Serializer for TransactionType {
                 writer.write_u8(29);
                 payload.write(writer);
             }
+            TransactionType::DisputeEscrow(payload) => {
+                writer.write_u8(30);
+                payload.write(writer);
+            }
+            TransactionType::AppealEscrow(payload) => {
+                writer.write_u8(31);
+                payload.write(writer);
+            }
             TransactionType::RegisterArbiter(payload) => {
                 writer.write_u8(33);
                 payload.write(writer);
@@ -680,6 +692,8 @@ impl Serializer for TransactionType {
             27 => TransactionType::RefundEscrow(RefundEscrowPayload::read(reader)?),
             28 => TransactionType::ChallengeEscrow(ChallengeEscrowPayload::read(reader)?),
             29 => TransactionType::SubmitVerdict(SubmitVerdictPayload::read(reader)?),
+            30 => TransactionType::DisputeEscrow(DisputeEscrowPayload::read(reader)?),
+            31 => TransactionType::AppealEscrow(AppealEscrowPayload::read(reader)?),
             33 => TransactionType::RegisterArbiter(RegisterArbiterPayload::read(reader)?),
             34 => TransactionType::UpdateArbiter(UpdateArbiterPayload::read(reader)?),
             18 => {
@@ -758,6 +772,8 @@ impl Serializer for TransactionType {
             TransactionType::RefundEscrow(payload) => payload.size(),
             TransactionType::ChallengeEscrow(payload) => payload.size(),
             TransactionType::SubmitVerdict(payload) => payload.size(),
+            TransactionType::DisputeEscrow(payload) => payload.size(),
+            TransactionType::AppealEscrow(payload) => payload.size(),
             TransactionType::RegisterArbiter(payload) => payload.size(),
             TransactionType::UpdateArbiter(payload) => payload.size(),
             TransactionType::UnoTransfers(txs) => {

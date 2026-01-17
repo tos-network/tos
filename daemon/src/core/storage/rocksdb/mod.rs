@@ -8,7 +8,10 @@ use std::sync::Arc;
 use crate::core::{
     config::RocksDBConfig,
     error::{BlockchainError, DiskContext},
-    storage::{BlocksAtHeightProvider, ClientProtocolProvider, ContractOutputsProvider, Tips},
+    storage::{
+        BlocksAtHeightProvider, ClientProtocolProvider, ContractOutputsProvider, EscrowProvider,
+        Tips,
+    },
 };
 use anyhow::Context;
 use async_trait::async_trait;
@@ -28,7 +31,7 @@ use tos_common::{
     network::Network,
     serializer::{Count, Serializer},
     tokio,
-    transaction::Transaction,
+    transaction::{Transaction, TransactionType},
 };
 
 pub use column::*;
@@ -612,6 +615,7 @@ impl Storage for RocksStorage {
         for tx_hash in block.get_transactions() {
             // Should we delete the tx too or only unlink it
             let mut should_delete = true;
+            let mut loaded_tx: Option<Immutable<Transaction>> = None;
             if self.has_tx_blocks(tx_hash)? {
                 let mut blocks: Tips = self.load_from_disk(Column::TransactionInBlocks, tx_hash)?;
                 self.remove_from_disk(Column::TransactionInBlocks, tx_hash)?;
@@ -641,6 +645,24 @@ impl Storage for RocksStorage {
                         tx_hash
                     );
                 }
+                let tx: Immutable<Transaction> =
+                    self.load_from_disk(Column::Transactions, tx_hash)?;
+                loaded_tx = Some(tx.clone());
+                let escrow_id = match tx.get_data() {
+                    TransactionType::CreateEscrow(_) => Some(tx_hash.clone()),
+                    TransactionType::DepositEscrow(payload) => Some(payload.escrow_id.clone()),
+                    TransactionType::ReleaseEscrow(payload) => Some(payload.escrow_id.clone()),
+                    TransactionType::RefundEscrow(payload) => Some(payload.escrow_id.clone()),
+                    TransactionType::ChallengeEscrow(payload) => Some(payload.escrow_id.clone()),
+                    TransactionType::DisputeEscrow(payload) => Some(payload.escrow_id.clone()),
+                    TransactionType::AppealEscrow(payload) => Some(payload.escrow_id.clone()),
+                    TransactionType::SubmitVerdict(payload) => Some(payload.escrow_id.clone()),
+                    _ => None,
+                };
+                if let Some(escrow_id) = escrow_id {
+                    self.remove_escrow_history(&escrow_id, topoheight, tx_hash)
+                        .await?;
+                }
                 self.unmark_tx_from_executed(&tx_hash)?;
                 self.delete_contract_outputs_for_tx(&tx_hash).await?;
             }
@@ -651,8 +673,10 @@ impl Storage for RocksStorage {
                 if log::log_enabled!(log::Level::Trace) {
                     trace!("Deleting TX {} in block {}", tx_hash, hash);
                 }
-                let tx: Immutable<Transaction> =
-                    self.load_from_disk(Column::Transactions, tx_hash)?;
+                let tx: Immutable<Transaction> = match loaded_tx.take() {
+                    Some(tx) => tx,
+                    None => self.load_from_disk(Column::Transactions, tx_hash)?,
+                };
                 self.remove_from_disk(Column::Transactions, tx_hash)?;
 
                 txs.push((tx_hash.clone(), tx));

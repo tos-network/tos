@@ -173,10 +173,10 @@ mod tests {
         let card_b = sample_card("agent-b", "skill:a", Some(500))?;
 
         let _ = registry
-            .register(card_a, "http://a.test".to_string())
+            .register(card_a, "https://a.test".to_string())
             .await?;
         let _ = registry
-            .register(card_b, "http://b.test".to_string())
+            .register(card_b, "https://b.test".to_string())
             .await?;
 
         let router = AgentRouter::new(Arc::clone(&registry));
@@ -196,10 +196,10 @@ mod tests {
         let card_b = sample_card("agent-b", "skill:a", None)?;
 
         let _ = registry
-            .register(card_a, "http://a.test".to_string())
+            .register(card_a, "https://a.test".to_string())
             .await?;
         let _ = registry
-            .register(card_b, "http://b.test".to_string())
+            .register(card_b, "https://b.test".to_string())
             .await?;
 
         let router = AgentRouter::new(Arc::clone(&registry));

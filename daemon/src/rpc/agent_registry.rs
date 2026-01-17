@@ -23,7 +23,10 @@ use tos_common::{
 };
 
 use crate::{
-    a2a::registry::{global_registry, AgentFilter, RegistryError},
+    a2a::registry::{
+        global_registry, AgentFilter, AgentHealthStatus, AgentStatus, RegisteredAgent,
+        RegistryError,
+    },
     core::{blockchain::Blockchain, storage::Storage},
     rpc::DaemonRpcServer,
 };
@@ -50,6 +53,13 @@ pub struct RegisterAgentResponse {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct UpdateAgentRequest {
+    pub agent_id: String,
+    pub agent_card: AgentCard,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct UnregisterAgentRequest {
     pub agent_id: String,
 }
@@ -64,6 +74,8 @@ pub struct GetAgentRequest {
 #[serde(rename_all = "camelCase")]
 pub struct HeartbeatRequest {
     pub agent_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<AgentHealthStatus>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -73,9 +85,38 @@ pub struct HeartbeatResponse {
     pub last_seen: i64,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentSummary {
+    pub agent_id: String,
+    pub name: String,
+    pub description: String,
+    pub endpoint_url: String,
+    pub skills: Vec<String>,
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tos_identity: Option<tos_common::a2a::TosAgentIdentity>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiscoverAgentsResponse {
+    pub agents: Vec<AgentSummary>,
+}
+
 #[derive(Clone, Debug, Deserialize)]
 pub struct AgentPath {
     pub id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct AgentListQuery {
+    pub skills: Option<String>,
+    pub input_modes: Option<String>,
+    pub output_modes: Option<String>,
+    pub require_settlement: Option<bool>,
+    pub require_tos_identity: Option<bool>,
+    pub limit: Option<u32>,
 }
 
 #[derive(Debug, Error)]
@@ -90,6 +131,14 @@ pub enum AgentRegistryRpcError {
     InvalidAgentId,
     #[error("failed to serialize agent card")]
     SerializeAgentCard,
+    #[error("arbiter requires TOS identity")]
+    ArbiterRequiresTosIdentity,
+    #[error("arbiter not registered on chain")]
+    ArbiterNotRegisteredOnChain,
+    #[error("arbiter not active")]
+    ArbiterNotActive,
+    #[error("arbiter stake too low: required {required}, found {found}")]
+    ArbiterStakeTooLow { required: u64, found: u64 },
     #[error("signature verification failed: {0}")]
     SignatureVerification(String),
     #[error("storage error: {0}")]
@@ -101,10 +150,19 @@ pub enum AgentRegistryRpcError {
 /// Register agent registry JSON-RPC methods.
 pub fn register_agent_registry_methods<S: Storage>(handler: &mut RPCHandler<Arc<Blockchain<S>>>) {
     handler.register_method("register_agent", async_handler!(register_agent::<S>));
+    handler.register_method("RegisterAgent", async_handler!(register_agent::<S>));
+    handler.register_method("update_agent", async_handler!(update_agent::<S>));
+    handler.register_method("UpdateAgent", async_handler!(update_agent::<S>));
     handler.register_method("unregister_agent", async_handler!(unregister_agent::<S>));
+    handler.register_method("UnregisterAgent", async_handler!(unregister_agent::<S>));
     handler.register_method("get_agent", async_handler!(get_agent::<S>));
+    handler.register_method("GetRegisteredAgent", async_handler!(get_agent::<S>));
     handler.register_method("discover_agents", async_handler!(discover_agents::<S>));
+    handler.register_method("DiscoverAgents", async_handler!(discover_agents::<S>));
+    handler.register_method("list_agents", async_handler!(list_agents::<S>));
+    handler.register_method("ListRegisteredAgents", async_handler!(list_agents::<S>));
     handler.register_method("heartbeat", async_handler!(heartbeat::<S>));
+    handler.register_method("AgentHeartbeat", async_handler!(heartbeat::<S>));
 }
 
 async fn register_agent<S: Storage>(
@@ -117,6 +175,21 @@ async fn register_agent<S: Storage>(
     let response = register_agent_impl(Arc::clone(blockchain), request).await?;
 
     serde_json::to_value(response).map_err(InternalRpcError::SerializeResponse)
+}
+
+async fn update_agent<S: Storage>(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    require_registry_auth_context(context).await?;
+    let request: UpdateAgentRequest = parse_params(body)?;
+    let agent_id = parse_agent_id(&request.agent_id)?;
+    let registry = global_registry();
+    let updated = registry
+        .update(&agent_id, request.agent_card)
+        .await
+        .map_err(AgentRegistryRpcError::from)?;
+    serde_json::to_value(to_agent_summary(&updated)).map_err(InternalRpcError::SerializeResponse)
 }
 
 async fn unregister_agent<S: Storage>(
@@ -143,7 +216,7 @@ async fn get_agent<S: Storage>(context: &Context, body: Value) -> Result<Value, 
 
     let registry = global_registry();
     let agent = registry.get(&agent_id).await;
-    let response = agent.map(|agent| agent.agent_card);
+    let response = agent.map(|agent| to_agent_summary(&agent));
     serde_json::to_value(response).map_err(InternalRpcError::SerializeResponse)
 }
 
@@ -155,8 +228,23 @@ async fn discover_agents<S: Storage>(
     let filter: AgentFilter = parse_params(body)?;
     let registry = global_registry();
     let agents = registry.filter(&filter).await;
-    let cards: Vec<AgentCard> = agents.into_iter().map(|agent| agent.agent_card).collect();
-    serde_json::to_value(cards).map_err(InternalRpcError::SerializeResponse)
+    let response = DiscoverAgentsResponse {
+        agents: agents.iter().map(to_agent_summary).collect(),
+    };
+    serde_json::to_value(response).map_err(InternalRpcError::SerializeResponse)
+}
+
+async fn list_agents<S: Storage>(
+    context: &Context,
+    _body: Value,
+) -> Result<Value, InternalRpcError> {
+    require_registry_auth_context(context).await?;
+    let registry = global_registry();
+    let agents = registry.list().await;
+    let response = DiscoverAgentsResponse {
+        agents: agents.iter().map(to_agent_summary).collect(),
+    };
+    serde_json::to_value(response).map_err(InternalRpcError::SerializeResponse)
 }
 
 async fn heartbeat<S: Storage>(context: &Context, body: Value) -> Result<Value, InternalRpcError> {
@@ -165,7 +253,7 @@ async fn heartbeat<S: Storage>(context: &Context, body: Value) -> Result<Value, 
     let agent_id = parse_agent_id(&request.agent_id)?;
     let registry = global_registry();
     let last_seen = registry
-        .heartbeat(&agent_id)
+        .heartbeat(&agent_id, request.status)
         .await
         .map_err(AgentRegistryRpcError::from)?;
     let response = HeartbeatResponse {
@@ -191,6 +279,29 @@ pub async fn register_agent_http<S: Storage>(
     Ok(HttpResponse::Ok().json(response))
 }
 
+/// HTTP endpoint: PATCH /agents/{id}
+pub async fn update_agent_http<S: Storage>(
+    _server: web::Data<DaemonRpcServer<S>>,
+    request: HttpRequest,
+    path: web::Path<AgentPath>,
+    body: web::Bytes,
+) -> Result<HttpResponse, ActixError> {
+    require_registry_auth_http(&request, &body).await?;
+    let agent_id = parse_agent_id_http(&path.id).map_err(map_http_error)?;
+    let request: UpdateAgentRequest =
+        serde_json::from_slice(&body).map_err(|e| ErrorBadRequest(e.to_string()))?;
+    if request.agent_id != path.id {
+        return Err(ErrorBadRequest("agent id mismatch"));
+    }
+    let registry = global_registry();
+    let updated = registry
+        .update(&agent_id, request.agent_card)
+        .await
+        .map_err(AgentRegistryRpcError::from)
+        .map_err(map_http_error)?;
+    Ok(HttpResponse::Ok().json(to_agent_summary(&updated)))
+}
+
 /// HTTP endpoint: GET /agents/{id}
 pub async fn get_agent_http<S: Storage>(
     _server: web::Data<DaemonRpcServer<S>>,
@@ -202,9 +313,23 @@ pub async fn get_agent_http<S: Storage>(
     let registry = global_registry();
     let agent = registry.get(&agent_id).await;
     match agent {
-        Some(agent) => Ok(HttpResponse::Ok().json(agent.agent_card)),
+        Some(agent) => Ok(HttpResponse::Ok().json(to_agent_summary(&agent))),
         None => Err(ErrorNotFound("Agent not found")),
     }
+}
+
+/// HTTP endpoint: GET /agents
+pub async fn list_agents_http<S: Storage>(
+    _server: web::Data<DaemonRpcServer<S>>,
+    request: HttpRequest,
+) -> Result<HttpResponse, ActixError> {
+    require_registry_auth_http(&request, &[]).await?;
+    let registry = global_registry();
+    let agents = registry.list().await;
+    let response = DiscoverAgentsResponse {
+        agents: agents.iter().map(to_agent_summary).collect(),
+    };
+    Ok(HttpResponse::Ok().json(response))
 }
 
 /// HTTP endpoint: DELETE /agents/{id}
@@ -235,8 +360,58 @@ pub async fn discover_agents_http<S: Storage>(
         serde_json::from_slice(&body).map_err(|e| ErrorBadRequest(e.to_string()))?;
     let registry = global_registry();
     let agents = registry.filter(&filter).await;
-    let cards: Vec<AgentCard> = agents.into_iter().map(|agent| agent.agent_card).collect();
-    Ok(HttpResponse::Ok().json(cards))
+    let response = DiscoverAgentsResponse {
+        agents: agents.iter().map(to_agent_summary).collect(),
+    };
+    Ok(HttpResponse::Ok().json(response))
+}
+
+/// HTTP endpoint: GET /agents:discover
+pub async fn discover_agents_http_get<S: Storage>(
+    _server: web::Data<DaemonRpcServer<S>>,
+    request: HttpRequest,
+    query: web::Query<AgentListQuery>,
+) -> Result<HttpResponse, ActixError> {
+    require_registry_auth_http(&request, &[]).await?;
+    let filter = filter_from_query(&query);
+    let registry = global_registry();
+    let agents = registry.filter(&filter).await;
+    let response = DiscoverAgentsResponse {
+        agents: agents.iter().map(to_agent_summary).collect(),
+    };
+    Ok(HttpResponse::Ok().json(response))
+}
+
+/// HTTP endpoint: POST /agents/{id}:heartbeat
+pub async fn heartbeat_http<S: Storage>(
+    _server: web::Data<DaemonRpcServer<S>>,
+    request: HttpRequest,
+    path: web::Path<AgentPath>,
+    body: web::Bytes,
+) -> Result<HttpResponse, ActixError> {
+    require_registry_auth_http(&request, &body).await?;
+    let agent_id = parse_agent_id_http(&path.id).map_err(map_http_error)?;
+    let status = if !body.is_empty() {
+        let payload: HeartbeatRequest =
+            serde_json::from_slice(&body).map_err(|e| ErrorBadRequest(e.to_string()))?;
+        if payload.agent_id != path.id {
+            return Err(ErrorBadRequest("agent id mismatch"));
+        }
+        payload.status
+    } else {
+        None
+    };
+    let registry = global_registry();
+    let last_seen = registry
+        .heartbeat(&agent_id, status)
+        .await
+        .map_err(AgentRegistryRpcError::from)
+        .map_err(map_http_error)?;
+    let response = HeartbeatResponse {
+        agent_id: agent_id.to_hex(),
+        last_seen,
+    };
+    Ok(HttpResponse::Ok().json(response))
 }
 
 fn parse_agent_id(value: &str) -> Result<Hash, InternalRpcError> {
@@ -283,52 +458,88 @@ async fn register_agent_impl<S: Storage>(
     blockchain: Arc<Blockchain<S>>,
     request: RegisterAgentRequest,
 ) -> Result<RegisterAgentResponse, AgentRegistryRpcError> {
-    let signature = request
-        .tos_signature
-        .as_ref()
-        .ok_or(AgentRegistryRpcError::MissingTosSignature)?;
-    let tos_identity = request
+    let is_arbiter = request
         .agent_card
-        .tos_identity
-        .as_ref()
-        .ok_or(AgentRegistryRpcError::MissingTosIdentity)?;
+        .skills
+        .iter()
+        .any(|skill| skill.id.starts_with("arbitration"));
 
-    let message = build_registration_message(
-        &tos_identity.agent_account,
-        &request.endpoint_url,
-        &request.agent_card,
-        signature,
-    )?;
+    if is_arbiter && request.agent_card.tos_identity.is_none() {
+        return Err(AgentRegistryRpcError::ArbiterRequiresTosIdentity);
+    }
 
-    let (meta, session_key) = {
-        let storage = blockchain.get_storage().read().await;
-        let meta = storage
-            .get_agent_account_meta(&tos_identity.agent_account)
-            .await
-            .map_err(|e| AgentRegistryRpcError::StorageError(e.to_string()))?;
-        let session_key = if signature.signer == TosSignerType::SessionKey {
-            let key_id = signature
-                .session_key_id
-                .ok_or(AgentRegistryRpcError::MissingTosSignature)?;
-            storage
-                .get_session_key(&tos_identity.agent_account, key_id)
+    if let Some(signature) = request.tos_signature.as_ref() {
+        let tos_identity = request
+            .agent_card
+            .tos_identity
+            .as_ref()
+            .ok_or(AgentRegistryRpcError::MissingTosIdentity)?;
+
+        let message = build_registration_message(
+            &tos_identity.agent_account,
+            &request.endpoint_url,
+            &request.agent_card,
+            signature,
+        )?;
+
+        let (meta, session_key) = {
+            let storage = blockchain.get_storage().read().await;
+            let meta = storage
+                .get_agent_account_meta(&tos_identity.agent_account)
                 .await
-                .map_err(|e| AgentRegistryRpcError::StorageError(e.to_string()))?
-        } else {
-            None
+                .map_err(|e| AgentRegistryRpcError::StorageError(e.to_string()))?;
+            let session_key = if signature.signer == TosSignerType::SessionKey {
+                let key_id = signature
+                    .session_key_id
+                    .ok_or(AgentRegistryRpcError::MissingTosSignature)?;
+                storage
+                    .get_session_key(&tos_identity.agent_account, key_id)
+                    .await
+                    .map_err(|e| AgentRegistryRpcError::StorageError(e.to_string()))?
+            } else {
+                None
+            };
+            (meta, session_key)
         };
-        (meta, session_key)
-    };
 
-    let reader = PreloadedAgentAccountReader {
-        agent_account: tos_identity.agent_account.clone(),
-        meta,
-        session_key,
-        topoheight: blockchain.get_topo_height(),
-    };
+        let reader = PreloadedAgentAccountReader {
+            agent_account: tos_identity.agent_account.clone(),
+            meta,
+            session_key,
+            topoheight: blockchain.get_topo_height(),
+        };
 
-    verify_tos_signature(signature, &tos_identity.agent_account, &message, &reader)
-        .map_err(|e| AgentRegistryRpcError::SignatureVerification(e.to_string()))?;
+        verify_tos_signature(signature, &tos_identity.agent_account, &message, &reader)
+            .map_err(|e| AgentRegistryRpcError::SignatureVerification(e.to_string()))?;
+    } else if request.agent_card.tos_identity.is_some() {
+        return Err(AgentRegistryRpcError::MissingTosSignature);
+    } else if is_arbiter {
+        return Err(AgentRegistryRpcError::MissingTosSignature);
+    }
+
+    if is_arbiter {
+        let tos_identity = request
+            .agent_card
+            .tos_identity
+            .as_ref()
+            .ok_or(AgentRegistryRpcError::MissingTosIdentity)?;
+        let storage = blockchain.get_storage().read().await;
+        let arbiter = storage
+            .get_arbiter(&tos_identity.agent_account)
+            .await
+            .map_err(|e| AgentRegistryRpcError::StorageError(e.to_string()))?
+            .ok_or(AgentRegistryRpcError::ArbiterNotRegisteredOnChain)?;
+        if arbiter.status != tos_common::arbitration::ArbiterStatus::Active {
+            return Err(AgentRegistryRpcError::ArbiterNotActive);
+        }
+        let min_stake = tos_common::config::MIN_ARBITER_STAKE;
+        if arbiter.stake_amount < min_stake {
+            return Err(AgentRegistryRpcError::ArbiterStakeTooLow {
+                required: min_stake,
+                found: arbiter.stake_amount,
+            });
+        }
+    }
 
     let registry = global_registry();
     let registered = registry
@@ -374,7 +585,11 @@ fn map_error(err: AgentRegistryRpcError) -> InternalRpcError {
         | AgentRegistryRpcError::MissingTosIdentity
         | AgentRegistryRpcError::InvalidAgentId
         | AgentRegistryRpcError::InvalidVersion(_)
-        | AgentRegistryRpcError::SerializeAgentCard => {
+        | AgentRegistryRpcError::SerializeAgentCard
+        | AgentRegistryRpcError::ArbiterRequiresTosIdentity
+        | AgentRegistryRpcError::ArbiterNotRegisteredOnChain
+        | AgentRegistryRpcError::ArbiterNotActive
+        | AgentRegistryRpcError::ArbiterStakeTooLow { .. } => {
             InternalRpcError::Custom(-32602, err.to_string())
         }
         AgentRegistryRpcError::SignatureVerification(message) => {
@@ -393,17 +608,21 @@ fn map_http_error(err: AgentRegistryRpcError) -> ActixError {
         | AgentRegistryRpcError::MissingTosIdentity
         | AgentRegistryRpcError::InvalidAgentId
         | AgentRegistryRpcError::InvalidVersion(_)
-        | AgentRegistryRpcError::SerializeAgentCard => ErrorBadRequest(err.to_string()),
+        | AgentRegistryRpcError::SerializeAgentCard
+        | AgentRegistryRpcError::ArbiterRequiresTosIdentity
+        | AgentRegistryRpcError::ArbiterNotRegisteredOnChain
+        | AgentRegistryRpcError::ArbiterNotActive
+        | AgentRegistryRpcError::ArbiterStakeTooLow { .. } => ErrorBadRequest(err.to_string()),
         AgentRegistryRpcError::SignatureVerification(message) => ErrorUnauthorized(message),
         AgentRegistryRpcError::StorageError(message) => ErrorInternalServerError(message),
         AgentRegistryRpcError::Registry(registry_err) => match registry_err {
             RegistryError::AgentNotFound => ErrorNotFound(registry_err.to_string()),
-            RegistryError::AgentAlreadyRegistered | RegistryError::InvalidEndpointUrl => {
-                ErrorBadRequest(registry_err.to_string())
-            }
-            RegistryError::SerializeAgentCard | RegistryError::TimestampOverflow => {
-                ErrorInternalServerError(registry_err.to_string())
-            }
+            RegistryError::AgentAlreadyRegistered
+            | RegistryError::InvalidEndpointUrl
+            | RegistryError::InvalidAgentCard(_) => ErrorBadRequest(registry_err.to_string()),
+            RegistryError::SerializeAgentCard
+            | RegistryError::TimestampOverflow
+            | RegistryError::Storage(_) => ErrorInternalServerError(registry_err.to_string()),
         },
     }
 }
@@ -452,6 +671,49 @@ impl From<AgentRegistryRpcError> for InternalRpcError {
     fn from(err: AgentRegistryRpcError) -> Self {
         map_error(err)
     }
+}
+
+fn to_agent_summary(agent: &RegisteredAgent) -> AgentSummary {
+    AgentSummary {
+        agent_id: agent.agent_id.to_hex(),
+        name: agent.agent_card.name.clone(),
+        description: agent.agent_card.description.clone(),
+        endpoint_url: agent.endpoint_url.clone(),
+        skills: agent
+            .agent_card
+            .skills
+            .iter()
+            .map(|skill| skill.id.clone())
+            .collect(),
+        status: match agent.status {
+            AgentStatus::Active => "active",
+            AgentStatus::Inactive => "inactive",
+            AgentStatus::Suspended => "suspended",
+            AgentStatus::Unregistered => "unregistered",
+        }
+        .to_string(),
+        tos_identity: agent.agent_card.tos_identity.clone(),
+    }
+}
+
+fn filter_from_query(query: &AgentListQuery) -> AgentFilter {
+    AgentFilter {
+        skills: query.skills.as_ref().map(|value| split_csv(value)),
+        input_modes: query.input_modes.as_ref().map(|value| split_csv(value)),
+        output_modes: query.output_modes.as_ref().map(|value| split_csv(value)),
+        require_settlement: query.require_settlement,
+        require_tos_identity: query.require_tos_identity,
+        limit: query.limit,
+    }
+}
+
+fn split_csv(value: &str) -> Vec<String> {
+    value
+        .split(',')
+        .map(|entry| entry.trim())
+        .filter(|entry| !entry.is_empty())
+        .map(String::from)
+        .collect()
 }
 
 #[cfg(test)]

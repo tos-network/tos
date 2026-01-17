@@ -18,13 +18,13 @@ use crate::{
     serializer::Serializer,
     transaction::{
         extra_data::UnknownExtraDataFormat, multisig::MultiSig, AgentAccountPayload,
-        AppealKycPayload, BatchReferralRewardPayload, BindReferrerPayload,
+        AppealEscrowPayload, AppealKycPayload, BatchReferralRewardPayload, BindReferrerPayload,
         BootstrapCommitteePayload, BurnPayload, ChallengeEscrowPayload, CreateEscrowPayload,
-        DeployContractPayload, DepositEscrowPayload, EmergencySuspendPayload, EnergyPayload,
-        EphemeralMessagePayload, FeeType, InvokeContractPayload, MultiSigPayload, Reference,
-        RefundEscrowPayload, RegisterArbiterPayload, RegisterCommitteePayload, RegisterNamePayload,
-        ReleaseEscrowPayload, RenewKycPayload, RevokeKycPayload, SetKycPayload,
-        ShieldTransferPayload, SubmitVerdictPayload, Transaction, TransactionType,
+        DeployContractPayload, DepositEscrowPayload, DisputeEscrowPayload, EmergencySuspendPayload,
+        EnergyPayload, EphemeralMessagePayload, FeeType, InvokeContractPayload, MultiSigPayload,
+        Reference, RefundEscrowPayload, RegisterArbiterPayload, RegisterCommitteePayload,
+        RegisterNamePayload, ReleaseEscrowPayload, RenewKycPayload, RevokeKycPayload,
+        SetKycPayload, ShieldTransferPayload, SubmitVerdictPayload, Transaction, TransactionType,
         TransferKycPayload, TransferPayload, TxVersion, UnoTransferPayload,
         UnshieldTransferPayload, UpdateArbiterPayload, UpdateCommitteePayload,
     },
@@ -104,6 +104,8 @@ pub enum RPCTransactionType<'a> {
     ReleaseEscrow(Cow<'a, ReleaseEscrowPayload>),
     RefundEscrow(Cow<'a, RefundEscrowPayload>),
     ChallengeEscrow(Cow<'a, ChallengeEscrowPayload>),
+    DisputeEscrow(Cow<'a, DisputeEscrowPayload>),
+    AppealEscrow(Cow<'a, AppealEscrowPayload>),
     SubmitVerdict(Cow<'a, SubmitVerdictPayload>),
     // Arbitration transaction types
     RegisterArbiter(Cow<'a, RegisterArbiterPayload>),
@@ -177,6 +179,8 @@ impl<'a> RPCTransactionType<'a> {
             TransactionType::ChallengeEscrow(payload) => {
                 Self::ChallengeEscrow(Cow::Borrowed(payload))
             }
+            TransactionType::DisputeEscrow(payload) => Self::DisputeEscrow(Cow::Borrowed(payload)),
+            TransactionType::AppealEscrow(payload) => Self::AppealEscrow(Cow::Borrowed(payload)),
             TransactionType::SubmitVerdict(payload) => Self::SubmitVerdict(Cow::Borrowed(payload)),
             TransactionType::RegisterArbiter(payload) => {
                 Self::RegisterArbiter(Cow::Borrowed(payload))
@@ -276,6 +280,12 @@ impl From<RPCTransactionType<'_>> for TransactionType {
             }
             RPCTransactionType::ChallengeEscrow(payload) => {
                 TransactionType::ChallengeEscrow(payload.into_owned())
+            }
+            RPCTransactionType::DisputeEscrow(payload) => {
+                TransactionType::DisputeEscrow(payload.into_owned())
+            }
+            RPCTransactionType::AppealEscrow(payload) => {
+                TransactionType::AppealEscrow(payload.into_owned())
             }
             RPCTransactionType::SubmitVerdict(payload) => {
                 TransactionType::SubmitVerdict(payload.into_owned())

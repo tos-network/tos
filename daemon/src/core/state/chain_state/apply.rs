@@ -638,6 +638,18 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for Applicable
             .await
     }
 
+    async fn add_escrow_history(
+        &mut self,
+        escrow_id: &Hash,
+        topoheight: u64,
+        tx_hash: &Hash,
+    ) -> Result<(), BlockchainError> {
+        self.inner
+            .storage
+            .add_escrow_history(escrow_id, topoheight, tx_hash)
+            .await
+    }
+
     async fn set_arbiter(
         &mut self,
         arbiter: &tos_common::arbitration::ArbiterAccount,
@@ -1296,7 +1308,7 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
                 if log::log_enabled!(log::Level::Trace) {
                     trace!("sender output sum: {}", output_sum);
                 }
-                match balances.entry(Cow::Borrowed(asset.as_ref())) {
+                match balances.entry(Cow::Owned(asset.clone())) {
                     Entry::Occupied(mut o) => {
                         if log::log_enabled!(log::Level::Trace) {
                             trace!(
@@ -1435,7 +1447,7 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
                     ..
                 } = uno_echange;
 
-                match uno_balances.entry(Cow::Borrowed(asset.as_ref())) {
+                match uno_balances.entry(Cow::Owned(asset.clone())) {
                     Entry::Occupied(mut o) => {
                         if log::log_enabled!(log::Level::Trace) {
                             trace!(

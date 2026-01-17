@@ -1,18 +1,28 @@
 use std::collections::{HashMap, HashSet};
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use once_cell::sync::Lazy;
-use serde::{Deserialize, Serialize};
+use once_cell::sync::OnceCell;
+use serde::{Deserialize, Deserializer, Serialize};
+use serde_json::Value;
 use thiserror::Error;
 use tokio::sync::RwLock;
+use tokio::time::{sleep, Duration};
 
 use tos_common::{
     a2a::AgentCard,
+    a2a::{MAX_EXTENSIONS, MAX_INTERFACES, MAX_SECURITY_SCHEMES, MAX_SIGNATURES, MAX_SKILLS},
     crypto::{hash, Hash, PublicKey},
     time::get_current_time_in_seconds,
 };
 
 pub mod router;
+
+const DEFAULT_HEALTH_CHECK_INTERVAL_SECS: u64 = 300;
+const DEFAULT_HEARTBEAT_TIMEOUT_SECS: u64 = 120;
+const DEFAULT_INACTIVE_FAILURES: u32 = 3;
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -21,6 +31,14 @@ pub enum AgentStatus {
     Inactive,
     Suspended,
     Unregistered,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentHealthStatus {
+    pub active_tasks: u32,
+    pub queue_depth: u32,
+    pub avg_latency_ms: u32,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -35,6 +53,8 @@ pub struct RegisteredAgent {
     pub controller: Option<PublicKey>,
     pub registered_at: i64,
     pub last_heartbeat: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_health: Option<AgentHealthStatus>,
     pub status: AgentStatus,
     pub health_failures: u32,
 }
@@ -42,12 +62,24 @@ pub struct RegisteredAgent {
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentFilter {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub skill: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub input_mode: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub output_mode: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_opt_string_vec",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub skills: Option<Vec<String>>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_opt_string_vec",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub input_modes: Option<Vec<String>>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_opt_string_vec",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub output_modes: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub require_settlement: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -64,10 +96,14 @@ pub enum RegistryError {
     AgentNotFound,
     #[error("invalid endpoint url")]
     InvalidEndpointUrl,
+    #[error("invalid agent card: {0}")]
+    InvalidAgentCard(String),
     #[error("failed to serialize agent card")]
     SerializeAgentCard,
     #[error("timestamp overflow")]
     TimestampOverflow,
+    #[error("storage error: {0}")]
+    Storage(String),
 }
 
 pub struct AgentRegistry {
@@ -90,9 +126,10 @@ impl AgentRegistry {
         agent_card: AgentCard,
         endpoint_url: String,
     ) -> Result<RegisteredAgent, RegistryError> {
-        if endpoint_url.trim().is_empty() {
+        if endpoint_url.trim().is_empty() || !endpoint_url.starts_with("https://") {
             return Err(RegistryError::InvalidEndpointUrl);
         }
+        validate_agent_card(&agent_card)?;
 
         let agent_id = compute_agent_id(&agent_card, &endpoint_url)?;
         let now = current_timestamp_i64()?;
@@ -114,6 +151,7 @@ impl AgentRegistry {
             controller,
             registered_at: now,
             last_heartbeat: now,
+            last_health: None,
             status: AgentStatus::Active,
             health_failures: 0,
         };
@@ -129,6 +167,9 @@ impl AgentRegistry {
         self.index_skills(agent_id.clone(), &registered.agent_card)
             .await;
 
+        persist_agent_record(&registered)?;
+        persist_index(&self.agents).await?;
+
         Ok(registered)
     }
 
@@ -140,6 +181,8 @@ impl AgentRegistry {
         };
         let removed = removed.ok_or(RegistryError::AgentNotFound)?;
         self.remove_skills(agent_id, &removed.agent_card).await;
+        remove_agent_record(&removed.agent_id)?;
+        persist_index(&self.agents).await?;
         Ok(())
     }
 
@@ -153,6 +196,62 @@ impl AgentRegistry {
     pub async fn list(&self) -> Vec<RegisteredAgent> {
         let agents = self.agents.read().await;
         agents.values().cloned().collect()
+    }
+
+    /// List all active agents.
+    pub async fn list_active(&self) -> Vec<RegisteredAgent> {
+        let agents = self.agents.read().await;
+        agents
+            .values()
+            .filter(|agent| agent.status == AgentStatus::Active)
+            .cloned()
+            .collect()
+    }
+
+    /// Update an existing agent's card.
+    pub async fn update(
+        &self,
+        agent_id: &Hash,
+        agent_card: AgentCard,
+    ) -> Result<RegisteredAgent, RegistryError> {
+        validate_agent_card(&agent_card)?;
+        let mut agents = self.agents.write().await;
+        let existing = agents
+            .get(agent_id)
+            .cloned()
+            .ok_or(RegistryError::AgentNotFound)?;
+
+        self.remove_skills(agent_id, &existing.agent_card).await;
+
+        let updated = RegisteredAgent {
+            agent_id: existing.agent_id.clone(),
+            endpoint_url: existing.endpoint_url.clone(),
+            agent_account: agent_card
+                .tos_identity
+                .as_ref()
+                .map(|id| id.agent_account.clone()),
+            controller: agent_card
+                .tos_identity
+                .as_ref()
+                .map(|id| id.controller.clone()),
+            registered_at: existing.registered_at,
+            last_heartbeat: existing.last_heartbeat,
+            last_health: existing.last_health.clone(),
+            status: existing.status,
+            health_failures: existing.health_failures,
+            agent_card,
+        };
+
+        agents.insert(existing.agent_id.clone(), updated.clone());
+        drop(agents);
+
+        self.index_skills(updated.agent_id.clone(), &updated.agent_card)
+            .await;
+
+        persist_agent_record(&updated)?;
+        persist_index(&self.agents).await?;
+
+        Ok(updated)
     }
 
     /// Fetch agents that match a given skill ID.
@@ -171,19 +270,19 @@ impl AgentRegistry {
 
     /// Filter agents by skill and capability constraints.
     pub async fn filter(&self, filter: &AgentFilter) -> Vec<RegisteredAgent> {
-        let mut candidates = if let Some(skill) = filter.skill.as_ref() {
-            self.filter_by_skill(skill).await
+        let mut candidates = if let Some(skills) = filter.skills.as_ref() {
+            self.filter_by_any_skill(skills).await
         } else {
             self.list().await
         };
 
         candidates.retain(|agent| agent.status == AgentStatus::Active);
 
-        if let Some(input_mode) = filter.input_mode.as_ref() {
-            candidates.retain(|agent| supports_input_mode(agent, input_mode));
+        if let Some(input_modes) = filter.input_modes.as_ref() {
+            candidates.retain(|agent| supports_any_input_mode(agent, input_modes));
         }
-        if let Some(output_mode) = filter.output_mode.as_ref() {
-            candidates.retain(|agent| supports_output_mode(agent, output_mode));
+        if let Some(output_modes) = filter.output_modes.as_ref() {
+            candidates.retain(|agent| supports_any_output_mode(agent, output_modes));
         }
         if let Some(require_settlement) = filter.require_settlement {
             candidates.retain(|agent| {
@@ -210,18 +309,90 @@ impl AgentRegistry {
         candidates
     }
 
+    /// Fetch agents that match any of the provided skill IDs.
+    pub async fn filter_by_any_skill(&self, skills: &[String]) -> Vec<RegisteredAgent> {
+        let mut agent_ids = HashSet::new();
+        let index = self.index_by_skill.read().await;
+        for skill in skills {
+            if let Some(ids) = index.get(skill) {
+                agent_ids.extend(ids.iter().cloned());
+            }
+        }
+        drop(index);
+
+        let agents = self.agents.read().await;
+        agent_ids
+            .into_iter()
+            .filter_map(|id| agents.get(&id).cloned())
+            .collect()
+    }
+
     /// Update heartbeat timestamp for an agent.
-    pub async fn heartbeat(&self, agent_id: &Hash) -> Result<i64, RegistryError> {
+    pub async fn heartbeat(
+        &self,
+        agent_id: &Hash,
+        status: Option<AgentHealthStatus>,
+    ) -> Result<i64, RegistryError> {
         let now = current_timestamp_i64()?;
         let mut agents = self.agents.write().await;
         let agent = agents
             .get_mut(agent_id)
             .ok_or(RegistryError::AgentNotFound)?;
         agent.last_heartbeat = now;
+        if status.is_some() {
+            agent.last_health = status;
+        }
         if agent.status == AgentStatus::Inactive {
             agent.status = AgentStatus::Active;
         }
+        let snapshot = agent.clone();
+        drop(agents);
+        persist_agent_record(&snapshot)?;
         Ok(now)
+    }
+
+    /// Mark an agent as inactive and increment failure count.
+    pub async fn mark_inactive(&self, agent_id: &Hash) -> Result<(), RegistryError> {
+        let mut agents = self.agents.write().await;
+        let agent = agents
+            .get_mut(agent_id)
+            .ok_or(RegistryError::AgentNotFound)?;
+        agent.status = AgentStatus::Inactive;
+        agent.health_failures = agent.health_failures.saturating_add(1);
+        let snapshot = agent.clone();
+        drop(agents);
+        persist_agent_record(&snapshot)?;
+        Ok(())
+    }
+
+    /// Run health checks and mark stale agents as inactive.
+    pub async fn run_health_checks(
+        &self,
+        timeout_secs: u64,
+        failure_threshold: u32,
+    ) -> Result<usize, RegistryError> {
+        let now = get_current_time_in_seconds();
+        let mut updated: Vec<RegisteredAgent> = Vec::new();
+        {
+            let mut agents = self.agents.write().await;
+            for agent in agents.values_mut() {
+                if agent.status != AgentStatus::Active {
+                    continue;
+                }
+                let last = u64::try_from(agent.last_heartbeat).unwrap_or(0);
+                if now.saturating_sub(last) > timeout_secs {
+                    agent.health_failures = agent.health_failures.saturating_add(1);
+                    if agent.health_failures >= failure_threshold {
+                        agent.status = AgentStatus::Inactive;
+                    }
+                    updated.push(agent.clone());
+                }
+            }
+        }
+        for agent in &updated {
+            persist_agent_record(agent)?;
+        }
+        Ok(updated.len())
     }
 
     async fn index_skills(&self, agent_id: Hash, card: &AgentCard) {
@@ -277,6 +448,12 @@ fn supports_input_mode(agent: &RegisteredAgent, input_mode: &str) -> bool {
         .any(|skill| skill.input_modes.iter().any(|mode| mode == input_mode))
 }
 
+fn supports_any_input_mode(agent: &RegisteredAgent, input_modes: &[String]) -> bool {
+    input_modes
+        .iter()
+        .any(|mode| supports_input_mode(agent, mode))
+}
+
 fn supports_output_mode(agent: &RegisteredAgent, output_mode: &str) -> bool {
     if agent
         .agent_card
@@ -293,19 +470,246 @@ fn supports_output_mode(agent: &RegisteredAgent, output_mode: &str) -> bool {
         .any(|skill| skill.output_modes.iter().any(|mode| mode == output_mode))
 }
 
+fn supports_any_output_mode(agent: &RegisteredAgent, output_modes: &[String]) -> bool {
+    output_modes
+        .iter()
+        .any(|mode| supports_output_mode(agent, mode))
+}
+
 fn extract_skill_ids(card: &AgentCard) -> Vec<String> {
     card.skills.iter().map(|skill| skill.id.clone()).collect()
+}
+
+fn deserialize_opt_string_vec<'de, D>(deserializer: D) -> Result<Option<Vec<String>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = Option::<Value>::deserialize(deserializer)?;
+    match value {
+        None => Ok(None),
+        Some(Value::String(s)) => Ok(Some(vec![s])),
+        Some(Value::Array(items)) => {
+            let mut out = Vec::with_capacity(items.len());
+            for item in items {
+                match item {
+                    Value::String(s) => out.push(s),
+                    _ => {
+                        return Err(serde::de::Error::custom(
+                            "expected string or list of strings",
+                        ))
+                    }
+                }
+            }
+            Ok(Some(out))
+        }
+        _ => Err(serde::de::Error::custom(
+            "expected string or list of strings",
+        )),
+    }
 }
 
 fn current_timestamp_i64() -> Result<i64, RegistryError> {
     i64::try_from(get_current_time_in_seconds()).map_err(|_| RegistryError::TimestampOverflow)
 }
 
+fn validate_agent_card(card: &AgentCard) -> Result<(), RegistryError> {
+    if card.skills.len() > MAX_SKILLS {
+        return Err(RegistryError::InvalidAgentCard(
+            "too many skills".to_string(),
+        ));
+    }
+    if card.supported_interfaces.len() > MAX_INTERFACES {
+        return Err(RegistryError::InvalidAgentCard(
+            "too many interfaces".to_string(),
+        ));
+    }
+    if card.security_schemes.len() > MAX_SECURITY_SCHEMES {
+        return Err(RegistryError::InvalidAgentCard(
+            "too many security schemes".to_string(),
+        ));
+    }
+    if card.signatures.len() > MAX_SIGNATURES {
+        return Err(RegistryError::InvalidAgentCard(
+            "too many signatures".to_string(),
+        ));
+    }
+    if card.capabilities.extensions.len() > MAX_EXTENSIONS {
+        return Err(RegistryError::InvalidAgentCard(
+            "too many capabilities extensions".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct RegistryIndex {
+    agent_ids: Vec<String>,
+}
+
+static REGISTRY_BASE_DIR: OnceCell<PathBuf> = OnceCell::new();
+static REGISTRY_LOADED: OnceCell<()> = OnceCell::new();
 static GLOBAL_REGISTRY: Lazy<Arc<AgentRegistry>> = Lazy::new(|| Arc::new(AgentRegistry::new()));
+
+/// Set base directory for registry persistence.
+pub fn set_base_dir(dir: &str) {
+    let _ = REGISTRY_BASE_DIR.set(PathBuf::from(dir));
+}
 
 /// Get the process-wide shared agent registry.
 pub fn global_registry() -> Arc<AgentRegistry> {
+    if REGISTRY_LOADED.get().is_none() {
+        let _ = REGISTRY_LOADED.set(());
+        load_registry_snapshot(&GLOBAL_REGISTRY);
+    }
     Arc::clone(&GLOBAL_REGISTRY)
+}
+
+/// Spawn background health check task using default settings.
+pub fn spawn_health_checks() -> tokio::task::JoinHandle<()> {
+    let registry = global_registry();
+    tokio::spawn(async move {
+        let interval = Duration::from_secs(DEFAULT_HEALTH_CHECK_INTERVAL_SECS);
+        loop {
+            let _ = registry
+                .run_health_checks(DEFAULT_HEARTBEAT_TIMEOUT_SECS, DEFAULT_INACTIVE_FAILURES)
+                .await;
+            sleep(interval).await;
+        }
+    })
+}
+
+fn registry_root() -> Option<PathBuf> {
+    let base = REGISTRY_BASE_DIR.get_or_init(|| PathBuf::from(""));
+    if base.as_os_str().is_empty() {
+        return None;
+    }
+    let mut path = base.clone();
+    path.push("a2a");
+    path.push("agents");
+    Some(path)
+}
+
+fn ensure_registry_dir(path: &Path) -> Result<(), RegistryError> {
+    fs::create_dir_all(path).map_err(|e| RegistryError::Storage(e.to_string()))
+}
+
+fn index_path(root: &Path) -> PathBuf {
+    let mut path = root.to_path_buf();
+    path.push("index.json");
+    path
+}
+
+fn agent_path(root: &Path, agent_id: &Hash) -> PathBuf {
+    let mut path = root.to_path_buf();
+    path.push(format!("{}.json", agent_id.to_hex()));
+    path
+}
+
+fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), RegistryError> {
+    let mut tmp = path.to_path_buf();
+    tmp.set_extension("tmp");
+    fs::write(&tmp, bytes).map_err(|e| RegistryError::Storage(e.to_string()))?;
+    fs::rename(&tmp, path).map_err(|e| RegistryError::Storage(e.to_string()))
+}
+
+fn persist_agent_record(agent: &RegisteredAgent) -> Result<(), RegistryError> {
+    let Some(root) = registry_root() else {
+        return Ok(());
+    };
+    ensure_registry_dir(&root)?;
+    let path = agent_path(&root, &agent.agent_id);
+    let bytes =
+        serde_json::to_vec_pretty(agent).map_err(|e| RegistryError::Storage(e.to_string()))?;
+    write_atomic(&path, &bytes)?;
+    Ok(())
+}
+
+fn remove_agent_record(agent_id: &Hash) -> Result<(), RegistryError> {
+    let Some(root) = registry_root() else {
+        return Ok(());
+    };
+    let path = agent_path(&root, agent_id);
+    if path.exists() {
+        fs::remove_file(&path).map_err(|e| RegistryError::Storage(e.to_string()))?;
+    }
+    Ok(())
+}
+
+async fn persist_index(
+    agents: &RwLock<HashMap<Hash, RegisteredAgent>>,
+) -> Result<(), RegistryError> {
+    let Some(root) = registry_root() else {
+        return Ok(());
+    };
+    ensure_registry_dir(&root)?;
+    let agents = agents.read().await;
+    let mut ids: Vec<String> = agents.keys().map(|id| id.to_hex()).collect();
+    ids.sort();
+    let index = RegistryIndex { agent_ids: ids };
+    let bytes =
+        serde_json::to_vec_pretty(&index).map_err(|e| RegistryError::Storage(e.to_string()))?;
+    write_atomic(&index_path(&root), &bytes)?;
+    Ok(())
+}
+
+fn load_registry_snapshot(registry: &Arc<AgentRegistry>) {
+    let Some(root) = registry_root() else {
+        return;
+    };
+    let index_path = index_path(&root);
+    let mut agents = HashMap::new();
+    if let Ok(raw) = fs::read(&index_path) {
+        if let Ok(index) = serde_json::from_slice::<RegistryIndex>(&raw) {
+            for id in index.agent_ids {
+                if let Ok(hash) = id.parse::<Hash>() {
+                    let path = agent_path(&root, &hash);
+                    if let Ok(bytes) = fs::read(&path) {
+                        if let Ok(agent) = serde_json::from_slice::<RegisteredAgent>(&bytes) {
+                            agents.insert(hash, agent);
+                        }
+                    }
+                }
+            }
+        }
+    } else if let Ok(entries) = fs::read_dir(&root) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.file_name().and_then(|s| s.to_str()) == Some("index.json") {
+                continue;
+            }
+            if path.extension().and_then(|s| s.to_str()) != Some("json") {
+                continue;
+            }
+            if let Ok(bytes) = fs::read(&path) {
+                if let Ok(agent) = serde_json::from_slice::<RegisteredAgent>(&bytes) {
+                    agents.insert(agent.agent_id.clone(), agent);
+                }
+            }
+        }
+    }
+
+    let index = agents.iter().fold(
+        HashMap::<String, HashSet<Hash>>::new(),
+        |mut acc, (id, agent)| {
+            for skill in extract_skill_ids(&agent.agent_card) {
+                acc.entry(skill).or_default().insert(id.clone());
+            }
+            acc
+        },
+    );
+
+    let registry_agents = Arc::clone(registry);
+    let registry_index = index;
+    let agents_map = agents;
+
+    let registry_inner = async move {
+        *registry_agents.agents.write().await = agents_map;
+        *registry_agents.index_by_skill.write().await = registry_index;
+    };
+
+    if let Ok(handle) = tokio::runtime::Handle::try_current() {
+        handle.block_on(registry_inner);
+    }
 }
 
 #[cfg(test)]
@@ -361,7 +765,7 @@ mod tests {
         let registry = AgentRegistry::new();
         let card = sample_card("agent", "skill:a");
         let registered = registry
-            .register(card, "http://agent.test".to_string())
+            .register(card, "https://agent.test".to_string())
             .await?;
 
         let fetched = registry.get(&registered.agent_id).await;
@@ -381,10 +785,10 @@ mod tests {
         let card_b = sample_card("agent-b", "skill:b");
 
         let _ = registry
-            .register(card_a, "http://a.test".to_string())
+            .register(card_a, "https://a.test".to_string())
             .await?;
         let _ = registry
-            .register(card_b, "http://b.test".to_string())
+            .register(card_b, "https://b.test".to_string())
             .await?;
 
         let filtered = registry.filter_by_skill("skill:a").await;
@@ -398,11 +802,11 @@ mod tests {
         let registry = AgentRegistry::new();
         let card = sample_card("agent", "skill:a");
         let registered = registry
-            .register(card, "http://agent.test".to_string())
+            .register(card, "https://agent.test".to_string())
             .await?;
 
         let before = registered.last_heartbeat;
-        let now = registry.heartbeat(&registered.agent_id).await?;
+        let now = registry.heartbeat(&registered.agent_id, None).await?;
         assert!(now >= before);
         Ok(())
     }

@@ -39,6 +39,7 @@ use storage::{
 
 pub fn set_base_dir(dir: &str) {
     storage::set_base_dir(dir);
+    registry::set_base_dir(dir);
 }
 
 pub struct A2ADaemonService<S: Storage> {

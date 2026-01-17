@@ -10,6 +10,7 @@ use tos_common::{
     asset::RPCAssetData,
     contract::Module,
     crypto::{Address, Hash},
+    escrow::EscrowAccount,
     rpc::client::{
         EventReceiver, JsonRPCResult, WebSocketJsonRPCClient, WebSocketJsonRPCClientImpl,
     },
@@ -628,6 +629,147 @@ impl DaemonAPI {
             )
             .await?;
         Ok(history)
+    }
+
+    /// Get escrow by ID
+    pub async fn get_escrow(&self, escrow_id: &Hash) -> Result<EscrowAccount> {
+        trace!("get_escrow");
+        let escrow = self
+            .client
+            .call_with(
+                "get_escrow",
+                &GetEscrowParams {
+                    escrow_id: Cow::Borrowed(escrow_id),
+                },
+            )
+            .await?;
+        Ok(escrow)
+    }
+
+    /// List escrows where the address is the client (payer)
+    pub async fn get_escrows_by_client(
+        &self,
+        address: &Address,
+        maximum: Option<usize>,
+        skip: Option<usize>,
+    ) -> Result<Vec<EscrowAccount>> {
+        trace!("get_escrows_by_client");
+        let result: EscrowListResult = self
+            .client
+            .call_with(
+                "get_escrows_by_client",
+                &GetEscrowsByClientParams {
+                    address: address.clone(),
+                    maximum,
+                    skip,
+                },
+            )
+            .await?;
+        Ok(result.escrows)
+    }
+
+    /// List escrows where the address is the provider (payee)
+    pub async fn get_escrows_by_provider(
+        &self,
+        address: &Address,
+        maximum: Option<usize>,
+        skip: Option<usize>,
+    ) -> Result<Vec<EscrowAccount>> {
+        trace!("get_escrows_by_provider");
+        let result: EscrowListResult = self
+            .client
+            .call_with(
+                "get_escrows_by_provider",
+                &GetEscrowsByProviderParams {
+                    address: address.clone(),
+                    maximum,
+                    skip,
+                },
+            )
+            .await?;
+        Ok(result.escrows)
+    }
+
+    /// List escrows for a given task ID
+    pub async fn get_escrows_by_task(
+        &self,
+        task_id: &str,
+        maximum: Option<usize>,
+        skip: Option<usize>,
+    ) -> Result<Vec<EscrowAccount>> {
+        trace!("get_escrows_by_task");
+        let result: EscrowListResult = self
+            .client
+            .call_with(
+                "get_escrows_by_task",
+                &GetEscrowsByTaskParams {
+                    task_id: Cow::Borrowed(task_id),
+                    maximum,
+                    skip,
+                },
+            )
+            .await?;
+        Ok(result.escrows)
+    }
+
+    /// Get escrow history with optional pagination and ordering
+    pub async fn get_escrow_history_with_options(
+        &self,
+        escrow_id: &Hash,
+        maximum: Option<usize>,
+        skip: Option<usize>,
+        descending: bool,
+    ) -> Result<EscrowHistoryResult> {
+        trace!("get_escrow_history_with_options");
+        let history = self
+            .client
+            .call_with(
+                "get_escrow_history",
+                &GetEscrowHistoryParams {
+                    escrow_id: Cow::Borrowed(escrow_id),
+                    maximum,
+                    skip,
+                    descending,
+                },
+            )
+            .await?;
+        Ok(history)
+    }
+
+    /// Get escrow history
+    pub async fn get_escrow_history(&self, escrow_id: &Hash) -> Result<EscrowHistoryResult> {
+        self.get_escrow_history_with_options(escrow_id, None, None, false)
+            .await
+    }
+
+    /// Get dispute details for escrow
+    pub async fn get_dispute_details(&self, escrow_id: &Hash) -> Result<DisputeDetailsResult> {
+        trace!("get_dispute_details");
+        let details = self
+            .client
+            .call_with(
+                "get_dispute_details",
+                &GetDisputeDetailsParams {
+                    escrow_id: Cow::Borrowed(escrow_id),
+                },
+            )
+            .await?;
+        Ok(details)
+    }
+
+    /// Get appeal status for escrow
+    pub async fn get_appeal_status(&self, escrow_id: &Hash) -> Result<AppealStatusResult> {
+        trace!("get_appeal_status");
+        let status = self
+            .client
+            .call_with(
+                "get_appeal_status",
+                &GetAppealStatusParams {
+                    escrow_id: Cow::Borrowed(escrow_id),
+                },
+            )
+            .await?;
+        Ok(status)
     }
 
     // Contract-related API methods

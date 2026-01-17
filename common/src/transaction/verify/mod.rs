@@ -226,6 +226,8 @@ impl Transaction {
                     | TransactionType::ReleaseEscrow(_)
                     | TransactionType::RefundEscrow(_)
                     | TransactionType::ChallengeEscrow(_)
+                    | TransactionType::DisputeEscrow(_)
+                    | TransactionType::AppealEscrow(_)
                     | TransactionType::SubmitVerdict(_)
                     | TransactionType::RegisterArbiter(_)
                     | TransactionType::UpdateArbiter(_) => true,
@@ -483,6 +485,8 @@ impl Transaction {
             | TransactionType::ReleaseEscrow(_)
             | TransactionType::RefundEscrow(_)
             | TransactionType::ChallengeEscrow(_)
+            | TransactionType::DisputeEscrow(_)
+            | TransactionType::AppealEscrow(_)
             | TransactionType::SubmitVerdict(_) => {}
         }
 
@@ -1295,7 +1299,7 @@ impl Transaction {
                 }
             }
             TransactionType::CreateEscrow(payload) => {
-                escrow::verify_create_escrow(payload)
+                escrow::verify_create_escrow(payload, &self.source)
                     .map_err(|e| VerificationError::AnyError(anyhow!(e)))?;
             }
             TransactionType::DepositEscrow(payload) => {
@@ -1313,8 +1317,13 @@ impl Transaction {
                     .await
                     .map_err(VerificationError::State)?
                     .ok_or_else(|| VerificationError::AnyError(anyhow!("escrow not found")))?;
-                escrow::verify_release_escrow(payload, &escrow_account, &self.source)
-                    .map_err(|e| VerificationError::AnyError(anyhow!(e)))?;
+                escrow::verify_release_escrow_with_balance(
+                    payload,
+                    &escrow_account,
+                    &self.source,
+                    escrow_account.amount,
+                )
+                .map_err(|e| VerificationError::AnyError(anyhow!(e)))?;
             }
             TransactionType::RefundEscrow(payload) => {
                 let escrow_account = state
@@ -1323,11 +1332,12 @@ impl Transaction {
                     .map_err(VerificationError::State)?
                     .ok_or_else(|| VerificationError::AnyError(anyhow!("escrow not found")))?;
                 let current_height = state.get_verification_topoheight();
-                escrow::verify_refund_escrow(
+                escrow::verify_refund_escrow_with_balance(
                     payload,
                     &escrow_account,
                     &self.source,
                     current_height,
+                    escrow_account.amount,
                 )
                 .map_err(|e| VerificationError::AnyError(anyhow!(e)))?;
             }
@@ -1339,6 +1349,30 @@ impl Transaction {
                     .ok_or_else(|| VerificationError::AnyError(anyhow!("escrow not found")))?;
                 let current_height = state.get_verification_topoheight();
                 escrow::verify_challenge_escrow(
+                    payload,
+                    &escrow_account,
+                    &self.source,
+                    current_height,
+                )
+                .map_err(|e| VerificationError::AnyError(anyhow!(e)))?;
+            }
+            TransactionType::DisputeEscrow(payload) => {
+                let escrow_account = state
+                    .get_escrow(&payload.escrow_id)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| VerificationError::AnyError(anyhow!("escrow not found")))?;
+                escrow::verify_dispute_escrow(payload, &escrow_account, &self.source)
+                    .map_err(|e| VerificationError::AnyError(anyhow!(e)))?;
+            }
+            TransactionType::AppealEscrow(payload) => {
+                let escrow_account = state
+                    .get_escrow(&payload.escrow_id)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| VerificationError::AnyError(anyhow!("escrow not found")))?;
+                let current_height = state.get_verification_topoheight();
+                escrow::verify_appeal_escrow(
                     payload,
                     &escrow_account,
                     &self.source,
@@ -1376,12 +1410,13 @@ impl Transaction {
                     arbiters,
                     min_stake: crate::config::MIN_ARBITER_STAKE,
                 };
-                escrow::verify_submit_verdict(
+                escrow::verify_submit_verdict_with_balance(
                     payload,
                     &escrow_account,
                     self.chain_id as u64,
                     required_threshold,
                     &registry,
+                    escrow_account.amount,
                 )
                 .map_err(|e| VerificationError::AnyError(anyhow!(e)))?;
             }
@@ -1581,6 +1616,18 @@ impl Transaction {
                 let current = spending_per_asset.entry(escrow.asset.clone()).or_insert(0);
                 *current = current
                     .checked_add(payload.deposit)
+                    .ok_or(VerificationError::Overflow)?;
+            }
+            TransactionType::DisputeEscrow(_) => {}
+            TransactionType::AppealEscrow(payload) => {
+                let escrow = state
+                    .get_escrow(&payload.escrow_id)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| VerificationError::AnyError(anyhow!("escrow not found")))?;
+                let current = spending_per_asset.entry(escrow.asset.clone()).or_insert(0);
+                *current = current
+                    .checked_add(payload.appeal_deposit)
                     .ok_or(VerificationError::Overflow)?;
             }
             TransactionType::RegisterArbiter(payload) => {
@@ -2929,7 +2976,7 @@ impl Transaction {
                 }
             }
             TransactionType::CreateEscrow(payload) => {
-                escrow::verify_create_escrow(payload)
+                escrow::verify_create_escrow(payload, &self.source)
                     .map_err(|e| VerificationError::AnyError(anyhow!(e)))?;
             }
             TransactionType::DepositEscrow(payload) => {
@@ -2947,8 +2994,13 @@ impl Transaction {
                     .await
                     .map_err(VerificationError::State)?
                     .ok_or_else(|| VerificationError::AnyError(anyhow!("escrow not found")))?;
-                escrow::verify_release_escrow(payload, &escrow_account, &self.source)
-                    .map_err(|e| VerificationError::AnyError(anyhow!(e)))?;
+                escrow::verify_release_escrow_with_balance(
+                    payload,
+                    &escrow_account,
+                    &self.source,
+                    escrow_account.amount,
+                )
+                .map_err(|e| VerificationError::AnyError(anyhow!(e)))?;
             }
             TransactionType::RefundEscrow(payload) => {
                 let escrow_account = state
@@ -2957,11 +3009,12 @@ impl Transaction {
                     .map_err(VerificationError::State)?
                     .ok_or_else(|| VerificationError::AnyError(anyhow!("escrow not found")))?;
                 let current_height = state.get_verification_topoheight();
-                escrow::verify_refund_escrow(
+                escrow::verify_refund_escrow_with_balance(
                     payload,
                     &escrow_account,
                     &self.source,
                     current_height,
+                    escrow_account.amount,
                 )
                 .map_err(|e| VerificationError::AnyError(anyhow!(e)))?;
             }
@@ -2973,6 +3026,30 @@ impl Transaction {
                     .ok_or_else(|| VerificationError::AnyError(anyhow!("escrow not found")))?;
                 let current_height = state.get_verification_topoheight();
                 escrow::verify_challenge_escrow(
+                    payload,
+                    &escrow_account,
+                    &self.source,
+                    current_height,
+                )
+                .map_err(|e| VerificationError::AnyError(anyhow!(e)))?;
+            }
+            TransactionType::DisputeEscrow(payload) => {
+                let escrow_account = state
+                    .get_escrow(&payload.escrow_id)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| VerificationError::AnyError(anyhow!("escrow not found")))?;
+                escrow::verify_dispute_escrow(payload, &escrow_account, &self.source)
+                    .map_err(|e| VerificationError::AnyError(anyhow!(e)))?;
+            }
+            TransactionType::AppealEscrow(payload) => {
+                let escrow_account = state
+                    .get_escrow(&payload.escrow_id)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| VerificationError::AnyError(anyhow!("escrow not found")))?;
+                let current_height = state.get_verification_topoheight();
+                escrow::verify_appeal_escrow(
                     payload,
                     &escrow_account,
                     &self.source,
@@ -3010,12 +3087,13 @@ impl Transaction {
                     arbiters,
                     min_stake: crate::config::MIN_ARBITER_STAKE,
                 };
-                escrow::verify_submit_verdict(
+                escrow::verify_submit_verdict_with_balance(
                     payload,
                     &escrow_account,
                     self.chain_id as u64,
                     required_threshold,
                     &registry,
+                    escrow_account.amount,
                 )
                 .map_err(|e| VerificationError::AnyError(anyhow!(e)))?;
             }
@@ -3271,6 +3349,8 @@ impl Transaction {
             | TransactionType::ReleaseEscrow(_)
             | TransactionType::RefundEscrow(_)
             | TransactionType::ChallengeEscrow(_)
+            | TransactionType::DisputeEscrow(_)
+            | TransactionType::AppealEscrow(_)
             | TransactionType::SubmitVerdict(_) => {
                 // Escrow transactions: verification handled in escrow module
             }
@@ -3455,6 +3535,18 @@ impl Transaction {
                 let current = spending_per_asset.entry(escrow.asset.clone()).or_insert(0);
                 *current = current
                     .checked_add(payload.deposit)
+                    .ok_or(VerificationError::Overflow)?;
+            }
+            TransactionType::DisputeEscrow(_) => {}
+            TransactionType::AppealEscrow(payload) => {
+                let escrow = state
+                    .get_escrow(&payload.escrow_id)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| VerificationError::AnyError(anyhow!("escrow not found")))?;
+                let current = spending_per_asset.entry(escrow.asset.clone()).or_insert(0);
+                *current = current
+                    .checked_add(payload.appeal_deposit)
                     .ok_or(VerificationError::Overflow)?;
             }
             TransactionType::RegisterArbiter(payload) => {
@@ -3930,6 +4022,18 @@ impl Transaction {
                     .checked_add(payload.deposit)
                     .ok_or(VerificationError::Overflow)?;
             }
+            TransactionType::DisputeEscrow(_) => {}
+            TransactionType::AppealEscrow(payload) => {
+                let escrow = state
+                    .get_escrow(&payload.escrow_id)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| VerificationError::AnyError(anyhow!("escrow not found")))?;
+                let current = spending_per_asset.entry(escrow.asset.clone()).or_insert(0);
+                *current = current
+                    .checked_add(payload.appeal_deposit)
+                    .ok_or(VerificationError::Overflow)?;
+            }
             TransactionType::RegisterArbiter(payload) => {
                 let current = spending_per_asset.entry(TOS_ASSET.clone()).or_insert(0);
                 *current = current
@@ -4204,27 +4308,44 @@ impl Transaction {
             }
             TransactionType::CreateEscrow(payload) => {
                 let created_at = state.get_verification_topoheight();
+                let timeout_at = created_at
+                    .checked_add(payload.timeout_blocks)
+                    .ok_or(VerificationError::Overflow)?;
                 let escrow = crate::escrow::EscrowAccount {
                     id: tx_hash.clone(),
                     task_id: payload.task_id.clone(),
                     payer: self.source.clone(),
                     payee: payload.provider.clone(),
                     amount: payload.amount,
+                    total_amount: payload.amount,
+                    released_amount: 0,
+                    refunded_amount: 0,
                     pending_release_amount: None,
                     challenge_deposit: 0,
                     asset: payload.asset.clone(),
                     state: crate::escrow::EscrowState::Funded,
+                    dispute_id: None,
+                    dispute_round: None,
                     challenge_window: payload.challenge_window,
                     challenge_deposit_bps: payload.challenge_deposit_bps,
                     optimistic_release: payload.optimistic_release,
                     release_requested_at: None,
                     created_at,
+                    updated_at: created_at,
+                    timeout_at,
                     timeout_blocks: payload.timeout_blocks,
                     arbitration_config: payload.arbitration_config.clone(),
+                    dispute: None,
+                    appeal: None,
+                    resolutions: Vec::new(),
                 };
 
                 state
                     .set_escrow(&escrow)
+                    .await
+                    .map_err(VerificationError::State)?;
+                state
+                    .add_escrow_history(&escrow.id, created_at, tx_hash)
                     .await
                     .map_err(VerificationError::State)?;
             }
@@ -4238,11 +4359,20 @@ impl Transaction {
                     .amount
                     .checked_add(payload.amount)
                     .ok_or(VerificationError::Overflow)?;
+                escrow.total_amount = escrow
+                    .total_amount
+                    .checked_add(payload.amount)
+                    .ok_or(VerificationError::Overflow)?;
                 if escrow.state == crate::escrow::EscrowState::Created {
                     escrow.state = crate::escrow::EscrowState::Funded;
                 }
+                escrow.updated_at = state.get_verification_topoheight();
                 state
                     .set_escrow(&escrow)
+                    .await
+                    .map_err(VerificationError::State)?;
+                state
+                    .add_escrow_history(&escrow.id, escrow.updated_at, tx_hash)
                     .await
                     .map_err(VerificationError::State)?;
             }
@@ -4267,6 +4397,7 @@ impl Transaction {
                 escrow.state = crate::escrow::EscrowState::PendingRelease;
                 escrow.release_requested_at = Some(current_height);
                 escrow.pending_release_amount = Some(payload.amount);
+                escrow.updated_at = current_height;
 
                 if escrow.optimistic_release {
                     let release_at = current_height
@@ -4280,6 +4411,10 @@ impl Transaction {
 
                 state
                     .set_escrow(&escrow)
+                    .await
+                    .map_err(VerificationError::State)?;
+                state
+                    .add_escrow_history(&escrow.id, escrow.updated_at, tx_hash)
                     .await
                     .map_err(VerificationError::State)?;
             }
@@ -4307,11 +4442,16 @@ impl Transaction {
                     .amount
                     .checked_sub(payload.amount)
                     .ok_or(VerificationError::Overflow)?;
+                escrow.refunded_amount = escrow
+                    .refunded_amount
+                    .checked_add(payload.amount)
+                    .ok_or(VerificationError::Overflow)?;
                 escrow.state = if escrow.amount == 0 {
                     crate::escrow::EscrowState::Refunded
                 } else {
                     crate::escrow::EscrowState::Funded
                 };
+                escrow.updated_at = state.get_verification_topoheight();
 
                 let balance = state
                     .get_receiver_balance(
@@ -4326,6 +4466,10 @@ impl Transaction {
 
                 state
                     .set_escrow(&escrow)
+                    .await
+                    .map_err(VerificationError::State)?;
+                state
+                    .add_escrow_history(&escrow.id, escrow.updated_at, tx_hash)
                     .await
                     .map_err(VerificationError::State)?;
             }
@@ -4356,9 +4500,107 @@ impl Transaction {
                     .amount
                     .checked_add(payload.deposit)
                     .ok_or(VerificationError::Overflow)?;
+                escrow.total_amount = escrow
+                    .total_amount
+                    .checked_add(payload.deposit)
+                    .ok_or(VerificationError::Overflow)?;
+                escrow.updated_at = state.get_verification_topoheight();
 
                 state
                     .set_escrow(&escrow)
+                    .await
+                    .map_err(VerificationError::State)?;
+                state
+                    .add_escrow_history(&escrow.id, escrow.updated_at, tx_hash)
+                    .await
+                    .map_err(VerificationError::State)?;
+            }
+            TransactionType::DisputeEscrow(payload) => {
+                let mut escrow = state
+                    .get_escrow(&payload.escrow_id)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| VerificationError::AnyError(anyhow!("escrow not found")))?;
+
+                if let Some(release_at) = escrow.release_requested_at {
+                    let pending_at = release_at
+                        .checked_add(escrow.challenge_window)
+                        .ok_or(VerificationError::Overflow)?;
+                    state
+                        .remove_pending_release(pending_at, &escrow.id)
+                        .await
+                        .map_err(VerificationError::State)?;
+                }
+
+                let current_height = state.get_verification_topoheight();
+                escrow.state = crate::escrow::EscrowState::Challenged;
+                escrow.pending_release_amount = None;
+                escrow.release_requested_at = None;
+                escrow.dispute = Some(crate::escrow::DisputeInfo {
+                    initiator: self.source.clone(),
+                    reason: payload.reason.clone(),
+                    evidence_hash: payload.evidence_hash.clone(),
+                    disputed_at: current_height,
+                    deadline: escrow.timeout_at,
+                });
+                escrow.dispute_id = Some(tx_hash.clone());
+                escrow.updated_at = current_height;
+
+                state
+                    .set_escrow(&escrow)
+                    .await
+                    .map_err(VerificationError::State)?;
+                state
+                    .add_escrow_history(&escrow.id, escrow.updated_at, tx_hash)
+                    .await
+                    .map_err(VerificationError::State)?;
+            }
+            TransactionType::AppealEscrow(payload) => {
+                let mut escrow = state
+                    .get_escrow(&payload.escrow_id)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| VerificationError::AnyError(anyhow!("escrow not found")))?;
+
+                let current_height = state.get_verification_topoheight();
+                let threshold = escrow
+                    .arbitration_config
+                    .as_ref()
+                    .and_then(|config| config.threshold)
+                    .unwrap_or(1);
+
+                if let Some(last) = escrow.resolutions.last_mut() {
+                    last.appealed = true;
+                }
+
+                escrow.state = crate::escrow::EscrowState::Challenged;
+                escrow.appeal = Some(crate::escrow::AppealInfo {
+                    appellant: self.source.clone(),
+                    reason: payload.reason.clone(),
+                    new_evidence_hash: payload.new_evidence_hash.clone(),
+                    deposit: payload.appeal_deposit,
+                    appealed_at: current_height,
+                    deadline: escrow.timeout_at,
+                    votes: Vec::new(),
+                    committee: Vec::new(),
+                    threshold,
+                });
+                escrow.amount = escrow
+                    .amount
+                    .checked_add(payload.appeal_deposit)
+                    .ok_or(VerificationError::Overflow)?;
+                escrow.total_amount = escrow
+                    .total_amount
+                    .checked_add(payload.appeal_deposit)
+                    .ok_or(VerificationError::Overflow)?;
+                escrow.updated_at = current_height;
+
+                state
+                    .set_escrow(&escrow)
+                    .await
+                    .map_err(VerificationError::State)?;
+                state
+                    .add_escrow_history(&escrow.id, escrow.updated_at, tx_hash)
                     .await
                     .map_err(VerificationError::State)?;
             }
@@ -4392,6 +4634,49 @@ impl Transaction {
                 escrow.pending_release_amount = None;
                 escrow.release_requested_at = None;
                 escrow.challenge_deposit = 0;
+                escrow.dispute_id = Some(payload.dispute_id.clone());
+                escrow.dispute_round = Some(payload.round);
+                escrow.updated_at = state.get_verification_topoheight();
+
+                let mut resolver = Vec::new();
+                let mut seen = std::collections::HashSet::new();
+                for sig in &payload.signatures {
+                    if seen.insert(sig.arbiter_pubkey.clone()) {
+                        resolver.push(sig.arbiter_pubkey.clone());
+                    }
+                }
+
+                let outcome = crate::arbitration::verdict::derive_dispute_outcome(
+                    payload.payer_amount,
+                    payload.payee_amount,
+                );
+                let resolution_hash = hash(&crate::arbitration::verdict::build_verdict_message(
+                    self.chain_id as u64,
+                    &payload.escrow_id,
+                    &payload.dispute_id,
+                    payload.round,
+                    outcome,
+                    payload.payer_amount,
+                    payload.payee_amount,
+                ));
+                let tier = match escrow
+                    .arbitration_config
+                    .as_ref()
+                    .map(|config| &config.mode)
+                {
+                    Some(crate::escrow::ArbitrationMode::Committee) => 2,
+                    Some(crate::escrow::ArbitrationMode::DaoGovernance) => 3,
+                    _ => 1,
+                };
+                escrow.resolutions.push(crate::escrow::ResolutionRecord {
+                    tier,
+                    resolver,
+                    client_amount: payload.payer_amount,
+                    provider_amount: payload.payee_amount,
+                    resolution_hash,
+                    resolved_at: escrow.updated_at,
+                    appealed: false,
+                });
 
                 if payload.payer_amount > 0 {
                     let balance = state
@@ -4402,6 +4687,10 @@ impl Transaction {
                         .await
                         .map_err(VerificationError::State)?;
                     *balance = balance
+                        .checked_add(payload.payer_amount)
+                        .ok_or(VerificationError::Overflow)?;
+                    escrow.refunded_amount = escrow
+                        .refunded_amount
                         .checked_add(payload.payer_amount)
                         .ok_or(VerificationError::Overflow)?;
                 }
@@ -4417,10 +4706,18 @@ impl Transaction {
                     *balance = balance
                         .checked_add(payload.payee_amount)
                         .ok_or(VerificationError::Overflow)?;
+                    escrow.released_amount = escrow
+                        .released_amount
+                        .checked_add(payload.payee_amount)
+                        .ok_or(VerificationError::Overflow)?;
                 }
 
                 state
                     .set_escrow(&escrow)
+                    .await
+                    .map_err(VerificationError::State)?;
+                state
+                    .add_escrow_history(&escrow.id, escrow.updated_at, tx_hash)
                     .await
                     .map_err(VerificationError::State)?;
             }
@@ -6103,6 +6400,18 @@ impl Transaction {
                 let current = spending_per_asset.entry(escrow.asset.clone()).or_insert(0);
                 *current = current
                     .checked_add(payload.deposit)
+                    .ok_or(VerificationError::Overflow)?;
+            }
+            TransactionType::DisputeEscrow(_) => {}
+            TransactionType::AppealEscrow(payload) => {
+                let escrow = state
+                    .get_escrow(&payload.escrow_id)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| VerificationError::AnyError(anyhow!("escrow not found")))?;
+                let current = spending_per_asset.entry(escrow.asset.clone()).or_insert(0);
+                *current = current
+                    .checked_add(payload.appeal_deposit)
                     .ok_or(VerificationError::Overflow)?;
             }
             TransactionType::ReleaseEscrow(_)

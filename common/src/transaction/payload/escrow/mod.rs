@@ -217,6 +217,121 @@ impl Serializer for ChallengeEscrowPayload {
     }
 }
 
+/// Initiate dispute on escrow.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct DisputeEscrowPayload {
+    /// Escrow ID.
+    pub escrow_id: Hash,
+    /// Dispute reason.
+    pub reason: String,
+    /// Evidence hash (off-chain evidence).
+    pub evidence_hash: Option<Hash>,
+}
+
+impl Serializer for DisputeEscrowPayload {
+    fn write(&self, writer: &mut Writer) {
+        self.escrow_id.write(writer);
+        self.reason.write(writer);
+        self.evidence_hash.write(writer);
+    }
+
+    fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
+        let escrow_id = Hash::read(reader)?;
+        let reason = String::read(reader)?;
+        let evidence_hash = Option::read(reader)?;
+        Ok(Self {
+            escrow_id,
+            reason,
+            evidence_hash,
+        })
+    }
+
+    fn size(&self) -> usize {
+        self.escrow_id.size() + self.reason.size() + self.evidence_hash.size()
+    }
+}
+
+/// Appeal mode for disputes.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AppealMode {
+    /// Escalate to committee (M-of-N).
+    Committee,
+    /// Escalate to DAO governance (high-value cases).
+    DaoGovernance,
+}
+
+impl Serializer for AppealMode {
+    fn write(&self, writer: &mut Writer) {
+        let value = match self {
+            AppealMode::Committee => 0u8,
+            AppealMode::DaoGovernance => 1u8,
+        };
+        value.write(writer);
+    }
+
+    fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
+        let value = u8::read(reader)?;
+        match value {
+            0 => Ok(AppealMode::Committee),
+            1 => Ok(AppealMode::DaoGovernance),
+            _ => Err(ReaderError::InvalidValue),
+        }
+    }
+
+    fn size(&self) -> usize {
+        1
+    }
+}
+
+/// Appeal a resolved dispute.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct AppealEscrowPayload {
+    /// Escrow ID.
+    pub escrow_id: Hash,
+    /// Appeal reason.
+    pub reason: String,
+    /// New evidence hash (optional).
+    pub new_evidence_hash: Option<Hash>,
+    /// Appeal deposit amount.
+    pub appeal_deposit: u64,
+    /// Preferred appeal mode.
+    pub appeal_mode: AppealMode,
+}
+
+impl Serializer for AppealEscrowPayload {
+    fn write(&self, writer: &mut Writer) {
+        self.escrow_id.write(writer);
+        self.reason.write(writer);
+        self.new_evidence_hash.write(writer);
+        self.appeal_deposit.write(writer);
+        self.appeal_mode.write(writer);
+    }
+
+    fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
+        let escrow_id = Hash::read(reader)?;
+        let reason = String::read(reader)?;
+        let new_evidence_hash = Option::read(reader)?;
+        let appeal_deposit = u64::read(reader)?;
+        let appeal_mode = AppealMode::read(reader)?;
+        Ok(Self {
+            escrow_id,
+            reason,
+            new_evidence_hash,
+            appeal_deposit,
+            appeal_mode,
+        })
+    }
+
+    fn size(&self) -> usize {
+        self.escrow_id.size()
+            + self.reason.size()
+            + self.new_evidence_hash.size()
+            + self.appeal_deposit.size()
+            + self.appeal_mode.size()
+    }
+}
+
 /// Submit arbitration verdict with threshold signatures.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct SubmitVerdictPayload {

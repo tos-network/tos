@@ -61,6 +61,10 @@ pub async fn apply_auto_release<'a, S: Storage>(
             .amount
             .checked_sub(release_amount)
             .ok_or(BlockchainError::BalanceOverflow)?;
+        escrow.released_amount = escrow
+            .released_amount
+            .checked_add(release_amount)
+            .ok_or(BlockchainError::BalanceOverflow)?;
 
         escrow.pending_release_amount = None;
         escrow.release_requested_at = None;
@@ -69,6 +73,7 @@ pub async fn apply_auto_release<'a, S: Storage>(
         } else {
             EscrowState::Funded
         };
+        escrow.updated_at = current_topoheight;
 
         state.set_escrow(&escrow).await?;
         state

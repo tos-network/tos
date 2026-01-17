@@ -66,6 +66,14 @@ pub enum ExpertiseDomain {
     Security,
     /// Gaming or digital goods.
     Gaming,
+    /// Data service disputes.
+    DataService,
+    /// Digital asset disputes (NFTs, tokens).
+    DigitalAsset,
+    /// Cross-chain disputes.
+    CrossChain,
+    /// NFT-specific disputes.
+    Nft,
 }
 
 impl Serializer for ExpertiseDomain {
@@ -81,6 +89,10 @@ impl Serializer for ExpertiseDomain {
             ExpertiseDomain::Data => 7u8,
             ExpertiseDomain::Security => 8u8,
             ExpertiseDomain::Gaming => 9u8,
+            ExpertiseDomain::DataService => 10u8,
+            ExpertiseDomain::DigitalAsset => 11u8,
+            ExpertiseDomain::CrossChain => 12u8,
+            ExpertiseDomain::Nft => 13u8,
         };
         value.write(writer);
     }
@@ -98,6 +110,10 @@ impl Serializer for ExpertiseDomain {
             7 => Ok(ExpertiseDomain::Data),
             8 => Ok(ExpertiseDomain::Security),
             9 => Ok(ExpertiseDomain::Gaming),
+            10 => Ok(ExpertiseDomain::DataService),
+            11 => Ok(ExpertiseDomain::DigitalAsset),
+            12 => Ok(ExpertiseDomain::CrossChain),
+            13 => Ok(ExpertiseDomain::Nft),
             _ => Err(ReaderError::InvalidValue),
         }
     }

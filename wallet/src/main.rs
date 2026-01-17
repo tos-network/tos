@@ -3825,6 +3825,18 @@ async fn transaction(
                 manager.message(format!("  Escrow ID: {}", payload.escrow_id));
                 manager.message(format!("  Deposit: {}", payload.deposit));
             }
+            TransactionType::DisputeEscrow(payload) => {
+                manager.message("Type: DisputeEscrow".to_string());
+                manager.message(format!("  Escrow ID: {}", payload.escrow_id));
+                manager.message(format!("  Reason: {}", payload.reason));
+            }
+            TransactionType::AppealEscrow(payload) => {
+                manager.message("Type: AppealEscrow".to_string());
+                manager.message(format!("  Escrow ID: {}", payload.escrow_id));
+                manager.message(format!("  Reason: {}", payload.reason));
+                manager.message(format!("  Deposit: {}", payload.appeal_deposit));
+                manager.message(format!("  Mode: {:?}", payload.appeal_mode));
+            }
             TransactionType::SubmitVerdict(payload) => {
                 manager.message("Type: SubmitVerdict".to_string());
                 manager.message(format!("  Escrow ID: {}", payload.escrow_id));

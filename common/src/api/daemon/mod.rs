@@ -1,6 +1,7 @@
 mod direction;
 
 use super::{default_true_value, DataElement, RPCContractOutput, RPCTransaction};
+use crate::escrow::{AppealInfo, DisputeInfo, EscrowAccount};
 use crate::{
     account::{Nonce, VersionedBalance, VersionedNonce, VersionedUnoBalance},
     block::{Algorithm, BlockVersion, TopoHeight, EXTRA_NONCE_SIZE},
@@ -2331,4 +2332,84 @@ pub struct GetMessageByIdResult<'a> {
     /// The message if found
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<EphemeralMessageInfo<'a>>,
+}
+
+// Escrow RPC types
+
+#[derive(Serialize, Deserialize)]
+pub struct GetEscrowParams<'a> {
+    pub escrow_id: Cow<'a, Hash>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct GetEscrowsByClientParams {
+    pub address: Address,
+    pub maximum: Option<usize>,
+    pub skip: Option<usize>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct GetEscrowsByProviderParams {
+    pub address: Address,
+    pub maximum: Option<usize>,
+    pub skip: Option<usize>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct GetEscrowsByTaskParams<'a> {
+    pub task_id: Cow<'a, str>,
+    pub maximum: Option<usize>,
+    pub skip: Option<usize>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct GetEscrowHistoryParams<'a> {
+    pub escrow_id: Cow<'a, Hash>,
+    pub maximum: Option<usize>,
+    pub skip: Option<usize>,
+    #[serde(default)]
+    pub descending: bool,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct GetDisputeDetailsParams<'a> {
+    pub escrow_id: Cow<'a, Hash>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct GetAppealStatusParams<'a> {
+    pub escrow_id: Cow<'a, Hash>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct EscrowListResult {
+    pub escrows: Vec<EscrowAccount>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct EscrowHistoryResult {
+    pub escrow_id: Hash,
+    pub entries: Vec<EscrowHistoryEntry>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct EscrowHistoryEntry {
+    pub topoheight: u64,
+    pub tx_hash: Hash,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct DisputeDetailsResult {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dispute: Option<DisputeInfo>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dispute_id: Option<Hash>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dispute_round: Option<u32>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct AppealStatusResult {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub appeal: Option<AppealInfo>,
 }

@@ -380,6 +380,14 @@ pub trait BlockchainApplyState<'a, P: ContractProvider, E>:
     /// Remove a pending release index entry
     async fn remove_pending_release(&mut self, release_at: u64, escrow_id: &Hash) -> Result<(), E>;
 
+    /// Add an escrow history entry
+    async fn add_escrow_history(
+        &mut self,
+        escrow_id: &Hash,
+        topoheight: u64,
+        tx_hash: &Hash,
+    ) -> Result<(), E>;
+
     // ===== Arbiter Apply Methods =====
 
     /// Store/update an arbiter account

@@ -1,6 +1,7 @@
 pub mod a2a;
 pub mod agent_registry;
 pub mod callback;
+pub mod escrow;
 pub mod getwork;
 pub mod rpc;
 pub mod ws_security;
@@ -102,6 +103,7 @@ impl<S: Storage> DaemonRpcServer<S> {
         }
         info!("A2A service enabled: {}", config.enable_a2a);
         if config.enable_a2a {
+            let _ = crate::a2a::registry::spawn_health_checks();
             crate::a2a::auth::set_auth_config(crate::a2a::auth::A2AAuthConfig::from_rpc_config(
                 &config,
             ));
@@ -214,12 +216,28 @@ impl<S: Storage> DaemonRpcServer<S> {
                             web::post().to(agent_registry::discover_agents_http::<S>),
                         )
                         .route(
+                            "/agents:discover",
+                            web::get().to(agent_registry::discover_agents_http_get::<S>),
+                        )
+                        .route(
+                            "/agents",
+                            web::get().to(agent_registry::list_agents_http::<S>),
+                        )
+                        .route(
                             "/agents/{id}",
                             web::get().to(agent_registry::get_agent_http::<S>),
                         )
                         .route(
                             "/agents/{id}",
+                            web::patch().to(agent_registry::update_agent_http::<S>),
+                        )
+                        .route(
+                            "/agents/{id}",
                             web::delete().to(agent_registry::unregister_agent_http::<S>),
+                        )
+                        .route(
+                            "/agents/{id}:heartbeat",
+                            web::post().to(agent_registry::heartbeat_http::<S>),
                         )
                         .route("/message:send", web::post().to(a2a::send_message_http::<S>))
                         .route(
@@ -267,12 +285,28 @@ impl<S: Storage> DaemonRpcServer<S> {
                             web::post().to(agent_registry::discover_agents_http::<S>),
                         )
                         .route(
+                            "/v1/agents:discover",
+                            web::get().to(agent_registry::discover_agents_http_get::<S>),
+                        )
+                        .route(
+                            "/v1/agents",
+                            web::get().to(agent_registry::list_agents_http::<S>),
+                        )
+                        .route(
                             "/v1/agents/{id}",
                             web::get().to(agent_registry::get_agent_http::<S>),
                         )
                         .route(
                             "/v1/agents/{id}",
+                            web::patch().to(agent_registry::update_agent_http::<S>),
+                        )
+                        .route(
+                            "/v1/agents/{id}",
                             web::delete().to(agent_registry::unregister_agent_http::<S>),
+                        )
+                        .route(
+                            "/v1/agents/{id}:heartbeat",
+                            web::post().to(agent_registry::heartbeat_http::<S>),
                         )
                         .route(
                             "/v1/message:send",

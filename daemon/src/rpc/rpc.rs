@@ -732,6 +732,8 @@ pub fn register_methods<S: Storage>(
         async_handler!(get_account_registration_topoheight::<S>),
     );
 
+    crate::rpc::escrow::register_methods(handler);
+
     // Useful methods
     handler.register_method("validate_address", async_handler!(validate_address::<S>));
     handler.register_method("split_address", async_handler!(split_address::<S>));
@@ -2501,6 +2503,8 @@ async fn get_account_history<S: Storage>(
                 | TransactionType::ReleaseEscrow(_)
                 | TransactionType::RefundEscrow(_)
                 | TransactionType::ChallengeEscrow(_)
+                | TransactionType::DisputeEscrow(_)
+                | TransactionType::AppealEscrow(_)
                 | TransactionType::SubmitVerdict(_) => {
                     // Escrow transactions are not included in account history yet
                 }

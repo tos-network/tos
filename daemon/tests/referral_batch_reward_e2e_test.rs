@@ -883,6 +883,15 @@ impl<'a> BlockchainApplyState<'a, DummyContractProvider, TestError> for TestChai
     ) -> Result<(), TestError> {
         Ok(())
     }
+
+    async fn add_escrow_history(
+        &mut self,
+        _escrow_id: &Hash,
+        _topoheight: u64,
+        _tx_hash: &Hash,
+    ) -> Result<(), TestError> {
+        Ok(())
+    }
 }
 
 #[tokio::test]
