@@ -1120,7 +1120,11 @@ impl TransactionBuilder {
         // Now get immutable access for calculations
         let transfers = match &self.data {
             TransactionTypeBuilder::UnoTransfers(t) => t,
-            _ => unreachable!(), // Already validated above
+            _ => {
+                return Err(GenerationError::State(
+                    "build_uno_unsigned requires UnoTransfers".into(),
+                ))
+            }
         };
 
         // Compute fees

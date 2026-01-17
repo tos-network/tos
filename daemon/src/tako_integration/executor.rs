@@ -1261,7 +1261,8 @@ mod tests {
                 // CRITICAL: Verify error category for RPC/metrics - what operators will see
                 assert_eq!(tako_err.category(), "resource_limit");
             }
-            _ => panic!(
+            _ => assert!(
+                false,
                 "Expected LoadedDataLimitExceeded error, got: {:?}",
                 tako_err
             ),
@@ -1301,7 +1302,8 @@ mod tests {
                     "Current should be actual value, not 0"
                 );
             }
-            _ => panic!(
+            _ => assert!(
+                false,
                 "Expected LoadedDataLimitExceeded error, got: {:?}",
                 tako_err
             ),

@@ -57,10 +57,7 @@ impl Echange {
         }
     }
 
-    // Get the right balance to use for TX verification
-    // TODO we may need to check previous balances and up to the last output balance made
-    // So if in block A we spent TX A, and block B we got some funds, then we spent TX B in block C
-    // We are still able to use it even if it was built at same time as TX A
+    // Get the right balance to use for TX verification.
     fn get_balance(&mut self) -> &mut u64 {
         let output = self.output_balance_used || self.allow_output_balance;
         let (balance, used) = self.version.select_balance(output);

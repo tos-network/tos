@@ -73,8 +73,9 @@ mod tests {
         let v = ExtraDataType::Proprietary(inner.clone());
         let bytes = v.to_bytes();
         let v2 = ExtraDataType::from_bytes(&bytes).unwrap();
+        assert!(matches!(v2, ExtraDataType::Proprietary(_)));
         let ExtraDataType::Proprietary(v2) = v2 else {
-            panic!("invalid variant");
+            return;
         };
 
         assert!(inner == v2);

@@ -472,15 +472,14 @@ mod tests {
         let mut reader = crate::serializer::Reader::new(&bytes);
         let deserialized = EnergyPayload::read(&mut reader).unwrap();
 
-        match deserialized {
-            EnergyPayload::FreezeTos {
-                amount,
-                duration: d,
-            } => {
-                assert_eq!(amount, COIN_VALUE);
-                assert_eq!(d, duration);
-            }
-            _ => panic!("Expected FreezeTos payload"),
+        assert!(matches!(deserialized, EnergyPayload::FreezeTos { .. }));
+        if let EnergyPayload::FreezeTos {
+            amount,
+            duration: d,
+        } = deserialized
+        {
+            assert_eq!(amount, COIN_VALUE);
+            assert_eq!(d, duration);
         }
     }
 
@@ -501,19 +500,18 @@ mod tests {
         let mut reader = crate::serializer::Reader::new(&bytes);
         let deserialized = EnergyPayload::read(&mut reader).unwrap();
 
-        match deserialized {
-            EnergyPayload::UnfreezeTos {
-                amount,
-                from_delegation,
-                record_index,
-                delegatee_address,
-            } => {
-                assert_eq!(amount, COIN_VALUE);
-                assert!(from_delegation);
-                assert_eq!(record_index, None);
-                assert_eq!(delegatee_address, None);
-            }
-            _ => panic!("Expected UnfreezeTos payload"),
+        assert!(matches!(deserialized, EnergyPayload::UnfreezeTos { .. }));
+        if let EnergyPayload::UnfreezeTos {
+            amount,
+            from_delegation,
+            record_index,
+            delegatee_address,
+        } = deserialized
+        {
+            assert_eq!(amount, COIN_VALUE);
+            assert!(from_delegation);
+            assert_eq!(record_index, None);
+            assert_eq!(delegatee_address, None);
         }
     }
 
@@ -534,19 +532,18 @@ mod tests {
         let mut reader = crate::serializer::Reader::new(&bytes);
         let deserialized = EnergyPayload::read(&mut reader).unwrap();
 
-        match deserialized {
-            EnergyPayload::UnfreezeTos {
-                amount,
-                from_delegation,
-                record_index,
-                delegatee_address,
-            } => {
-                assert_eq!(amount, COIN_VALUE * 3);
-                assert!(!from_delegation);
-                assert_eq!(record_index, Some(5));
-                assert_eq!(delegatee_address, None);
-            }
-            _ => panic!("Expected UnfreezeTos payload"),
+        assert!(matches!(deserialized, EnergyPayload::UnfreezeTos { .. }));
+        if let EnergyPayload::UnfreezeTos {
+            amount,
+            from_delegation,
+            record_index,
+            delegatee_address,
+        } = deserialized
+        {
+            assert_eq!(amount, COIN_VALUE * 3);
+            assert!(!from_delegation);
+            assert_eq!(record_index, Some(5));
+            assert_eq!(delegatee_address, None);
         }
     }
 
@@ -568,19 +565,18 @@ mod tests {
         let mut reader = crate::serializer::Reader::new(&bytes);
         let deserialized = EnergyPayload::read(&mut reader).unwrap();
 
-        match deserialized {
-            EnergyPayload::UnfreezeTos {
-                amount,
-                from_delegation,
-                record_index,
-                delegatee_address,
-            } => {
-                assert_eq!(amount, COIN_VALUE * 2);
-                assert!(from_delegation);
-                assert_eq!(record_index, Some(0));
-                assert_eq!(delegatee_address, Some(delegatee));
-            }
-            _ => panic!("Expected UnfreezeTos payload"),
+        assert!(matches!(deserialized, EnergyPayload::UnfreezeTos { .. }));
+        if let EnergyPayload::UnfreezeTos {
+            amount,
+            from_delegation,
+            record_index,
+            delegatee_address,
+        } = deserialized
+        {
+            assert_eq!(amount, COIN_VALUE * 2);
+            assert!(from_delegation);
+            assert_eq!(record_index, Some(0));
+            assert_eq!(delegatee_address, Some(delegatee));
         }
     }
 

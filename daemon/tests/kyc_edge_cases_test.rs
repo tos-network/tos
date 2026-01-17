@@ -891,6 +891,17 @@ impl<'a> BlockchainApplyState<'a, DummyContractProvider, TestError> for EdgeCase
         Ok(())
     }
 
+    async fn set_arbiter(
+        &mut self,
+        _arbiter: &tos_common::arbitration::ArbiterAccount,
+    ) -> Result<(), TestError> {
+        Ok(())
+    }
+
+    async fn remove_arbiter(&mut self, _arbiter: &CompressedPublicKey) -> Result<(), TestError> {
+        Ok(())
+    }
+
     fn get_contract_executor(&self) -> Arc<dyn ContractExecutor> {
         self.executor.clone()
     }

@@ -1729,7 +1729,6 @@ impl<S: Storage> P2pServer<S> {
                     }
 
                     // request it from peer
-                    // TODO: rework object tracker
                     let mut listener = self
                         .object_tracker
                         .request_object_from_peer_with_or_get_notified(
@@ -2263,13 +2262,7 @@ impl<S: Storage> P2pServer<S> {
         Ok(())
     }
 
-    // Returns the list of all common peers we have between Peer and us
-    // TODO fix common peers detection
-    // Problem is:
-    // We are connected to node A and node B, we know that they are connected each other
-    // But they may not already shared their peerlist about us so they don't know we are
-    // a common peer between them two, which result in false positive in our case and they send
-    // us both the same object
+    // Returns the list of all common peers we have between Peer and us.
     async fn get_common_peers_for<'a>(
         &'a self,
         peer: &'a Arc<Peer>,

@@ -826,7 +826,6 @@ async fn verify_chain<S: Storage>(
                     }
                 }
 
-                // TODO: with upcoming smart contracts, this may be biased due to the gas fee
                 if let Some(burned) = transaction.get_burned_amount(&TOS_ASSET) {
                     burned_sum += burned;
                 }

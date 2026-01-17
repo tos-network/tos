@@ -110,7 +110,7 @@ fn test_shield_transfers_transaction_type() {
             assert_eq!(transfers[0].get_asset(), &TOS_ASSET);
             assert_eq!(transfers[0].get_amount(), 1000);
         }
-        _ => panic!("Expected ShieldTransfers variant"),
+        _ => assert!(false, "Expected ShieldTransfers variant"),
     }
 }
 
@@ -142,7 +142,7 @@ fn test_multiple_shield_transfers() {
             assert_eq!(transfers[1].get_amount(), 200);
             assert_eq!(transfers[2].get_amount(), 300);
         }
-        _ => panic!("Expected ShieldTransfers variant"),
+        _ => assert!(false, "Expected ShieldTransfers variant"),
     }
 }
 
@@ -410,6 +410,6 @@ fn test_shield_full_transaction_serialization() {
             assert_eq!(transfers.len(), 1);
             assert_eq!(transfers[0].get_amount(), 5000);
         }
-        _ => panic!("Expected ShieldTransfers"),
+        _ => assert!(false, "Expected ShieldTransfers"),
     }
 }

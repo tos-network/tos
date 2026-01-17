@@ -192,13 +192,22 @@ mod tests {
         let string = shareable.as_string().unwrap();
         assert!(string.starts_with(PREFIX_PROOF));
 
+        let parsed = HumanReadableProof::from_string(&string).unwrap();
+        assert!(matches!(
+            parsed,
+            HumanReadableProof::Balance {
+                asset: _,
+                topoheight: _,
+                proof: _
+            }
+        ));
         let HumanReadableProof::Balance {
             proof,
             asset,
             topoheight,
-        } = HumanReadableProof::from_string(&string).unwrap()
+        } = parsed
         else {
-            panic!("Failed to parse the shareable proof");
+            return;
         };
         assert_eq!(topoheight, 0);
         assert_eq!(asset, TOS_ASSET);
@@ -239,13 +248,22 @@ mod tests {
         let string = shareable.as_string().unwrap();
         assert!(string.starts_with(PREFIX_PROOF));
 
+        let parsed = HumanReadableProof::from_string(&string).unwrap();
+        assert!(matches!(
+            parsed,
+            HumanReadableProof::Ownership {
+                asset: _,
+                topoheight: _,
+                proof: _
+            }
+        ));
         let HumanReadableProof::Ownership {
             proof,
             asset,
             topoheight,
-        } = HumanReadableProof::from_string(&string).unwrap()
+        } = parsed
         else {
-            panic!("Failed to parse the shareable proof");
+            return;
         };
         assert_eq!(topoheight, 0);
         assert_eq!(asset, TOS_ASSET);

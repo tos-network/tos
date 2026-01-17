@@ -1296,6 +1296,12 @@ fn is_valid_fee_type_combination(tx_type: &TransactionType, fee_type: &FeeType) 
         (TransactionType::SubmitVerdict(_), FeeType::TOS) => true,
         (TransactionType::SubmitVerdict(_), FeeType::Energy) => false,
         (TransactionType::SubmitVerdict(_), FeeType::UNO) => false,
+        (TransactionType::RegisterArbiter(_), FeeType::TOS) => true,
+        (TransactionType::RegisterArbiter(_), FeeType::Energy) => false,
+        (TransactionType::RegisterArbiter(_), FeeType::UNO) => false,
+        (TransactionType::UpdateArbiter(_), FeeType::TOS) => true,
+        (TransactionType::UpdateArbiter(_), FeeType::Energy) => false,
+        (TransactionType::UpdateArbiter(_), FeeType::UNO) => false,
     }
 }
 
@@ -1359,7 +1365,8 @@ fn test_freeze_tos_sigma_proofs_verification() {
                 tx
             }
             Err(e) => {
-                panic!("Failed to build transaction: {e:?}");
+                assert!(false, "Failed to build transaction: {e:?}");
+                return;
             }
         };
 
@@ -1385,7 +1392,8 @@ fn test_freeze_tos_sigma_proofs_verification() {
                 tx
             }
             Err(e) => {
-                panic!("Failed to deserialize transaction: {e:?}");
+                assert!(false, "Failed to deserialize transaction: {e:?}");
+                return;
             }
         };
 
@@ -1401,30 +1409,33 @@ fn test_freeze_tos_sigma_proofs_verification() {
         let signature_data = freeze_tx.get_signing_bytes(); // Use the correct signing bytes
         let alice_pubkey_decompressed = alice.get_public_key();
 
-        if !freeze_tx
-            .get_signature()
-            .verify(&signature_data, alice_pubkey_decompressed)
-        {
-            panic!("Transaction signature verification failed");
-        }
+        assert!(
+            freeze_tx
+                .get_signature()
+                .verify(&signature_data, alice_pubkey_decompressed),
+            "Transaction signature verification failed"
+        );
         println!("✓ Transaction signature verification passed");
 
         // Test 5: Verify that the transaction data matches expected values
-        match freeze_tx.get_data() {
-            tos_common::transaction::TransactionType::Energy(energy_payload) => {
-                match energy_payload {
-                    tos_common::transaction::EnergyPayload::FreezeTos {
-                        amount,
-                        duration: tx_duration,
-                    } => {
-                        assert_eq!(*amount, freeze_amount, "Freeze amount mismatch");
-                        assert_eq!(*tx_duration, duration, "Freeze duration mismatch");
-                        println!("✓ Energy payload validation passed");
-                    }
-                    _ => panic!("Expected FreezeTos payload"),
-                }
+        assert!(matches!(
+            freeze_tx.get_data(),
+            tos_common::transaction::TransactionType::Energy(
+                tos_common::transaction::EnergyPayload::FreezeTos { .. }
+            )
+        ));
+        if let tos_common::transaction::TransactionType::Energy(energy_payload) =
+            freeze_tx.get_data()
+        {
+            if let tos_common::transaction::EnergyPayload::FreezeTos {
+                amount,
+                duration: tx_duration,
+            } = energy_payload
+            {
+                assert_eq!(*amount, freeze_amount, "Freeze amount mismatch");
+                assert_eq!(*tx_duration, duration, "Freeze duration mismatch");
+                println!("✓ Energy payload validation passed");
             }
-            _ => panic!("Expected Energy transaction type"),
         }
 
         // Test 6: Verify fee type
@@ -1514,7 +1525,8 @@ fn test_unfreeze_tos_sigma_proofs_verification() {
                 tx
             }
             Err(e) => {
-                panic!("Failed to build transaction: {e:?}");
+                assert!(false, "Failed to build transaction: {e:?}");
+                return;
             }
         };
 
@@ -1540,7 +1552,8 @@ fn test_unfreeze_tos_sigma_proofs_verification() {
                 tx
             }
             Err(e) => {
-                panic!("Failed to deserialize transaction: {e:?}");
+                assert!(false, "Failed to deserialize transaction: {e:?}");
+                return;
             }
         };
 
@@ -1556,26 +1569,30 @@ fn test_unfreeze_tos_sigma_proofs_verification() {
         let signature_data = unfreeze_tx.get_signing_bytes(); // Use the correct signing bytes
         let alice_pubkey_decompressed = alice.get_public_key();
 
-        if !unfreeze_tx
-            .get_signature()
-            .verify(&signature_data, alice_pubkey_decompressed)
-        {
-            panic!("Transaction signature verification failed");
-        }
+        assert!(
+            unfreeze_tx
+                .get_signature()
+                .verify(&signature_data, alice_pubkey_decompressed),
+            "Transaction signature verification failed"
+        );
         println!("✓ Transaction signature verification passed");
 
         // Test 5: Verify that the transaction data matches expected values
-        match unfreeze_tx.get_data() {
-            tos_common::transaction::TransactionType::Energy(energy_payload) => {
-                match energy_payload {
-                    tos_common::transaction::EnergyPayload::UnfreezeTos { amount, .. } => {
-                        assert_eq!(*amount, unfreeze_amount, "Unfreeze amount mismatch");
-                        println!("✓ Energy payload validation passed");
-                    }
-                    _ => panic!("Expected UnfreezeTos payload"),
-                }
+        assert!(matches!(
+            unfreeze_tx.get_data(),
+            tos_common::transaction::TransactionType::Energy(
+                tos_common::transaction::EnergyPayload::UnfreezeTos { .. }
+            )
+        ));
+        if let tos_common::transaction::TransactionType::Energy(energy_payload) =
+            unfreeze_tx.get_data()
+        {
+            if let tos_common::transaction::EnergyPayload::UnfreezeTos { amount, .. } =
+                energy_payload
+            {
+                assert_eq!(*amount, unfreeze_amount, "Unfreeze amount mismatch");
+                println!("✓ Energy payload validation passed");
             }
-            _ => panic!("Expected Energy transaction type"),
         }
 
         // Test 6: Verify fee type
@@ -2864,10 +2881,9 @@ fn test_bind_referrer_transaction_creation() {
     assert!(matches!(tx.get_data(), TransactionType::BindReferrer(_)));
 
     // Verify the referrer in the payload
+    assert!(matches!(tx.get_data(), TransactionType::BindReferrer(_)));
     if let TransactionType::BindReferrer(payload) = tx.get_data() {
         assert_eq!(payload.get_referrer(), &bob_pubkey);
-    } else {
-        panic!("Expected BindReferrer transaction type");
     }
 
     println!("✓ Bind referrer transaction created successfully");
@@ -3211,10 +3227,12 @@ fn test_referral_transaction_serialization() {
     assert_eq!(tx.get_nonce(), deserialized.get_nonce());
 
     // Verify payload
+    assert!(matches!(
+        deserialized.get_data(),
+        TransactionType::BindReferrer(_)
+    ));
     if let TransactionType::BindReferrer(payload) = deserialized.get_data() {
         assert_eq!(payload.get_referrer(), &bob_pubkey);
-    } else {
-        panic!("Expected BindReferrer transaction type after deserialization");
     }
 
     println!("✓ Transaction serialization works correctly");

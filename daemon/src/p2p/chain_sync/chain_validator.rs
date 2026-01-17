@@ -507,7 +507,6 @@ impl<S: Storage> BlocksAtHeightProvider for ChainValidatorProvider<'_, S> {
             trace!("get blocks at height {}", height);
         }
         if let Some(tips) = self.parent.blocks_at_height.get(&height) {
-            // TODO
             return Ok(tips.iter().map(|v| v.as_ref().clone()).collect());
         }
 

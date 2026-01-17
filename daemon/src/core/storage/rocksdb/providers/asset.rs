@@ -220,7 +220,6 @@ impl AssetProvider for RocksStorage {
     // Count the number of assets stored
     async fn count_assets(&self) -> Result<u64, BlockchainError> {
         trace!("count assets");
-        // TODO: cache
         self.load_optional_from_disk(Column::Common, &ASSETS_ID)
             .map(|v| v.unwrap_or(0))
     }

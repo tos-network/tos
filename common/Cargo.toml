@@ -73,7 +73,6 @@ better_any = "0.2.0"
 log-panics = { version = "2", features = ["with-backtrace"]}
 
 [target.armv7-unknown-linux-gnueabihf.dependencies]
-# TODO: remove once fixed https://github.com/cross-rs/cross/issues/1689
 aws-lc-sys = { version = "0.30", features = ["bindgen"] }
 
 [target.'cfg(windows)'.dependencies]

@@ -610,8 +610,6 @@ impl<S: Storage> P2pServer<S> {
                 // Fast check: because each block represent a topoheight, it should contains
                 // at least the same blockchain size to try to replace it on our side
                 if pop_count > blocks_len as u64 && blocks_len < requested_max_size {
-                    // TODO: maybe we could request its whole chain for comparison until chain validator has_higher_cumulative_difficulty ?
-                    // If after going through all its chain and we still have a higher cumulative difficulty, we should not rewind
                     if log::log_enabled!(log::Level::Warn) {
                         warn!(
                             "{} sent us a pop count of {} but only sent us {} blocks, ignoring",

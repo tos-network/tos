@@ -228,7 +228,6 @@ impl ContractDataProvider for RocksStorage {
             .map(move |res| async move {
                 let id = res?;
                 let key = self.load_from_disk(Column::ContractDataById, &id.to_be_bytes())?;
-                // TODO: Optimize by a raw call instead of recalculating an id we already know
                 let value = self
                     .get_contract_data_at_maximum_topoheight_for(contract, &key, topoheight)
                     .await?;

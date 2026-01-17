@@ -4562,7 +4562,6 @@ impl Transaction {
                         .await?;
 
                     // if it has failed, we don't want to deploy the contract
-                    // TODO: we must handle this carefully
                     if !is_success {
                         if log::log_enabled!(log::Level::Debug) {
                             debug!("Contract deploy for {contract_address} failed");

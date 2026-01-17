@@ -1605,9 +1605,14 @@ async fn get_assets<S: Storage>(context: &Context, body: Value) -> Result<Value,
     let skip = params.skip.unwrap_or(0);
     let storage = blockchain.get_storage().read().await;
 
-    // TODO: verify params
     let min = params.minimum_topoheight;
     let max = params.maximum_topoheight;
+    if let (Some(min), Some(max)) = (min, max) {
+        if max < min {
+            return Err(InternalRpcError::InvalidJSONRequest)
+                .context("maximum_topoheight must be >= minimum_topoheight")?;
+        }
+    }
 
     let assets = storage
         .get_assets_with_data_in_range(min, max)

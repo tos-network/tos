@@ -97,7 +97,6 @@ impl RocksStorage {
         if log::log_enabled!(log::Level::Trace) {
             trace!("get metadata at topoheight {}", topoheight);
         }
-        // TODO: cache
         self.load_from_disk(Column::TopoHeightMetadata, &topoheight.to_be_bytes())
     }
 }

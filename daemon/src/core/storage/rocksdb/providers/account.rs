@@ -312,7 +312,6 @@ impl RocksStorage {
             );
         }
         // This will read just the id
-        // TODO: cache
         self.load_optional_from_disk(Column::Account, key.as_bytes())
     }
 

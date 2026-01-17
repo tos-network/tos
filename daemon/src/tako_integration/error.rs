@@ -423,7 +423,11 @@ mod tests {
                     "Details should contain error message"
                 );
             }
-            _ => panic!("Expected LoadedDataLimitExceeded error, got: {:?}", result),
+            _ => assert!(
+                false,
+                "Expected LoadedDataLimitExceeded error, got: {:?}",
+                result
+            ),
         }
     }
 
@@ -454,7 +458,11 @@ mod tests {
                 );
                 assert!(!operation.is_empty(), "Operation should be determined");
             }
-            _ => panic!("Expected LoadedDataLimitExceeded error, got: {:?}", result),
+            _ => assert!(
+                false,
+                "Expected LoadedDataLimitExceeded error, got: {:?}",
+                result
+            ),
         }
     }
 
@@ -483,7 +491,11 @@ mod tests {
                     "Current should be actual value, not 0"
                 );
             }
-            _ => panic!("Expected LoadedDataLimitExceeded error, got: {:?}", result),
+            _ => assert!(
+                false,
+                "Expected LoadedDataLimitExceeded error, got: {:?}",
+                result
+            ),
         }
     }
 

@@ -748,6 +748,17 @@ impl<'a> BlockchainApplyState<'a, DummyContractProvider, TestError> for TestChai
         Ok(())
     }
 
+    async fn set_arbiter(
+        &mut self,
+        _arbiter: &tos_common::arbitration::ArbiterAccount,
+    ) -> Result<(), TestError> {
+        Ok(())
+    }
+
+    async fn remove_arbiter(&mut self, _arbiter: &CompressedPublicKey) -> Result<(), TestError> {
+        Ok(())
+    }
+
     async fn bootstrap_global_committee(
         &mut self,
         _name: String,
@@ -943,10 +954,12 @@ async fn test_batch_referral_reward_refunds_remainder_e2e() {
 
     let tx = builder.build(&mut account_state, &alice).unwrap();
     let tx_hash = tx.hash();
+    assert!(matches!(
+        tx.get_data(),
+        tos_common::transaction::TransactionType::BatchReferralReward(_)
+    ));
     if let tos_common::transaction::TransactionType::BatchReferralReward(payload) = tx.get_data() {
         assert_eq!(payload.get_total_amount(), 1000);
-    } else {
-        panic!("Expected BatchReferralReward transaction");
     }
     assert_eq!(tx.get_source(), &alice_pk);
 
