@@ -8,6 +8,7 @@ pub mod config;
 // VRF must be declared before core (core/config.rs uses WrappedVrfSecret)
 pub mod a2a;
 pub mod core;
+pub mod escrow;
 pub mod p2p;
 pub mod rpc;
 pub mod tako_integration;

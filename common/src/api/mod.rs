@@ -19,12 +19,13 @@ use crate::{
     transaction::{
         extra_data::UnknownExtraDataFormat, multisig::MultiSig, AgentAccountPayload,
         AppealKycPayload, BatchReferralRewardPayload, BindReferrerPayload,
-        BootstrapCommitteePayload, BurnPayload, DeployContractPayload, EmergencySuspendPayload,
-        EnergyPayload, EphemeralMessagePayload, FeeType, InvokeContractPayload, MultiSigPayload,
-        Reference, RegisterCommitteePayload, RegisterNamePayload, RenewKycPayload,
-        RevokeKycPayload, SetKycPayload, ShieldTransferPayload, Transaction, TransactionType,
-        TransferKycPayload, TransferPayload, TxVersion, UnoTransferPayload,
-        UnshieldTransferPayload, UpdateCommitteePayload,
+        BootstrapCommitteePayload, BurnPayload, ChallengeEscrowPayload, CreateEscrowPayload,
+        DeployContractPayload, DepositEscrowPayload, EmergencySuspendPayload, EnergyPayload,
+        EphemeralMessagePayload, FeeType, InvokeContractPayload, MultiSigPayload, Reference,
+        RefundEscrowPayload, RegisterCommitteePayload, RegisterNamePayload, ReleaseEscrowPayload,
+        RenewKycPayload, RevokeKycPayload, SetKycPayload, ShieldTransferPayload,
+        SubmitVerdictPayload, Transaction, TransactionType, TransferKycPayload, TransferPayload,
+        TxVersion, UnoTransferPayload, UnshieldTransferPayload, UpdateCommitteePayload,
     },
 };
 pub use data::*;
@@ -96,6 +97,13 @@ pub enum RPCTransactionType<'a> {
     // TNS (TOS Name Service) transaction types
     RegisterName(Cow<'a, RegisterNamePayload>),
     EphemeralMessage(Cow<'a, EphemeralMessagePayload>),
+    // Escrow (A2A) transaction types
+    CreateEscrow(Cow<'a, CreateEscrowPayload>),
+    DepositEscrow(Cow<'a, DepositEscrowPayload>),
+    ReleaseEscrow(Cow<'a, ReleaseEscrowPayload>),
+    RefundEscrow(Cow<'a, RefundEscrowPayload>),
+    ChallengeEscrow(Cow<'a, ChallengeEscrowPayload>),
+    SubmitVerdict(Cow<'a, SubmitVerdictPayload>),
 }
 
 impl<'a> RPCTransactionType<'a> {
@@ -158,6 +166,14 @@ impl<'a> RPCTransactionType<'a> {
             TransactionType::EphemeralMessage(payload) => {
                 Self::EphemeralMessage(Cow::Borrowed(payload))
             }
+            TransactionType::CreateEscrow(payload) => Self::CreateEscrow(Cow::Borrowed(payload)),
+            TransactionType::DepositEscrow(payload) => Self::DepositEscrow(Cow::Borrowed(payload)),
+            TransactionType::ReleaseEscrow(payload) => Self::ReleaseEscrow(Cow::Borrowed(payload)),
+            TransactionType::RefundEscrow(payload) => Self::RefundEscrow(Cow::Borrowed(payload)),
+            TransactionType::ChallengeEscrow(payload) => {
+                Self::ChallengeEscrow(Cow::Borrowed(payload))
+            }
+            TransactionType::SubmitVerdict(payload) => Self::SubmitVerdict(Cow::Borrowed(payload)),
         }
     }
 }
@@ -231,6 +247,24 @@ impl From<RPCTransactionType<'_>> for TransactionType {
             }
             RPCTransactionType::EphemeralMessage(payload) => {
                 TransactionType::EphemeralMessage(payload.into_owned())
+            }
+            RPCTransactionType::CreateEscrow(payload) => {
+                TransactionType::CreateEscrow(payload.into_owned())
+            }
+            RPCTransactionType::DepositEscrow(payload) => {
+                TransactionType::DepositEscrow(payload.into_owned())
+            }
+            RPCTransactionType::ReleaseEscrow(payload) => {
+                TransactionType::ReleaseEscrow(payload.into_owned())
+            }
+            RPCTransactionType::RefundEscrow(payload) => {
+                TransactionType::RefundEscrow(payload.into_owned())
+            }
+            RPCTransactionType::ChallengeEscrow(payload) => {
+                TransactionType::ChallengeEscrow(payload.into_owned())
+            }
+            RPCTransactionType::SubmitVerdict(payload) => {
+                TransactionType::SubmitVerdict(payload.into_owned())
             }
         }
     }

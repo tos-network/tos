@@ -1305,4 +1305,11 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for ChainS
     async fn is_message_id_used(&self, message_id: &Hash) -> Result<bool, BlockchainError> {
         self.storage.is_message_id_used(message_id).await
     }
+
+    async fn get_escrow(
+        &mut self,
+        escrow_id: &Hash,
+    ) -> Result<Option<tos_common::escrow::EscrowAccount>, BlockchainError> {
+        self.storage.get_escrow(escrow_id).await
+    }
 }

@@ -158,6 +158,16 @@ pub trait BlockchainVerificationState<'a, E> {
         Ok(Vec::new())
     }
 
+    // ===== Escrow Verification Methods =====
+
+    /// Get an escrow account by ID
+    async fn get_escrow(
+        &mut self,
+        _escrow_id: &Hash,
+    ) -> Result<Option<crate::escrow::EscrowAccount>, E> {
+        Ok(None)
+    }
+
     /// Get the block version in which TX is executed
     fn get_block_version(&self) -> BlockVersion;
 
@@ -349,6 +359,17 @@ pub trait BlockchainApplyState<'a, P: ContractProvider, E>:
         contract: &Hash,
         tx_hash: &'a Hash,
     ) -> Result<(), E>;
+
+    // ===== Escrow Apply Methods =====
+
+    /// Store/update an escrow account
+    async fn set_escrow(&mut self, escrow: &crate::escrow::EscrowAccount) -> Result<(), E>;
+
+    /// Add a pending release index entry
+    async fn add_pending_release(&mut self, release_at: u64, escrow_id: &Hash) -> Result<(), E>;
+
+    /// Remove a pending release index entry
+    async fn remove_pending_release(&mut self, release_at: u64, escrow_id: &Hash) -> Result<(), E>;
 
     // ===== KYC System Operations =====
 

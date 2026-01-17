@@ -20,6 +20,7 @@ pub mod config;
 pub mod vrf;
 
 pub mod core;
+pub mod escrow;
 pub mod p2p;
 pub mod rpc;
 

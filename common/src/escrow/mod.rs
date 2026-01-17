@@ -168,6 +168,11 @@ pub struct EscrowAccount {
     pub payee: PublicKey,
     /// Escrow amount in atomic units.
     pub amount: u64,
+    /// Amount currently pending release (if any).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pending_release_amount: Option<u64>,
+    /// Challenge deposit amount locked in escrow (if challenged).
+    pub challenge_deposit: u64,
     /// Asset type (TOS native or token).
     pub asset: Hash,
     /// Current escrow state.
@@ -176,6 +181,8 @@ pub struct EscrowAccount {
     pub challenge_window: u64,
     /// Challenge deposit percentage (basis points).
     pub challenge_deposit_bps: u16,
+    /// Enable optimistic auto-release.
+    pub optimistic_release: bool,
     /// Block height when release was requested.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub release_requested_at: Option<u64>,
@@ -186,6 +193,67 @@ pub struct EscrowAccount {
     /// Arbitration configuration.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub arbitration_config: Option<ArbitrationConfig>,
+}
+
+impl Serializer for EscrowAccount {
+    fn write(&self, writer: &mut Writer) {
+        self.id.write(writer);
+        self.task_id.write(writer);
+        self.payer.write(writer);
+        self.payee.write(writer);
+        self.amount.write(writer);
+        self.pending_release_amount.write(writer);
+        self.challenge_deposit.write(writer);
+        self.asset.write(writer);
+        self.state.write(writer);
+        self.challenge_window.write(writer);
+        self.challenge_deposit_bps.write(writer);
+        self.optimistic_release.write(writer);
+        self.release_requested_at.write(writer);
+        self.created_at.write(writer);
+        self.timeout_blocks.write(writer);
+        self.arbitration_config.write(writer);
+    }
+
+    fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
+        Ok(Self {
+            id: Hash::read(reader)?,
+            task_id: String::read(reader)?,
+            payer: PublicKey::read(reader)?,
+            payee: PublicKey::read(reader)?,
+            amount: u64::read(reader)?,
+            pending_release_amount: Option::read(reader)?,
+            challenge_deposit: u64::read(reader)?,
+            asset: Hash::read(reader)?,
+            state: EscrowState::read(reader)?,
+            challenge_window: u64::read(reader)?,
+            challenge_deposit_bps: u16::read(reader)?,
+            optimistic_release: bool::read(reader)?,
+            release_requested_at: Option::read(reader)?,
+            created_at: u64::read(reader)?,
+            timeout_blocks: u64::read(reader)?,
+            arbitration_config: Option::read(reader)?,
+        })
+    }
+
+    fn size(&self) -> usize {
+        self.id.size()
+            + self.task_id.size()
+            + self.payer.size()
+            + self.payee.size()
+            + self.amount.size()
+            + self.pending_release_amount.size()
+            + self.challenge_deposit.size()
+            + self.asset.size()
+            + self.state.size()
+            + self.challenge_window.size()
+            + self.challenge_deposit_bps.size()
+            + self.optimistic_release.size()
+            + self.release_requested_at.size()
+            + self.created_at.size()
+            + self.timeout_blocks.size()
+            + self.arbitration_config.size()
+    }
 }
 
 #[cfg(test)]
@@ -210,10 +278,13 @@ mod tests {
             payer: PublicKey::from_bytes(&[1u8; 32])?,
             payee: PublicKey::from_bytes(&[2u8; 32])?,
             amount: 1000,
+            pending_release_amount: None,
+            challenge_deposit: 0,
             asset: Hash::max(),
             state: EscrowState::Created,
             challenge_window: 10,
             challenge_deposit_bps: 500,
+            optimistic_release: true,
             release_requested_at: None,
             created_at: 1,
             timeout_blocks: 100,

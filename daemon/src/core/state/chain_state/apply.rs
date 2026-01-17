@@ -310,6 +310,13 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError>
     async fn is_message_id_used(&self, message_id: &Hash) -> Result<bool, BlockchainError> {
         self.inner.is_message_id_used(message_id).await
     }
+
+    async fn get_escrow(
+        &mut self,
+        escrow_id: &Hash,
+    ) -> Result<Option<tos_common::escrow::EscrowAccount>, BlockchainError> {
+        self.inner.storage.get_escrow(escrow_id).await
+    }
 }
 
 #[async_trait]
@@ -593,6 +600,35 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for Applicable
         }
 
         Ok(())
+    }
+
+    async fn set_escrow(
+        &mut self,
+        escrow: &tos_common::escrow::EscrowAccount,
+    ) -> Result<(), BlockchainError> {
+        self.inner.storage.set_escrow(escrow).await
+    }
+
+    async fn add_pending_release(
+        &mut self,
+        release_at: u64,
+        escrow_id: &Hash,
+    ) -> Result<(), BlockchainError> {
+        self.inner
+            .storage
+            .add_pending_release(release_at, escrow_id)
+            .await
+    }
+
+    async fn remove_pending_release(
+        &mut self,
+        release_at: u64,
+        escrow_id: &Hash,
+    ) -> Result<(), BlockchainError> {
+        self.inner
+            .storage
+            .remove_pending_release(release_at, escrow_id)
+            .await
     }
 
     // ===== KYC System Operations =====

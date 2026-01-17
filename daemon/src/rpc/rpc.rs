@@ -2491,6 +2491,14 @@ async fn get_account_history<S: Storage>(
                     // TNS transactions are tracked in dedicated TNS history endpoints
                     // Not relevant to asset flow tracking
                 }
+                TransactionType::CreateEscrow(_)
+                | TransactionType::DepositEscrow(_)
+                | TransactionType::ReleaseEscrow(_)
+                | TransactionType::RefundEscrow(_)
+                | TransactionType::ChallengeEscrow(_)
+                | TransactionType::SubmitVerdict(_) => {
+                    // Escrow transactions are not included in account history yet
+                }
             }
         }
 

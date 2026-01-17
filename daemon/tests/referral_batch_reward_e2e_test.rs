@@ -16,6 +16,7 @@ use tos_common::{
         elgamal::{Ciphertext, CompressedPublicKey},
         Hash, Hashable, KeyPair, PublicKey,
     },
+    escrow::EscrowAccount,
     immutable::Immutable,
     network::Network,
     nft::{NftCache, NftStorageProvider},
@@ -848,6 +849,26 @@ impl<'a> BlockchainApplyState<'a, DummyContractProvider, TestError> for TestChai
         _encrypted_content: Vec<u8>,
         _receiver_handle: [u8; 32],
         _current_topoheight: u64,
+    ) -> Result<(), TestError> {
+        Ok(())
+    }
+
+    async fn set_escrow(&mut self, _escrow: &EscrowAccount) -> Result<(), TestError> {
+        Ok(())
+    }
+
+    async fn add_pending_release(
+        &mut self,
+        _release_at: u64,
+        _escrow_id: &Hash,
+    ) -> Result<(), TestError> {
+        Ok(())
+    }
+
+    async fn remove_pending_release(
+        &mut self,
+        _release_at: u64,
+        _escrow_id: &Hash,
     ) -> Result<(), TestError> {
         Ok(())
     }

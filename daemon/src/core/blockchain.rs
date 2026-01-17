@@ -20,6 +20,7 @@ use crate::{
         tx_selector::{TxSelector, TxSelectorEntry},
         ScheduledExecutionConfig, TxCache,
     },
+    escrow::auto_release::apply_auto_release,
     p2p::P2pServer,
     rpc::{
         rpc::{get_block_response, get_block_type_for_block},
@@ -4399,6 +4400,9 @@ impl<S: Storage> Blockchain<S> {
                         }
                     }
                 }
+
+                // Auto-release optimistic escrows once challenge window expires
+                apply_auto_release(&mut chain_state, highest_topo).await?;
 
                 // apply changes from Chain State
                 let burned_supply = chain_state.get_burned_supply();
