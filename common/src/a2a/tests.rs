@@ -150,6 +150,7 @@ fn test_agent_card_roundtrip() {
         supports_extended_agent_card: Some(true),
         signatures: vec![],
         tos_identity: None,
+        arbitration: None,
     };
 
     let value = serde_json::to_value(&agent_card).expect("serialize agent card");

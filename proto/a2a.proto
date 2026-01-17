@@ -385,6 +385,23 @@ message TosAgentIdentity {
   TosIdentityProof identity_proof = 4;
 }
 
+message ContactPreferences {
+  string preferred_method = 1;
+  uint32 response_time_hours = 2;
+  string availability = 3;
+}
+
+message ArbitrationExtension {
+  repeated string expertise_domains = 1;
+  uint32 fee_basis_points = 2;
+  uint64 min_escrow_value = 3;
+  uint64 max_escrow_value = 4;
+  repeated string committee_ids = 5;
+  uint32 avg_resolution_hours = 6;
+  repeated string languages = 7;
+  ContactPreferences contact_preferences = 8;
+}
+
 message AgentCard {
   string protocol_version = 1;
   string name = 2;
@@ -403,6 +420,7 @@ message AgentCard {
   bool supports_extended_agent_card = 15;
   repeated AgentCardSignature signatures = 16;
   TosAgentIdentity tos_identity = 17;
+  ArbitrationExtension arbitration = 18;
 }
 
 message GetExtendedAgentCardRequest {

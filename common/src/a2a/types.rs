@@ -178,6 +178,8 @@ pub struct AgentCard {
     pub signatures: Vec<AgentCardSignature>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tos_identity: Option<TosAgentIdentity>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub arbitration: Option<ArbitrationExtension>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -240,6 +242,29 @@ pub struct AgentSkill {
     pub security: Vec<Security>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tos_base_cost: Option<u64>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArbitrationExtension {
+    pub expertise_domains: Vec<String>,
+    pub fee_basis_points: u16,
+    pub min_escrow_value: u64,
+    pub max_escrow_value: u64,
+    pub committee_ids: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub avg_resolution_hours: Option<u32>,
+    pub languages: Vec<String>,
+    pub contact_preferences: ContactPreferences,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContactPreferences {
+    pub preferred_method: String,
+    pub response_time_hours: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub availability: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

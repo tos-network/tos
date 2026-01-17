@@ -757,6 +757,7 @@ mod tests {
             supports_extended_agent_card: Some(false),
             signatures: Vec::new(),
             tos_identity: None,
+            arbitration: None,
         }
     }
 

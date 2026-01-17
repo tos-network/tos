@@ -1,13 +1,20 @@
+use std::collections::{HashMap, VecDeque};
 use std::str::FromStr;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use actix_web::{
-    error::{ErrorBadRequest, ErrorInternalServerError, ErrorNotFound, ErrorUnauthorized},
+    error::{
+        ErrorBadRequest, ErrorInternalServerError, ErrorNotFound, ErrorTooManyRequests,
+        ErrorUnauthorized,
+    },
     web, Error as ActixError, HttpRequest, HttpResponse,
 };
+use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
+use tokio::sync::Mutex;
 
 use tos_common::{
     a2a::{verify_tos_signature, AgentCard, TosSignature, TosSignerType},
@@ -33,6 +40,62 @@ use crate::{
 
 const REGISTRY_SIGNATURE_DOMAIN: &[u8] = b"TOS_AGENT_REGISTRY_V1";
 const DEFAULT_HEARTBEAT_INTERVAL_SECS: u32 = 30;
+const DEFAULT_REGISTRY_RATE_LIMIT_WINDOW_SECS: u64 = 60;
+const DEFAULT_REGISTRY_RATE_LIMIT_MAX: u32 = 10;
+
+#[derive(Clone, Copy)]
+pub struct RegistrationRateLimitConfig {
+    pub window_secs: u64,
+    pub max_requests: u32,
+}
+
+struct RegistrationRateLimiter {
+    window: Duration,
+    max_requests: u32,
+    entries: Mutex<HashMap<String, VecDeque<Instant>>>,
+}
+
+impl RegistrationRateLimiter {
+    fn new(config: RegistrationRateLimitConfig) -> Self {
+        Self {
+            window: Duration::from_secs(config.window_secs),
+            max_requests: config.max_requests,
+            entries: Mutex::new(HashMap::new()),
+        }
+    }
+
+    async fn check(&self, key: &str) -> Result<(), AgentRegistryRpcError> {
+        if self.max_requests == 0 || self.window.is_zero() {
+            return Ok(());
+        }
+        let now = Instant::now();
+        let mut entries = self.entries.lock().await;
+        let bucket = entries.entry(key.to_string()).or_default();
+        while let Some(front) = bucket.front() {
+            if now.duration_since(*front) > self.window {
+                bucket.pop_front();
+            } else {
+                break;
+            }
+        }
+        if bucket.len() >= self.max_requests as usize {
+            return Err(AgentRegistryRpcError::RateLimitExceeded {
+                window_secs: self.window.as_secs(),
+                max_requests: self.max_requests,
+            });
+        }
+        bucket.push_back(now);
+        Ok(())
+    }
+}
+
+static REGISTRY_RATE_LIMIT_CONFIG: OnceCell<RegistrationRateLimitConfig> = OnceCell::new();
+static REGISTRY_RATE_LIMITER: OnceCell<RegistrationRateLimiter> = OnceCell::new();
+
+pub fn set_registration_rate_limit_config(config: RegistrationRateLimitConfig) {
+    let _ = REGISTRY_RATE_LIMIT_CONFIG.set(config);
+    let _ = REGISTRY_RATE_LIMITER.set(RegistrationRateLimiter::new(config));
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -104,6 +167,34 @@ pub struct DiscoverAgentsResponse {
     pub agents: Vec<AgentSummary>,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiscoverCommitteeMembersRequest {
+    pub committee_id: String,
+    #[serde(default)]
+    pub active_only: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiscoverCommitteeMembersResponse {
+    pub committee_name: String,
+    pub region: String,
+    pub members: Vec<CommitteeMemberInfo>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitteeMemberInfo {
+    pub pubkey: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub endpoint_url: Option<String>,
+    pub role: String,
+    pub reputation_score: u16,
+}
+
 #[derive(Clone, Debug, Deserialize)]
 pub struct AgentPath {
     pub id: String,
@@ -119,6 +210,11 @@ pub struct AgentListQuery {
     pub limit: Option<u32>,
 }
 
+#[derive(Clone, Debug, Deserialize)]
+pub struct CommitteeMembersQuery {
+    pub active_only: Option<bool>,
+}
+
 #[derive(Debug, Error)]
 pub enum AgentRegistryRpcError {
     #[error("missing TOS signature")]
@@ -129,6 +225,10 @@ pub enum AgentRegistryRpcError {
     InvalidVersion(String),
     #[error("invalid agent id")]
     InvalidAgentId,
+    #[error("invalid committee id")]
+    InvalidCommitteeId,
+    #[error("committee not found")]
+    CommitteeNotFound,
     #[error("failed to serialize agent card")]
     SerializeAgentCard,
     #[error("arbiter requires TOS identity")]
@@ -139,6 +239,8 @@ pub enum AgentRegistryRpcError {
     ArbiterNotActive,
     #[error("arbiter stake too low: required {required}, found {found}")]
     ArbiterStakeTooLow { required: u64, found: u64 },
+    #[error("registration rate limit exceeded: {max_requests} per {window_secs}s")]
+    RateLimitExceeded { window_secs: u64, max_requests: u32 },
     #[error("signature verification failed: {0}")]
     SignatureVerification(String),
     #[error("storage error: {0}")]
@@ -163,6 +265,14 @@ pub fn register_agent_registry_methods<S: Storage>(handler: &mut RPCHandler<Arc<
     handler.register_method("ListRegisteredAgents", async_handler!(list_agents::<S>));
     handler.register_method("heartbeat", async_handler!(heartbeat::<S>));
     handler.register_method("AgentHeartbeat", async_handler!(heartbeat::<S>));
+    handler.register_method(
+        "discover_committee_members",
+        async_handler!(discover_committee_members::<S>),
+    );
+    handler.register_method(
+        "DiscoverCommitteeMembers",
+        async_handler!(discover_committee_members::<S>),
+    );
 }
 
 async fn register_agent<S: Storage>(
@@ -231,6 +341,17 @@ async fn discover_agents<S: Storage>(
     let response = DiscoverAgentsResponse {
         agents: agents.iter().map(to_agent_summary).collect(),
     };
+    serde_json::to_value(response).map_err(InternalRpcError::SerializeResponse)
+}
+
+async fn discover_committee_members<S: Storage>(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    require_registry_auth_context(context).await?;
+    let request: DiscoverCommitteeMembersRequest = parse_params(body)?;
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let response = discover_committee_members_impl(Arc::clone(blockchain), request).await?;
     serde_json::to_value(response).map_err(InternalRpcError::SerializeResponse)
 }
 
@@ -366,6 +487,22 @@ pub async fn discover_agents_http<S: Storage>(
     Ok(HttpResponse::Ok().json(response))
 }
 
+/// HTTP endpoint: POST /committees:members
+pub async fn discover_committee_members_http<S: Storage>(
+    server: web::Data<DaemonRpcServer<S>>,
+    request: HttpRequest,
+    body: web::Bytes,
+) -> Result<HttpResponse, ActixError> {
+    require_registry_auth_http(&request, &body).await?;
+    let request: DiscoverCommitteeMembersRequest =
+        serde_json::from_slice(&body).map_err(|e| ErrorBadRequest(e.to_string()))?;
+    let blockchain = server.get_rpc_handler().get_data().clone();
+    let response = discover_committee_members_impl(blockchain, request)
+        .await
+        .map_err(map_http_error)?;
+    Ok(HttpResponse::Ok().json(response))
+}
+
 /// HTTP endpoint: GET /agents:discover
 pub async fn discover_agents_http_get<S: Storage>(
     _server: web::Data<DaemonRpcServer<S>>,
@@ -379,6 +516,25 @@ pub async fn discover_agents_http_get<S: Storage>(
     let response = DiscoverAgentsResponse {
         agents: agents.iter().map(to_agent_summary).collect(),
     };
+    Ok(HttpResponse::Ok().json(response))
+}
+
+/// HTTP endpoint: GET /committees/{id}:members
+pub async fn discover_committee_members_http_get<S: Storage>(
+    server: web::Data<DaemonRpcServer<S>>,
+    request: HttpRequest,
+    path: web::Path<AgentPath>,
+    query: web::Query<CommitteeMembersQuery>,
+) -> Result<HttpResponse, ActixError> {
+    require_registry_auth_http(&request, &[]).await?;
+    let request = DiscoverCommitteeMembersRequest {
+        committee_id: path.id.clone(),
+        active_only: query.active_only.unwrap_or(true),
+    };
+    let blockchain = server.get_rpc_handler().get_data().clone();
+    let response = discover_committee_members_impl(blockchain, request)
+        .await
+        .map_err(map_http_error)?;
     Ok(HttpResponse::Ok().json(response))
 }
 
@@ -422,6 +578,11 @@ fn parse_agent_id_http(value: &str) -> Result<Hash, AgentRegistryRpcError> {
     Hash::from_str(value).map_err(|_| AgentRegistryRpcError::InvalidAgentId)
 }
 
+fn parse_committee_id(value: &str) -> Result<Hash, AgentRegistryRpcError> {
+    let value = value.strip_prefix("0x").unwrap_or(value);
+    Hash::from_str(value).map_err(|_| AgentRegistryRpcError::InvalidCommitteeId)
+}
+
 fn validate_a2a_version(
     headers: &std::collections::HashMap<String, String>,
 ) -> Result<(), AgentRegistryRpcError> {
@@ -454,11 +615,38 @@ async fn require_registry_auth_context(context: &Context) -> Result<(), Internal
     Ok(())
 }
 
+fn registry_rate_limit_config() -> RegistrationRateLimitConfig {
+    *REGISTRY_RATE_LIMIT_CONFIG.get_or_init(|| RegistrationRateLimitConfig {
+        window_secs: DEFAULT_REGISTRY_RATE_LIMIT_WINDOW_SECS,
+        max_requests: DEFAULT_REGISTRY_RATE_LIMIT_MAX,
+    })
+}
+
+fn registration_rate_limit_key(request: &RegisterAgentRequest) -> String {
+    if let Some(identity) = request.agent_card.tos_identity.as_ref() {
+        format!("account:{}", hex::encode(identity.agent_account.as_bytes()))
+    } else {
+        format!("endpoint:{}", request.endpoint_url)
+    }
+}
+
+async fn enforce_registration_rate_limit(
+    request: &RegisterAgentRequest,
+) -> Result<(), AgentRegistryRpcError> {
+    let config = registry_rate_limit_config();
+    if config.window_secs == 0 || config.max_requests == 0 {
+        return Ok(());
+    }
+    let limiter = REGISTRY_RATE_LIMITER.get_or_init(|| RegistrationRateLimiter::new(config));
+    limiter.check(&registration_rate_limit_key(request)).await
+}
+
 async fn register_agent_impl<S: Storage>(
     blockchain: Arc<Blockchain<S>>,
     request: RegisterAgentRequest,
 ) -> Result<RegisterAgentResponse, AgentRegistryRpcError> {
     let mut request = request;
+    enforce_registration_rate_limit(&request).await?;
     let is_arbiter = request
         .agent_card
         .skills
@@ -563,6 +751,68 @@ async fn register_agent_impl<S: Storage>(
     })
 }
 
+async fn discover_committee_members_impl<S: Storage>(
+    blockchain: Arc<Blockchain<S>>,
+    request: DiscoverCommitteeMembersRequest,
+) -> Result<DiscoverCommitteeMembersResponse, AgentRegistryRpcError> {
+    let storage = blockchain.get_storage().read().await;
+    let committee_id = if request.committee_id.eq_ignore_ascii_case("global") {
+        storage
+            .get_global_committee_id()
+            .await
+            .map_err(|e| AgentRegistryRpcError::StorageError(e.to_string()))?
+            .ok_or(AgentRegistryRpcError::CommitteeNotFound)?
+    } else {
+        parse_committee_id(&request.committee_id)?
+    };
+    let committee = storage
+        .get_committee(&committee_id)
+        .await
+        .map_err(|e| AgentRegistryRpcError::StorageError(e.to_string()))?
+        .ok_or(AgentRegistryRpcError::CommitteeNotFound)?;
+
+    let registry = global_registry();
+    let active_agents = registry.list_active().await;
+    let mut agent_by_account: HashMap<String, (String, String)> = HashMap::new();
+    for agent in active_agents {
+        if let Some(identity) = agent.agent_card.tos_identity.as_ref() {
+            let key = hex::encode(identity.agent_account.as_bytes());
+            agent_by_account.insert(key, (agent.agent_id.to_hex(), agent.endpoint_url.clone()));
+        }
+    }
+
+    let mut members = Vec::new();
+    for member in &committee.members {
+        if request.active_only && member.status != tos_common::kyc::MemberStatus::Active {
+            continue;
+        }
+        let key = hex::encode(member.public_key.as_bytes());
+        let (agent_id, endpoint_url) = agent_by_account
+            .get(&key)
+            .map(|(id, url)| (Some(id.clone()), Some(url.clone())))
+            .unwrap_or((None, None));
+        let reputation_score = storage
+            .get_arbiter(&member.public_key)
+            .await
+            .map_err(|e| AgentRegistryRpcError::StorageError(e.to_string()))?
+            .map(|arbiter| arbiter.reputation_score)
+            .unwrap_or(0);
+        members.push(CommitteeMemberInfo {
+            pubkey: format!("0x{key}"),
+            agent_id,
+            endpoint_url,
+            role: member.role.as_str().to_string(),
+            reputation_score,
+        });
+    }
+
+    Ok(DiscoverCommitteeMembersResponse {
+        committee_name: committee.name,
+        region: committee.region.as_str().to_string(),
+        members,
+    })
+}
+
 fn build_registration_message(
     agent_account: &PublicKey,
     endpoint_url: &str,
@@ -593,6 +843,8 @@ fn map_error(err: AgentRegistryRpcError) -> InternalRpcError {
         AgentRegistryRpcError::MissingTosSignature
         | AgentRegistryRpcError::MissingTosIdentity
         | AgentRegistryRpcError::InvalidAgentId
+        | AgentRegistryRpcError::InvalidCommitteeId
+        | AgentRegistryRpcError::CommitteeNotFound
         | AgentRegistryRpcError::InvalidVersion(_)
         | AgentRegistryRpcError::SerializeAgentCard
         | AgentRegistryRpcError::ArbiterRequiresTosIdentity
@@ -600,6 +852,9 @@ fn map_error(err: AgentRegistryRpcError) -> InternalRpcError {
         | AgentRegistryRpcError::ArbiterNotActive
         | AgentRegistryRpcError::ArbiterStakeTooLow { .. } => {
             InternalRpcError::Custom(-32602, err.to_string())
+        }
+        AgentRegistryRpcError::RateLimitExceeded { .. } => {
+            InternalRpcError::Custom(-32083, err.to_string())
         }
         AgentRegistryRpcError::SignatureVerification(message) => {
             InternalRpcError::Custom(-32080, message)
@@ -616,12 +871,15 @@ fn map_http_error(err: AgentRegistryRpcError) -> ActixError {
         AgentRegistryRpcError::MissingTosSignature
         | AgentRegistryRpcError::MissingTosIdentity
         | AgentRegistryRpcError::InvalidAgentId
+        | AgentRegistryRpcError::InvalidCommitteeId
         | AgentRegistryRpcError::InvalidVersion(_)
         | AgentRegistryRpcError::SerializeAgentCard
         | AgentRegistryRpcError::ArbiterRequiresTosIdentity
         | AgentRegistryRpcError::ArbiterNotRegisteredOnChain
         | AgentRegistryRpcError::ArbiterNotActive
         | AgentRegistryRpcError::ArbiterStakeTooLow { .. } => ErrorBadRequest(err.to_string()),
+        AgentRegistryRpcError::CommitteeNotFound => ErrorNotFound(err.to_string()),
+        AgentRegistryRpcError::RateLimitExceeded { .. } => ErrorTooManyRequests(err.to_string()),
         AgentRegistryRpcError::SignatureVerification(message) => ErrorUnauthorized(message),
         AgentRegistryRpcError::StorageError(message) => ErrorInternalServerError(message),
         AgentRegistryRpcError::Registry(registry_err) => match registry_err {
@@ -788,6 +1046,7 @@ mod tests {
             supports_extended_agent_card: Some(false),
             signatures: Vec::new(),
             tos_identity: None,
+            arbitration: None,
         }
     }
 

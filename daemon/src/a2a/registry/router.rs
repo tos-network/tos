@@ -346,6 +346,7 @@ mod tests {
                 reputation_score_bps: Some(score),
                 identity_proof: None,
             }),
+            arbitration: None,
         })
     }
 

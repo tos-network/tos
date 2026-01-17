@@ -139,6 +139,14 @@ fn default_a2a_escrow_allowed_states() -> Vec<String> {
     ]
 }
 
+const fn default_a2a_registry_rate_limit_window_secs() -> u64 {
+    60
+}
+
+const fn default_a2a_registry_rate_limit_max() -> u32 {
+    10
+}
+
 #[derive(Debug, Clone, Copy, clap::ValueEnum, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum A2ARoutingStrategy {
@@ -346,6 +354,22 @@ pub struct RPCConfig {
     )]
     #[serde(default = "default_a2a_router_fallback_to_local")]
     pub a2a_router_fallback_to_local: bool,
+    /// Registration rate limit window in seconds (0 disables).
+    #[clap(
+        name = "a2a-registry-rate-limit-window-secs",
+        long,
+        default_value_t = default_a2a_registry_rate_limit_window_secs()
+    )]
+    #[serde(default = "default_a2a_registry_rate_limit_window_secs")]
+    pub a2a_registry_rate_limit_window_secs: u64,
+    /// Maximum registration requests per window (0 disables).
+    #[clap(
+        name = "a2a-registry-rate-limit-max",
+        long,
+        default_value_t = default_a2a_registry_rate_limit_max()
+    )]
+    #[serde(default = "default_a2a_registry_rate_limit_max")]
+    pub a2a_registry_rate_limit_max: u32,
     /// Validate escrow state against allowed states when escrowHash is provided.
     #[clap(name = "a2a-escrow-validate-states", long, default_value_t = default_a2a_escrow_validate_states())]
     #[serde(default = "default_a2a_escrow_validate_states")]

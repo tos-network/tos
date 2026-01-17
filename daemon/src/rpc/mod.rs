@@ -11,6 +11,7 @@ use crate::a2a::router_executor::AgentRouterExecutor;
 use crate::core::{
     blockchain::Blockchain, config::RPCConfig, error::BlockchainError, storage::Storage,
 };
+use crate::rpc::agent_registry::RegistrationRateLimitConfig;
 use actix_web::{
     dev::ServerHandle,
     error::Error,
@@ -115,6 +116,12 @@ impl<S: Storage> DaemonRpcServer<S> {
                 validate_timeout: config.a2a_escrow_validate_timeout,
                 validate_amounts: config.a2a_escrow_validate_amounts,
             });
+            crate::rpc::agent_registry::set_registration_rate_limit_config(
+                RegistrationRateLimitConfig {
+                    window_secs: config.a2a_registry_rate_limit_window_secs,
+                    max_requests: config.a2a_registry_rate_limit_max,
+                },
+            );
             let local_executor =
                 crate::a2a::executor::default_executor(config.a2a_executor_concurrency);
             let router_config = RouterConfig {
@@ -251,6 +258,14 @@ impl<S: Storage> DaemonRpcServer<S> {
                             web::get().to(agent_registry::discover_agents_http_get::<S>),
                         )
                         .route(
+                            "/committees:members",
+                            web::post().to(agent_registry::discover_committee_members_http::<S>),
+                        )
+                        .route(
+                            "/committees/{id}:members",
+                            web::get().to(agent_registry::discover_committee_members_http_get::<S>),
+                        )
+                        .route(
                             "/agents",
                             web::get().to(agent_registry::list_agents_http::<S>),
                         )
@@ -318,6 +333,14 @@ impl<S: Storage> DaemonRpcServer<S> {
                         .route(
                             "/v1/agents:discover",
                             web::get().to(agent_registry::discover_agents_http_get::<S>),
+                        )
+                        .route(
+                            "/v1/committees:members",
+                            web::post().to(agent_registry::discover_committee_members_http::<S>),
+                        )
+                        .route(
+                            "/v1/committees/{id}:members",
+                            web::get().to(agent_registry::discover_committee_members_http_get::<S>),
                         )
                         .route(
                             "/v1/agents",

@@ -452,6 +452,7 @@ impl<S: Storage> A2ADaemonService<S> {
             supports_extended_agent_card: Some(true),
             signatures: Vec::new(),
             tos_identity: None,
+            arbitration: None,
         }
     }
 
