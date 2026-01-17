@@ -3,15 +3,19 @@ pub mod executor;
 pub mod grpc;
 mod notify;
 pub mod registry;
+pub mod router_executor;
 mod storage;
 
+use std::str::FromStr;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::stream;
 use log::error;
+use once_cell::sync::OnceCell;
 use rand::RngCore;
 
+use tos_common::a2a::Value;
 use tos_common::{
     a2a::{
         A2AError, A2AResult, A2AService, AgentCapabilities, AgentCard, AgentInterface,
@@ -20,13 +24,14 @@ use tos_common::{
         ListTasksResponse, Message, OAuth2SecurityScheme, OAuthFlows, PartContent,
         PushNotificationConfig, Role, Security, SecurityScheme, SendMessageConfiguration,
         SendMessageRequest, SendMessageResponse, SetTaskPushNotificationConfigRequest,
-        StreamResponse, SubscribeToTaskRequest, Task, TaskArtifactUpdateEvent,
+        SettlementStatus, StreamResponse, SubscribeToTaskRequest, Task, TaskArtifactUpdateEvent,
         TaskPushNotificationConfig, TaskState, TaskStatus, TaskStatusUpdateEvent,
-        TosSignatureSecurityScheme, MAX_ARTIFACTS_PER_TASK, MAX_DATA_PART_BYTES,
+        TosSignatureSecurityScheme, TosTaskAnchor, MAX_ARTIFACTS_PER_TASK, MAX_DATA_PART_BYTES,
         MAX_FILE_INLINE_BYTES, MAX_HISTORY_LENGTH, MAX_METADATA_KEYS, MAX_PARTS_PER_MESSAGE,
         MAX_PUSH_CONFIGS_PER_TASK, MAX_TEXT_PART_BYTES,
     },
     config::VERSION,
+    crypto::{Address, Hash},
 };
 
 use crate::core::blockchain::Blockchain;
@@ -42,8 +47,255 @@ pub fn set_base_dir(dir: &str) {
     registry::set_base_dir(dir);
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use tos_common::crypto::{Address, AddressType, Hash, PublicKey};
+    use tos_common::escrow::{EscrowAccount, EscrowState};
+    use tos_common::serializer::Serializer;
+
+    fn sample_pubkey(byte: u8) -> PublicKey {
+        PublicKey::from_bytes(&[byte; 32]).expect("valid pubkey")
+    }
+
+    fn addr_str(key: PublicKey) -> String {
+        Address::new(true, AddressType::Normal, key)
+            .as_string()
+            .expect("address string")
+    }
+
+    fn build_escrow(
+        id: Hash,
+        task_id: &str,
+        payee: PublicKey,
+        state: EscrowState,
+        timeout_at: u64,
+    ) -> EscrowAccount {
+        EscrowAccount {
+            id,
+            task_id: task_id.to_string(),
+            payer: sample_pubkey(9),
+            payee,
+            amount: 10,
+            total_amount: 10,
+            released_amount: 0,
+            refunded_amount: 0,
+            pending_release_amount: None,
+            challenge_deposit: 0,
+            asset: Hash::zero(),
+            state,
+            dispute_id: None,
+            dispute_round: None,
+            challenge_window: 0,
+            challenge_deposit_bps: 0,
+            optimistic_release: false,
+            release_requested_at: None,
+            created_at: 0,
+            updated_at: 0,
+            timeout_at,
+            timeout_blocks: 0,
+            arbitration_config: None,
+            dispute: None,
+            appeal: None,
+            resolutions: Vec::new(),
+        }
+    }
+
+    fn build_metadata(
+        escrow_hash: &Hash,
+        agent_account: &PublicKey,
+    ) -> std::collections::HashMap<String, Value> {
+        let agent_account = addr_str(agent_account.clone());
+        let settlement = json!({
+            "escrowHash": format!("0x{}", escrow_hash.to_hex()),
+            "agentAccount": agent_account,
+            "escrowId": 12345
+        });
+        let mut meta = std::collections::HashMap::new();
+        meta.insert("tosSettlement".to_string(), settlement);
+        meta
+    }
+
+    #[test]
+    fn escrow_hash_validation_accepts_matching_anchor() {
+        let task_id = "task-abc123";
+        let escrow_hash = Hash::new([7u8; 32]);
+        let payee = sample_pubkey(4);
+        let escrow = build_escrow(
+            escrow_hash.clone(),
+            task_id,
+            payee.clone(),
+            EscrowState::Funded,
+            100,
+        );
+        let metadata = build_metadata(&escrow_hash, &payee);
+
+        let anchor =
+            validate_settlement_anchor_with_escrow(task_id, Some(&metadata), 10, Some(escrow))
+                .expect("valid anchor")
+                .expect("anchor present");
+
+        assert_eq!(anchor.escrow_id, 12345);
+        assert_eq!(anchor.agent_account, payee);
+    }
+
+    #[test]
+    fn escrow_hash_validation_rejects_task_mismatch() {
+        let escrow_hash = Hash::new([8u8; 32]);
+        let payee = sample_pubkey(5);
+        let escrow = build_escrow(
+            escrow_hash.clone(),
+            "task-on-chain",
+            payee.clone(),
+            EscrowState::Funded,
+            100,
+        );
+        let metadata = build_metadata(&escrow_hash, &payee);
+
+        let err = validate_settlement_anchor_with_escrow(
+            "task-request",
+            Some(&metadata),
+            10,
+            Some(escrow),
+        )
+        .err()
+        .expect("should fail");
+
+        assert!(err.to_string().contains("task_id mismatch"));
+    }
+
+    #[test]
+    fn escrow_hash_validation_rejects_terminal_or_timeout() {
+        let escrow_hash = Hash::new([9u8; 32]);
+        let payee = sample_pubkey(6);
+        let escrow = build_escrow(
+            escrow_hash.clone(),
+            "task-1",
+            payee.clone(),
+            EscrowState::Released,
+            100,
+        );
+        let metadata = build_metadata(&escrow_hash, &payee);
+
+        let err =
+            validate_settlement_anchor_with_escrow("task-1", Some(&metadata), 10, Some(escrow))
+                .err()
+                .expect("should fail");
+
+        assert!(err.to_string().contains("disallowed state"));
+
+        let escrow_timeout = build_escrow(
+            escrow_hash.clone(),
+            "task-1",
+            payee.clone(),
+            EscrowState::Funded,
+            10,
+        );
+        let err = validate_settlement_anchor_with_escrow(
+            "task-1",
+            Some(&metadata),
+            10,
+            Some(escrow_timeout),
+        )
+        .err()
+        .expect("should fail");
+
+        assert!(err.to_string().contains("timeout"));
+    }
+
+    #[test]
+    fn escrow_validation_allows_only_configured_states() {
+        let escrow_hash = Hash::new([10u8; 32]);
+        let payee = sample_pubkey(7);
+        let metadata = build_metadata(&escrow_hash, &payee);
+        let escrow = build_escrow(
+            escrow_hash.clone(),
+            "task-2",
+            payee.clone(),
+            EscrowState::Challenged,
+            100,
+        );
+        let config = SettlementValidationConfig {
+            validate_states: true,
+            allowed_states: vec!["funded".to_string()],
+            validate_timeout: false,
+            validate_amounts: false,
+        };
+
+        let err = validate_settlement_anchor_with_config(
+            "task-2",
+            Some(&metadata),
+            10,
+            Some(escrow),
+            &config,
+        )
+        .err()
+        .expect("should fail");
+
+        assert!(err.to_string().contains("disallowed state"));
+    }
+
+    #[test]
+    fn escrow_validation_enforces_max_cost_when_enabled() {
+        let escrow_hash = Hash::new([11u8; 32]);
+        let payee = sample_pubkey(8);
+        let mut metadata = build_metadata(&escrow_hash, &payee);
+        metadata.insert(
+            "tosSettlement".to_string(),
+            json!({
+                "escrowHash": format!("0x{}", escrow_hash.to_hex()),
+                "agentAccount": addr_str(payee.clone()),
+                "maxCost": 5000
+            }),
+        );
+        let escrow = build_escrow(
+            escrow_hash.clone(),
+            "task-3",
+            payee.clone(),
+            EscrowState::Funded,
+            100,
+        );
+        let escrow = EscrowAccount {
+            amount: 1000,
+            ..escrow
+        };
+        let config = SettlementValidationConfig {
+            validate_states: false,
+            allowed_states: Vec::new(),
+            validate_timeout: false,
+            validate_amounts: true,
+        };
+
+        let err = validate_settlement_anchor_with_config(
+            "task-3",
+            Some(&metadata),
+            10,
+            Some(escrow),
+            &config,
+        )
+        .err()
+        .expect("should fail");
+
+        assert!(err.to_string().contains("maxCost"));
+    }
+}
 pub struct A2ADaemonService<S: Storage> {
     blockchain: Arc<Blockchain<S>>,
+}
+
+#[derive(Clone, Debug)]
+pub struct SettlementValidationConfig {
+    pub validate_states: bool,
+    pub allowed_states: Vec<String>,
+    pub validate_timeout: bool,
+    pub validate_amounts: bool,
+}
+
+static SETTLEMENT_CONFIG: OnceCell<SettlementValidationConfig> = OnceCell::new();
+
+pub fn set_settlement_validation_config(config: SettlementValidationConfig) {
+    let _ = SETTLEMENT_CONFIG.set(config);
 }
 
 impl<S: Storage> A2ADaemonService<S> {
@@ -202,6 +454,37 @@ impl<S: Storage> A2ADaemonService<S> {
             tos_identity: None,
         }
     }
+
+    async fn validate_settlement_anchor(
+        &self,
+        task_id: &str,
+        metadata: Option<&std::collections::HashMap<String, Value>>,
+    ) -> A2AResult<Option<TosTaskAnchor>> {
+        let escrow_hash = parse_escrow_hash(metadata)?;
+        let escrow = if let Some(escrow_hash) = escrow_hash.as_ref() {
+            let storage = self.blockchain.get_storage().read().await;
+            Some(
+                storage
+                    .get_escrow(escrow_hash)
+                    .await
+                    .map_err(|e| A2AError::TosEscrowFailed {
+                        reason: e.to_string(),
+                    })?
+                    .ok_or_else(|| A2AError::TosEscrowFailed {
+                        reason: "escrow not found".to_string(),
+                    })?,
+            )
+        } else {
+            None
+        };
+
+        validate_settlement_anchor_with_escrow(
+            task_id,
+            metadata,
+            self.blockchain.get_topo_height(),
+            escrow,
+        )
+    }
 }
 
 fn map_store_error(err: A2AStoreError) -> A2AError {
@@ -218,6 +501,222 @@ fn new_id(prefix: &str) -> String {
 
 fn resolve_context_id(message: &Message) -> String {
     message.context_id.clone().unwrap_or_else(|| new_id("ctx-"))
+}
+
+fn parse_settlement_anchor(
+    metadata: Option<&std::collections::HashMap<String, Value>>,
+) -> A2AResult<Option<TosTaskAnchor>> {
+    let Some(metadata) = metadata else {
+        return Ok(None);
+    };
+    let Some(settlement) = metadata.get("tosSettlement") else {
+        return Ok(None);
+    };
+    let Some(obj) = settlement.as_object() else {
+        return Err(A2AError::TosEscrowFailed {
+            reason: "invalid tosSettlement metadata".to_string(),
+        });
+    };
+
+    let escrow_id = match obj.get("escrowId") {
+        Some(value) => match value {
+            Value::Number(num) => num.as_u64(),
+            Value::String(s) => s.parse::<u64>().ok(),
+            _ => None,
+        },
+        None => Some(0),
+    }
+    .ok_or_else(|| A2AError::TosEscrowFailed {
+        reason: "invalid escrowId".to_string(),
+    })?;
+
+    let agent_account = obj
+        .get("agentAccount")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| A2AError::TosEscrowFailed {
+            reason: "missing agentAccount".to_string(),
+        })
+        .and_then(|s| {
+            Address::from_str(s)
+                .map(|addr| addr.to_public_key())
+                .map_err(|e| A2AError::TosEscrowFailed {
+                    reason: format!("invalid agentAccount: {}", e),
+                })
+        })?;
+
+    let settlement_status = obj
+        .get("settlementStatus")
+        .and_then(|v| v.as_str())
+        .and_then(parse_settlement_status)
+        .unwrap_or(SettlementStatus::EscrowLocked);
+
+    Ok(Some(TosTaskAnchor {
+        escrow_id,
+        agent_account,
+        settlement_status,
+    }))
+}
+
+fn parse_settlement_status(value: &str) -> Option<SettlementStatus> {
+    match value {
+        "none" => Some(SettlementStatus::None),
+        "escrow-locked" | "escrowLocked" => Some(SettlementStatus::EscrowLocked),
+        "claimed" => Some(SettlementStatus::Claimed),
+        "refunded" => Some(SettlementStatus::Refunded),
+        "disputed" => Some(SettlementStatus::Disputed),
+        _ => None,
+    }
+}
+
+fn parse_escrow_hash(
+    metadata: Option<&std::collections::HashMap<String, Value>>,
+) -> A2AResult<Option<Hash>> {
+    let Some(metadata) = metadata else {
+        return Ok(None);
+    };
+    let Some(settlement) = metadata.get("tosSettlement") else {
+        return Ok(None);
+    };
+    let Some(obj) = settlement.as_object() else {
+        return Err(A2AError::TosEscrowFailed {
+            reason: "invalid tosSettlement metadata".to_string(),
+        });
+    };
+    let Some(value) = obj.get("escrowHash") else {
+        return Ok(None);
+    };
+    let Some(hash_str) = value.as_str() else {
+        return Err(A2AError::TosEscrowFailed {
+            reason: "invalid escrowHash".to_string(),
+        });
+    };
+    let hash_str = hash_str.strip_prefix("0x").unwrap_or(hash_str);
+    Hash::from_str(hash_str)
+        .map(Some)
+        .map_err(|e| A2AError::TosEscrowFailed {
+            reason: e.to_string(),
+        })
+}
+
+fn validate_settlement_anchor_with_escrow(
+    task_id: &str,
+    metadata: Option<&std::collections::HashMap<String, Value>>,
+    topoheight: u64,
+    escrow: Option<tos_common::escrow::EscrowAccount>,
+) -> A2AResult<Option<TosTaskAnchor>> {
+    let config = settlement_validation_config_struct();
+    validate_settlement_anchor_with_config(task_id, metadata, topoheight, escrow, &config)
+}
+
+fn settlement_validation_config_struct() -> SettlementValidationConfig {
+    let default = SettlementValidationConfig {
+        validate_states: true,
+        allowed_states: vec![
+            "created".to_string(),
+            "funded".to_string(),
+            "pending-release".to_string(),
+            "challenged".to_string(),
+        ],
+        validate_timeout: true,
+        validate_amounts: false,
+    };
+    let mut cfg = SETTLEMENT_CONFIG.get().cloned().unwrap_or(default);
+    cfg.allowed_states = cfg
+        .allowed_states
+        .into_iter()
+        .map(|state| state.to_lowercase())
+        .collect();
+    cfg
+}
+
+fn escrow_state_name(state: &tos_common::escrow::EscrowState) -> &str {
+    match state {
+        tos_common::escrow::EscrowState::Created => "created",
+        tos_common::escrow::EscrowState::Funded => "funded",
+        tos_common::escrow::EscrowState::PendingRelease => "pending-release",
+        tos_common::escrow::EscrowState::Challenged => "challenged",
+        tos_common::escrow::EscrowState::Released => "released",
+        tos_common::escrow::EscrowState::Refunded => "refunded",
+        tos_common::escrow::EscrowState::Resolved => "resolved",
+        tos_common::escrow::EscrowState::Expired => "expired",
+    }
+}
+
+fn parse_tos_settlement_max_cost(
+    metadata: Option<&std::collections::HashMap<String, Value>>,
+) -> Option<u64> {
+    let settlement = metadata?.get("tosSettlement")?;
+    let obj = settlement.as_object()?;
+    let value = obj.get("maxCost")?;
+    match value {
+        Value::Number(num) => num.as_u64(),
+        Value::String(s) => s.parse::<u64>().ok(),
+        _ => None,
+    }
+}
+
+fn validate_settlement_anchor_with_config(
+    task_id: &str,
+    metadata: Option<&std::collections::HashMap<String, Value>>,
+    topoheight: u64,
+    escrow: Option<tos_common::escrow::EscrowAccount>,
+    config: &SettlementValidationConfig,
+) -> A2AResult<Option<TosTaskAnchor>> {
+    let anchor = parse_settlement_anchor(metadata)?;
+    let escrow_hash = parse_escrow_hash(metadata)?;
+    let Some(_escrow_hash) = escrow_hash else {
+        return Ok(anchor);
+    };
+
+    let Some(anchor) = anchor else {
+        return Err(A2AError::TosEscrowFailed {
+            reason: "missing tosSettlement anchor fields".to_string(),
+        });
+    };
+    let Some(escrow) = escrow else {
+        return Err(A2AError::TosEscrowFailed {
+            reason: "escrow not found".to_string(),
+        });
+    };
+
+    if escrow.task_id != task_id {
+        return Err(A2AError::TosEscrowFailed {
+            reason: "escrow task_id mismatch".to_string(),
+        });
+    }
+    if escrow.payee != anchor.agent_account {
+        return Err(A2AError::TosEscrowFailed {
+            reason: "escrow payee mismatch".to_string(),
+        });
+    }
+    if config.validate_states {
+        let state_name = escrow_state_name(&escrow.state);
+        if !config
+            .allowed_states
+            .iter()
+            .any(|allowed| allowed == state_name)
+        {
+            return Err(A2AError::TosEscrowFailed {
+                reason: "escrow is in disallowed state".to_string(),
+            });
+        }
+    }
+    if config.validate_timeout && topoheight >= escrow.timeout_at {
+        return Err(A2AError::TosEscrowFailed {
+            reason: "escrow timeout reached".to_string(),
+        });
+    }
+    if config.validate_amounts {
+        if let Some(max_cost) = parse_tos_settlement_max_cost(metadata) {
+            if escrow.amount < max_cost {
+                return Err(A2AError::TosEscrowFailed {
+                    reason: "escrow amount below maxCost".to_string(),
+                });
+            }
+        }
+    }
+
+    Ok(Some(anchor))
 }
 
 fn make_status_event(task: &Task) -> StreamResponse {
@@ -539,6 +1038,9 @@ impl<S: Storage + Send + Sync + 'static> A2AService for A2ADaemonService<S> {
         } else {
             let task_id = new_id("task-");
             let context_id = resolve_context_id(&message);
+            let tos_task_anchor = self
+                .validate_settlement_anchor(&task_id, request.metadata.as_ref())
+                .await?;
             let task = Task {
                 id: task_id.clone(),
                 context_id: context_id.clone(),
@@ -550,7 +1052,7 @@ impl<S: Storage + Send + Sync + 'static> A2AService for A2ADaemonService<S> {
                 artifacts: Vec::new(),
                 history: Vec::new(),
                 metadata: request.metadata.clone(),
-                tos_task_anchor: None,
+                tos_task_anchor,
             };
             (task_id, context_id, task)
         };
@@ -692,6 +1194,9 @@ impl<S: Storage + Send + Sync + 'static> A2AService for A2ADaemonService<S> {
         } else {
             let task_id = new_id("task-");
             let context_id = resolve_context_id(&message);
+            let tos_task_anchor = self
+                .validate_settlement_anchor(&task_id, request.metadata.as_ref())
+                .await?;
             let task = Task {
                 id: task_id.clone(),
                 context_id: context_id.clone(),
@@ -703,7 +1208,7 @@ impl<S: Storage + Send + Sync + 'static> A2AService for A2ADaemonService<S> {
                 artifacts: Vec::new(),
                 history: Vec::new(),
                 metadata: request.metadata.clone(),
-                tos_task_anchor: None,
+                tos_task_anchor,
             };
             (task_id, context_id, task)
         };

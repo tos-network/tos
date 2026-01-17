@@ -6,6 +6,8 @@ pub mod getwork;
 pub mod rpc;
 pub mod ws_security;
 
+use crate::a2a::registry::router::{RouterConfig, RoutingStrategy};
+use crate::a2a::router_executor::AgentRouterExecutor;
 use crate::core::{
     blockchain::Blockchain, config::RPCConfig, error::BlockchainError, storage::Storage,
 };
@@ -107,9 +109,38 @@ impl<S: Storage> DaemonRpcServer<S> {
             crate::a2a::auth::set_auth_config(crate::a2a::auth::A2AAuthConfig::from_rpc_config(
                 &config,
             ));
-            crate::a2a::executor::set_executor(crate::a2a::executor::default_executor(
-                config.a2a_executor_concurrency,
-            ));
+            crate::a2a::set_settlement_validation_config(crate::a2a::SettlementValidationConfig {
+                validate_states: config.a2a_escrow_validate_states,
+                allowed_states: config.a2a_escrow_allowed_states.clone(),
+                validate_timeout: config.a2a_escrow_validate_timeout,
+                validate_amounts: config.a2a_escrow_validate_amounts,
+            });
+            let local_executor =
+                crate::a2a::executor::default_executor(config.a2a_executor_concurrency);
+            let router_config = RouterConfig {
+                strategy: match config.a2a_router_strategy {
+                    crate::core::config::A2ARoutingStrategy::FirstMatch => {
+                        RoutingStrategy::FirstMatch
+                    }
+                    crate::core::config::A2ARoutingStrategy::LowestLatency => {
+                        RoutingStrategy::LowestLatency
+                    }
+                    crate::core::config::A2ARoutingStrategy::HighestReputation => {
+                        RoutingStrategy::HighestReputation
+                    }
+                    crate::core::config::A2ARoutingStrategy::RoundRobin => {
+                        RoutingStrategy::RoundRobin
+                    }
+                    crate::core::config::A2ARoutingStrategy::WeightedRandom => {
+                        RoutingStrategy::WeightedRandom
+                    }
+                },
+                timeout_ms: config.a2a_router_timeout_ms,
+                retry_count: config.a2a_router_retry_count,
+                fallback_to_local: config.a2a_router_fallback_to_local,
+            };
+            let router_executor = AgentRouterExecutor::new(local_executor, router_config);
+            crate::a2a::executor::set_executor(Arc::new(router_executor));
         }
 
         let websocket_security = Arc::new(WebSocketSecurity::new(ws_security_config));

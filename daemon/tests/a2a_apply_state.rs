@@ -258,7 +258,7 @@ impl TestApplyState {
     pub fn insert_account(&mut self, key: PublicKey, balance: u64, nonce: Nonce) {
         self.balances
             .entry(key.clone())
-            .or_insert_with(HashMap::new)
+            .or_default()
             .insert(tos_common::config::TOS_ASSET, balance);
         self.nonces.insert(key, nonce);
     }
@@ -296,10 +296,7 @@ impl<'a> BlockchainVerificationState<'a, TestError> for TestApplyState {
         account: Cow<'a, CompressedPublicKey>,
         asset: Cow<'a, Hash>,
     ) -> Result<&'b mut u64, TestError> {
-        let account_entry = self
-            .balances
-            .entry(account.into_owned())
-            .or_insert_with(HashMap::new);
+        let account_entry = self.balances.entry(account.into_owned()).or_default();
         Ok(account_entry.entry(asset.into_owned()).or_insert(0))
     }
 
@@ -614,7 +611,7 @@ impl<'a> BlockchainApplyState<'a, DummyContractProvider, TestError> for TestAppl
     ) -> Result<(), TestError> {
         self.escrow_history
             .entry(escrow_id.clone())
-            .or_insert_with(Vec::new)
+            .or_default()
             .push((topoheight, tx_hash.clone()));
         Ok(())
     }

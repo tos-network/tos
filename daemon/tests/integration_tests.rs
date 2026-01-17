@@ -1370,10 +1370,7 @@ fn test_freeze_tos_sigma_proofs_verification() {
                 println!("✓ Transaction built successfully");
                 tx
             }
-            Err(e) => {
-                assert!(false, "Failed to build transaction: {e:?}");
-                return;
-            }
+            Err(e) => panic!("Failed to build transaction: {e:?}"),
         };
 
         println!("Transaction details:");
@@ -1397,10 +1394,7 @@ fn test_freeze_tos_sigma_proofs_verification() {
                 println!("✓ Transaction serialization/deserialization successful");
                 tx
             }
-            Err(e) => {
-                assert!(false, "Failed to deserialize transaction: {e:?}");
-                return;
-            }
+            Err(e) => panic!("Failed to deserialize transaction: {e:?}"),
         };
 
         assert_eq!(
@@ -1430,19 +1424,18 @@ fn test_freeze_tos_sigma_proofs_verification() {
                 tos_common::transaction::EnergyPayload::FreezeTos { .. }
             )
         ));
-        if let tos_common::transaction::TransactionType::Energy(energy_payload) =
-            freeze_tx.get_data()
-        {
-            if let tos_common::transaction::EnergyPayload::FreezeTos {
+        let tos_common::transaction::TransactionType::Energy(
+            tos_common::transaction::EnergyPayload::FreezeTos {
                 amount,
                 duration: tx_duration,
-            } = energy_payload
-            {
-                assert_eq!(*amount, freeze_amount, "Freeze amount mismatch");
-                assert_eq!(*tx_duration, duration, "Freeze duration mismatch");
-                println!("✓ Energy payload validation passed");
-            }
-        }
+            },
+        ) = freeze_tx.get_data()
+        else {
+            unreachable!("Expected FreezeTos energy payload");
+        };
+        assert_eq!(*amount, freeze_amount, "Freeze amount mismatch");
+        assert_eq!(*tx_duration, duration, "Freeze duration mismatch");
+        println!("✓ Energy payload validation passed");
 
         // Test 6: Verify fee type
         assert_eq!(
@@ -1530,10 +1523,7 @@ fn test_unfreeze_tos_sigma_proofs_verification() {
                 println!("✓ Transaction built successfully");
                 tx
             }
-            Err(e) => {
-                assert!(false, "Failed to build transaction: {e:?}");
-                return;
-            }
+            Err(e) => panic!("Failed to build transaction: {e:?}"),
         };
 
         println!("Transaction details:");
@@ -1557,10 +1547,7 @@ fn test_unfreeze_tos_sigma_proofs_verification() {
                 println!("✓ Transaction serialization/deserialization successful");
                 tx
             }
-            Err(e) => {
-                assert!(false, "Failed to deserialize transaction: {e:?}");
-                return;
-            }
+            Err(e) => panic!("Failed to deserialize transaction: {e:?}"),
         };
 
         assert_eq!(
@@ -1590,16 +1577,14 @@ fn test_unfreeze_tos_sigma_proofs_verification() {
                 tos_common::transaction::EnergyPayload::UnfreezeTos { .. }
             )
         ));
-        if let tos_common::transaction::TransactionType::Energy(energy_payload) =
-            unfreeze_tx.get_data()
-        {
-            if let tos_common::transaction::EnergyPayload::UnfreezeTos { amount, .. } =
-                energy_payload
-            {
-                assert_eq!(*amount, unfreeze_amount, "Unfreeze amount mismatch");
-                println!("✓ Energy payload validation passed");
-            }
-        }
+        let tos_common::transaction::TransactionType::Energy(
+            tos_common::transaction::EnergyPayload::UnfreezeTos { amount, .. },
+        ) = unfreeze_tx.get_data()
+        else {
+            unreachable!("Expected UnfreezeTos energy payload");
+        };
+        assert_eq!(*amount, unfreeze_amount, "Unfreeze amount mismatch");
+        println!("✓ Energy payload validation passed");
 
         // Test 6: Verify fee type
         assert_eq!(

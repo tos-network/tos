@@ -458,6 +458,7 @@ async fn register_agent_impl<S: Storage>(
     blockchain: Arc<Blockchain<S>>,
     request: RegisterAgentRequest,
 ) -> Result<RegisterAgentResponse, AgentRegistryRpcError> {
+    let mut request = request;
     let is_arbiter = request
         .agent_card
         .skills
@@ -517,6 +518,7 @@ async fn register_agent_impl<S: Storage>(
         return Err(AgentRegistryRpcError::MissingTosSignature);
     }
 
+    let mut arbiter_reputation: Option<u16> = None;
     if is_arbiter {
         let tos_identity = request
             .agent_card
@@ -539,6 +541,13 @@ async fn register_agent_impl<S: Storage>(
                 found: arbiter.stake_amount,
             });
         }
+        arbiter_reputation = Some(arbiter.reputation_score);
+    }
+
+    if let (Some(rep), Some(identity)) =
+        (arbiter_reputation, request.agent_card.tos_identity.as_mut())
+    {
+        identity.reputation_score_bps = Some(u32::from(rep));
     }
 
     let registry = global_registry();

@@ -1,15 +1,24 @@
 use std::cmp::Ordering;
 use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
 use std::sync::Arc;
+use std::time::Duration;
 
 use thiserror::Error;
 
-use tos_common::a2a::AgentCard;
+use rand::distributions::WeightedIndex;
+use rand::prelude::Distribution;
+use reqwest::Client;
+use tos_common::a2a::{
+    A2AError, A2AResult, AgentCard, Message, SendMessageRequest, SendMessageResponse,
+    HEADER_VERSION, PROTOCOL_VERSION,
+};
 use tos_common::time::get_current_time_in_seconds;
 
 use super::{AgentRegistry, AgentStatus, RegisteredAgent};
 
 const DEFAULT_HEARTBEAT_TIMEOUT_SECS: u64 = 120;
+const DEFAULT_ROUTER_TIMEOUT_MS: u64 = 30_000;
+const DEFAULT_ROUTER_RETRY_COUNT: u32 = 2;
 
 #[derive(Clone, Copy, Debug)]
 pub enum RoutingStrategy {
@@ -17,6 +26,7 @@ pub enum RoutingStrategy {
     LowestLatency,
     HighestReputation,
     RoundRobin,
+    WeightedRandom,
 }
 
 #[derive(Debug, Error)]
@@ -25,10 +35,31 @@ pub enum RouterError {
     NoAvailableAgents,
 }
 
+#[derive(Clone, Debug)]
+pub struct RouterConfig {
+    pub strategy: RoutingStrategy,
+    pub timeout_ms: u64,
+    pub retry_count: u32,
+    pub fallback_to_local: bool,
+}
+
+impl Default for RouterConfig {
+    fn default() -> Self {
+        Self {
+            strategy: RoutingStrategy::LowestLatency,
+            timeout_ms: DEFAULT_ROUTER_TIMEOUT_MS,
+            retry_count: DEFAULT_ROUTER_RETRY_COUNT,
+            fallback_to_local: true,
+        }
+    }
+}
+
 pub struct AgentRouter {
     registry: Arc<AgentRegistry>,
     rr_counter: AtomicUsize,
     heartbeat_timeout_secs: u64,
+    http_client: Client,
+    config: RouterConfig,
 }
 
 impl AgentRouter {
@@ -38,6 +69,8 @@ impl AgentRouter {
             registry,
             rr_counter: AtomicUsize::new(0),
             heartbeat_timeout_secs: DEFAULT_HEARTBEAT_TIMEOUT_SECS,
+            http_client: Client::new(),
+            config: RouterConfig::default(),
         }
     }
 
@@ -45,6 +78,17 @@ impl AgentRouter {
     pub fn with_heartbeat_timeout(mut self, timeout_secs: u64) -> Self {
         self.heartbeat_timeout_secs = timeout_secs;
         self
+    }
+
+    /// Set router configuration (strategy, timeout, retries, fallback).
+    pub fn with_config(mut self, config: RouterConfig) -> Self {
+        self.config = config;
+        self
+    }
+
+    /// Access router configuration.
+    pub fn config(&self) -> &RouterConfig {
+        &self.config
     }
 
     /// Select an agent card for the given skill using a routing strategy.
@@ -55,12 +99,68 @@ impl AgentRouter {
     ) -> Result<AgentCard, RouterError> {
         let mut candidates = self.registry.filter_by_skill(skill).await;
         candidates.retain(|agent| self.is_healthy(agent));
+        let selected = self.select_from_candidates(candidates, strategy);
 
-        if candidates.is_empty() {
+        selected
+            .map(|agent| agent.agent_card)
+            .ok_or(RouterError::NoAvailableAgents)
+    }
+
+    /// Select a full registered agent for the given skill and strategy.
+    pub async fn route_agent(
+        &self,
+        skill: &str,
+        strategy: RoutingStrategy,
+    ) -> Result<RegisteredAgent, RouterError> {
+        let mut candidates = self.registry.filter_by_skill(skill).await;
+        candidates.retain(|agent| self.is_healthy(agent));
+        self.select_from_candidates(candidates, strategy)
+            .ok_or(RouterError::NoAvailableAgents)
+    }
+
+    /// Route using multiple required skills. Uses intersection first, then optionally falls back
+    /// to any-skill matching when no intersection candidates are available.
+    pub async fn route_agent_by_skills(
+        &self,
+        skills: &[String],
+        strategy: RoutingStrategy,
+        fallback_any: bool,
+    ) -> Result<RegisteredAgent, RouterError> {
+        let Some((first, rest)) = skills.split_first() else {
             return Err(RouterError::NoAvailableAgents);
+        };
+        let mut candidates = self.registry.filter_by_skill(first).await;
+        candidates.retain(|agent| self.is_healthy(agent));
+        if !rest.is_empty() {
+            candidates.retain(|agent| {
+                rest.iter().all(|skill| {
+                    agent
+                        .agent_card
+                        .skills
+                        .iter()
+                        .any(|agent_skill| agent_skill.id == *skill)
+                })
+            });
         }
 
-        let selected = match strategy {
+        if candidates.is_empty() && fallback_any {
+            candidates = self.registry.filter_by_any_skill(skills).await;
+            candidates.retain(|agent| self.is_healthy(agent));
+        }
+
+        self.select_from_candidates(candidates, strategy)
+            .ok_or(RouterError::NoAvailableAgents)
+    }
+
+    fn select_from_candidates(
+        &self,
+        mut candidates: Vec<RegisteredAgent>,
+        strategy: RoutingStrategy,
+    ) -> Option<RegisteredAgent> {
+        if candidates.is_empty() {
+            return None;
+        }
+        match strategy {
             RoutingStrategy::FirstMatch => candidates.into_iter().next(),
             RoutingStrategy::LowestLatency => candidates
                 .into_iter()
@@ -73,11 +173,67 @@ impl AgentRouter {
                 let idx = self.rr_counter.fetch_add(1, AtomicOrdering::Relaxed) % candidates.len();
                 candidates.into_iter().nth(idx)
             }
-        };
+            RoutingStrategy::WeightedRandom => {
+                let weights: Vec<u32> = candidates
+                    .iter()
+                    .map(|agent| reputation_weight(agent))
+                    .collect();
+                let dist = WeightedIndex::new(&weights).ok();
+                dist.and_then(|dist| {
+                    let idx = dist.sample(&mut rand::thread_rng());
+                    candidates.into_iter().nth(idx)
+                })
+            }
+        }
+    }
 
-        selected
-            .map(|agent| agent.agent_card)
-            .ok_or(RouterError::NoAvailableAgents)
+    /// Forward a SendMessage request to an external agent.
+    pub async fn forward_request(
+        &self,
+        agent: &RegisteredAgent,
+        request: SendMessageRequest,
+    ) -> A2AResult<SendMessageResponse> {
+        let url = format!("{}/message:send", agent.endpoint_url.trim_end_matches('/'));
+
+        let mut last_err: Option<String> = None;
+        let attempts = self.config.retry_count.saturating_add(1);
+
+        for _ in 0..attempts {
+            let response = self
+                .http_client
+                .post(&url)
+                .header(HEADER_VERSION, PROTOCOL_VERSION)
+                .timeout(Duration::from_millis(self.config.timeout_ms))
+                .json(&request)
+                .send()
+                .await;
+
+            match response {
+                Ok(resp) => {
+                    if !resp.status().is_success() {
+                        last_err = Some(format!("status {}", resp.status()));
+                        continue;
+                    }
+                    let response: SendMessageResponse =
+                        resp.json()
+                            .await
+                            .map_err(|e| A2AError::InvalidAgentResponseError {
+                                message: format!("invalid response from agent: {}", e),
+                            })?;
+                    return Ok(response);
+                }
+                Err(err) => {
+                    last_err = Some(err.to_string());
+                }
+            }
+        }
+
+        Err(A2AError::InternalError {
+            message: format!(
+                "failed to forward request: {}",
+                last_err.unwrap_or_else(|| "unknown error".to_string())
+            ),
+        })
     }
 
     fn is_healthy(&self, agent: &RegisteredAgent) -> bool {
@@ -106,6 +262,30 @@ fn compare_reputation(a: &RegisteredAgent, b: &RegisteredAgent) -> Ordering {
     rep_a.cmp(&rep_b)
 }
 
+fn reputation_weight(agent: &RegisteredAgent) -> u32 {
+    agent
+        .agent_card
+        .tos_identity
+        .as_ref()
+        .and_then(|id| id.reputation_score_bps)
+        .unwrap_or(0)
+        .saturating_add(1)
+}
+
+pub fn extract_required_skills(message: &Message) -> Vec<String> {
+    message
+        .metadata
+        .as_ref()
+        .and_then(|m| m.get("required_skills").or_else(|| m.get("requiredSkills")))
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -115,7 +295,7 @@ mod tests {
 
     fn sample_card(
         name: &str,
-        skill_id: &str,
+        skill_ids: &[&str],
         rep: Option<u32>,
     ) -> Result<AgentCard, Box<dyn std::error::Error>> {
         let agent_account = tos_common::crypto::PublicKey::from_bytes(&[1u8; 32])?;
@@ -144,17 +324,20 @@ mod tests {
             security: Vec::new(),
             default_input_modes: vec!["text/plain".to_string()],
             default_output_modes: vec!["text/plain".to_string()],
-            skills: vec![AgentSkill {
-                id: skill_id.to_string(),
-                name: "skill".to_string(),
-                description: "skill desc".to_string(),
-                tags: Vec::new(),
-                examples: Vec::new(),
-                input_modes: vec!["text/plain".to_string()],
-                output_modes: vec!["text/plain".to_string()],
-                security: Vec::new(),
-                tos_base_cost: None,
-            }],
+            skills: skill_ids
+                .iter()
+                .map(|id| AgentSkill {
+                    id: (*id).to_string(),
+                    name: "skill".to_string(),
+                    description: "skill desc".to_string(),
+                    tags: Vec::new(),
+                    examples: Vec::new(),
+                    input_modes: vec!["text/plain".to_string()],
+                    output_modes: vec!["text/plain".to_string()],
+                    security: Vec::new(),
+                    tos_base_cost: None,
+                })
+                .collect(),
             supports_extended_agent_card: Some(false),
             signatures: Vec::new(),
             tos_identity: rep.map(|score| tos_common::a2a::TosAgentIdentity {
@@ -169,8 +352,8 @@ mod tests {
     #[tokio::test]
     async fn router_selects_highest_reputation() -> Result<(), Box<dyn std::error::Error>> {
         let registry = Arc::new(AgentRegistry::new());
-        let card_a = sample_card("agent-a", "skill:a", Some(100))?;
-        let card_b = sample_card("agent-b", "skill:a", Some(500))?;
+        let card_a = sample_card("agent-a", &["skill:a"], Some(100))?;
+        let card_b = sample_card("agent-b", &["skill:a"], Some(500))?;
 
         let _ = registry
             .register(card_a, "https://a.test".to_string())
@@ -192,8 +375,8 @@ mod tests {
     #[tokio::test]
     async fn router_round_robin() -> Result<(), Box<dyn std::error::Error>> {
         let registry = Arc::new(AgentRegistry::new());
-        let card_a = sample_card("agent-a", "skill:a", None)?;
-        let card_b = sample_card("agent-b", "skill:a", None)?;
+        let card_a = sample_card("agent-a", &["skill:a"], None)?;
+        let card_b = sample_card("agent-b", &["skill:a"], None)?;
 
         let _ = registry
             .register(card_a, "https://a.test".to_string())
@@ -213,6 +396,70 @@ mod tests {
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
 
         assert_ne!(first.name, second.name);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn router_weighted_random_selects_candidate() -> Result<(), Box<dyn std::error::Error>> {
+        let registry = Arc::new(AgentRegistry::new());
+        let card_a = sample_card("agent-a", &["skill:a"], Some(0))?;
+        let card_b = sample_card("agent-b", &["skill:a"], Some(1000))?;
+
+        let _ = registry
+            .register(card_a, "https://a.test".to_string())
+            .await?;
+        let _ = registry
+            .register(card_b, "https://b.test".to_string())
+            .await?;
+
+        let router = AgentRouter::new(Arc::clone(&registry));
+        let selected = router
+            .route_request("skill:a", RoutingStrategy::WeightedRandom)
+            .await
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+
+        assert!(selected.name == "agent-a" || selected.name == "agent-b");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn router_intersection_then_fallback_any() -> Result<(), Box<dyn std::error::Error>> {
+        let registry = Arc::new(AgentRegistry::new());
+        let card_a = sample_card("agent-a", &["skill:a", "skill:b"], None)?;
+        let card_b = sample_card("agent-b", &["skill:a"], None)?;
+
+        let _ = registry
+            .register(card_a, "https://a.test".to_string())
+            .await?;
+        let _ = registry
+            .register(card_b, "https://b.test".to_string())
+            .await?;
+
+        let router = AgentRouter::new(Arc::clone(&registry));
+        let selected = router
+            .route_agent_by_skills(
+                &vec!["skill:a".to_string(), "skill:b".to_string()],
+                RoutingStrategy::FirstMatch,
+                true,
+            )
+            .await
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+
+        assert_eq!(selected.agent_card.name, "agent-a");
+
+        let fallback_selected = router
+            .route_agent_by_skills(
+                &vec!["skill:a".to_string(), "skill:missing".to_string()],
+                RoutingStrategy::FirstMatch,
+                true,
+            )
+            .await
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+
+        assert!(
+            fallback_selected.agent_card.name == "agent-a"
+                || fallback_selected.agent_card.name == "agent-b"
+        );
         Ok(())
     }
 }
