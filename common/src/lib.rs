@@ -9,6 +9,7 @@
 pub mod a2a;
 pub mod account;
 pub mod api;
+pub mod arbitration;
 pub mod block;
 pub mod contract;
 pub mod crypto;

@@ -22,10 +22,11 @@ use crate::{
         BootstrapCommitteePayload, BurnPayload, ChallengeEscrowPayload, CreateEscrowPayload,
         DeployContractPayload, DepositEscrowPayload, EmergencySuspendPayload, EnergyPayload,
         EphemeralMessagePayload, FeeType, InvokeContractPayload, MultiSigPayload, Reference,
-        RefundEscrowPayload, RegisterCommitteePayload, RegisterNamePayload, ReleaseEscrowPayload,
-        RenewKycPayload, RevokeKycPayload, SetKycPayload, ShieldTransferPayload,
-        SubmitVerdictPayload, Transaction, TransactionType, TransferKycPayload, TransferPayload,
-        TxVersion, UnoTransferPayload, UnshieldTransferPayload, UpdateCommitteePayload,
+        RefundEscrowPayload, RegisterArbiterPayload, RegisterCommitteePayload, RegisterNamePayload,
+        ReleaseEscrowPayload, RenewKycPayload, RevokeKycPayload, SetKycPayload,
+        ShieldTransferPayload, SubmitVerdictPayload, Transaction, TransactionType,
+        TransferKycPayload, TransferPayload, TxVersion, UnoTransferPayload,
+        UnshieldTransferPayload, UpdateArbiterPayload, UpdateCommitteePayload,
     },
 };
 pub use data::*;
@@ -104,6 +105,9 @@ pub enum RPCTransactionType<'a> {
     RefundEscrow(Cow<'a, RefundEscrowPayload>),
     ChallengeEscrow(Cow<'a, ChallengeEscrowPayload>),
     SubmitVerdict(Cow<'a, SubmitVerdictPayload>),
+    // Arbitration transaction types
+    RegisterArbiter(Cow<'a, RegisterArbiterPayload>),
+    UpdateArbiter(Cow<'a, UpdateArbiterPayload>),
 }
 
 impl<'a> RPCTransactionType<'a> {
@@ -174,6 +178,10 @@ impl<'a> RPCTransactionType<'a> {
                 Self::ChallengeEscrow(Cow::Borrowed(payload))
             }
             TransactionType::SubmitVerdict(payload) => Self::SubmitVerdict(Cow::Borrowed(payload)),
+            TransactionType::RegisterArbiter(payload) => {
+                Self::RegisterArbiter(Cow::Borrowed(payload))
+            }
+            TransactionType::UpdateArbiter(payload) => Self::UpdateArbiter(Cow::Borrowed(payload)),
         }
     }
 }
@@ -247,6 +255,12 @@ impl From<RPCTransactionType<'_>> for TransactionType {
             }
             RPCTransactionType::EphemeralMessage(payload) => {
                 TransactionType::EphemeralMessage(payload.into_owned())
+            }
+            RPCTransactionType::RegisterArbiter(payload) => {
+                TransactionType::RegisterArbiter(payload.into_owned())
+            }
+            RPCTransactionType::UpdateArbiter(payload) => {
+                TransactionType::UpdateArbiter(payload.into_owned())
             }
             RPCTransactionType::CreateEscrow(payload) => {
                 TransactionType::CreateEscrow(payload.into_owned())

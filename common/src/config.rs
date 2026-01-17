@@ -94,6 +94,8 @@ pub const MIN_FREEZE_TOS_AMOUNT: u64 = COIN_VALUE;
 pub const MIN_UNFREEZE_TOS_AMOUNT: u64 = COIN_VALUE;
 // Minimum TOS amount for Shield operations (100 TOS) - anti-money-laundering measure
 pub const MIN_SHIELD_TOS_AMOUNT: u64 = COIN_VALUE * 100;
+/// Minimum arbiter stake (1000 TOS)
+pub const MIN_ARBITER_STAKE: u64 = COIN_VALUE * 1000;
 
 // ===== ENERGY SYSTEM LIMITS =====
 // Maximum freeze records per account (self-freeze + delegation combined)

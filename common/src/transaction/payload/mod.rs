@@ -1,4 +1,5 @@
 mod agent_account;
+mod arbitration;
 mod burn;
 mod contract;
 mod energy;
@@ -13,6 +14,7 @@ mod uno_transfer;
 mod unshield_transfer;
 
 pub use agent_account::*;
+pub use arbitration::*;
 pub use burn::*;
 pub use contract::*;
 pub use energy::*;

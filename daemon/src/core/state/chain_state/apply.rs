@@ -317,6 +317,13 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError>
     ) -> Result<Option<tos_common::escrow::EscrowAccount>, BlockchainError> {
         self.inner.storage.get_escrow(escrow_id).await
     }
+
+    async fn get_arbiter(
+        &mut self,
+        arbiter: &'a CompressedPublicKey,
+    ) -> Result<Option<tos_common::arbitration::ArbiterAccount>, BlockchainError> {
+        self.inner.storage.get_arbiter(arbiter).await
+    }
 }
 
 #[async_trait]
@@ -629,6 +636,20 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for Applicable
             .storage
             .remove_pending_release(release_at, escrow_id)
             .await
+    }
+
+    async fn set_arbiter(
+        &mut self,
+        arbiter: &tos_common::arbitration::ArbiterAccount,
+    ) -> Result<(), BlockchainError> {
+        self.inner.storage.set_arbiter(arbiter).await
+    }
+
+    async fn remove_arbiter(
+        &mut self,
+        arbiter: &CompressedPublicKey,
+    ) -> Result<(), BlockchainError> {
+        self.inner.storage.remove_arbiter(arbiter).await
     }
 
     // ===== KYC System Operations =====

@@ -130,4 +130,22 @@ pub enum VerificationError<T> {
     InvalidReceiverHandle,
     #[error("Insufficient TNS fee: required {required}, provided {provided}")]
     InsufficientTnsFee { required: u64, provided: u64 },
+
+    // ===== Arbiter Registration Errors =====
+    #[error("Arbiter name length {len} exceeds max {max}")]
+    ArbiterNameLength { len: usize, max: usize },
+    #[error("Arbiter fee basis points invalid: {0}")]
+    ArbiterInvalidFee(u16),
+    #[error("Arbiter stake too low: required {required}, found {found}")]
+    ArbiterStakeTooLow { required: u64, found: u64 },
+    #[error("Arbiter escrow range invalid: min {min} > max {max}")]
+    ArbiterEscrowRangeInvalid { min: u64, max: u64 },
+    #[error("Arbiter already registered")]
+    ArbiterAlreadyRegistered,
+    #[error("Arbiter not found")]
+    ArbiterNotFound,
+    #[error("Arbiter status update not allowed")]
+    ArbiterInvalidStatus,
+    #[error("Arbiter deactivation cannot add stake")]
+    ArbiterDeactivateWithStake,
 }

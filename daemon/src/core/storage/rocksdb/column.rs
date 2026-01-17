@@ -256,6 +256,12 @@ pub enum Column {
     // {release_at (8 bytes)}{escrow_id (32 bytes)} => {escrow_id}
     EscrowPendingRelease,
 
+    // ===== Arbitration =====
+
+    // Arbiter accounts storage
+    // {arbiter_public_key (32 bytes)} => {ArbiterAccount}
+    ArbiterAccounts,
+
     // ===== TNS (TOS Name Service) =====
 
     // Name to owner mapping: name_hash -> owner_public_key

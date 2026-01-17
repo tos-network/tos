@@ -1312,4 +1312,11 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for ChainS
     ) -> Result<Option<tos_common::escrow::EscrowAccount>, BlockchainError> {
         self.storage.get_escrow(escrow_id).await
     }
+
+    async fn get_arbiter(
+        &mut self,
+        arbiter: &'a CompressedPublicKey,
+    ) -> Result<Option<tos_common::arbitration::ArbiterAccount>, BlockchainError> {
+        self.storage.get_arbiter(arbiter).await
+    }
 }

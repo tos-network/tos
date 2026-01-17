@@ -51,6 +51,7 @@ pub trait Storage:
     + EnergyProvider
     + ReferralProvider
     + EscrowProvider
+    + ArbiterProvider
     + KycProvider
     + CommitteeProvider
     + NftProvider

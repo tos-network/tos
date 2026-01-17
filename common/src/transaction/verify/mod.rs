@@ -1,4 +1,5 @@
 pub mod agent_account;
+mod arbitration;
 mod contract;
 mod error;
 pub mod escrow;
@@ -7,7 +8,7 @@ mod state;
 mod tns;
 mod zkp_cache;
 
-use std::{borrow::Cow, iter, sync::Arc};
+use std::{borrow::Cow, collections::HashMap, iter, sync::Arc};
 
 use anyhow::{anyhow, Context};
 use indexmap::IndexMap;
@@ -107,21 +108,32 @@ impl DecompressedUnshieldTransferCt {
     }
 }
 
-struct NoopArbiterRegistry;
+struct StateArbiterRegistry {
+    arbiters: HashMap<crate::crypto::PublicKey, crate::arbitration::ArbiterAccount>,
+    min_stake: u64,
+}
 
-impl escrow::ArbiterRegistry for NoopArbiterRegistry {
+impl crate::arbitration::verdict::ArbiterRegistry for StateArbiterRegistry {
     type Error = &'static str;
 
-    fn is_active(&self, _arbiter: &crate::crypto::PublicKey) -> Result<bool, Self::Error> {
-        Ok(true)
+    fn is_active(&self, arbiter: &crate::crypto::PublicKey) -> Result<bool, Self::Error> {
+        Ok(self
+            .arbiters
+            .get(arbiter)
+            .map(|entry| matches!(entry.status, crate::arbitration::ArbiterStatus::Active))
+            .unwrap_or(false))
     }
 
-    fn stake(&self, _arbiter: &crate::crypto::PublicKey) -> Result<u64, Self::Error> {
-        Ok(0)
+    fn stake(&self, arbiter: &crate::crypto::PublicKey) -> Result<u64, Self::Error> {
+        Ok(self
+            .arbiters
+            .get(arbiter)
+            .map(|entry| entry.stake_amount)
+            .unwrap_or(0))
     }
 
     fn min_stake(&self) -> Result<u64, Self::Error> {
-        Ok(0)
+        Ok(self.min_stake)
     }
 }
 
@@ -214,7 +226,9 @@ impl Transaction {
                     | TransactionType::ReleaseEscrow(_)
                     | TransactionType::RefundEscrow(_)
                     | TransactionType::ChallengeEscrow(_)
-                    | TransactionType::SubmitVerdict(_) => true,
+                    | TransactionType::SubmitVerdict(_)
+                    | TransactionType::RegisterArbiter(_)
+                    | TransactionType::UpdateArbiter(_) => true,
                 }
             }
         }
@@ -437,6 +451,18 @@ impl Transaction {
                 push_target(&payload.provider);
                 push_asset(&payload.asset);
                 add_spend(payload.amount)?;
+            }
+            TransactionType::RegisterArbiter(payload) => {
+                push_asset(&TOS_ASSET);
+                add_spend(payload.get_stake_amount())?;
+            }
+            TransactionType::UpdateArbiter(payload) => {
+                if let Some(add_stake) = payload.get_add_stake() {
+                    if add_stake > 0 {
+                        push_asset(&TOS_ASSET);
+                        add_spend(add_stake)?;
+                    }
+                }
             }
             TransactionType::MultiSig(_)
             | TransactionType::BindReferrer(_)
@@ -1333,7 +1359,23 @@ impl Transaction {
                     .and_then(|config| config.threshold)
                     .unwrap_or(1);
 
-                let registry = NoopArbiterRegistry;
+                let mut arbiters = HashMap::new();
+                for sig in &payload.signatures {
+                    if arbiters.contains_key(&sig.arbiter_pubkey) {
+                        continue;
+                    }
+                    if let Some(arbiter) = state
+                        .get_arbiter(&sig.arbiter_pubkey)
+                        .await
+                        .map_err(VerificationError::State)?
+                    {
+                        arbiters.insert(sig.arbiter_pubkey.clone(), arbiter);
+                    }
+                }
+                let registry = StateArbiterRegistry {
+                    arbiters,
+                    min_stake: crate::config::MIN_ARBITER_STAKE,
+                };
                 escrow::verify_submit_verdict(
                     payload,
                     &escrow_account,
@@ -1342,6 +1384,38 @@ impl Transaction {
                     &registry,
                 )
                 .map_err(|e| VerificationError::AnyError(anyhow!(e)))?;
+            }
+            TransactionType::RegisterArbiter(payload) => {
+                arbitration::verify_register_arbiter(payload)?;
+                if state
+                    .get_arbiter(&self.source)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .is_some()
+                {
+                    return Err(VerificationError::ArbiterAlreadyRegistered);
+                }
+            }
+            TransactionType::UpdateArbiter(payload) => {
+                arbitration::verify_update_arbiter(payload)?;
+                let existing = state
+                    .get_arbiter(&self.source)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or(VerificationError::ArbiterNotFound)?;
+
+                let min_value = payload
+                    .get_min_escrow_value()
+                    .unwrap_or(existing.min_escrow_value);
+                let max_value = payload
+                    .get_max_escrow_value()
+                    .unwrap_or(existing.max_escrow_value);
+                if min_value > max_value {
+                    return Err(VerificationError::ArbiterEscrowRangeInvalid {
+                        min: min_value,
+                        max: max_value,
+                    });
+                }
             }
         };
 
@@ -1508,6 +1582,22 @@ impl Transaction {
                 *current = current
                     .checked_add(payload.deposit)
                     .ok_or(VerificationError::Overflow)?;
+            }
+            TransactionType::RegisterArbiter(payload) => {
+                let current = spending_per_asset.entry(TOS_ASSET.clone()).or_insert(0);
+                *current = current
+                    .checked_add(payload.get_stake_amount())
+                    .ok_or(VerificationError::Overflow)?;
+            }
+            TransactionType::UpdateArbiter(payload) => {
+                if let Some(add_stake) = payload.get_add_stake() {
+                    if add_stake > 0 {
+                        let current = spending_per_asset.entry(TOS_ASSET.clone()).or_insert(0);
+                        *current = current
+                            .checked_add(add_stake)
+                            .ok_or(VerificationError::Overflow)?;
+                    }
+                }
             }
             TransactionType::ReleaseEscrow(_)
             | TransactionType::RefundEscrow(_)
@@ -2903,7 +2993,23 @@ impl Transaction {
                     .and_then(|config| config.threshold)
                     .unwrap_or(1);
 
-                let registry = NoopArbiterRegistry;
+                let mut arbiters = HashMap::new();
+                for sig in &payload.signatures {
+                    if arbiters.contains_key(&sig.arbiter_pubkey) {
+                        continue;
+                    }
+                    if let Some(arbiter) = state
+                        .get_arbiter(&sig.arbiter_pubkey)
+                        .await
+                        .map_err(VerificationError::State)?
+                    {
+                        arbiters.insert(sig.arbiter_pubkey.clone(), arbiter);
+                    }
+                }
+                let registry = StateArbiterRegistry {
+                    arbiters,
+                    min_stake: crate::config::MIN_ARBITER_STAKE,
+                };
                 escrow::verify_submit_verdict(
                     payload,
                     &escrow_account,
@@ -2912,6 +3018,12 @@ impl Transaction {
                     &registry,
                 )
                 .map_err(|e| VerificationError::AnyError(anyhow!(e)))?;
+            }
+            TransactionType::RegisterArbiter(payload) => {
+                arbitration::verify_register_arbiter(payload)?;
+            }
+            TransactionType::UpdateArbiter(payload) => {
+                arbitration::verify_update_arbiter(payload)?;
             }
         };
 
@@ -3162,6 +3274,9 @@ impl Transaction {
             | TransactionType::SubmitVerdict(_) => {
                 // Escrow transactions: verification handled in escrow module
             }
+            TransactionType::RegisterArbiter(_) | TransactionType::UpdateArbiter(_) => {
+                // Arbiter registry txs handled in arbitration module
+            }
         }
 
         // With plaintext balances, we don't need Bulletproofs range proofs
@@ -3341,6 +3456,22 @@ impl Transaction {
                 *current = current
                     .checked_add(payload.deposit)
                     .ok_or(VerificationError::Overflow)?;
+            }
+            TransactionType::RegisterArbiter(payload) => {
+                let current = spending_per_asset.entry(TOS_ASSET.clone()).or_insert(0);
+                *current = current
+                    .checked_add(payload.get_stake_amount())
+                    .ok_or(VerificationError::Overflow)?;
+            }
+            TransactionType::UpdateArbiter(payload) => {
+                if let Some(add_stake) = payload.get_add_stake() {
+                    if add_stake > 0 {
+                        let current = spending_per_asset.entry(TOS_ASSET.clone()).or_insert(0);
+                        *current = current
+                            .checked_add(add_stake)
+                            .ok_or(VerificationError::Overflow)?;
+                    }
+                }
             }
             TransactionType::ReleaseEscrow(_)
             | TransactionType::RefundEscrow(_)
@@ -3798,6 +3929,22 @@ impl Transaction {
                 *current = current
                     .checked_add(payload.deposit)
                     .ok_or(VerificationError::Overflow)?;
+            }
+            TransactionType::RegisterArbiter(payload) => {
+                let current = spending_per_asset.entry(TOS_ASSET.clone()).or_insert(0);
+                *current = current
+                    .checked_add(payload.get_stake_amount())
+                    .ok_or(VerificationError::Overflow)?;
+            }
+            TransactionType::UpdateArbiter(payload) => {
+                if let Some(add_stake) = payload.get_add_stake() {
+                    if add_stake > 0 {
+                        let current = spending_per_asset.entry(TOS_ASSET.clone()).or_insert(0);
+                        *current = current
+                            .checked_add(add_stake)
+                            .ok_or(VerificationError::Overflow)?;
+                    }
+                }
             }
             TransactionType::ReleaseEscrow(_)
             | TransactionType::RefundEscrow(_)
@@ -4274,6 +4421,88 @@ impl Transaction {
 
                 state
                     .set_escrow(&escrow)
+                    .await
+                    .map_err(VerificationError::State)?;
+            }
+            TransactionType::RegisterArbiter(payload) => {
+                let current_height = state.get_verification_topoheight();
+                let arbiter = crate::arbitration::ArbiterAccount {
+                    public_key: self.source.clone(),
+                    name: payload.get_name().to_string(),
+                    status: crate::arbitration::ArbiterStatus::Active,
+                    expertise: payload.get_expertise().to_vec(),
+                    stake_amount: payload.get_stake_amount(),
+                    fee_basis_points: payload.get_fee_basis_points(),
+                    min_escrow_value: payload.get_min_escrow_value(),
+                    max_escrow_value: payload.get_max_escrow_value(),
+                    reputation_score: 0,
+                    total_cases: 0,
+                    cases_overturned: 0,
+                    registered_at: current_height,
+                    last_active_at: current_height,
+                };
+                state
+                    .set_arbiter(&arbiter)
+                    .await
+                    .map_err(VerificationError::State)?;
+            }
+            TransactionType::UpdateArbiter(payload) => {
+                let mut arbiter = state
+                    .get_arbiter(&self.source)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or(VerificationError::ArbiterNotFound)?;
+
+                if payload.is_deactivate() {
+                    if arbiter.stake_amount > 0 {
+                        let balance = state
+                            .get_receiver_balance(
+                                Cow::Borrowed(&self.source),
+                                Cow::Borrowed(&TOS_ASSET),
+                            )
+                            .await
+                            .map_err(VerificationError::State)?;
+                        *balance = balance
+                            .checked_add(arbiter.stake_amount)
+                            .ok_or(VerificationError::Overflow)?;
+                    }
+                    state
+                        .remove_arbiter(&self.source)
+                        .await
+                        .map_err(VerificationError::State)?;
+                    return Ok(());
+                }
+
+                if let Some(name) = payload.get_name() {
+                    arbiter.name = name.to_string();
+                }
+                if let Some(expertise) = payload.get_expertise() {
+                    arbiter.expertise = expertise.to_vec();
+                }
+                if let Some(fee) = payload.get_fee_basis_points() {
+                    arbiter.fee_basis_points = fee;
+                }
+                if let Some(min_value) = payload.get_min_escrow_value() {
+                    arbiter.min_escrow_value = min_value;
+                }
+                if let Some(max_value) = payload.get_max_escrow_value() {
+                    arbiter.max_escrow_value = max_value;
+                }
+                if let Some(add_stake) = payload.get_add_stake() {
+                    if add_stake > 0 {
+                        arbiter.stake_amount = arbiter
+                            .stake_amount
+                            .checked_add(add_stake)
+                            .ok_or(VerificationError::Overflow)?;
+                    }
+                }
+                if let Some(status) = payload.get_status() {
+                    arbiter.status = status;
+                }
+                arbiter.last_active_at = state.get_verification_topoheight();
+
+                state
+                    .set_arbiter(&arbiter)
                     .await
                     .map_err(VerificationError::State)?;
             }
@@ -5881,6 +6110,22 @@ impl Transaction {
             | TransactionType::RefundEscrow(_)
             | TransactionType::SubmitVerdict(_) => {
                 // Escrow releases/refunds/verdicts move funds from escrow, not sender balance
+            }
+            TransactionType::RegisterArbiter(payload) => {
+                let current = spending_per_asset.entry(TOS_ASSET.clone()).or_insert(0);
+                *current = current
+                    .checked_add(payload.get_stake_amount())
+                    .ok_or(VerificationError::Overflow)?;
+            }
+            TransactionType::UpdateArbiter(payload) => {
+                if let Some(add_stake) = payload.get_add_stake() {
+                    if add_stake > 0 {
+                        let current = spending_per_asset.entry(TOS_ASSET.clone()).or_insert(0);
+                        *current = current
+                            .checked_add(add_stake)
+                            .ok_or(VerificationError::Overflow)?;
+                    }
+                }
             }
         };
 

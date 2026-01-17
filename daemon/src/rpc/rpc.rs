@@ -2499,6 +2499,9 @@ async fn get_account_history<S: Storage>(
                 | TransactionType::SubmitVerdict(_) => {
                     // Escrow transactions are not included in account history yet
                 }
+                TransactionType::RegisterArbiter(_) | TransactionType::UpdateArbiter(_) => {
+                    // Arbiter registry updates are not included in account history yet
+                }
             }
         }
 

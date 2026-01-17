@@ -89,6 +89,10 @@ pub enum TransactionType {
     ChallengeEscrow(ChallengeEscrowPayload),
     /// A2A escrow: submit arbitration verdict
     SubmitVerdict(SubmitVerdictPayload),
+    /// Arbitration: register arbiter
+    RegisterArbiter(RegisterArbiterPayload),
+    /// Arbitration: update arbiter
+    UpdateArbiter(UpdateArbiterPayload),
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -592,6 +596,14 @@ impl Serializer for TransactionType {
                 writer.write_u8(29);
                 payload.write(writer);
             }
+            TransactionType::RegisterArbiter(payload) => {
+                writer.write_u8(33);
+                payload.write(writer);
+            }
+            TransactionType::UpdateArbiter(payload) => {
+                writer.write_u8(34);
+                payload.write(writer);
+            }
             TransactionType::UnoTransfers(transfers) => {
                 writer.write_u8(18);
                 let len: u16 = transfers.len() as u16;
@@ -668,6 +680,8 @@ impl Serializer for TransactionType {
             27 => TransactionType::RefundEscrow(RefundEscrowPayload::read(reader)?),
             28 => TransactionType::ChallengeEscrow(ChallengeEscrowPayload::read(reader)?),
             29 => TransactionType::SubmitVerdict(SubmitVerdictPayload::read(reader)?),
+            33 => TransactionType::RegisterArbiter(RegisterArbiterPayload::read(reader)?),
+            34 => TransactionType::UpdateArbiter(UpdateArbiterPayload::read(reader)?),
             18 => {
                 let txs_count = reader.read_u16()?;
                 if txs_count == 0 || txs_count as usize > MAX_TRANSFER_COUNT {
@@ -744,6 +758,8 @@ impl Serializer for TransactionType {
             TransactionType::RefundEscrow(payload) => payload.size(),
             TransactionType::ChallengeEscrow(payload) => payload.size(),
             TransactionType::SubmitVerdict(payload) => payload.size(),
+            TransactionType::RegisterArbiter(payload) => payload.size(),
+            TransactionType::UpdateArbiter(payload) => payload.size(),
             TransactionType::UnoTransfers(txs) => {
                 // 2 bytes for count of transfers (u16)
                 let mut size = 2;

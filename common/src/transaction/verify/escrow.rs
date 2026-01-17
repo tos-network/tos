@@ -1,13 +1,15 @@
-use std::collections::HashSet;
-
 use thiserror::Error;
 
 use crate::{
-    crypto::{Hash, PublicKey},
+    arbitration::verdict::{
+        derive_dispute_outcome, verify_verdict_signatures, ArbiterRegistry, VerdictArtifact,
+        VerdictVerificationError,
+    },
+    crypto::PublicKey,
     escrow::{EscrowAccount, EscrowState},
     transaction::payload::{
-        ArbiterSignature, ChallengeEscrowPayload, CreateEscrowPayload, DepositEscrowPayload,
-        RefundEscrowPayload, ReleaseEscrowPayload, SubmitVerdictPayload,
+        ChallengeEscrowPayload, CreateEscrowPayload, DepositEscrowPayload, RefundEscrowPayload,
+        ReleaseEscrowPayload, SubmitVerdictPayload,
     },
 };
 
@@ -54,14 +56,6 @@ pub enum EscrowVerificationError {
     InvalidReasonLength,
     #[error("insufficient escrow balance: required {required}, available {available}")]
     InsufficientEscrowBalance { required: u64, available: u64 },
-}
-
-pub trait ArbiterRegistry {
-    type Error: std::fmt::Display;
-
-    fn is_active(&self, arbiter: &PublicKey) -> Result<bool, Self::Error>;
-    fn stake(&self, arbiter: &PublicKey) -> Result<u64, Self::Error>;
-    fn min_stake(&self) -> Result<u64, Self::Error>;
 }
 
 /// Verify create escrow payload (stateless).
@@ -256,52 +250,20 @@ pub fn verify_submit_verdict<R: ArbiterRegistry>(
         return Err(EscrowVerificationError::InvalidVerdictAmounts);
     }
 
-    let message = build_verdict_message(
+    let outcome = derive_dispute_outcome(payload.payer_amount, payload.payee_amount);
+    let artifact = VerdictArtifact {
         chain_id,
-        &payload.escrow_id,
-        &payload.dispute_id,
-        payload.round,
-        payload.payer_amount,
-        payload.payee_amount,
-    );
+        escrow_id: payload.escrow_id.clone(),
+        dispute_id: payload.dispute_id.clone(),
+        round: payload.round,
+        outcome,
+        payer_amount: payload.payer_amount,
+        payee_amount: payload.payee_amount,
+        signatures: payload.signatures.clone(),
+    };
 
-    let min_stake = registry
-        .min_stake()
-        .map_err(|e| EscrowVerificationError::Registry(e.to_string()))?;
-
-    let mut seen = HashSet::new();
-    let mut valid = 0u8;
-
-    for sig in &payload.signatures {
-        if !seen.insert(sig.arbiter_pubkey.clone()) {
-            continue;
-        }
-        let is_active = registry
-            .is_active(&sig.arbiter_pubkey)
-            .map_err(|e| EscrowVerificationError::Registry(e.to_string()))?;
-        if !is_active {
-            return Err(EscrowVerificationError::ArbiterNotActive);
-        }
-        let stake = registry
-            .stake(&sig.arbiter_pubkey)
-            .map_err(|e| EscrowVerificationError::Registry(e.to_string()))?;
-        if stake < min_stake {
-            return Err(EscrowVerificationError::ArbiterStakeTooLow {
-                required: min_stake,
-                found: stake,
-            });
-        }
-        verify_arbiter_signature(&message, sig)?;
-        valid = valid.saturating_add(1);
-    }
-
-    if valid < required_threshold {
-        return Err(EscrowVerificationError::ThresholdNotMet {
-            required: required_threshold,
-            found: valid,
-        });
-    }
-
+    verify_verdict_signatures(&artifact, required_threshold, registry)
+        .map_err(map_verdict_error)?;
     Ok(())
 }
 
@@ -328,44 +290,33 @@ pub fn verify_submit_verdict_with_balance<R: ArbiterRegistry>(
     Ok(())
 }
 
-fn verify_arbiter_signature(
-    message: &[u8],
-    sig: &ArbiterSignature,
-) -> Result<(), EscrowVerificationError> {
-    let public = sig
-        .arbiter_pubkey
-        .decompress()
-        .map_err(|_| EscrowVerificationError::InvalidSignature)?;
-    if !sig.signature.verify(message, &public) {
-        return Err(EscrowVerificationError::InvalidSignature);
+fn map_verdict_error(err: VerdictVerificationError) -> EscrowVerificationError {
+    match err {
+        VerdictVerificationError::InvalidVerdictAmounts
+        | VerdictVerificationError::InvalidOutcome => {
+            EscrowVerificationError::InvalidVerdictAmounts
+        }
+        VerdictVerificationError::ThresholdNotMet { required, found } => {
+            EscrowVerificationError::ThresholdNotMet { required, found }
+        }
+        VerdictVerificationError::InvalidSignature => EscrowVerificationError::InvalidSignature,
+        VerdictVerificationError::ArbiterNotActive => EscrowVerificationError::ArbiterNotActive,
+        VerdictVerificationError::ArbiterStakeTooLow { required, found } => {
+            EscrowVerificationError::ArbiterStakeTooLow { required, found }
+        }
+        VerdictVerificationError::Registry(message) => EscrowVerificationError::Registry(message),
     }
-    Ok(())
-}
-
-fn build_verdict_message(
-    chain_id: u64,
-    escrow_id: &Hash,
-    dispute_id: &Hash,
-    round: u32,
-    payer_amount: u64,
-    payee_amount: u64,
-) -> Vec<u8> {
-    let mut message = Vec::new();
-    message.extend_from_slice(b"TOS_VERDICT_V1");
-    message.extend_from_slice(&chain_id.to_le_bytes());
-    message.extend_from_slice(escrow_id.as_bytes());
-    message.extend_from_slice(dispute_id.as_bytes());
-    message.extend_from_slice(&round.to_le_bytes());
-    message.extend_from_slice(&payer_amount.to_le_bytes());
-    message.extend_from_slice(&payee_amount.to_le_bytes());
-    message
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::arbitration::verdict::{build_verdict_message, DisputeOutcome};
     use crate::crypto::elgamal::KeyPair;
+    use crate::crypto::Hash;
     use crate::serializer::Serializer;
+    use crate::transaction::ArbiterSignature;
+    use std::collections::HashSet;
 
     struct TestRegistry {
         active: HashSet<PublicKey>,
@@ -491,7 +442,15 @@ mod tests {
         let escrow = sample_escrow(EscrowState::Challenged)?;
         let keypair = KeyPair::new();
         let arbiter_pubkey = keypair.get_public_key().compress();
-        let message = build_verdict_message(1, &escrow.id, &Hash::max(), 0, 50, 50);
+        let message = build_verdict_message(
+            1,
+            &escrow.id,
+            &Hash::max(),
+            0,
+            DisputeOutcome::Split,
+            50,
+            50,
+        );
         let signature = keypair.sign(&message);
 
         let payload = SubmitVerdictPayload {
@@ -524,7 +483,15 @@ mod tests {
         let escrow = sample_escrow(EscrowState::Challenged)?;
         let keypair = KeyPair::new();
         let arbiter_pubkey = keypair.get_public_key().compress();
-        let message = build_verdict_message(1, &escrow.id, &Hash::max(), 0, 50, 50);
+        let message = build_verdict_message(
+            1,
+            &escrow.id,
+            &Hash::max(),
+            0,
+            DisputeOutcome::Split,
+            50,
+            50,
+        );
         let signature = keypair.sign(&message);
 
         let payload = SubmitVerdictPayload {
@@ -559,7 +526,15 @@ mod tests {
         let escrow = sample_escrow(EscrowState::Challenged)?;
         let keypair = KeyPair::new();
         let arbiter_pubkey = keypair.get_public_key().compress();
-        let message = build_verdict_message(1, &escrow.id, &Hash::max(), 0, 50, 50);
+        let message = build_verdict_message(
+            1,
+            &escrow.id,
+            &Hash::max(),
+            0,
+            DisputeOutcome::Split,
+            50,
+            50,
+        );
         let signature = keypair.sign(&message);
 
         let payload = SubmitVerdictPayload {
@@ -599,7 +574,15 @@ mod tests {
         let escrow = sample_escrow(EscrowState::Challenged)?;
         let keypair = KeyPair::new();
         let arbiter_pubkey = keypair.get_public_key().compress();
-        let message = build_verdict_message(1, &escrow.id, &Hash::max(), 0, 50, 50);
+        let message = build_verdict_message(
+            1,
+            &escrow.id,
+            &Hash::max(),
+            0,
+            DisputeOutcome::Split,
+            50,
+            50,
+        );
         let signature = keypair.sign(&message);
 
         let payload = SubmitVerdictPayload {
@@ -674,7 +657,15 @@ mod tests {
         let escrow = sample_escrow(EscrowState::Challenged)?;
         let keypair = KeyPair::new();
         let arbiter_pubkey = keypair.get_public_key().compress();
-        let message = build_verdict_message(1, &escrow.id, &Hash::max(), 0, 50, 50);
+        let message = build_verdict_message(
+            1,
+            &escrow.id,
+            &Hash::max(),
+            0,
+            DisputeOutcome::Split,
+            50,
+            50,
+        );
         let signature = keypair.sign(&message);
 
         let payload = SubmitVerdictPayload {

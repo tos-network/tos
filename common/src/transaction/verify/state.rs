@@ -2,6 +2,7 @@ use std::{borrow::Cow, collections::HashMap};
 
 use crate::{
     account::{AgentAccountMeta, Nonce, SessionKey},
+    arbitration::ArbiterAccount,
     block::{Block, BlockVersion},
     contract::{
         AssetChanges, ChainState, ContractCache, ContractEventTracker, ContractOutput,
@@ -165,6 +166,14 @@ pub trait BlockchainVerificationState<'a, E> {
         &mut self,
         _escrow_id: &Hash,
     ) -> Result<Option<crate::escrow::EscrowAccount>, E> {
+        Ok(None)
+    }
+
+    /// Get an arbiter account by public key
+    async fn get_arbiter(
+        &mut self,
+        _arbiter: &'a CompressedPublicKey,
+    ) -> Result<Option<ArbiterAccount>, E> {
         Ok(None)
     }
 
@@ -370,6 +379,14 @@ pub trait BlockchainApplyState<'a, P: ContractProvider, E>:
 
     /// Remove a pending release index entry
     async fn remove_pending_release(&mut self, release_at: u64, escrow_id: &Hash) -> Result<(), E>;
+
+    // ===== Arbiter Apply Methods =====
+
+    /// Store/update an arbiter account
+    async fn set_arbiter(&mut self, arbiter: &ArbiterAccount) -> Result<(), E>;
+
+    /// Remove an arbiter account
+    async fn remove_arbiter(&mut self, arbiter: &CompressedPublicKey) -> Result<(), E>;
 
     // ===== KYC System Operations =====
 
