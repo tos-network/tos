@@ -52,6 +52,8 @@ pub enum EscrowVerificationError {
     Registry(String),
     #[error("invalid reason length")]
     InvalidReasonLength,
+    #[error("insufficient escrow balance: required {required}, available {available}")]
+    InsufficientEscrowBalance { required: u64, available: u64 },
 }
 
 pub trait ArbiterRegistry {
@@ -114,6 +116,23 @@ pub fn verify_release_escrow(
     Ok(())
 }
 
+/// Verify release escrow payload (stateful, includes escrow balance).
+pub fn verify_release_escrow_with_balance(
+    payload: &ReleaseEscrowPayload,
+    escrow: &EscrowAccount,
+    caller: &PublicKey,
+    escrow_balance: u64,
+) -> Result<(), EscrowVerificationError> {
+    verify_release_escrow(payload, escrow, caller)?;
+    if escrow_balance < payload.amount {
+        return Err(EscrowVerificationError::InsufficientEscrowBalance {
+            required: payload.amount,
+            available: escrow_balance,
+        });
+    }
+    Ok(())
+}
+
 /// Verify refund escrow payload (read-only).
 pub fn verify_refund_escrow(
     payload: &RefundEscrowPayload,
@@ -157,6 +176,24 @@ pub fn verify_refund_escrow(
         return Err(EscrowVerificationError::InvalidState);
     }
 
+    Ok(())
+}
+
+/// Verify refund escrow payload (stateful, includes escrow balance).
+pub fn verify_refund_escrow_with_balance(
+    payload: &RefundEscrowPayload,
+    escrow: &EscrowAccount,
+    caller: &PublicKey,
+    current_height: u64,
+    escrow_balance: u64,
+) -> Result<(), EscrowVerificationError> {
+    verify_refund_escrow(payload, escrow, caller, current_height)?;
+    if escrow_balance < payload.amount {
+        return Err(EscrowVerificationError::InsufficientEscrowBalance {
+            required: payload.amount,
+            available: escrow_balance,
+        });
+    }
     Ok(())
 }
 
@@ -265,6 +302,29 @@ pub fn verify_submit_verdict<R: ArbiterRegistry>(
         });
     }
 
+    Ok(())
+}
+
+/// Verify submit verdict payload (stateful, includes escrow balance).
+pub fn verify_submit_verdict_with_balance<R: ArbiterRegistry>(
+    payload: &SubmitVerdictPayload,
+    escrow: &EscrowAccount,
+    chain_id: u64,
+    required_threshold: u8,
+    registry: &R,
+    escrow_balance: u64,
+) -> Result<(), EscrowVerificationError> {
+    verify_submit_verdict(payload, escrow, chain_id, required_threshold, registry)?;
+    let total = payload
+        .payer_amount
+        .checked_add(payload.payee_amount)
+        .ok_or(EscrowVerificationError::InvalidVerdictAmounts)?;
+    if escrow_balance < total {
+        return Err(EscrowVerificationError::InsufficientEscrowBalance {
+            required: total,
+            available: escrow_balance,
+        });
+    }
     Ok(())
 }
 
@@ -453,6 +513,196 @@ mod tests {
         };
 
         verify_submit_verdict(&payload, &escrow, 1, 1, &registry)?;
+        Ok(())
+    }
+
+    #[test]
+    fn submit_verdict_rejects_inactive_arbiter() -> Result<(), Box<dyn std::error::Error>> {
+        let escrow = sample_escrow(EscrowState::Challenged)?;
+        let keypair = KeyPair::new();
+        let arbiter_pubkey = keypair.get_public_key().compress();
+        let message = build_verdict_message(1, &escrow.id, &Hash::max(), 0, 50, 50);
+        let signature = keypair.sign(&message);
+
+        let payload = SubmitVerdictPayload {
+            escrow_id: escrow.id.clone(),
+            dispute_id: Hash::max(),
+            round: 0,
+            payer_amount: 50,
+            payee_amount: 50,
+            signatures: vec![ArbiterSignature {
+                arbiter_pubkey,
+                signature,
+                timestamp: 1,
+            }],
+        };
+
+        let registry = TestRegistry {
+            active: HashSet::new(),
+            stake: 1000,
+            min_stake: 1,
+        };
+
+        let err = match verify_submit_verdict(&payload, &escrow, 1, 1, &registry) {
+            Ok(_) => return Err("expected error".into()),
+            Err(err) => err,
+        };
+        assert!(matches!(err, EscrowVerificationError::ArbiterNotActive));
+        Ok(())
+    }
+
+    #[test]
+    fn submit_verdict_rejects_low_stake() -> Result<(), Box<dyn std::error::Error>> {
+        let escrow = sample_escrow(EscrowState::Challenged)?;
+        let keypair = KeyPair::new();
+        let arbiter_pubkey = keypair.get_public_key().compress();
+        let message = build_verdict_message(1, &escrow.id, &Hash::max(), 0, 50, 50);
+        let signature = keypair.sign(&message);
+
+        let payload = SubmitVerdictPayload {
+            escrow_id: escrow.id.clone(),
+            dispute_id: Hash::max(),
+            round: 0,
+            payer_amount: 50,
+            payee_amount: 50,
+            signatures: vec![ArbiterSignature {
+                arbiter_pubkey: arbiter_pubkey.clone(),
+                signature,
+                timestamp: 1,
+            }],
+        };
+
+        let mut active = HashSet::new();
+        active.insert(arbiter_pubkey);
+        let registry = TestRegistry {
+            active,
+            stake: 1,
+            min_stake: 10,
+        };
+
+        let err = match verify_submit_verdict(&payload, &escrow, 1, 1, &registry) {
+            Ok(_) => return Err("expected error".into()),
+            Err(err) => err,
+        };
+        assert!(matches!(
+            err,
+            EscrowVerificationError::ArbiterStakeTooLow { .. }
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn submit_verdict_rejects_bad_signature() -> Result<(), Box<dyn std::error::Error>> {
+        let escrow = sample_escrow(EscrowState::Challenged)?;
+        let keypair = KeyPair::new();
+        let arbiter_pubkey = keypair.get_public_key().compress();
+        let message = build_verdict_message(1, &escrow.id, &Hash::max(), 0, 50, 50);
+        let signature = keypair.sign(&message);
+
+        let payload = SubmitVerdictPayload {
+            escrow_id: escrow.id.clone(),
+            dispute_id: Hash::max(),
+            round: 1,
+            payer_amount: 50,
+            payee_amount: 50,
+            signatures: vec![ArbiterSignature {
+                arbiter_pubkey: arbiter_pubkey.clone(),
+                signature,
+                timestamp: 1,
+            }],
+        };
+
+        let mut active = HashSet::new();
+        active.insert(arbiter_pubkey);
+        let registry = TestRegistry {
+            active,
+            stake: 1000,
+            min_stake: 1,
+        };
+
+        let err = match verify_submit_verdict(&payload, &escrow, 1, 1, &registry) {
+            Ok(_) => return Err("expected error".into()),
+            Err(err) => err,
+        };
+        assert!(matches!(err, EscrowVerificationError::InvalidSignature));
+        Ok(())
+    }
+
+    #[test]
+    fn release_rejects_insufficient_balance() -> Result<(), Box<dyn std::error::Error>> {
+        let escrow = sample_escrow(EscrowState::Funded)?;
+        let payload = ReleaseEscrowPayload {
+            escrow_id: escrow.id.clone(),
+            amount: 50,
+            completion_proof: None,
+        };
+        let err = match verify_release_escrow_with_balance(&payload, &escrow, &escrow.payee, 10) {
+            Ok(_) => return Err("expected error".into()),
+            Err(err) => err,
+        };
+        assert!(matches!(
+            err,
+            EscrowVerificationError::InsufficientEscrowBalance { .. }
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn refund_rejects_insufficient_balance() -> Result<(), Box<dyn std::error::Error>> {
+        let escrow = sample_escrow(EscrowState::Funded)?;
+        let payload = RefundEscrowPayload {
+            escrow_id: escrow.id.clone(),
+            amount: 50,
+            reason: None,
+        };
+        let err = match verify_refund_escrow_with_balance(&payload, &escrow, &escrow.payer, 5, 10) {
+            Ok(_) => return Err("expected error".into()),
+            Err(err) => err,
+        };
+        assert!(matches!(
+            err,
+            EscrowVerificationError::InsufficientEscrowBalance { .. }
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn verdict_rejects_insufficient_balance() -> Result<(), Box<dyn std::error::Error>> {
+        let escrow = sample_escrow(EscrowState::Challenged)?;
+        let keypair = KeyPair::new();
+        let arbiter_pubkey = keypair.get_public_key().compress();
+        let message = build_verdict_message(1, &escrow.id, &Hash::max(), 0, 50, 50);
+        let signature = keypair.sign(&message);
+
+        let payload = SubmitVerdictPayload {
+            escrow_id: escrow.id.clone(),
+            dispute_id: Hash::max(),
+            round: 0,
+            payer_amount: 50,
+            payee_amount: 50,
+            signatures: vec![ArbiterSignature {
+                arbiter_pubkey: arbiter_pubkey.clone(),
+                signature,
+                timestamp: 1,
+            }],
+        };
+
+        let mut active = HashSet::new();
+        active.insert(arbiter_pubkey);
+        let registry = TestRegistry {
+            active,
+            stake: 1000,
+            min_stake: 1,
+        };
+
+        let err = match verify_submit_verdict_with_balance(&payload, &escrow, 1, 1, &registry, 10) {
+            Ok(_) => return Err("expected error".into()),
+            Err(err) => err,
+        };
+        assert!(matches!(
+            err,
+            EscrowVerificationError::InsufficientEscrowBalance { .. }
+        ));
         Ok(())
     }
 }
