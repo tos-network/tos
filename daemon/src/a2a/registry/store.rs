@@ -1,4 +1,6 @@
-use std::{collections::HashSet, fs, path::Path, sync::Arc};
+use std::fs;
+use std::path::Path;
+use std::sync::Arc;
 
 use rocksdb::{IteratorMode, Options, WriteBatch, DB};
 use serde::de::DeserializeOwned;
@@ -6,18 +8,23 @@ use serde::Serialize;
 
 use tos_common::crypto::{Hash, PublicKey};
 
+use super::cache::{extract_skill_ids, RegistryCache};
+use super::snapshot::RegistrySnapshot;
 use super::{RegisteredAgent, RegistryError};
 
 const AGENT_PREFIX: &[u8] = b"agent:";
 const SKILL_PREFIX: &[u8] = b"skill:";
 const ACCOUNT_PREFIX: &[u8] = b"account:";
 
-#[derive(Clone)]
-pub(super) struct A2ARegistryStore {
-    db: Arc<DB>,
+pub struct RegistryStore {
+    db: Option<Arc<DB>>,
+    cache: RegistryCache,
+    snapshot: Option<RegistrySnapshot>,
+    #[cfg(test)]
+    fail_commit: bool,
 }
 
-impl A2ARegistryStore {
+impl RegistryStore {
     pub fn open(path: &Path) -> Result<Self, RegistryError> {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).map_err(|e| RegistryError::Storage(e.to_string()))?;
@@ -29,263 +36,242 @@ impl A2ARegistryStore {
         opts.create_if_missing(true);
 
         let db = DB::open(&opts, path).map_err(|e| RegistryError::Storage(e.to_string()))?;
-        Ok(Self { db: Arc::new(db) })
+        let db = Arc::new(db);
+        let cache = Self::load_cache_from_rocksdb(&db)?;
+
+        Ok(Self {
+            db: Some(db),
+            cache,
+            snapshot: None,
+            #[cfg(test)]
+            fail_commit: false,
+        })
     }
 
-    pub fn save_agent(&self, agent: &RegisteredAgent) -> Result<(), RegistryError> {
-        let key = agent_key(&agent.agent_id);
-        let bytes = to_json(agent)?;
-        self.db
-            .put(key, bytes)
-            .map_err(|e| RegistryError::Storage(e.to_string()))?;
+    pub fn in_memory() -> Self {
+        Self {
+            db: None,
+            cache: RegistryCache::new(),
+            snapshot: None,
+            #[cfg(test)]
+            fail_commit: false,
+        }
+    }
+
+    pub fn cache(&self) -> &RegistryCache {
+        self.snapshot
+            .as_ref()
+            .map(|snapshot| &snapshot.cache)
+            .unwrap_or(&self.cache)
+    }
+
+    fn cache_mut(&mut self) -> &mut RegistryCache {
+        self.snapshot
+            .as_mut()
+            .map(|snapshot| &mut snapshot.cache)
+            .unwrap_or(&mut self.cache)
+    }
+
+    pub fn has_snapshot(&self) -> bool {
+        self.snapshot.is_some()
+    }
+
+    pub fn start_snapshot(&mut self) -> Result<(), RegistryError> {
+        if self.snapshot.is_some() {
+            return Err(RegistryError::SnapshotAlreadyActive);
+        }
+        self.snapshot = Some(RegistrySnapshot::new(self.cache.clone_mut()));
         Ok(())
     }
 
-    pub fn save_agent_with_indexes(
-        &self,
-        agent: &RegisteredAgent,
-        skill_ids: &[String],
-    ) -> Result<(), RegistryError> {
-        let mut batch = WriteBatch::default();
-        let key = agent_key(&agent.agent_id);
-        let bytes = to_json(agent)?;
-        batch.put(key, bytes);
+    pub fn end_snapshot(&mut self, apply: bool) -> Result<(), RegistryError> {
+        if self.snapshot.is_none() {
+            return Err(RegistryError::SnapshotNotActive);
+        }
 
-        let id_hex = agent.agent_id.to_hex();
-        for skill in skill_ids {
-            let key = skill_key(skill);
-            let mut agents = self.load_skill_agents(&key)?;
-            if !agents.iter().any(|id| id == &id_hex) {
-                agents.push(id_hex.clone());
-                agents.sort();
+        if apply {
+            self.apply_snapshot_to_disk()?;
+            // Safe: we already verified snapshot.is_some() at function start
+            if let Some(snapshot) = self.snapshot.take() {
+                self.cache = snapshot.cache;
             }
-            let bytes = to_json(&agents)?;
-            batch.put(key, bytes);
+        } else {
+            self.snapshot.take();
         }
 
-        if let Some(account) = agent.agent_account.as_ref() {
-            let key = account_key(account);
-            let bytes = to_json(&id_hex)?;
-            batch.put(key, bytes);
-        }
-
-        self.db
-            .write(batch)
-            .map_err(|e| RegistryError::Storage(e.to_string()))?;
         Ok(())
     }
 
-    pub fn remove_agent(&self, agent_id: &Hash) -> Result<(), RegistryError> {
-        let key = agent_key(agent_id);
-        self.db
-            .delete(key)
-            .map_err(|e| RegistryError::Storage(e.to_string()))?;
+    pub fn insert_agent(&mut self, agent: RegisteredAgent) -> Result<(), RegistryError> {
+        let snapshot = self
+            .snapshot
+            .as_mut()
+            .ok_or(RegistryError::SnapshotNotActive)?;
+
+        snapshot.deleted_agents.remove(&agent.agent_id);
+        snapshot.dirty_agents.insert(agent.agent_id.clone());
+        mark_dirty_sets(snapshot, None, Some(&agent));
+
+        self.cache_mut().insert_agent(agent);
         Ok(())
     }
 
-    pub fn remove_agent_with_indexes(
-        &self,
-        agent: &RegisteredAgent,
-        skill_ids: &[String],
-    ) -> Result<(), RegistryError> {
-        let mut batch = WriteBatch::default();
-        let key = agent_key(&agent.agent_id);
-        batch.delete(key);
-
-        let id_hex = agent.agent_id.to_hex();
-        for skill in skill_ids {
-            let key = skill_key(skill);
-            let mut agents = self.load_skill_agents(&key)?;
-            let original_len = agents.len();
-            agents.retain(|id| id != &id_hex);
-            if agents.is_empty() {
-                batch.delete(key);
-            } else if agents.len() != original_len {
-                let bytes = to_json(&agents)?;
-                batch.put(key, bytes);
-            }
-        }
-
-        if let Some(account) = agent.agent_account.as_ref() {
-            let key = account_key(account);
-            batch.delete(key);
-        }
-
-        self.db
-            .write(batch)
-            .map_err(|e| RegistryError::Storage(e.to_string()))?;
-        Ok(())
-    }
-
-    pub fn update_agent_with_indexes(
-        &self,
+    pub fn update_agent(
+        &mut self,
         existing: &RegisteredAgent,
-        updated: &RegisteredAgent,
-        existing_skills: &[String],
-        updated_skills: &[String],
+        updated: RegisteredAgent,
     ) -> Result<(), RegistryError> {
-        let mut batch = WriteBatch::default();
-        let key = agent_key(&updated.agent_id);
-        let bytes = to_json(updated)?;
-        batch.put(key, bytes);
+        let snapshot = self
+            .snapshot
+            .as_mut()
+            .ok_or(RegistryError::SnapshotNotActive)?;
 
-        let existing_set: HashSet<String> = existing_skills.iter().cloned().collect();
-        let updated_set: HashSet<String> = updated_skills.iter().cloned().collect();
-        let mut union: HashSet<String> = existing_set.union(&updated_set).cloned().collect();
+        snapshot.deleted_agents.remove(&existing.agent_id);
+        snapshot.dirty_agents.insert(existing.agent_id.clone());
+        mark_dirty_sets(snapshot, Some(existing), Some(&updated));
 
-        let id_hex = updated.agent_id.to_hex();
-        for skill in union.drain() {
-            let key = skill_key(&skill);
-            let mut agents = self.load_skill_agents(&key)?;
-            let original_len = agents.len();
-
-            if existing_set.contains(&skill) && !updated_set.contains(&skill) {
-                agents.retain(|id| id != &id_hex);
-            } else if updated_set.contains(&skill) && !agents.iter().any(|id| id == &id_hex) {
-                agents.push(id_hex.clone());
-                agents.sort();
-            }
-
-            if agents.is_empty() {
-                batch.delete(key);
-            } else if agents.len() != original_len {
-                let bytes = to_json(&agents)?;
-                batch.put(key, bytes);
-            }
-        }
-
-        let existing_account = existing.agent_account.as_ref();
-        let updated_account = updated.agent_account.as_ref();
-        match (existing_account, updated_account) {
-            (Some(old), Some(new)) if old != new => {
-                batch.delete(account_key(old));
-                let bytes = to_json(&id_hex)?;
-                batch.put(account_key(new), bytes);
-            }
-            (Some(account), Some(_)) => {
-                let bytes = to_json(&id_hex)?;
-                batch.put(account_key(account), bytes);
-            }
-            (Some(account), None) => {
-                batch.delete(account_key(account));
-            }
-            (None, Some(account)) => {
-                let bytes = to_json(&id_hex)?;
-                batch.put(account_key(account), bytes);
-            }
-            (None, None) => {}
-        }
-
-        self.db
-            .write(batch)
-            .map_err(|e| RegistryError::Storage(e.to_string()))?;
+        self.cache_mut().update_agent(existing, updated);
         Ok(())
     }
 
-    pub fn load_agents(&self) -> Result<Vec<RegisteredAgent>, RegistryError> {
-        let mut agents = Vec::new();
-        let iter = self.db.iterator(IteratorMode::Start);
+    pub fn remove_agent(
+        &mut self,
+        agent_id: &Hash,
+    ) -> Result<Option<RegisteredAgent>, RegistryError> {
+        // Check snapshot exists before any mutation
+        if self.snapshot.is_none() {
+            return Err(RegistryError::SnapshotNotActive);
+        }
+
+        let removed = self.cache_mut().remove_agent(agent_id);
+
+        // Safe: we already verified snapshot.is_some() at function start
+        if let (Some(snapshot), Some(ref agent)) = (self.snapshot.as_mut(), &removed) {
+            snapshot.dirty_agents.remove(agent_id);
+            snapshot.deleted_agents.insert(agent_id.clone());
+            mark_dirty_sets(snapshot, Some(agent), None);
+        }
+
+        Ok(removed)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.cache.agents.is_empty()
+    }
+
+    fn apply_snapshot_to_disk(&mut self) -> Result<(), RegistryError> {
+        let snapshot = self
+            .snapshot
+            .as_mut()
+            .ok_or(RegistryError::SnapshotNotActive)?;
+
+        #[cfg(test)]
+        if self.fail_commit {
+            return Err(RegistryError::Storage("forced commit failure".to_string()));
+        }
+
+        let Some(db) = self.db.as_ref() else {
+            return Ok(());
+        };
+
+        if snapshot.has_pending_writes() {
+            let batch = rebuild_snapshot_batch(snapshot)?;
+            if !batch.is_empty() {
+                db.write(batch)
+                    .map_err(|e| RegistryError::Storage(e.to_string()))?;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn load_cache_from_rocksdb(db: &Arc<DB>) -> Result<RegistryCache, RegistryError> {
+        let mut cache = RegistryCache::new();
+        let iter = db.iterator(IteratorMode::Start);
         for item in iter {
             let (key, value) = item.map_err(|e| RegistryError::Storage(e.to_string()))?;
             if !key.starts_with(AGENT_PREFIX) {
                 continue;
             }
             let agent: RegisteredAgent = from_json(&value)?;
-            agents.push(agent);
+            cache.insert_agent(agent);
         }
-        Ok(agents)
+        Ok(cache)
     }
 
-    pub fn add_agent_to_skill(&self, agent_id: &Hash, skill_id: &str) -> Result<(), RegistryError> {
-        let key = skill_key(skill_id);
-        let mut agents = self.load_skill_agents(&key)?;
-        let id_hex = agent_id.to_hex();
-        if !agents.iter().any(|id| id == &id_hex) {
-            agents.push(id_hex);
-            agents.sort();
+    #[cfg(test)]
+    pub fn set_fail_commit(&mut self, fail: bool) {
+        self.fail_commit = fail;
+    }
+}
+
+fn mark_dirty_sets(
+    snapshot: &mut RegistrySnapshot,
+    existing: Option<&RegisteredAgent>,
+    updated: Option<&RegisteredAgent>,
+) {
+    if let Some(agent) = existing {
+        for skill in extract_skill_ids(&agent.agent_card) {
+            snapshot.dirty_skills.insert(skill);
         }
-        let bytes = to_json(&agents)?;
-        self.db
-            .put(key, bytes)
-            .map_err(|e| RegistryError::Storage(e.to_string()))?;
-        Ok(())
+        if let Some(ref account) = agent.agent_account {
+            snapshot.dirty_accounts.insert(account.clone());
+        }
     }
 
-    pub fn remove_agent_from_skill(
-        &self,
-        agent_id: &Hash,
-        skill_id: &str,
-    ) -> Result<(), RegistryError> {
-        let key = skill_key(skill_id);
-        let mut agents = self.load_skill_agents(&key)?;
-        let id_hex = agent_id.to_hex();
-        let original_len = agents.len();
-        agents.retain(|id| id != &id_hex);
-        if agents.is_empty() {
-            self.db
-                .delete(key)
-                .map_err(|e| RegistryError::Storage(e.to_string()))?;
-            return Ok(());
+    if let Some(agent) = updated {
+        for skill in extract_skill_ids(&agent.agent_card) {
+            snapshot.dirty_skills.insert(skill);
         }
-        if agents.len() != original_len {
-            let bytes = to_json(&agents)?;
-            self.db
-                .put(key, bytes)
-                .map_err(|e| RegistryError::Storage(e.to_string()))?;
+        if let Some(ref account) = agent.agent_account {
+            snapshot.dirty_accounts.insert(account.clone());
         }
-        Ok(())
+    }
+}
+
+fn rebuild_snapshot_batch(snapshot: &RegistrySnapshot) -> Result<WriteBatch, RegistryError> {
+    let mut batch = WriteBatch::default();
+
+    for agent_id in snapshot.dirty_agents.iter() {
+        if let Some(agent) = snapshot.cache.agents.get(agent_id) {
+            let key = agent_key(&agent.agent_id);
+            let bytes = to_json(agent)?;
+            batch.put(key, bytes);
+        }
     }
 
-    pub fn set_account_index(
-        &self,
-        account: &PublicKey,
-        agent_id: &Hash,
-    ) -> Result<(), RegistryError> {
+    for agent_id in snapshot.deleted_agents.iter() {
+        let key = agent_key(agent_id);
+        batch.delete(key);
+    }
+
+    for skill in snapshot.dirty_skills.iter() {
+        let key = skill_key(skill);
+        if let Some(agent_ids) = snapshot.cache.index_by_skill.get(skill) {
+            if agent_ids.is_empty() {
+                batch.delete(key);
+            } else {
+                let mut ids: Vec<String> = agent_ids.iter().map(|id| id.to_hex()).collect();
+                ids.sort();
+                let bytes = to_json(&ids)?;
+                batch.put(key, bytes);
+            }
+        } else {
+            batch.delete(key);
+        }
+    }
+
+    for account in snapshot.dirty_accounts.iter() {
         let key = account_key(account);
-        let bytes = to_json(&agent_id.to_hex())?;
-        self.db
-            .put(key, bytes)
-            .map_err(|e| RegistryError::Storage(e.to_string()))?;
-        Ok(())
+        if let Some(agent_id) = snapshot.cache.index_by_account.get(account) {
+            let bytes = to_json(&agent_id.to_hex())?;
+            batch.put(key, bytes);
+        } else {
+            batch.delete(key);
+        }
     }
 
-    pub fn remove_account_index(&self, account: &PublicKey) -> Result<(), RegistryError> {
-        let key = account_key(account);
-        self.db
-            .delete(key)
-            .map_err(|e| RegistryError::Storage(e.to_string()))?;
-        Ok(())
-    }
-
-    pub fn get_agent_id_by_account(
-        &self,
-        account: &PublicKey,
-    ) -> Result<Option<Hash>, RegistryError> {
-        let key = account_key(account);
-        let Some(raw) = self
-            .db
-            .get(key)
-            .map_err(|e| RegistryError::Storage(e.to_string()))?
-        else {
-            return Ok(None);
-        };
-        let id_hex: String = from_json(&raw)?;
-        id_hex
-            .parse::<Hash>()
-            .map(Some)
-            .map_err(|_| RegistryError::Storage("invalid agent id".to_string()))
-    }
-
-    fn load_skill_agents(&self, key: &[u8]) -> Result<Vec<String>, RegistryError> {
-        let Some(raw) = self
-            .db
-            .get(key)
-            .map_err(|e| RegistryError::Storage(e.to_string()))?
-        else {
-            return Ok(Vec::new());
-        };
-        from_json(&raw)
-    }
+    Ok(batch)
 }
 
 fn to_json<T: Serialize>(value: &T) -> Result<Vec<u8>, RegistryError> {

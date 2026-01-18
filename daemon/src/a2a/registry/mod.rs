@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::fs;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -10,6 +11,7 @@ use serde_json::Value;
 use thiserror::Error;
 use tokio::sync::RwLock;
 use tokio::time::{sleep, Duration};
+use url::Url;
 
 use tos_common::{
     a2a::AgentCard,
@@ -18,14 +20,23 @@ use tos_common::{
     time::get_current_time_in_seconds,
 };
 
+mod cache;
 pub mod router;
+mod snapshot;
 mod store;
 
-use store::A2ARegistryStore;
+use snapshot::SnapshotGuard;
+use store::RegistryStore;
 
 const DEFAULT_HEALTH_CHECK_INTERVAL_SECS: u64 = 300;
 const DEFAULT_HEARTBEAT_TIMEOUT_SECS: u64 = 120;
 const DEFAULT_INACTIVE_FAILURES: u32 = 3;
+
+// Security limits
+const MAX_ENDPOINT_URL_LENGTH: usize = 2048;
+const MAX_FILTER_SKILLS: usize = 32;
+const MAX_FILTER_INPUT_MODES: usize = 16;
+const MAX_FILTER_OUTPUT_MODES: usize = 16;
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -99,6 +110,10 @@ pub enum RegistryError {
     AgentNotFound,
     #[error("invalid endpoint url")]
     InvalidEndpointUrl,
+    #[error("endpoint url blocked: {0}")]
+    EndpointUrlBlocked(String),
+    #[error("filter input exceeds limit")]
+    FilterInputTooLarge,
     #[error("invalid agent card: {0}")]
     InvalidAgentCard(String),
     #[error("failed to serialize agent card")]
@@ -115,19 +130,21 @@ pub enum RegistryError {
     AgentAccountAlreadyRegistered,
     #[error("cannot change agent account once set")]
     CannotChangeAgentAccount,
+    #[error("snapshot already active")]
+    SnapshotAlreadyActive,
+    #[error("snapshot not active")]
+    SnapshotNotActive,
 }
 
 pub struct AgentRegistry {
-    agents: RwLock<HashMap<Hash, RegisteredAgent>>,
-    index_by_skill: RwLock<HashMap<String, HashSet<Hash>>>,
+    store: RwLock<RegistryStore>,
 }
 
 impl AgentRegistry {
     /// Create a new empty registry.
     pub fn new() -> Self {
         Self {
-            agents: RwLock::new(HashMap::new()),
-            index_by_skill: RwLock::new(HashMap::new()),
+            store: RwLock::new(RegistryStore::in_memory()),
         }
     }
 
@@ -137,9 +154,20 @@ impl AgentRegistry {
         agent_card: AgentCard,
         endpoint_url: String,
     ) -> Result<RegisteredAgent, RegistryError> {
-        if endpoint_url.trim().is_empty() || !endpoint_url.starts_with("https://") {
-            return Err(RegistryError::InvalidEndpointUrl);
-        }
+        let mut store = self.store.write().await;
+        let mut guard = SnapshotGuard::new(&mut store)?;
+        let registered = Self::do_register(guard.store_mut(), agent_card, endpoint_url)?;
+        guard.commit()?;
+        Ok(registered)
+    }
+
+    fn do_register(
+        store: &mut RegistryStore,
+        agent_card: AgentCard,
+        endpoint_url: String,
+    ) -> Result<RegisteredAgent, RegistryError> {
+        // Validate endpoint URL (SSRF protection)
+        validate_endpoint_url(&endpoint_url)?;
         validate_agent_card(&agent_card)?;
 
         let agent_id = compute_agent_id(&agent_card, &endpoint_url)?;
@@ -154,6 +182,16 @@ impl AgentRegistry {
             .as_ref()
             .map(|id| id.controller.clone());
 
+        if store.cache().agents.contains_key(&agent_id) {
+            return Err(RegistryError::AgentAlreadyRegistered);
+        }
+
+        if let Some(ref account) = agent_account {
+            if store.cache().index_by_account.contains_key(account) {
+                return Err(RegistryError::AgentAccountAlreadyRegistered);
+            }
+        }
+
         let registered = RegisteredAgent {
             agent_id: agent_id.clone(),
             agent_card,
@@ -167,82 +205,40 @@ impl AgentRegistry {
             health_failures: 0,
         };
 
-        {
-            let mut agents = self.agents.write().await;
-
-            // Check for duplicate agent_id
-            if agents.contains_key(&agent_id) {
-                return Err(RegistryError::AgentAlreadyRegistered);
-            }
-
-            // Enforce 1:1 mapping between agent_account and agent (inside write lock to prevent race)
-            // An account can only have one registered agent at a time
-            if let Some(ref account) = registered.agent_account {
-                let account_exists = agents
-                    .values()
-                    .any(|a| a.agent_account.as_ref() == Some(account));
-                if account_exists {
-                    return Err(RegistryError::AgentAccountAlreadyRegistered);
-                }
-            }
-
-            // Persist BEFORE updating in-memory state to prevent divergence on failure.
-            // This ensures that if persistence fails, the in-memory state is unchanged.
-            persist_agent_with_indexes(&registered)?;
-
-            // Only insert into in-memory state after successful persistence
-            agents.insert(agent_id.clone(), registered.clone());
-        }
-
-        // Index skills after registration is fully committed
-        self.index_skills(agent_id.clone(), &registered.agent_card)
-            .await;
-
-        // Persist the full index (this is optional/optimization, not critical for consistency)
-        let _ = persist_index(&self.agents).await;
-
+        store.insert_agent(registered.clone())?;
         Ok(registered)
     }
 
     /// Unregister an agent by ID.
     pub async fn unregister(&self, agent_id: &Hash) -> Result<(), RegistryError> {
-        let mut agents = self.agents.write().await;
-        let removed = agents
-            .get(agent_id)
-            .cloned()
+        let mut store = self.store.write().await;
+        let mut guard = SnapshotGuard::new(&mut store)?;
+        guard
+            .store_mut()
+            .remove_agent(agent_id)?
             .ok_or(RegistryError::AgentNotFound)?;
-
-        // Persist removal BEFORE updating in-memory state to prevent divergence on failure
-        remove_agent_with_indexes(&removed)?;
-
-        // Only remove from in-memory state after successful persistence
-        agents.remove(agent_id);
-        drop(agents);
-
-        // Remove skill indexes after successful unregistration
-        self.remove_skills(agent_id, &removed.agent_card).await;
-
-        // Persist the full index (optional optimization)
-        let _ = persist_index(&self.agents).await;
+        guard.commit()?;
         Ok(())
     }
 
     /// Fetch a registered agent by ID.
     pub async fn get(&self, agent_id: &Hash) -> Option<RegisteredAgent> {
-        let agents = self.agents.read().await;
-        agents.get(agent_id).cloned()
+        let store = self.store.read().await;
+        store.cache().agents.get(agent_id).cloned()
     }
 
     /// List all registered agents (including inactive).
     pub async fn list(&self) -> Vec<RegisteredAgent> {
-        let agents = self.agents.read().await;
-        agents.values().cloned().collect()
+        let store = self.store.read().await;
+        store.cache().agents.values().cloned().collect()
     }
 
     /// List all active agents.
     pub async fn list_active(&self) -> Vec<RegisteredAgent> {
-        let agents = self.agents.read().await;
-        agents
+        let store = self.store.read().await;
+        store
+            .cache()
+            .agents
             .values()
             .filter(|agent| agent.status == AgentStatus::Active)
             .cloned()
@@ -251,16 +247,13 @@ impl AgentRegistry {
 
     /// Fetch a registered agent by on-chain account.
     pub async fn get_by_account(&self, account: &PublicKey) -> Option<RegisteredAgent> {
-        if let Ok(Some(store)) = registry_store() {
-            if let Ok(Some(agent_id)) = store.get_agent_id_by_account(account) {
-                if let Some(agent) = self.get(&agent_id).await {
-                    return Some(agent);
-                }
-            }
+        let store = self.store.read().await;
+        if let Some(agent_id) = store.cache().index_by_account.get(account) {
+            return store.cache().agents.get(agent_id).cloned();
         }
-
-        let agents = self.agents.read().await;
-        agents
+        store
+            .cache()
+            .agents
             .values()
             .find(|agent| agent.agent_account.as_ref() == Some(account))
             .cloned()
@@ -277,8 +270,12 @@ impl AgentRegistry {
         agent_card: AgentCard,
     ) -> Result<RegisteredAgent, RegistryError> {
         validate_agent_card(&agent_card)?;
-        let mut agents = self.agents.write().await;
-        let existing = agents
+        let mut store = self.store.write().await;
+        let mut guard = SnapshotGuard::new(&mut store)?;
+        let existing = guard
+            .store_mut()
+            .cache()
+            .agents
             .get(agent_id)
             .cloned()
             .ok_or(RegistryError::AgentNotFound)?;
@@ -323,43 +320,37 @@ impl AgentRegistry {
             agent_card,
         };
 
-        // Persist BEFORE updating in-memory state to prevent divergence on failure.
-        // Update store indexes and record atomically (if either fails, in-memory state remains unchanged).
-        update_agent_with_indexes(&existing, &updated)?;
-
-        // Only update in-memory state after successful persistence
-        agents.insert(existing.agent_id.clone(), updated.clone());
-        drop(agents);
-
-        // Update skill indexes (best-effort, in-memory only)
-        self.remove_skills(agent_id, &existing.agent_card).await;
-        self.index_skills(updated.agent_id.clone(), &updated.agent_card)
-            .await;
-
-        // Persist the full index (optional optimization)
-        let _ = persist_index(&self.agents).await;
-
+        guard.store_mut().update_agent(&existing, updated.clone())?;
+        guard.commit()?;
         Ok(updated)
     }
 
     /// Fetch agents that match a given skill ID.
     pub async fn filter_by_skill(&self, skill: &str) -> Vec<RegisteredAgent> {
-        let agent_ids = {
-            let index = self.index_by_skill.read().await;
-            index.get(skill).cloned().unwrap_or_else(HashSet::new)
-        };
-
-        let agents = self.agents.read().await;
-        agent_ids
-            .into_iter()
-            .filter_map(|id| agents.get(&id).cloned())
-            .collect()
+        let store = self.store.read().await;
+        let cache = store.cache();
+        cache
+            .index_by_skill
+            .get(skill)
+            .map(|ids| {
+                ids.iter()
+                    .filter_map(|id| cache.agents.get(id).cloned())
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     /// Filter agents by skill and capability constraints.
-    pub async fn filter(&self, filter: &AgentFilter) -> Vec<RegisteredAgent> {
+    /// Returns error if filter input exceeds size limits.
+    pub async fn filter(
+        &self,
+        filter: &AgentFilter,
+    ) -> Result<Vec<RegisteredAgent>, RegistryError> {
+        // Validate filter input sizes to prevent DoS
+        Self::validate_filter(filter)?;
+
         let mut candidates = if let Some(skills) = filter.skills.as_ref() {
-            self.filter_by_any_skill(skills).await
+            self.filter_by_any_skill(skills).await?
         } else {
             self.list().await
         };
@@ -394,25 +385,51 @@ impl AgentRegistry {
             }
         }
 
-        candidates
+        Ok(candidates)
+    }
+
+    /// Validate filter input sizes to prevent DoS attacks.
+    fn validate_filter(filter: &AgentFilter) -> Result<(), RegistryError> {
+        if let Some(ref skills) = filter.skills {
+            if skills.len() > MAX_FILTER_SKILLS {
+                return Err(RegistryError::FilterInputTooLarge);
+            }
+        }
+        if let Some(ref input_modes) = filter.input_modes {
+            if input_modes.len() > MAX_FILTER_INPUT_MODES {
+                return Err(RegistryError::FilterInputTooLarge);
+            }
+        }
+        if let Some(ref output_modes) = filter.output_modes {
+            if output_modes.len() > MAX_FILTER_OUTPUT_MODES {
+                return Err(RegistryError::FilterInputTooLarge);
+            }
+        }
+        Ok(())
     }
 
     /// Fetch agents that match any of the provided skill IDs.
-    pub async fn filter_by_any_skill(&self, skills: &[String]) -> Vec<RegisteredAgent> {
+    /// Returns error if skills list exceeds size limit.
+    pub async fn filter_by_any_skill(
+        &self,
+        skills: &[String],
+    ) -> Result<Vec<RegisteredAgent>, RegistryError> {
+        if skills.len() > MAX_FILTER_SKILLS {
+            return Err(RegistryError::FilterInputTooLarge);
+        }
+
+        let store = self.store.read().await;
+        let cache = store.cache();
         let mut agent_ids = HashSet::new();
-        let index = self.index_by_skill.read().await;
         for skill in skills {
-            if let Some(ids) = index.get(skill) {
+            if let Some(ids) = cache.index_by_skill.get(skill) {
                 agent_ids.extend(ids.iter().cloned());
             }
         }
-        drop(index);
-
-        let agents = self.agents.read().await;
-        agent_ids
+        Ok(agent_ids
             .into_iter()
-            .filter_map(|id| agents.get(&id).cloned())
-            .collect()
+            .filter_map(|id| cache.agents.get(&id).cloned())
+            .collect())
     }
 
     /// Update heartbeat timestamp for an agent.
@@ -422,51 +439,47 @@ impl AgentRegistry {
         status: Option<AgentHealthStatus>,
     ) -> Result<i64, RegistryError> {
         let now = current_timestamp_i64()?;
+        let mut store = self.store.write().await;
+        let mut guard = SnapshotGuard::new(&mut store)?;
+        let existing = guard
+            .store_mut()
+            .cache()
+            .agents
+            .get(agent_id)
+            .cloned()
+            .ok_or(RegistryError::AgentNotFound)?;
 
-        // Build updated agent record without modifying in-memory state yet
-        let updated = {
-            let agents = self.agents.read().await;
-            let agent = agents.get(agent_id).ok_or(RegistryError::AgentNotFound)?;
-            let mut updated = agent.clone();
-            updated.last_heartbeat = now;
-            if status.is_some() {
-                updated.last_health = status;
-            }
-            if updated.status == AgentStatus::Inactive {
-                updated.status = AgentStatus::Active;
-            }
-            updated
-        };
+        let mut updated = existing.clone();
+        updated.last_heartbeat = now;
+        if status.is_some() {
+            updated.last_health = status;
+        }
+        if updated.status == AgentStatus::Inactive {
+            updated.status = AgentStatus::Active;
+        }
 
-        // Persist BEFORE updating in-memory state to prevent divergence on failure
-        persist_agent_record(&updated)?;
-
-        // Only update in-memory state after successful persistence
-        let mut agents = self.agents.write().await;
-        agents.insert(agent_id.clone(), updated);
+        guard.store_mut().update_agent(&existing, updated)?;
+        guard.commit()?;
 
         Ok(now)
     }
 
     /// Mark an agent as inactive and increment failure count.
     pub async fn mark_inactive(&self, agent_id: &Hash) -> Result<(), RegistryError> {
-        // Build updated agent record without modifying in-memory state yet
-        let updated = {
-            let agents = self.agents.read().await;
-            let agent = agents.get(agent_id).ok_or(RegistryError::AgentNotFound)?;
-            let mut updated = agent.clone();
-            updated.status = AgentStatus::Inactive;
-            updated.health_failures = updated.health_failures.saturating_add(1);
-            updated
-        };
-
-        // Persist BEFORE updating in-memory state to prevent divergence on failure
-        persist_agent_record(&updated)?;
-
-        // Only update in-memory state after successful persistence
-        let mut agents = self.agents.write().await;
-        agents.insert(agent_id.clone(), updated);
-
+        let mut store = self.store.write().await;
+        let mut guard = SnapshotGuard::new(&mut store)?;
+        let existing = guard
+            .store_mut()
+            .cache()
+            .agents
+            .get(agent_id)
+            .cloned()
+            .ok_or(RegistryError::AgentNotFound)?;
+        let mut updated = existing.clone();
+        updated.status = AgentStatus::Inactive;
+        updated.health_failures = updated.health_failures.saturating_add(1);
+        guard.store_mut().update_agent(&existing, updated)?;
+        guard.commit()?;
         Ok(())
     }
 
@@ -477,72 +490,34 @@ impl AgentRegistry {
         failure_threshold: u32,
     ) -> Result<usize, RegistryError> {
         let now = get_current_time_in_seconds();
+        let mut store = self.store.write().await;
+        let mut guard = SnapshotGuard::new(&mut store)?;
 
-        // Build list of updated agent records without modifying in-memory state yet
-        let updated: Vec<RegisteredAgent> = {
-            let agents = self.agents.read().await;
-            agents
-                .values()
-                .filter_map(|agent| {
-                    if agent.status != AgentStatus::Active {
-                        return None;
-                    }
-                    let last = u64::try_from(agent.last_heartbeat).unwrap_or(0);
-                    if now.saturating_sub(last) > timeout_secs {
-                        let mut updated = agent.clone();
-                        updated.health_failures = updated.health_failures.saturating_add(1);
-                        if updated.health_failures >= failure_threshold {
-                            updated.status = AgentStatus::Inactive;
-                        }
-                        Some(updated)
-                    } else {
-                        None
-                    }
-                })
-                .collect()
-        };
+        let existing_agents: Vec<RegisteredAgent> =
+            guard.store_mut().cache().agents.values().cloned().collect();
+        let mut updates: Vec<(RegisteredAgent, RegisteredAgent)> = Vec::new();
 
-        // Persist BEFORE updating in-memory state to prevent divergence on failure
-        for agent in &updated {
-            persist_agent_record(agent)?;
-        }
-
-        // Only update in-memory state after ALL persistence succeeds
-        {
-            let mut agents = self.agents.write().await;
-            for agent in &updated {
-                agents.insert(agent.agent_id.clone(), agent.clone());
+        for agent in existing_agents {
+            if agent.status != AgentStatus::Active {
+                continue;
             }
-        }
-
-        Ok(updated.len())
-    }
-
-    async fn index_skills(&self, agent_id: Hash, card: &AgentCard) {
-        let skills = extract_skill_ids(card);
-        if skills.is_empty() {
-            return;
-        }
-        let mut index = self.index_by_skill.write().await;
-        for skill in skills {
-            index.entry(skill).or_default().insert(agent_id.clone());
-        }
-    }
-
-    async fn remove_skills(&self, agent_id: &Hash, card: &AgentCard) {
-        let skills = extract_skill_ids(card);
-        if skills.is_empty() {
-            return;
-        }
-        let mut index = self.index_by_skill.write().await;
-        for skill in skills {
-            if let Some(agent_ids) = index.get_mut(&skill) {
-                agent_ids.remove(agent_id);
-                if agent_ids.is_empty() {
-                    index.remove(&skill);
+            let last = u64::try_from(agent.last_heartbeat).unwrap_or(0);
+            if now.saturating_sub(last) > timeout_secs {
+                let mut updated = agent.clone();
+                updated.health_failures = updated.health_failures.saturating_add(1);
+                if updated.health_failures >= failure_threshold {
+                    updated.status = AgentStatus::Inactive;
                 }
+                updates.push((agent, updated));
             }
         }
+
+        for (existing, updated) in &updates {
+            guard.store_mut().update_agent(existing, updated.clone())?;
+        }
+
+        guard.commit()?;
+        Ok(updates.len())
     }
 }
 
@@ -634,10 +609,6 @@ fn supports_any_output_mode(agent: &RegisteredAgent, output_modes: &[String]) ->
         .any(|mode| supports_output_mode(agent, mode))
 }
 
-fn extract_skill_ids(card: &AgentCard) -> Vec<String> {
-    card.skills.iter().map(|skill| skill.id.clone()).collect()
-}
-
 fn deserialize_opt_string_vec<'de, D>(deserializer: D) -> Result<Option<Vec<String>>, D::Error>
 where
     D: Deserializer<'de>,
@@ -699,6 +670,133 @@ fn validate_agent_card(card: &AgentCard) -> Result<(), RegistryError> {
     Ok(())
 }
 
+/// Validate endpoint URL to prevent SSRF attacks.
+/// Blocks private IP ranges, localhost, and non-HTTPS URLs.
+fn validate_endpoint_url(endpoint_url: &str) -> Result<(), RegistryError> {
+    // Check length limit
+    if endpoint_url.len() > MAX_ENDPOINT_URL_LENGTH {
+        return Err(RegistryError::EndpointUrlBlocked(
+            "URL too long".to_string(),
+        ));
+    }
+
+    // Parse URL
+    let url = Url::parse(endpoint_url).map_err(|_| RegistryError::InvalidEndpointUrl)?;
+
+    // Require HTTPS
+    if url.scheme() != "https" {
+        return Err(RegistryError::InvalidEndpointUrl);
+    }
+
+    // Get host
+    let host = url.host_str().ok_or(RegistryError::InvalidEndpointUrl)?;
+
+    // Block localhost variants
+    if host == "localhost" || host == "127.0.0.1" || host == "::1" || host == "[::1]" {
+        return Err(RegistryError::EndpointUrlBlocked(
+            "localhost not allowed".to_string(),
+        ));
+    }
+
+    // Try to parse as IP address
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        if is_private_ip(&ip) {
+            return Err(RegistryError::EndpointUrlBlocked(
+                "private IP not allowed".to_string(),
+            ));
+        }
+    }
+
+    // Block common internal hostnames
+    let host_lower = host.to_lowercase();
+    if host_lower.ends_with(".local")
+        || host_lower.ends_with(".internal")
+        || host_lower.ends_with(".localhost")
+        || host_lower == "metadata.google.internal"
+        || host_lower == "169.254.169.254"
+    {
+        return Err(RegistryError::EndpointUrlBlocked(
+            "internal hostname not allowed".to_string(),
+        ));
+    }
+
+    Ok(())
+}
+
+/// Check if an IP address is in a private/reserved range.
+fn is_private_ip(ip: &IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(ipv4) => is_private_ipv4(ipv4),
+        IpAddr::V6(ipv6) => is_private_ipv6(ipv6),
+    }
+}
+
+fn is_private_ipv4(ip: &Ipv4Addr) -> bool {
+    let octets = ip.octets();
+    // 10.0.0.0/8
+    if octets[0] == 10 {
+        return true;
+    }
+    // 172.16.0.0/12
+    if octets[0] == 172 && (16..=31).contains(&octets[1]) {
+        return true;
+    }
+    // 192.168.0.0/16
+    if octets[0] == 192 && octets[1] == 168 {
+        return true;
+    }
+    // 127.0.0.0/8 (loopback)
+    if octets[0] == 127 {
+        return true;
+    }
+    // 169.254.0.0/16 (link-local, includes AWS metadata endpoint)
+    if octets[0] == 169 && octets[1] == 254 {
+        return true;
+    }
+    // 0.0.0.0/8
+    if octets[0] == 0 {
+        return true;
+    }
+    false
+}
+
+fn is_private_ipv6(ip: &Ipv6Addr) -> bool {
+    // ::1 loopback
+    if ip.is_loopback() {
+        return true;
+    }
+    // :: unspecified
+    if ip.is_unspecified() {
+        return true;
+    }
+    let segments = ip.segments();
+    // fe80::/10 link-local
+    if (segments[0] & 0xffc0) == 0xfe80 {
+        return true;
+    }
+    // fc00::/7 unique local
+    if (segments[0] & 0xfe00) == 0xfc00 {
+        return true;
+    }
+    // ::ffff:0:0/96 IPv4-mapped (check the embedded IPv4)
+    if segments[0] == 0
+        && segments[1] == 0
+        && segments[2] == 0
+        && segments[3] == 0
+        && segments[4] == 0
+        && segments[5] == 0xffff
+    {
+        let ipv4 = Ipv4Addr::new(
+            (segments[6] >> 8) as u8,
+            segments[6] as u8,
+            (segments[7] >> 8) as u8,
+            segments[7] as u8,
+        );
+        return is_private_ipv4(&ipv4);
+    }
+    false
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 struct RegistryIndex {
     agent_ids: Vec<String>,
@@ -706,7 +804,6 @@ struct RegistryIndex {
 
 static REGISTRY_BASE_DIR: OnceCell<PathBuf> = OnceCell::new();
 static REGISTRY_LOADED: OnceCell<()> = OnceCell::new();
-static REGISTRY_STORE: OnceCell<A2ARegistryStore> = OnceCell::new();
 static GLOBAL_REGISTRY: Lazy<Arc<AgentRegistry>> = Lazy::new(|| Arc::new(AgentRegistry::new()));
 
 /// Set base directory for registry persistence.
@@ -717,8 +814,10 @@ pub fn set_base_dir(dir: &str) {
 /// Get the process-wide shared agent registry.
 pub fn global_registry() -> Arc<AgentRegistry> {
     if REGISTRY_LOADED.get().is_none() {
-        let _ = REGISTRY_LOADED.set(());
-        load_registry_snapshot(&GLOBAL_REGISTRY);
+        // Only mark as loaded if we successfully load (including runtime assignment)
+        if load_registry_snapshot(&GLOBAL_REGISTRY) {
+            let _ = REGISTRY_LOADED.set(());
+        }
     }
     Arc::clone(&GLOBAL_REGISTRY)
 }
@@ -748,22 +847,6 @@ fn registry_root() -> Option<PathBuf> {
     Some(path)
 }
 
-fn registry_store() -> Result<Option<&'static A2ARegistryStore>, RegistryError> {
-    let base = REGISTRY_BASE_DIR.get_or_init(|| PathBuf::from(""));
-    if base.as_os_str().is_empty() {
-        return Ok(None);
-    }
-    let mut path = base.clone();
-    path.push("a2a");
-    path.push("registry");
-    let store = REGISTRY_STORE.get_or_try_init(|| A2ARegistryStore::open(&path))?;
-    Ok(Some(store))
-}
-
-fn ensure_registry_dir(path: &Path) -> Result<(), RegistryError> {
-    fs::create_dir_all(path).map_err(|e| RegistryError::Storage(e.to_string()))
-}
-
 fn index_path(root: &Path) -> PathBuf {
     let mut path = root.to_path_buf();
     path.push("index.json");
@@ -776,209 +859,139 @@ fn agent_path(root: &Path, agent_id: &Hash) -> PathBuf {
     path
 }
 
-fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), RegistryError> {
-    let mut tmp = path.to_path_buf();
-    tmp.set_extension("tmp");
-    fs::write(&tmp, bytes).map_err(|e| RegistryError::Storage(e.to_string()))?;
-    fs::rename(&tmp, path).map_err(|e| RegistryError::Storage(e.to_string()))
-}
-
-fn persist_agent_record(agent: &RegisteredAgent) -> Result<(), RegistryError> {
-    if let Some(store) = registry_store()? {
-        store.save_agent(agent)?;
-        return Ok(());
+/// Load registry from disk. Returns true if successfully loaded (or no persistence configured).
+fn load_registry_snapshot(registry: &Arc<AgentRegistry>) -> bool {
+    let base = REGISTRY_BASE_DIR.get_or_init(|| PathBuf::from(""));
+    if base.as_os_str().is_empty() {
+        // No persistence configured, consider this a success (in-memory only mode)
+        return true;
     }
 
-    let Some(root) = registry_root() else {
-        return Ok(());
+    let mut db_path = base.clone();
+    db_path.push("a2a");
+    db_path.push("registry");
+
+    let mut store = match RegistryStore::open(&db_path) {
+        Ok(store) => store,
+        Err(_) => return false,
     };
-    ensure_registry_dir(&root)?;
-    let path = agent_path(&root, &agent.agent_id);
-    let bytes =
-        serde_json::to_vec_pretty(agent).map_err(|e| RegistryError::Storage(e.to_string()))?;
-    write_atomic(&path, &bytes)?;
-    Ok(())
-}
 
-fn remove_agent_record(agent_id: &Hash) -> Result<(), RegistryError> {
-    if let Some(store) = registry_store()? {
-        store.remove_agent(agent_id)?;
-        return Ok(());
-    }
-
-    let Some(root) = registry_root() else {
-        return Ok(());
-    };
-    let path = agent_path(&root, agent_id);
-    if path.exists() {
-        fs::remove_file(&path).map_err(|e| RegistryError::Storage(e.to_string()))?;
-    }
-    Ok(())
-}
-
-async fn persist_index(
-    agents: &RwLock<HashMap<Hash, RegisteredAgent>>,
-) -> Result<(), RegistryError> {
-    if registry_store()?.is_some() {
-        return Ok(());
-    }
-
-    let Some(root) = registry_root() else {
-        return Ok(());
-    };
-    ensure_registry_dir(&root)?;
-    let agents = agents.read().await;
-    let mut ids: Vec<String> = agents.keys().map(|id| id.to_hex()).collect();
-    ids.sort();
-    let index = RegistryIndex { agent_ids: ids };
-    let bytes =
-        serde_json::to_vec_pretty(&index).map_err(|e| RegistryError::Storage(e.to_string()))?;
-    write_atomic(&index_path(&root), &bytes)?;
-    Ok(())
-}
-
-fn add_store_indexes(agent: &RegisteredAgent) -> Result<(), RegistryError> {
-    let Some(store) = registry_store()? else {
-        return Ok(());
-    };
-    for skill in extract_skill_ids(&agent.agent_card) {
-        store.add_agent_to_skill(&agent.agent_id, &skill)?;
-    }
-    if let Some(account) = agent.agent_account.as_ref() {
-        store.set_account_index(account, &agent.agent_id)?;
-    }
-    Ok(())
-}
-
-fn persist_agent_with_indexes(agent: &RegisteredAgent) -> Result<(), RegistryError> {
-    if let Some(store) = registry_store()? {
-        let skills = extract_skill_ids(&agent.agent_card);
-        store.save_agent_with_indexes(agent, &skills)?;
-        return Ok(());
-    }
-    persist_agent_record(agent)?;
-    add_store_indexes(agent)?;
-    Ok(())
-}
-
-fn remove_agent_with_indexes(agent: &RegisteredAgent) -> Result<(), RegistryError> {
-    if let Some(store) = registry_store()? {
-        let skills = extract_skill_ids(&agent.agent_card);
-        store.remove_agent_with_indexes(agent, &skills)?;
-        return Ok(());
-    }
-    remove_store_indexes(agent)?;
-    remove_agent_record(&agent.agent_id)?;
-    Ok(())
-}
-
-fn update_agent_with_indexes(
-    existing: &RegisteredAgent,
-    updated: &RegisteredAgent,
-) -> Result<(), RegistryError> {
-    if let Some(store) = registry_store()? {
-        let existing_skills = extract_skill_ids(&existing.agent_card);
-        let updated_skills = extract_skill_ids(&updated.agent_card);
-        store.update_agent_with_indexes(existing, updated, &existing_skills, &updated_skills)?;
-        return Ok(());
-    }
-    remove_store_indexes(existing)?;
-    persist_agent_record(updated)?;
-    add_store_indexes(updated)?;
-    Ok(())
-}
-
-fn remove_store_indexes(agent: &RegisteredAgent) -> Result<(), RegistryError> {
-    let Some(store) = registry_store()? else {
-        return Ok(());
-    };
-    for skill in extract_skill_ids(&agent.agent_card) {
-        store.remove_agent_from_skill(&agent.agent_id, &skill)?;
-    }
-    if let Some(account) = agent.agent_account.as_ref() {
-        store.remove_account_index(account)?;
-    }
-    Ok(())
-}
-
-fn load_registry_snapshot(registry: &Arc<AgentRegistry>) {
-    let mut agents = HashMap::new();
-    let mut loaded_from_store = false;
-    if let Ok(Some(store)) = registry_store() {
-        if let Ok(store_agents) = store.load_agents() {
-            if !store_agents.is_empty() {
-                for agent in store_agents {
-                    agents.insert(agent.agent_id.clone(), agent);
+    if store.is_empty() {
+        let agents = load_agents_from_files();
+        if !agents.is_empty() {
+            let mut guard = match SnapshotGuard::new(&mut store) {
+                Ok(guard) => guard,
+                Err(_) => return false,
+            };
+            for agent in agents {
+                if guard.store_mut().insert_agent(agent).is_err() {
+                    let _ = guard.rollback();
+                    return false;
                 }
-                loaded_from_store = true;
+            }
+            if guard.commit().is_err() {
+                return false;
             }
         }
     }
 
-    if !loaded_from_store {
-        let Some(root) = registry_root() else {
+    let registry_store = Arc::clone(registry);
+    let registry_inner = async move {
+        *registry_store.store.write().await = store;
+    };
+
+    // Only mark as loaded if we have a runtime to actually apply the store
+    if let Ok(handle) = tokio::runtime::Handle::try_current() {
+        handle.block_on(registry_inner);
+        true
+    } else {
+        // No runtime available, don't mark as loaded so we can retry later
+        false
+    }
+}
+
+fn load_agents_from_files() -> Vec<RegisteredAgent> {
+    let Some(root) = registry_root() else {
+        return Vec::new();
+    };
+
+    let mut agents = HashMap::new();
+    let mut seen_accounts: HashSet<PublicKey> = HashSet::new();
+    let index_path = index_path(&root);
+
+    // Helper to validate and insert agent
+    let mut try_insert_agent = |agent: RegisteredAgent| {
+        // Validate endpoint URL (SSRF protection)
+        if validate_endpoint_url(&agent.endpoint_url).is_err() {
+            if log::log_enabled!(log::Level::Warn) {
+                log::warn!(
+                    "Skipping agent {} with invalid endpoint URL: {}",
+                    agent.agent_id.to_hex(),
+                    agent.endpoint_url
+                );
+            }
             return;
-        };
-        let index_path = index_path(&root);
-        if let Ok(raw) = fs::read(&index_path) {
-            if let Ok(index) = serde_json::from_slice::<RegistryIndex>(&raw) {
-                for id in index.agent_ids {
-                    if let Ok(hash) = id.parse::<Hash>() {
-                        let path = agent_path(&root, &hash);
-                        if let Ok(bytes) = fs::read(&path) {
-                            if let Ok(agent) = serde_json::from_slice::<RegisteredAgent>(&bytes) {
-                                agents.insert(hash, agent);
-                            }
+        }
+
+        // Validate agent card
+        if validate_agent_card(&agent.agent_card).is_err() {
+            if log::log_enabled!(log::Level::Warn) {
+                log::warn!(
+                    "Skipping agent {} with invalid card",
+                    agent.agent_id.to_hex()
+                );
+            }
+            return;
+        }
+
+        // Check for duplicate accounts
+        if let Some(ref account) = agent.agent_account {
+            if seen_accounts.contains(account) {
+                if log::log_enabled!(log::Level::Warn) {
+                    log::warn!(
+                        "Skipping agent {} with duplicate account",
+                        agent.agent_id.to_hex()
+                    );
+                }
+                return;
+            }
+            seen_accounts.insert(account.clone());
+        }
+
+        agents.insert(agent.agent_id.clone(), agent);
+    };
+
+    if let Ok(raw) = fs::read(&index_path) {
+        if let Ok(index) = serde_json::from_slice::<RegistryIndex>(&raw) {
+            for id in index.agent_ids {
+                if let Ok(hash) = id.parse::<Hash>() {
+                    let path = agent_path(&root, &hash);
+                    if let Ok(bytes) = fs::read(&path) {
+                        if let Ok(agent) = serde_json::from_slice::<RegisteredAgent>(&bytes) {
+                            try_insert_agent(agent);
                         }
                     }
                 }
             }
-        } else if let Ok(entries) = fs::read_dir(&root) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.file_name().and_then(|s| s.to_str()) == Some("index.json") {
-                    continue;
-                }
-                if path.extension().and_then(|s| s.to_str()) != Some("json") {
-                    continue;
-                }
-                if let Ok(bytes) = fs::read(&path) {
-                    if let Ok(agent) = serde_json::from_slice::<RegisteredAgent>(&bytes) {
-                        agents.insert(agent.agent_id.clone(), agent);
-                    }
-                }
-            }
         }
-
-        if let Ok(Some(_store)) = registry_store() {
-            for agent in agents.values() {
-                let _ = persist_agent_with_indexes(agent);
+    } else if let Ok(entries) = fs::read_dir(&root) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.file_name().and_then(|s| s.to_str()) == Some("index.json") {
+                continue;
+            }
+            if path.extension().and_then(|s| s.to_str()) != Some("json") {
+                continue;
+            }
+            if let Ok(bytes) = fs::read(&path) {
+                if let Ok(agent) = serde_json::from_slice::<RegisteredAgent>(&bytes) {
+                    try_insert_agent(agent);
+                }
             }
         }
     }
 
-    let index = agents.iter().fold(
-        HashMap::<String, HashSet<Hash>>::new(),
-        |mut acc, (id, agent)| {
-            for skill in extract_skill_ids(&agent.agent_card) {
-                acc.entry(skill).or_default().insert(id.clone());
-            }
-            acc
-        },
-    );
-
-    let registry_agents = Arc::clone(registry);
-    let registry_index = index;
-    let agents_map = agents;
-
-    let registry_inner = async move {
-        *registry_agents.agents.write().await = agents_map;
-        *registry_agents.index_by_skill.write().await = registry_index;
-    };
-
-    if let Ok(handle) = tokio::runtime::Handle::try_current() {
-        handle.block_on(registry_inner);
-    }
+    agents.into_values().collect()
 }
 
 #[cfg(test)]
@@ -1027,6 +1040,24 @@ mod tests {
             signatures: Vec::new(),
             tos_identity: None,
             arbitration: None,
+        }
+    }
+
+    fn build_registered_agent(name: &str, skill_id: &str, endpoint: &str) -> RegisteredAgent {
+        let card = sample_card(name, skill_id);
+        let agent_id = compute_agent_id(&card, endpoint).expect("agent id");
+        let now = current_timestamp_i64().expect("timestamp");
+        RegisteredAgent {
+            agent_id,
+            agent_card: card,
+            endpoint_url: endpoint.to_string(),
+            agent_account: None,
+            controller: None,
+            registered_at: now,
+            last_heartbeat: now,
+            last_health: None,
+            status: AgentStatus::Active,
+            health_failures: 0,
         }
     }
 
@@ -1079,5 +1110,73 @@ mod tests {
         let now = registry.heartbeat(&registered.agent_id, None).await?;
         assert!(now >= before);
         Ok(())
+    }
+
+    #[test]
+    fn snapshot_read_your_writes() {
+        let mut store = RegistryStore::in_memory();
+        store.start_snapshot().expect("start snapshot");
+
+        let agent_a = build_registered_agent("agent-a", "skill:shared", "https://a.test");
+        let agent_b = build_registered_agent("agent-b", "skill:shared", "https://b.test");
+
+        store.insert_agent(agent_a.clone()).expect("insert a");
+        store.insert_agent(agent_b.clone()).expect("insert b");
+
+        let agents = store
+            .cache()
+            .index_by_skill
+            .get("skill:shared")
+            .expect("index");
+        assert_eq!(agents.len(), 2);
+        assert!(agents.contains(&agent_a.agent_id));
+        assert!(agents.contains(&agent_b.agent_id));
+
+        store.end_snapshot(true).expect("commit");
+
+        let agents = store
+            .cache()
+            .index_by_skill
+            .get("skill:shared")
+            .expect("index");
+        assert_eq!(agents.len(), 2);
+        assert!(agents.contains(&agent_a.agent_id));
+        assert!(agents.contains(&agent_b.agent_id));
+    }
+
+    #[test]
+    fn snapshot_rollback_discards_changes() {
+        let mut store = RegistryStore::in_memory();
+        {
+            let mut guard = SnapshotGuard::new(&mut store).expect("guard");
+            let agent = build_registered_agent("agent-a", "skill:a", "https://a.test");
+            guard.store_mut().insert_agent(agent).expect("insert");
+            guard.rollback().expect("rollback");
+        }
+
+        assert!(store.cache().agents.is_empty());
+        assert!(store.cache().index_by_skill.is_empty());
+    }
+
+    #[test]
+    fn snapshot_commit_retry_after_failure() {
+        let mut store = RegistryStore::in_memory();
+        let mut guard = SnapshotGuard::new(&mut store).expect("guard");
+
+        let agent = build_registered_agent("agent-a", "skill:a", "https://a.test");
+        guard
+            .store_mut()
+            .insert_agent(agent.clone())
+            .expect("insert");
+
+        guard.store_mut().set_fail_commit(true);
+        assert!(guard.commit().is_err());
+        assert!(guard.store_mut().has_snapshot());
+
+        guard.store_mut().set_fail_commit(false);
+        guard.commit().expect("retry commit");
+        drop(guard);
+
+        assert!(store.cache().agents.contains_key(&agent.agent_id));
     }
 }

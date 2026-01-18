@@ -8,6 +8,7 @@ use thiserror::Error;
 use rand::distributions::WeightedIndex;
 use rand::prelude::Distribution;
 use reqwest::Client;
+use serde_json;
 use tos_common::a2a::{
     A2AError, A2AResult, AgentCard, Message, SendMessageRequest, SendMessageResponse,
     HEADER_VERSION, PROTOCOL_VERSION,
@@ -19,6 +20,8 @@ use super::{AgentRegistry, AgentStatus, RegisteredAgent};
 const DEFAULT_HEARTBEAT_TIMEOUT_SECS: u64 = 120;
 const DEFAULT_ROUTER_TIMEOUT_MS: u64 = 30_000;
 const DEFAULT_ROUTER_RETRY_COUNT: u32 = 2;
+// Maximum response body size (1 MB) to prevent DoS via large responses
+const MAX_RESPONSE_BODY_SIZE: usize = 1024 * 1024;
 
 #[derive(Clone, Copy, Debug)]
 pub enum RoutingStrategy {
@@ -144,7 +147,12 @@ impl AgentRouter {
         }
 
         if candidates.is_empty() && fallback_any {
-            candidates = self.registry.filter_by_any_skill(skills).await;
+            // If filter fails due to too many skills, treat as no candidates
+            candidates = self
+                .registry
+                .filter_by_any_skill(skills)
+                .await
+                .unwrap_or_default();
             candidates.retain(|agent| self.is_healthy(agent));
         }
 
@@ -226,12 +234,43 @@ impl AgentRouter {
                         last_err = Some(format!("status {}", resp.status()));
                         continue;
                     }
-                    let response: SendMessageResponse =
-                        resp.json()
+
+                    // Check content-length header if present
+                    if let Some(content_length) = resp.content_length() {
+                        if content_length as usize > MAX_RESPONSE_BODY_SIZE {
+                            return Err(A2AError::InvalidAgentResponseError {
+                                message: format!(
+                                    "response too large: {} bytes exceeds {} limit",
+                                    content_length, MAX_RESPONSE_BODY_SIZE
+                                ),
+                            });
+                        }
+                    }
+
+                    // Read body with size limit
+                    let bytes =
+                        resp.bytes()
                             .await
                             .map_err(|e| A2AError::InvalidAgentResponseError {
-                                message: format!("invalid response from agent: {}", e),
+                                message: format!("failed to read response body: {}", e),
                             })?;
+
+                    if bytes.len() > MAX_RESPONSE_BODY_SIZE {
+                        return Err(A2AError::InvalidAgentResponseError {
+                            message: format!(
+                                "response too large: {} bytes exceeds {} limit",
+                                bytes.len(),
+                                MAX_RESPONSE_BODY_SIZE
+                            ),
+                        });
+                    }
+
+                    let response: SendMessageResponse =
+                        serde_json::from_slice(&bytes).map_err(|e| {
+                            A2AError::InvalidAgentResponseError {
+                                message: format!("invalid response from agent: {}", e),
+                            }
+                        })?;
                     return Ok(response);
                 }
                 Err(err) => {
