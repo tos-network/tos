@@ -1081,6 +1081,13 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Mempoo
     async fn is_message_id_used(&self, message_id: &Hash) -> Result<bool, BlockchainError> {
         self.storage.is_message_id_used(message_id).await
     }
+
+    async fn get_arbiter(
+        &mut self,
+        arbiter: &'a CompressedPublicKey,
+    ) -> Result<Option<tos_common::arbitration::ArbiterAccount>, BlockchainError> {
+        self.storage.get_arbiter(arbiter).await
+    }
 }
 
 #[cfg(test)]

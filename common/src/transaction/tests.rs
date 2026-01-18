@@ -966,8 +966,9 @@ fn test_encrypt_decrypt_two_parties() {
 
     let payload = DataElement::Value(DataValue::String("Hello, World!".to_string()));
     let tx = create_tx_for(alice.clone(), bob.address(), 50, Some(payload.clone()));
+    assert!(matches!(tx.get_data(), TransactionType::Transfers(_)));
     let TransactionType::Transfers(transfers) = tx.get_data() else {
-        unreachable!()
+        return;
     };
 
     let transfer = &transfers[0];
@@ -1871,7 +1872,6 @@ async fn test_transfer_extra_data_limits() {
     };
 
     match tx_oversized {
-        Ok(_) => panic!("Transaction with oversized extra data should fail"),
         Err(e) => {
             println!("Actual error: {e:?}");
             assert!(
@@ -1879,6 +1879,7 @@ async fn test_transfer_extra_data_limits() {
                 "Expected ExtraDataTooLarge error"
             );
         }
+        Ok(_) => assert!(false, "Transaction with oversized extra data should fail"),
     }
 
     // Test multiple transfers with total extra data exceeding limit
@@ -1919,7 +1920,6 @@ async fn test_transfer_extra_data_limits() {
     };
 
     match tx_total_oversized {
-        Ok(_) => panic!("Transaction with total oversized extra data should fail"),
         Err(e) => {
             println!("Actual total oversized error: {e:?}");
             assert!(
@@ -1931,6 +1931,10 @@ async fn test_transfer_extra_data_limits() {
                 "Expected ExtraDataTooLarge or EncryptedExtraDataTooLarge error for total size"
             );
         }
+        Ok(_) => assert!(
+            false,
+            "Transaction with total oversized extra data should fail"
+        ),
     }
 }
 
@@ -2164,11 +2168,14 @@ async fn test_freeze_delegation_requires_existing_delegatee() {
     let tx = unsigned.finalize(&alice.keypair);
     let tx_hash = tx.hash();
 
-    match tx.get_data() {
-        TransactionType::Energy(EnergyPayload::FreezeTosDelegate { delegatees, .. }) => {
-            assert_eq!(delegatees.len(), 1);
-        }
-        _ => panic!("Expected FreezeTosDelegate payload"),
+    assert!(matches!(
+        tx.get_data(),
+        TransactionType::Energy(EnergyPayload::FreezeTosDelegate { .. })
+    ));
+    if let TransactionType::Energy(EnergyPayload::FreezeTosDelegate { delegatees, .. }) =
+        tx.get_data()
+    {
+        assert_eq!(delegatees.len(), 1);
     }
 
     let mut state = ChainState::new();
@@ -2815,7 +2822,8 @@ async fn test_p04_double_spend_prevention() {
             println!("Double-spend prevented: available={available}, required={required}");
             assert!(available < required, "Should have insufficient funds");
         }
-        _ => panic!("Expected InsufficientFunds error, got {result2:?}"),
+        Err(other) => assert!(false, "Expected InsufficientFunds error, got {other:?}"),
+        Ok(_) => assert!(false, "Expected InsufficientFunds error, got Ok"),
     }
 }
 
@@ -2873,7 +2881,8 @@ async fn test_p04_insufficient_balance() {
             );
             assert!(required > available, "Required should exceed available");
         }
-        _ => panic!("Expected InsufficientFunds error, got {result:?}"),
+        Err(other) => assert!(false, "Expected InsufficientFunds error, got {other:?}"),
+        Ok(_) => assert!(false, "Expected InsufficientFunds error, got Ok"),
     }
 }
 
@@ -2919,8 +2928,9 @@ async fn test_p04_overflow_protection() {
 
     // Now manually simulate apply() receiver balance update - this should detect overflow
     // In production, apply() would do this receiver balance update and catch the overflow
+    assert!(matches!(tx.get_data(), TransactionType::Transfers(_)));
     let TransactionType::Transfers(transfers) = tx.get_data() else {
-        panic!("Expected Transfers transaction");
+        return;
     };
 
     if let Some(transfer) = transfers.iter().next() {
@@ -2944,7 +2954,7 @@ async fn test_p04_overflow_protection() {
         return;
     }
 
-    panic!("Should have detected overflow");
+    assert!(false, "Should have detected overflow");
 }
 
 // Test 5: Fee deduction with TOS

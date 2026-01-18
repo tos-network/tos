@@ -1,12 +1,18 @@
 pub mod a2a;
+pub mod agent_registry;
+pub mod arbitration;
 pub mod callback;
+pub mod escrow;
 pub mod getwork;
 pub mod rpc;
 pub mod ws_security;
 
+use crate::a2a::registry::router::{RouterConfig, RoutingStrategy};
+use crate::a2a::router_executor::AgentRouterExecutor;
 use crate::core::{
     blockchain::Blockchain, config::RPCConfig, error::BlockchainError, storage::Storage,
 };
+use crate::rpc::agent_registry::RegistrationRateLimitConfig;
 use actix_web::{
     dev::ServerHandle,
     error::Error,
@@ -101,12 +107,48 @@ impl<S: Storage> DaemonRpcServer<S> {
         }
         info!("A2A service enabled: {}", config.enable_a2a);
         if config.enable_a2a {
+            let _ = crate::a2a::registry::spawn_health_checks();
             crate::a2a::auth::set_auth_config(crate::a2a::auth::A2AAuthConfig::from_rpc_config(
                 &config,
             ));
-            crate::a2a::executor::set_executor(crate::a2a::executor::default_executor(
-                config.a2a_executor_concurrency,
-            ));
+            crate::a2a::set_settlement_validation_config(crate::a2a::SettlementValidationConfig {
+                validate_states: config.a2a_escrow_validate_states,
+                allowed_states: config.a2a_escrow_allowed_states.clone(),
+                validate_timeout: config.a2a_escrow_validate_timeout,
+                validate_amounts: config.a2a_escrow_validate_amounts,
+            });
+            crate::rpc::agent_registry::set_registration_rate_limit_config(
+                RegistrationRateLimitConfig {
+                    window_secs: config.a2a_registry_rate_limit_window_secs,
+                    max_requests: config.a2a_registry_rate_limit_max,
+                },
+            );
+            let local_executor =
+                crate::a2a::executor::default_executor(config.a2a_executor_concurrency);
+            let router_config = RouterConfig {
+                strategy: match config.a2a_router_strategy {
+                    crate::core::config::A2ARoutingStrategy::FirstMatch => {
+                        RoutingStrategy::FirstMatch
+                    }
+                    crate::core::config::A2ARoutingStrategy::LowestLatency => {
+                        RoutingStrategy::LowestLatency
+                    }
+                    crate::core::config::A2ARoutingStrategy::HighestReputation => {
+                        RoutingStrategy::HighestReputation
+                    }
+                    crate::core::config::A2ARoutingStrategy::RoundRobin => {
+                        RoutingStrategy::RoundRobin
+                    }
+                    crate::core::config::A2ARoutingStrategy::WeightedRandom => {
+                        RoutingStrategy::WeightedRandom
+                    }
+                },
+                timeout_ms: config.a2a_router_timeout_ms,
+                retry_count: config.a2a_router_retry_count,
+                fallback_to_local: config.a2a_router_fallback_to_local,
+            };
+            let router_executor = AgentRouterExecutor::new(local_executor, router_config);
+            crate::a2a::executor::set_executor(Arc::new(router_executor));
         }
 
         let websocket_security = Arc::new(WebSocketSecurity::new(ws_security_config));
@@ -204,6 +246,54 @@ impl<S: Storage> DaemonRpcServer<S> {
                             "/.well-known/agent-card.json",
                             web::get().to(a2a::agent_card::<S>),
                         )
+                        .route(
+                            "/agents:register",
+                            web::post().to(agent_registry::register_agent_http::<S>),
+                        )
+                        .route(
+                            "/agents:discover",
+                            web::post().to(agent_registry::discover_agents_http::<S>),
+                        )
+                        .route(
+                            "/agents:discover",
+                            web::get().to(agent_registry::discover_agents_http_get::<S>),
+                        )
+                        .route(
+                            "/committees:members",
+                            web::post().to(agent_registry::discover_committee_members_http::<S>),
+                        )
+                        .route(
+                            "/committees/{id}:members",
+                            web::get().to(agent_registry::discover_committee_members_http_get::<S>),
+                        )
+                        .route(
+                            "/escrows:pending",
+                            web::post().to(escrow::get_pending_releases_http::<S>),
+                        )
+                        .route(
+                            "/escrows:pending",
+                            web::get().to(escrow::get_pending_releases_http_get::<S>),
+                        )
+                        .route(
+                            "/agents",
+                            web::get().to(agent_registry::list_agents_http::<S>),
+                        )
+                        .route(
+                            "/agents/{id}",
+                            web::get().to(agent_registry::get_agent_http::<S>),
+                        )
+                        .route(
+                            "/agents/{id}",
+                            web::patch().to(agent_registry::update_agent_http::<S>),
+                        )
+                        .route(
+                            "/agents/{id}",
+                            web::delete().to(agent_registry::unregister_agent_http::<S>),
+                        )
+                        .route(
+                            "/agents/{id}:heartbeat",
+                            web::post().to(agent_registry::heartbeat_http::<S>),
+                        )
                         .route("/message:send", web::post().to(a2a::send_message_http::<S>))
                         .route(
                             "/message:stream",
@@ -241,6 +331,54 @@ impl<S: Storage> DaemonRpcServer<S> {
                         );
                     // Versioned A2A endpoints (/v1/...)
                     app = app
+                        .route(
+                            "/v1/agents:register",
+                            web::post().to(agent_registry::register_agent_http::<S>),
+                        )
+                        .route(
+                            "/v1/agents:discover",
+                            web::post().to(agent_registry::discover_agents_http::<S>),
+                        )
+                        .route(
+                            "/v1/agents:discover",
+                            web::get().to(agent_registry::discover_agents_http_get::<S>),
+                        )
+                        .route(
+                            "/v1/committees:members",
+                            web::post().to(agent_registry::discover_committee_members_http::<S>),
+                        )
+                        .route(
+                            "/v1/committees/{id}:members",
+                            web::get().to(agent_registry::discover_committee_members_http_get::<S>),
+                        )
+                        .route(
+                            "/v1/escrows:pending",
+                            web::post().to(escrow::get_pending_releases_http::<S>),
+                        )
+                        .route(
+                            "/v1/escrows:pending",
+                            web::get().to(escrow::get_pending_releases_http_get::<S>),
+                        )
+                        .route(
+                            "/v1/agents",
+                            web::get().to(agent_registry::list_agents_http::<S>),
+                        )
+                        .route(
+                            "/v1/agents/{id}",
+                            web::get().to(agent_registry::get_agent_http::<S>),
+                        )
+                        .route(
+                            "/v1/agents/{id}",
+                            web::patch().to(agent_registry::update_agent_http::<S>),
+                        )
+                        .route(
+                            "/v1/agents/{id}",
+                            web::delete().to(agent_registry::unregister_agent_http::<S>),
+                        )
+                        .route(
+                            "/v1/agents/{id}:heartbeat",
+                            web::post().to(agent_registry::heartbeat_http::<S>),
+                        )
                         .route(
                             "/v1/message:send",
                             web::post().to(a2a::send_message_http::<S>),

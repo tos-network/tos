@@ -2,6 +2,7 @@ use std::{borrow::Cow, collections::HashMap};
 
 use crate::{
     account::{AgentAccountMeta, Nonce, SessionKey},
+    arbitration::ArbiterAccount,
     block::{Block, BlockVersion},
     contract::{
         AssetChanges, ChainState, ContractCache, ContractEventTracker, ContractOutput,
@@ -156,6 +157,24 @@ pub trait BlockchainVerificationState<'a, E> {
         _account: &'a CompressedPublicKey,
     ) -> Result<Vec<SessionKey>, E> {
         Ok(Vec::new())
+    }
+
+    // ===== Escrow Verification Methods =====
+
+    /// Get an escrow account by ID
+    async fn get_escrow(
+        &mut self,
+        _escrow_id: &Hash,
+    ) -> Result<Option<crate::escrow::EscrowAccount>, E> {
+        Ok(None)
+    }
+
+    /// Get an arbiter account by public key
+    async fn get_arbiter(
+        &mut self,
+        _arbiter: &'a CompressedPublicKey,
+    ) -> Result<Option<ArbiterAccount>, E> {
+        Ok(None)
     }
 
     /// Get the block version in which TX is executed
@@ -349,6 +368,33 @@ pub trait BlockchainApplyState<'a, P: ContractProvider, E>:
         contract: &Hash,
         tx_hash: &'a Hash,
     ) -> Result<(), E>;
+
+    // ===== Escrow Apply Methods =====
+
+    /// Store/update an escrow account
+    async fn set_escrow(&mut self, escrow: &crate::escrow::EscrowAccount) -> Result<(), E>;
+
+    /// Add a pending release index entry
+    async fn add_pending_release(&mut self, release_at: u64, escrow_id: &Hash) -> Result<(), E>;
+
+    /// Remove a pending release index entry
+    async fn remove_pending_release(&mut self, release_at: u64, escrow_id: &Hash) -> Result<(), E>;
+
+    /// Add an escrow history entry
+    async fn add_escrow_history(
+        &mut self,
+        escrow_id: &Hash,
+        topoheight: u64,
+        tx_hash: &Hash,
+    ) -> Result<(), E>;
+
+    // ===== Arbiter Apply Methods =====
+
+    /// Store/update an arbiter account
+    async fn set_arbiter(&mut self, arbiter: &ArbiterAccount) -> Result<(), E>;
+
+    /// Remove an arbiter account
+    async fn remove_arbiter(&mut self, arbiter: &CompressedPublicKey) -> Result<(), E>;
 
     // ===== KYC System Operations =====
 

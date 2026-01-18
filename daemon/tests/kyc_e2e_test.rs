@@ -25,6 +25,7 @@ use tos_common::{
         elgamal::{Ciphertext, CompressedPublicKey},
         Hash, Hashable, KeyPair, PublicKey,
     },
+    escrow::EscrowAccount,
     immutable::Immutable,
     kyc::{CommitteeMember, CommitteeStatus, KycRegion, KycStatus, MemberRole, SecurityCommittee},
     network::Network,
@@ -609,6 +610,17 @@ impl<'a> BlockchainApplyState<'a, DummyContractProvider, TestError> for KycTestC
         Ok(())
     }
 
+    async fn set_arbiter(
+        &mut self,
+        _arbiter: &tos_common::arbitration::ArbiterAccount,
+    ) -> Result<(), TestError> {
+        Ok(())
+    }
+
+    async fn remove_arbiter(&mut self, _arbiter: &CompressedPublicKey) -> Result<(), TestError> {
+        Ok(())
+    }
+
     fn get_contract_executor(&self) -> Arc<dyn ContractExecutor> {
         self.executor.clone()
     }
@@ -906,6 +918,35 @@ impl<'a> BlockchainApplyState<'a, DummyContractProvider, TestError> for KycTestC
         _encrypted_content: Vec<u8>,
         _receiver_handle: [u8; 32],
         _current_topoheight: u64,
+    ) -> Result<(), TestError> {
+        Ok(())
+    }
+
+    async fn set_escrow(&mut self, _escrow: &EscrowAccount) -> Result<(), TestError> {
+        Ok(())
+    }
+
+    async fn add_pending_release(
+        &mut self,
+        _release_at: u64,
+        _escrow_id: &Hash,
+    ) -> Result<(), TestError> {
+        Ok(())
+    }
+
+    async fn remove_pending_release(
+        &mut self,
+        _release_at: u64,
+        _escrow_id: &Hash,
+    ) -> Result<(), TestError> {
+        Ok(())
+    }
+
+    async fn add_escrow_history(
+        &mut self,
+        _escrow_id: &Hash,
+        _topoheight: u64,
+        _tx_hash: &Hash,
     ) -> Result<(), TestError> {
         Ok(())
     }

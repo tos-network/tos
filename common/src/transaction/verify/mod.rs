@@ -1,12 +1,14 @@
 pub mod agent_account;
+mod arbitration;
 mod contract;
 mod error;
+pub mod escrow;
 mod kyc;
 mod state;
 mod tns;
 mod zkp_cache;
 
-use std::{borrow::Cow, iter, sync::Arc};
+use std::{borrow::Cow, collections::HashMap, iter, sync::Arc};
 
 use anyhow::{anyhow, Context};
 use indexmap::IndexMap;
@@ -106,6 +108,35 @@ impl DecompressedUnshieldTransferCt {
     }
 }
 
+struct StateArbiterRegistry {
+    arbiters: HashMap<crate::crypto::PublicKey, crate::arbitration::ArbiterAccount>,
+    min_stake: u64,
+}
+
+impl crate::arbitration::verdict::ArbiterRegistry for StateArbiterRegistry {
+    type Error = &'static str;
+
+    fn is_active(&self, arbiter: &crate::crypto::PublicKey) -> Result<bool, Self::Error> {
+        Ok(self
+            .arbiters
+            .get(arbiter)
+            .map(|entry| matches!(entry.status, crate::arbitration::ArbiterStatus::Active))
+            .unwrap_or(false))
+    }
+
+    fn stake(&self, arbiter: &crate::crypto::PublicKey) -> Result<u64, Self::Error> {
+        Ok(self
+            .arbiters
+            .get(arbiter)
+            .map(|entry| entry.stake_amount)
+            .unwrap_or(0))
+    }
+
+    fn min_stake(&self) -> Result<u64, Self::Error> {
+        Ok(self.min_stake)
+    }
+}
+
 #[derive(Clone)]
 enum AgentAuthKind {
     Owner,
@@ -189,7 +220,21 @@ impl Transaction {
                     | TransactionType::ShieldTransfers(_)
                     | TransactionType::UnshieldTransfers(_)
                     | TransactionType::RegisterName(_)
-                    | TransactionType::EphemeralMessage(_) => true,
+                    | TransactionType::EphemeralMessage(_)
+                    | TransactionType::CreateEscrow(_)
+                    | TransactionType::DepositEscrow(_)
+                    | TransactionType::ReleaseEscrow(_)
+                    | TransactionType::RefundEscrow(_)
+                    | TransactionType::ChallengeEscrow(_)
+                    | TransactionType::DisputeEscrow(_)
+                    | TransactionType::AppealEscrow(_)
+                    | TransactionType::SubmitVerdict(_)
+                    | TransactionType::RegisterArbiter(_)
+                    | TransactionType::UpdateArbiter(_)
+                    | TransactionType::SlashArbiter(_)
+                    | TransactionType::RequestArbiterExit(_)
+                    | TransactionType::WithdrawArbiterStake(_)
+                    | TransactionType::CancelArbiterExit(_) => true,
                 }
             }
         }
@@ -408,6 +453,27 @@ impl Transaction {
                     }
                 }
             }
+            TransactionType::CreateEscrow(payload) => {
+                push_target(&payload.provider);
+                push_asset(&payload.asset);
+                add_spend(payload.amount)?;
+            }
+            TransactionType::RegisterArbiter(payload) => {
+                push_asset(&TOS_ASSET);
+                add_spend(payload.get_stake_amount())?;
+            }
+            TransactionType::UpdateArbiter(payload) => {
+                if let Some(add_stake) = payload.get_add_stake() {
+                    if add_stake > 0 {
+                        push_asset(&TOS_ASSET);
+                        add_spend(add_stake)?;
+                    }
+                }
+            }
+            TransactionType::RequestArbiterExit(_)
+            | TransactionType::WithdrawArbiterStake(_)
+            | TransactionType::CancelArbiterExit(_)
+            | TransactionType::SlashArbiter(_) => {}
             TransactionType::MultiSig(_)
             | TransactionType::BindReferrer(_)
             | TransactionType::BatchReferralReward(_)
@@ -422,7 +488,14 @@ impl Transaction {
             | TransactionType::EmergencySuspend(_)
             | TransactionType::AgentAccount(_)
             | TransactionType::RegisterName(_)
-            | TransactionType::EphemeralMessage(_) => {}
+            | TransactionType::EphemeralMessage(_)
+            | TransactionType::DepositEscrow(_)
+            | TransactionType::ReleaseEscrow(_)
+            | TransactionType::RefundEscrow(_)
+            | TransactionType::ChallengeEscrow(_)
+            | TransactionType::DisputeEscrow(_)
+            | TransactionType::AppealEscrow(_)
+            | TransactionType::SubmitVerdict(_) => {}
         }
 
         Ok(AgentPolicyView {
@@ -1233,26 +1306,271 @@ impl Transaction {
                     return Err(VerificationError::MessageAlreadyExists);
                 }
             }
+            TransactionType::CreateEscrow(payload) => {
+                escrow::verify_create_escrow(payload, &self.source)
+                    .map_err(|e| VerificationError::AnyError(anyhow!(e)))?;
+            }
+            TransactionType::DepositEscrow(payload) => {
+                let escrow_account = state
+                    .get_escrow(&payload.escrow_id)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| VerificationError::AnyError(anyhow!("escrow not found")))?;
+                escrow::verify_deposit_escrow(payload, &escrow_account)
+                    .map_err(|e| VerificationError::AnyError(anyhow!(e)))?;
+            }
+            TransactionType::ReleaseEscrow(payload) => {
+                let escrow_account = state
+                    .get_escrow(&payload.escrow_id)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| VerificationError::AnyError(anyhow!("escrow not found")))?;
+                escrow::verify_release_escrow_with_balance(
+                    payload,
+                    &escrow_account,
+                    &self.source,
+                    escrow_account.amount,
+                )
+                .map_err(|e| VerificationError::AnyError(anyhow!(e)))?;
+            }
+            TransactionType::RefundEscrow(payload) => {
+                let escrow_account = state
+                    .get_escrow(&payload.escrow_id)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| VerificationError::AnyError(anyhow!("escrow not found")))?;
+                let current_height = state.get_verification_topoheight();
+                escrow::verify_refund_escrow_with_balance(
+                    payload,
+                    &escrow_account,
+                    &self.source,
+                    current_height,
+                    escrow_account.amount,
+                )
+                .map_err(|e| VerificationError::AnyError(anyhow!(e)))?;
+            }
+            TransactionType::ChallengeEscrow(payload) => {
+                let escrow_account = state
+                    .get_escrow(&payload.escrow_id)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| VerificationError::AnyError(anyhow!("escrow not found")))?;
+                let current_height = state.get_verification_topoheight();
+                escrow::verify_challenge_escrow(
+                    payload,
+                    &escrow_account,
+                    &self.source,
+                    current_height,
+                )
+                .map_err(|e| VerificationError::AnyError(anyhow!(e)))?;
+            }
+            TransactionType::DisputeEscrow(payload) => {
+                let escrow_account = state
+                    .get_escrow(&payload.escrow_id)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| VerificationError::AnyError(anyhow!("escrow not found")))?;
+                escrow::verify_dispute_escrow(payload, &escrow_account, &self.source)
+                    .map_err(|e| VerificationError::AnyError(anyhow!(e)))?;
+            }
+            TransactionType::AppealEscrow(payload) => {
+                let escrow_account = state
+                    .get_escrow(&payload.escrow_id)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| VerificationError::AnyError(anyhow!("escrow not found")))?;
+                let current_height = state.get_verification_topoheight();
+                escrow::verify_appeal_escrow(
+                    payload,
+                    &escrow_account,
+                    &self.source,
+                    current_height,
+                )
+                .map_err(|e| VerificationError::AnyError(anyhow!(e)))?;
+            }
+            TransactionType::SubmitVerdict(payload) => {
+                let escrow_account = state
+                    .get_escrow(&payload.escrow_id)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| VerificationError::AnyError(anyhow!("escrow not found")))?;
+
+                // Enforce minimum threshold of 1 to prevent zero-signature verdicts
+                let required_threshold = escrow_account
+                    .arbitration_config
+                    .as_ref()
+                    .and_then(|config| config.threshold)
+                    .unwrap_or(1)
+                    .max(1);
+
+                let mut arbiters = HashMap::new();
+                for sig in &payload.signatures {
+                    if arbiters.contains_key(&sig.arbiter_pubkey) {
+                        continue;
+                    }
+                    if let Some(arbiter) = state
+                        .get_arbiter(&sig.arbiter_pubkey)
+                        .await
+                        .map_err(VerificationError::State)?
+                    {
+                        arbiters.insert(sig.arbiter_pubkey.clone(), arbiter);
+                    }
+                }
+                let registry = StateArbiterRegistry {
+                    arbiters,
+                    min_stake: crate::config::MIN_ARBITER_STAKE,
+                };
+                escrow::verify_submit_verdict_with_balance(
+                    payload,
+                    &escrow_account,
+                    self.chain_id as u64,
+                    required_threshold,
+                    &registry,
+                    escrow_account.amount,
+                )
+                .map_err(|e| VerificationError::AnyError(anyhow!(e)))?;
+            }
+            TransactionType::RegisterArbiter(payload) => {
+                arbitration::verify_register_arbiter(payload)?;
+                if state
+                    .get_arbiter(&self.source)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .is_some()
+                {
+                    return Err(VerificationError::ArbiterAlreadyRegistered);
+                }
+            }
+            TransactionType::UpdateArbiter(payload) => {
+                arbitration::verify_update_arbiter(payload)?;
+                let existing = state
+                    .get_arbiter(&self.source)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or(VerificationError::ArbiterNotFound)?;
+
+                if payload.is_deactivate() {
+                    if existing.status != crate::arbitration::ArbiterStatus::Active {
+                        return Err(VerificationError::ArbiterInvalidStatus);
+                    }
+                    if existing.stake_amount == 0 {
+                        return Err(VerificationError::ArbiterNoStakeToWithdraw);
+                    }
+                }
+
+                let min_value = payload
+                    .get_min_escrow_value()
+                    .unwrap_or(existing.min_escrow_value);
+                let max_value = payload
+                    .get_max_escrow_value()
+                    .unwrap_or(existing.max_escrow_value);
+                if min_value > max_value {
+                    return Err(VerificationError::ArbiterEscrowRangeInvalid {
+                        min: min_value,
+                        max: max_value,
+                    });
+                }
+            }
+            TransactionType::SlashArbiter(payload) => {
+                arbitration::verify_slash_arbiter(payload)?;
+                if state
+                    .get_arbiter(payload.get_arbiter_pubkey())
+                    .await
+                    .map_err(VerificationError::State)?
+                    .is_none()
+                {
+                    return Err(VerificationError::ArbiterNotFound);
+                }
+            }
+            TransactionType::RequestArbiterExit(_) => {
+                let arbiter = state
+                    .get_arbiter(&self.source)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or(VerificationError::ArbiterNotFound)?;
+                if arbiter.status != crate::arbitration::ArbiterStatus::Active {
+                    return Err(VerificationError::ArbiterInvalidStatus);
+                }
+                if arbiter.stake_amount == 0 {
+                    return Err(VerificationError::ArbiterNoStakeToWithdraw);
+                }
+            }
+            TransactionType::WithdrawArbiterStake(payload) => {
+                let arbiter = state
+                    .get_arbiter(&self.source)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or(VerificationError::ArbiterNotFound)?;
+                let current_topoheight = state.get_verification_topoheight();
+                let available = match arbiter.can_withdraw(current_topoheight) {
+                    Ok(amount) => amount,
+                    Err(err) => {
+                        return Err(match err {
+                            crate::arbitration::ArbiterWithdrawError::NotActive
+                            | crate::arbitration::ArbiterWithdrawError::NotInExitProcess => {
+                                VerificationError::ArbiterNotInExitProcess
+                            }
+                            crate::arbitration::ArbiterWithdrawError::NoStakeToWithdraw => {
+                                VerificationError::ArbiterNoStakeToWithdraw
+                            }
+                            crate::arbitration::ArbiterWithdrawError::CooldownNotComplete {
+                                current,
+                                required,
+                            } => {
+                                VerificationError::ArbiterCooldownNotComplete { current, required }
+                            }
+                            crate::arbitration::ArbiterWithdrawError::HasActiveCases { count } => {
+                                VerificationError::ArbiterHasActiveCases { count }
+                            }
+                            crate::arbitration::ArbiterWithdrawError::ArbiterAlreadyRemoved => {
+                                VerificationError::ArbiterAlreadyRemoved
+                            }
+                        });
+                    }
+                };
+                if payload.amount > 0 && payload.amount > available {
+                    return Err(VerificationError::ArbiterStakeTooLow {
+                        required: payload.amount,
+                        found: available,
+                    });
+                }
+            }
+            TransactionType::CancelArbiterExit(_) => {
+                let arbiter = state
+                    .get_arbiter(&self.source)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or(VerificationError::ArbiterNotFound)?;
+                if arbiter.status != crate::arbitration::ArbiterStatus::Exiting {
+                    return Err(VerificationError::ArbiterNotInExitProcess);
+                }
+                if arbiter.stake_amount < crate::config::MIN_ARBITER_STAKE {
+                    return Err(VerificationError::ArbiterStakeTooLow {
+                        required: crate::config::MIN_ARBITER_STAKE,
+                        found: arbiter.stake_amount,
+                    });
+                }
+            }
         };
 
         // SECURITY FIX: Verify sender has sufficient balance for all spending
         // Calculate total spending per asset
         // Use references to original Hash values in transaction (they live for 'a)
-        let mut spending_per_asset: IndexMap<&'a Hash, u64> = IndexMap::new();
+        let mut spending_per_asset: IndexMap<Hash, u64> = IndexMap::new();
 
         match &self.data {
             TransactionType::Transfers(transfers) => {
                 for transfer in transfers {
                     let asset = transfer.get_asset(); // Returns &Hash
                     let amount = transfer.get_amount();
-                    let current = spending_per_asset.entry(asset).or_insert(0);
+                    let current = spending_per_asset.entry(asset.clone()).or_insert(0);
                     *current = current
                         .checked_add(amount)
                         .ok_or(VerificationError::Overflow)?;
                 }
             }
             TransactionType::Burn(payload) => {
-                let current = spending_per_asset.entry(&payload.asset).or_insert(0);
+                let current = spending_per_asset.entry(payload.asset.clone()).or_insert(0);
                 *current = current
                     .checked_add(payload.amount)
                     .ok_or(VerificationError::Overflow)?;
@@ -1263,20 +1581,20 @@ impl Transaction {
                     let amount = deposit
                         .get_amount()
                         .map_err(|e| VerificationError::AnyError(anyhow!(e)))?;
-                    let current = spending_per_asset.entry(asset).or_insert(0);
+                    let current = spending_per_asset.entry(asset.clone()).or_insert(0);
                     *current = current
                         .checked_add(amount)
                         .ok_or(VerificationError::Overflow)?;
                 }
                 // Add max_gas to TOS spending
-                let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                let current = spending_per_asset.entry(TOS_ASSET.clone()).or_insert(0);
                 *current = current
                     .checked_add(payload.max_gas)
                     .ok_or(VerificationError::Overflow)?;
             }
             TransactionType::DeployContract(payload) => {
                 // Add BURN_PER_CONTRACT to TOS spending
-                let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                let current = spending_per_asset.entry(TOS_ASSET.clone()).or_insert(0);
                 *current = current
                     .checked_add(BURN_PER_CONTRACT)
                     .ok_or(VerificationError::Overflow)?;
@@ -1287,13 +1605,13 @@ impl Transaction {
                         let amount = deposit
                             .get_amount()
                             .map_err(|e| VerificationError::AnyError(anyhow!(e)))?;
-                        let current = spending_per_asset.entry(asset).or_insert(0);
+                        let current = spending_per_asset.entry(asset.clone()).or_insert(0);
                         *current = current
                             .checked_add(amount)
                             .ok_or(VerificationError::Overflow)?;
                     }
                     // Add max_gas to TOS spending
-                    let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                    let current = spending_per_asset.entry(TOS_ASSET.clone()).or_insert(0);
                     *current = current
                         .checked_add(invoke.max_gas)
                         .ok_or(VerificationError::Overflow)?;
@@ -1311,7 +1629,7 @@ impl Transaction {
                         // Only charge for balance portion (amount - recyclable)
                         let balance_required = amount.saturating_sub(recyclable_tos);
 
-                        let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                        let current = spending_per_asset.entry(TOS_ASSET.clone()).or_insert(0);
                         *current = current
                             .checked_add(balance_required)
                             .ok_or(VerificationError::Overflow)?;
@@ -1323,7 +1641,7 @@ impl Transaction {
                             .iter()
                             .try_fold(0u64, |acc, entry| acc.checked_add(entry.amount))
                             .ok_or(VerificationError::Overflow)?;
-                        let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                        let current = spending_per_asset.entry(TOS_ASSET.clone()).or_insert(0);
                         *current = current
                             .checked_add(total)
                             .ok_or(VerificationError::Overflow)?;
@@ -1353,7 +1671,7 @@ impl Transaction {
             }
             TransactionType::BatchReferralReward(payload) => {
                 // BatchReferralReward spends total_amount of the specified asset
-                let current = spending_per_asset.entry(payload.get_asset()).or_insert(0);
+                let current = spending_per_asset.entry(payload.get_asset().clone()).or_insert(0);
                 *current = current
                     .checked_add(payload.get_total_amount())
                     .ok_or(VerificationError::Overflow)?;
@@ -1371,6 +1689,71 @@ impl Transaction {
                 // Registration fee and message fee are added to TOS spending via the fee field
                 // Actual name/message verification happens in verify_register_name/verify_ephemeral_message
             }
+            TransactionType::CreateEscrow(payload) => {
+                let current = spending_per_asset.entry(payload.asset.clone()).or_insert(0);
+                *current = current
+                    .checked_add(payload.amount)
+                    .ok_or(VerificationError::Overflow)?;
+            }
+            TransactionType::DepositEscrow(payload) => {
+                let escrow = state
+                    .get_escrow(&payload.escrow_id)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| VerificationError::AnyError(anyhow!("escrow not found")))?;
+                let current = spending_per_asset.entry(escrow.asset.clone()).or_insert(0);
+                *current = current
+                    .checked_add(payload.amount)
+                    .ok_or(VerificationError::Overflow)?;
+            }
+            TransactionType::ChallengeEscrow(payload) => {
+                let escrow = state
+                    .get_escrow(&payload.escrow_id)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| VerificationError::AnyError(anyhow!("escrow not found")))?;
+                let current = spending_per_asset.entry(escrow.asset.clone()).or_insert(0);
+                *current = current
+                    .checked_add(payload.deposit)
+                    .ok_or(VerificationError::Overflow)?;
+            }
+            TransactionType::DisputeEscrow(_) => {}
+            TransactionType::AppealEscrow(payload) => {
+                let escrow = state
+                    .get_escrow(&payload.escrow_id)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| VerificationError::AnyError(anyhow!("escrow not found")))?;
+                let current = spending_per_asset.entry(escrow.asset.clone()).or_insert(0);
+                *current = current
+                    .checked_add(payload.appeal_deposit)
+                    .ok_or(VerificationError::Overflow)?;
+            }
+            TransactionType::RegisterArbiter(payload) => {
+                let current = spending_per_asset.entry(TOS_ASSET.clone()).or_insert(0);
+                *current = current
+                    .checked_add(payload.get_stake_amount())
+                    .ok_or(VerificationError::Overflow)?;
+            }
+            TransactionType::UpdateArbiter(payload) => {
+                if let Some(add_stake) = payload.get_add_stake() {
+                    if add_stake > 0 {
+                        let current = spending_per_asset.entry(TOS_ASSET.clone()).or_insert(0);
+                        *current = current
+                            .checked_add(add_stake)
+                            .ok_or(VerificationError::Overflow)?;
+                    }
+                }
+            }
+            TransactionType::RequestArbiterExit(_)
+            | TransactionType::WithdrawArbiterStake(_)
+            | TransactionType::CancelArbiterExit(_)
+            | TransactionType::SlashArbiter(_) => {}
+            TransactionType::ReleaseEscrow(_)
+            | TransactionType::RefundEscrow(_)
+            | TransactionType::SubmitVerdict(_) => {
+                // Escrow releases/refunds/verdicts move funds from escrow, not sender balance
+            }
         };
 
         // For Shield transfers, add TOS spending (plaintext balance deduction)
@@ -1378,7 +1761,7 @@ impl Transaction {
             for transfer in transfers {
                 let asset = transfer.get_asset();
                 let amount = transfer.get_amount();
-                let current = spending_per_asset.entry(asset).or_insert(0);
+                let current = spending_per_asset.entry(asset.clone()).or_insert(0);
                 *current = current
                     .checked_add(amount)
                     .ok_or(VerificationError::Overflow)?;
@@ -1410,7 +1793,7 @@ impl Transaction {
             }
 
             if fee_charged_to_source {
-                let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                let current = spending_per_asset.entry(TOS_ASSET.clone()).or_insert(0);
                 *current = current
                     .checked_add(self.fee)
                     .ok_or(VerificationError::Overflow)?;
@@ -1426,7 +1809,7 @@ impl Transaction {
             let current_balance = state
                 .get_sender_balance(
                     Cow::Borrowed(&self.source),
-                    Cow::Borrowed(asset_hash),
+                    Cow::Owned(asset_hash.clone()),
                     &self.reference,
                 )
                 .await
@@ -2695,12 +3078,143 @@ impl Transaction {
                     return Err(VerificationError::MessageAlreadyExists);
                 }
             }
-        };
+            TransactionType::CreateEscrow(payload) => {
+                escrow::verify_create_escrow(payload, &self.source)
+                    .map_err(|e| VerificationError::AnyError(anyhow!(e)))?;
+            }
+            TransactionType::DepositEscrow(payload) => {
+                let escrow_account = state
+                    .get_escrow(&payload.escrow_id)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| VerificationError::AnyError(anyhow!("escrow not found")))?;
+                escrow::verify_deposit_escrow(payload, &escrow_account)
+                    .map_err(|e| VerificationError::AnyError(anyhow!(e)))?;
+            }
+            TransactionType::ReleaseEscrow(payload) => {
+                let escrow_account = state
+                    .get_escrow(&payload.escrow_id)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| VerificationError::AnyError(anyhow!("escrow not found")))?;
+                escrow::verify_release_escrow_with_balance(
+                    payload,
+                    &escrow_account,
+                    &self.source,
+                    escrow_account.amount,
+                )
+                .map_err(|e| VerificationError::AnyError(anyhow!(e)))?;
+            }
+            TransactionType::RefundEscrow(payload) => {
+                let escrow_account = state
+                    .get_escrow(&payload.escrow_id)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| VerificationError::AnyError(anyhow!("escrow not found")))?;
+                let current_height = state.get_verification_topoheight();
+                escrow::verify_refund_escrow_with_balance(
+                    payload,
+                    &escrow_account,
+                    &self.source,
+                    current_height,
+                    escrow_account.amount,
+                )
+                .map_err(|e| VerificationError::AnyError(anyhow!(e)))?;
+            }
+            TransactionType::ChallengeEscrow(payload) => {
+                let escrow_account = state
+                    .get_escrow(&payload.escrow_id)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| VerificationError::AnyError(anyhow!("escrow not found")))?;
+                let current_height = state.get_verification_topoheight();
+                escrow::verify_challenge_escrow(
+                    payload,
+                    &escrow_account,
+                    &self.source,
+                    current_height,
+                )
+                .map_err(|e| VerificationError::AnyError(anyhow!(e)))?;
+            }
+            TransactionType::DisputeEscrow(payload) => {
+                let escrow_account = state
+                    .get_escrow(&payload.escrow_id)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| VerificationError::AnyError(anyhow!("escrow not found")))?;
+                escrow::verify_dispute_escrow(payload, &escrow_account, &self.source)
+                    .map_err(|e| VerificationError::AnyError(anyhow!(e)))?;
+            }
+            TransactionType::AppealEscrow(payload) => {
+                let escrow_account = state
+                    .get_escrow(&payload.escrow_id)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| VerificationError::AnyError(anyhow!("escrow not found")))?;
+                let current_height = state.get_verification_topoheight();
+                escrow::verify_appeal_escrow(
+                    payload,
+                    &escrow_account,
+                    &self.source,
+                    current_height,
+                )
+                .map_err(|e| VerificationError::AnyError(anyhow!(e)))?;
+            }
+            TransactionType::SubmitVerdict(payload) => {
+                let escrow_account = state
+                    .get_escrow(&payload.escrow_id)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| VerificationError::AnyError(anyhow!("escrow not found")))?;
 
-        let source_decompressed = self
-            .source
-            .decompress()
-            .map_err(|err| VerificationError::Proof(err.into()))?;
+                // Enforce minimum threshold of 1 to prevent zero-signature verdicts
+                let required_threshold = escrow_account
+                    .arbitration_config
+                    .as_ref()
+                    .and_then(|config| config.threshold)
+                    .unwrap_or(1)
+                    .max(1);
+
+                let mut arbiters = HashMap::new();
+                for sig in &payload.signatures {
+                    if arbiters.contains_key(&sig.arbiter_pubkey) {
+                        continue;
+                    }
+                    if let Some(arbiter) = state
+                        .get_arbiter(&sig.arbiter_pubkey)
+                        .await
+                        .map_err(VerificationError::State)?
+                    {
+                        arbiters.insert(sig.arbiter_pubkey.clone(), arbiter);
+                    }
+                }
+                let registry = StateArbiterRegistry {
+                    arbiters,
+                    min_stake: crate::config::MIN_ARBITER_STAKE,
+                };
+                escrow::verify_submit_verdict_with_balance(
+                    payload,
+                    &escrow_account,
+                    self.chain_id as u64,
+                    required_threshold,
+                    &registry,
+                    escrow_account.amount,
+                )
+                .map_err(|e| VerificationError::AnyError(anyhow!(e)))?;
+            }
+            TransactionType::RegisterArbiter(payload) => {
+                arbitration::verify_register_arbiter(payload)?;
+            }
+            TransactionType::UpdateArbiter(payload) => {
+                arbitration::verify_update_arbiter(payload)?;
+            }
+            TransactionType::SlashArbiter(payload) => {
+                arbitration::verify_slash_arbiter(payload)?;
+            }
+            TransactionType::RequestArbiterExit(_) => {}
+            TransactionType::WithdrawArbiterStake(_) => {}
+            TransactionType::CancelArbiterExit(_) => {}
+        };
 
         // 0.a Verify chain_id for T1+ transactions (cross-network replay protection)
         if self.version >= TxVersion::T1 {
@@ -2720,6 +3234,10 @@ impl Transaction {
         }
 
         // 0.b Verify Signature (Agent accounts can use controller or session keys)
+        let source_decompressed = self
+            .source
+            .decompress()
+            .map_err(|err| VerificationError::Proof(err.into()))?;
         let bytes = self.get_signing_bytes();
         let agent_auth = self
             .resolve_agent_auth(state, &bytes, &source_decompressed)
@@ -2937,6 +3455,24 @@ impl Transaction {
             TransactionType::RegisterName(_) | TransactionType::EphemeralMessage(_) => {
                 // TNS transactions: verification handled in dedicated functions
             }
+            TransactionType::CreateEscrow(_)
+            | TransactionType::DepositEscrow(_)
+            | TransactionType::ReleaseEscrow(_)
+            | TransactionType::RefundEscrow(_)
+            | TransactionType::ChallengeEscrow(_)
+            | TransactionType::DisputeEscrow(_)
+            | TransactionType::AppealEscrow(_)
+            | TransactionType::SubmitVerdict(_) => {
+                // Escrow transactions: verification handled in escrow module
+            }
+            TransactionType::RegisterArbiter(_)
+            | TransactionType::UpdateArbiter(_)
+            | TransactionType::SlashArbiter(_)
+            | TransactionType::RequestArbiterExit(_)
+            | TransactionType::WithdrawArbiterStake(_)
+            | TransactionType::CancelArbiterExit(_) => {
+                // Arbiter registry txs handled in arbitration module
+            }
         }
 
         // With plaintext balances, we don't need Bulletproofs range proofs
@@ -2945,21 +3481,21 @@ impl Transaction {
 
         // SECURITY FIX: Check balances inline (can't call verify_dynamic_parts as it also does CAS nonce update)
         // Calculate total spending per asset and verify sender has sufficient balance
-        let mut spending_per_asset: IndexMap<&'a Hash, u64> = IndexMap::new();
+        let mut spending_per_asset: IndexMap<Hash, u64> = IndexMap::new();
 
         match &self.data {
             TransactionType::Transfers(transfers) => {
                 for transfer in transfers {
                     let asset = transfer.get_asset();
                     let amount = transfer.get_amount();
-                    let current = spending_per_asset.entry(asset).or_insert(0);
+                    let current = spending_per_asset.entry(asset.clone()).or_insert(0);
                     *current = current
                         .checked_add(amount)
                         .ok_or(VerificationError::Overflow)?;
                 }
             }
             TransactionType::Burn(payload) => {
-                let current = spending_per_asset.entry(&payload.asset).or_insert(0);
+                let current = spending_per_asset.entry(payload.asset.clone()).or_insert(0);
                 *current = current
                     .checked_add(payload.amount)
                     .ok_or(VerificationError::Overflow)?;
@@ -2969,20 +3505,20 @@ impl Transaction {
                     let amount = deposit
                         .get_amount()
                         .map_err(|e| VerificationError::AnyError(anyhow!(e)))?;
-                    let current = spending_per_asset.entry(asset).or_insert(0);
+                    let current = spending_per_asset.entry(asset.clone()).or_insert(0);
                     *current = current
                         .checked_add(amount)
                         .ok_or(VerificationError::Overflow)?;
                 }
                 // Add max_gas to TOS spending
-                let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                let current = spending_per_asset.entry(TOS_ASSET.clone()).or_insert(0);
                 *current = current
                     .checked_add(payload.max_gas)
                     .ok_or(VerificationError::Overflow)?;
             }
             TransactionType::DeployContract(payload) => {
                 // Add BURN_PER_CONTRACT to TOS spending
-                let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                let current = spending_per_asset.entry(TOS_ASSET.clone()).or_insert(0);
                 *current = current
                     .checked_add(BURN_PER_CONTRACT)
                     .ok_or(VerificationError::Overflow)?;
@@ -2992,13 +3528,13 @@ impl Transaction {
                         let amount = deposit
                             .get_amount()
                             .map_err(|e| VerificationError::AnyError(anyhow!(e)))?;
-                        let current = spending_per_asset.entry(asset).or_insert(0);
+                        let current = spending_per_asset.entry(asset.clone()).or_insert(0);
                         *current = current
                             .checked_add(amount)
                             .ok_or(VerificationError::Overflow)?;
                     }
                     // Add max_gas to TOS spending
-                    let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                    let current = spending_per_asset.entry(TOS_ASSET.clone()).or_insert(0);
                     *current = current
                         .checked_add(invoke.max_gas)
                         .ok_or(VerificationError::Overflow)?;
@@ -3016,7 +3552,7 @@ impl Transaction {
                         // Only charge for balance portion (amount - recyclable)
                         let balance_required = amount.saturating_sub(recyclable_tos);
 
-                        let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                        let current = spending_per_asset.entry(TOS_ASSET.clone()).or_insert(0);
                         *current = current
                             .checked_add(balance_required)
                             .ok_or(VerificationError::Overflow)?;
@@ -3028,7 +3564,7 @@ impl Transaction {
                             .iter()
                             .try_fold(0u64, |acc, entry| acc.checked_add(entry.amount))
                             .ok_or(VerificationError::Overflow)?;
-                        let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                        let current = spending_per_asset.entry(TOS_ASSET.clone()).or_insert(0);
                         *current = current
                             .checked_add(total)
                             .ok_or(VerificationError::Overflow)?;
@@ -3058,7 +3594,7 @@ impl Transaction {
             }
             TransactionType::BatchReferralReward(payload) => {
                 // BatchReferralReward spends total_amount of the specified asset
-                let current = spending_per_asset.entry(payload.get_asset()).or_insert(0);
+                let current = spending_per_asset.entry(payload.get_asset().clone()).or_insert(0);
                 *current = current
                     .checked_add(payload.get_total_amount())
                     .ok_or(VerificationError::Overflow)?;
@@ -3074,7 +3610,7 @@ impl Transaction {
                 for transfer in transfers {
                     let asset = transfer.get_asset();
                     let amount = transfer.get_amount();
-                    let current = spending_per_asset.entry(asset).or_insert(0);
+                    let current = spending_per_asset.entry(asset.clone()).or_insert(0);
                     *current = current
                         .checked_add(amount)
                         .ok_or(VerificationError::Overflow)?;
@@ -3088,6 +3624,71 @@ impl Transaction {
             TransactionType::RegisterName(_) | TransactionType::EphemeralMessage(_) => {
                 // TNS transactions: registration/message fees are paid via the fee field
                 // No additional spending verification needed here
+            }
+            TransactionType::CreateEscrow(payload) => {
+                let current = spending_per_asset.entry(payload.asset.clone()).or_insert(0);
+                *current = current
+                    .checked_add(payload.amount)
+                    .ok_or(VerificationError::Overflow)?;
+            }
+            TransactionType::DepositEscrow(payload) => {
+                let escrow = state
+                    .get_escrow(&payload.escrow_id)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| VerificationError::AnyError(anyhow!("escrow not found")))?;
+                let current = spending_per_asset.entry(escrow.asset.clone()).or_insert(0);
+                *current = current
+                    .checked_add(payload.amount)
+                    .ok_or(VerificationError::Overflow)?;
+            }
+            TransactionType::ChallengeEscrow(payload) => {
+                let escrow = state
+                    .get_escrow(&payload.escrow_id)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| VerificationError::AnyError(anyhow!("escrow not found")))?;
+                let current = spending_per_asset.entry(escrow.asset.clone()).or_insert(0);
+                *current = current
+                    .checked_add(payload.deposit)
+                    .ok_or(VerificationError::Overflow)?;
+            }
+            TransactionType::DisputeEscrow(_) => {}
+            TransactionType::AppealEscrow(payload) => {
+                let escrow = state
+                    .get_escrow(&payload.escrow_id)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| VerificationError::AnyError(anyhow!("escrow not found")))?;
+                let current = spending_per_asset.entry(escrow.asset.clone()).or_insert(0);
+                *current = current
+                    .checked_add(payload.appeal_deposit)
+                    .ok_or(VerificationError::Overflow)?;
+            }
+            TransactionType::RegisterArbiter(payload) => {
+                let current = spending_per_asset.entry(TOS_ASSET.clone()).or_insert(0);
+                *current = current
+                    .checked_add(payload.get_stake_amount())
+                    .ok_or(VerificationError::Overflow)?;
+            }
+            TransactionType::UpdateArbiter(payload) => {
+                if let Some(add_stake) = payload.get_add_stake() {
+                    if add_stake > 0 {
+                        let current = spending_per_asset.entry(TOS_ASSET.clone()).or_insert(0);
+                        *current = current
+                            .checked_add(add_stake)
+                            .ok_or(VerificationError::Overflow)?;
+                    }
+                }
+            }
+            TransactionType::RequestArbiterExit(_)
+            | TransactionType::WithdrawArbiterStake(_)
+            | TransactionType::CancelArbiterExit(_)
+            | TransactionType::SlashArbiter(_) => {}
+            TransactionType::ReleaseEscrow(_)
+            | TransactionType::RefundEscrow(_)
+            | TransactionType::SubmitVerdict(_) => {
+                // Escrow releases/refunds/verdicts move funds from escrow, not sender balance
             }
         };
 
@@ -3116,7 +3717,7 @@ impl Transaction {
             }
 
             if fee_charged_to_source {
-                let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                let current = spending_per_asset.entry(TOS_ASSET.clone()).or_insert(0);
                 *current = current
                     .checked_add(self.fee)
                     .ok_or(VerificationError::Overflow)?;
@@ -3131,7 +3732,7 @@ impl Transaction {
             let current_balance = state
                 .get_sender_balance(
                     Cow::Borrowed(&self.source),
-                    Cow::Borrowed(asset_hash),
+                    Cow::Owned(asset_hash.clone()),
                     &self.reference,
                 )
                 .await
@@ -3367,21 +3968,21 @@ impl Transaction {
         // SECURITY FIX: Deduct sender balances BEFORE adding to receivers
         // Calculate total spending per asset for sender deduction
         // Use references to original Hash values in transaction (they live for 'a)
-        let mut spending_per_asset: IndexMap<&'a Hash, u64> = IndexMap::new();
+        let mut spending_per_asset: IndexMap<Hash, u64> = IndexMap::new();
 
         match &self.data {
             TransactionType::Transfers(transfers) => {
                 for transfer in transfers {
                     let asset = transfer.get_asset(); // Returns &Hash
                     let amount = transfer.get_amount();
-                    let current = spending_per_asset.entry(asset).or_insert(0);
+                    let current = spending_per_asset.entry(asset.clone()).or_insert(0);
                     *current = current
                         .checked_add(amount)
                         .ok_or(VerificationError::Overflow)?;
                 }
             }
             TransactionType::Burn(payload) => {
-                let current = spending_per_asset.entry(&payload.asset).or_insert(0);
+                let current = spending_per_asset.entry(payload.asset.clone()).or_insert(0);
                 *current = current
                     .checked_add(payload.amount)
                     .ok_or(VerificationError::Overflow)?;
@@ -3392,20 +3993,20 @@ impl Transaction {
                     let amount = deposit
                         .get_amount()
                         .map_err(|e| VerificationError::AnyError(anyhow!(e)))?;
-                    let current = spending_per_asset.entry(asset).or_insert(0);
+                    let current = spending_per_asset.entry(asset.clone()).or_insert(0);
                     *current = current
                         .checked_add(amount)
                         .ok_or(VerificationError::Overflow)?;
                 }
                 // Add max_gas to TOS spending
-                let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                let current = spending_per_asset.entry(TOS_ASSET.clone()).or_insert(0);
                 *current = current
                     .checked_add(payload.max_gas)
                     .ok_or(VerificationError::Overflow)?;
             }
             TransactionType::DeployContract(payload) => {
                 // Add BURN_PER_CONTRACT to TOS spending
-                let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                let current = spending_per_asset.entry(TOS_ASSET.clone()).or_insert(0);
                 *current = current
                     .checked_add(BURN_PER_CONTRACT)
                     .ok_or(VerificationError::Overflow)?;
@@ -3416,13 +4017,13 @@ impl Transaction {
                         let amount = deposit
                             .get_amount()
                             .map_err(|e| VerificationError::AnyError(anyhow!(e)))?;
-                        let current = spending_per_asset.entry(asset).or_insert(0);
+                        let current = spending_per_asset.entry(asset.clone()).or_insert(0);
                         *current = current
                             .checked_add(amount)
                             .ok_or(VerificationError::Overflow)?;
                     }
                     // Add max_gas to TOS spending
-                    let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                    let current = spending_per_asset.entry(TOS_ASSET.clone()).or_insert(0);
                     *current = current
                         .checked_add(invoke.max_gas)
                         .ok_or(VerificationError::Overflow)?;
@@ -3440,7 +4041,7 @@ impl Transaction {
                         // Only charge for balance portion (amount - recyclable)
                         let balance_required = amount.saturating_sub(recyclable_tos);
 
-                        let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                        let current = spending_per_asset.entry(TOS_ASSET.clone()).or_insert(0);
                         *current = current
                             .checked_add(balance_required)
                             .ok_or(VerificationError::Overflow)?;
@@ -3452,7 +4053,7 @@ impl Transaction {
                             .iter()
                             .try_fold(0u64, |acc, entry| acc.checked_add(entry.amount))
                             .ok_or(VerificationError::Overflow)?;
-                        let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                        let current = spending_per_asset.entry(TOS_ASSET.clone()).or_insert(0);
                         *current = current
                             .checked_add(total)
                             .ok_or(VerificationError::Overflow)?;
@@ -3482,7 +4083,7 @@ impl Transaction {
             }
             TransactionType::BatchReferralReward(payload) => {
                 // BatchReferralReward spends total_amount of the specified asset
-                let current = spending_per_asset.entry(payload.get_asset()).or_insert(0);
+                let current = spending_per_asset.entry(payload.get_asset().clone()).or_insert(0);
                 *current = current
                     .checked_add(payload.get_total_amount())
                     .ok_or(VerificationError::Overflow)?;
@@ -3498,7 +4099,7 @@ impl Transaction {
                 for transfer in transfers {
                     let asset = transfer.get_asset();
                     let amount = transfer.get_amount();
-                    let current = spending_per_asset.entry(asset).or_insert(0);
+                    let current = spending_per_asset.entry(asset.clone()).or_insert(0);
                     *current = current
                         .checked_add(amount)
                         .ok_or(VerificationError::Overflow)?;
@@ -3512,6 +4113,71 @@ impl Transaction {
             TransactionType::RegisterName(_) | TransactionType::EphemeralMessage(_) => {
                 // TNS transactions: registration/message fees are paid via the fee field
                 // No additional spending verification needed here
+            }
+            TransactionType::CreateEscrow(payload) => {
+                let current = spending_per_asset.entry(payload.asset.clone()).or_insert(0);
+                *current = current
+                    .checked_add(payload.amount)
+                    .ok_or(VerificationError::Overflow)?;
+            }
+            TransactionType::DepositEscrow(payload) => {
+                let escrow = state
+                    .get_escrow(&payload.escrow_id)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| VerificationError::AnyError(anyhow!("escrow not found")))?;
+                let current = spending_per_asset.entry(escrow.asset.clone()).or_insert(0);
+                *current = current
+                    .checked_add(payload.amount)
+                    .ok_or(VerificationError::Overflow)?;
+            }
+            TransactionType::ChallengeEscrow(payload) => {
+                let escrow = state
+                    .get_escrow(&payload.escrow_id)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| VerificationError::AnyError(anyhow!("escrow not found")))?;
+                let current = spending_per_asset.entry(escrow.asset.clone()).or_insert(0);
+                *current = current
+                    .checked_add(payload.deposit)
+                    .ok_or(VerificationError::Overflow)?;
+            }
+            TransactionType::DisputeEscrow(_) => {}
+            TransactionType::AppealEscrow(payload) => {
+                let escrow = state
+                    .get_escrow(&payload.escrow_id)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| VerificationError::AnyError(anyhow!("escrow not found")))?;
+                let current = spending_per_asset.entry(escrow.asset.clone()).or_insert(0);
+                *current = current
+                    .checked_add(payload.appeal_deposit)
+                    .ok_or(VerificationError::Overflow)?;
+            }
+            TransactionType::RegisterArbiter(payload) => {
+                let current = spending_per_asset.entry(TOS_ASSET.clone()).or_insert(0);
+                *current = current
+                    .checked_add(payload.get_stake_amount())
+                    .ok_or(VerificationError::Overflow)?;
+            }
+            TransactionType::UpdateArbiter(payload) => {
+                if let Some(add_stake) = payload.get_add_stake() {
+                    if add_stake > 0 {
+                        let current = spending_per_asset.entry(TOS_ASSET.clone()).or_insert(0);
+                        *current = current
+                            .checked_add(add_stake)
+                            .ok_or(VerificationError::Overflow)?;
+                    }
+                }
+            }
+            TransactionType::RequestArbiterExit(_)
+            | TransactionType::WithdrawArbiterStake(_)
+            | TransactionType::CancelArbiterExit(_)
+            | TransactionType::SlashArbiter(_) => {}
+            TransactionType::ReleaseEscrow(_)
+            | TransactionType::RefundEscrow(_)
+            | TransactionType::SubmitVerdict(_) => {
+                // Escrow releases/refunds/verdicts move funds from escrow, not sender balance
             }
         };
 
@@ -3543,7 +4209,7 @@ impl Transaction {
             }
 
             if fee_charged_to_source {
-                let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                let current = spending_per_asset.entry(TOS_ASSET.clone()).or_insert(0);
                 *current = current
                     .checked_add(self.fee)
                     .ok_or(VerificationError::Overflow)?;
@@ -3567,7 +4233,7 @@ impl Transaction {
             let _ = state
                 .get_sender_balance(
                     Cow::Borrowed(&self.source),
-                    Cow::Borrowed(asset_hash),
+                    Cow::Owned(asset_hash.clone()),
                     &self.reference,
                 )
                 .await
@@ -3577,7 +4243,7 @@ impl Transaction {
             state
                 .add_sender_output(
                     Cow::Borrowed(&self.source),
-                    Cow::Borrowed(asset_hash),
+                    Cow::Owned(asset_hash.clone()),
                     *total_spending,
                 )
                 .await
@@ -3764,6 +4430,610 @@ impl Transaction {
             TransactionType::AgentAccount(payload) => {
                 verify_agent_account_payload(payload, &self.source, state).await?;
             }
+            TransactionType::CreateEscrow(payload) => {
+                let created_at = state.get_verification_topoheight();
+                let timeout_at = created_at
+                    .checked_add(payload.timeout_blocks)
+                    .ok_or(VerificationError::Overflow)?;
+                let escrow = crate::escrow::EscrowAccount {
+                    id: tx_hash.clone(),
+                    task_id: payload.task_id.clone(),
+                    payer: self.source.clone(),
+                    payee: payload.provider.clone(),
+                    amount: payload.amount,
+                    total_amount: payload.amount,
+                    released_amount: 0,
+                    refunded_amount: 0,
+                    pending_release_amount: None,
+                    challenge_deposit: 0,
+                    asset: payload.asset.clone(),
+                    state: crate::escrow::EscrowState::Funded,
+                    dispute_id: None,
+                    dispute_round: None,
+                    challenge_window: payload.challenge_window,
+                    challenge_deposit_bps: payload.challenge_deposit_bps,
+                    optimistic_release: payload.optimistic_release,
+                    release_requested_at: None,
+                    created_at,
+                    updated_at: created_at,
+                    timeout_at,
+                    timeout_blocks: payload.timeout_blocks,
+                    arbitration_config: payload.arbitration_config.clone(),
+                    dispute: None,
+                    appeal: None,
+                    resolutions: Vec::new(),
+                };
+
+                state
+                    .set_escrow(&escrow)
+                    .await
+                    .map_err(VerificationError::State)?;
+                state
+                    .add_escrow_history(&escrow.id, created_at, tx_hash)
+                    .await
+                    .map_err(VerificationError::State)?;
+            }
+            TransactionType::DepositEscrow(payload) => {
+                let mut escrow = state
+                    .get_escrow(&payload.escrow_id)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| VerificationError::AnyError(anyhow!("escrow not found")))?;
+                escrow.amount = escrow
+                    .amount
+                    .checked_add(payload.amount)
+                    .ok_or(VerificationError::Overflow)?;
+                escrow.total_amount = escrow
+                    .total_amount
+                    .checked_add(payload.amount)
+                    .ok_or(VerificationError::Overflow)?;
+                if escrow.state == crate::escrow::EscrowState::Created {
+                    escrow.state = crate::escrow::EscrowState::Funded;
+                }
+                escrow.updated_at = state.get_verification_topoheight();
+                state
+                    .set_escrow(&escrow)
+                    .await
+                    .map_err(VerificationError::State)?;
+                state
+                    .add_escrow_history(&escrow.id, escrow.updated_at, tx_hash)
+                    .await
+                    .map_err(VerificationError::State)?;
+            }
+            TransactionType::ReleaseEscrow(payload) => {
+                let mut escrow = state
+                    .get_escrow(&payload.escrow_id)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| VerificationError::AnyError(anyhow!("escrow not found")))?;
+
+                if let Some(release_at) = escrow.release_requested_at {
+                    let pending_at = release_at
+                        .checked_add(escrow.challenge_window)
+                        .ok_or(VerificationError::Overflow)?;
+                    state
+                        .remove_pending_release(pending_at, &escrow.id)
+                        .await
+                        .map_err(VerificationError::State)?;
+                }
+
+                let current_height = state.get_verification_topoheight();
+                escrow.state = crate::escrow::EscrowState::PendingRelease;
+                escrow.release_requested_at = Some(current_height);
+                escrow.pending_release_amount = Some(payload.amount);
+                escrow.updated_at = current_height;
+
+                if escrow.optimistic_release {
+                    let release_at = current_height
+                        .checked_add(escrow.challenge_window)
+                        .ok_or(VerificationError::Overflow)?;
+                    state
+                        .add_pending_release(release_at, &escrow.id)
+                        .await
+                        .map_err(VerificationError::State)?;
+                }
+
+                state
+                    .set_escrow(&escrow)
+                    .await
+                    .map_err(VerificationError::State)?;
+                state
+                    .add_escrow_history(&escrow.id, escrow.updated_at, tx_hash)
+                    .await
+                    .map_err(VerificationError::State)?;
+            }
+            TransactionType::RefundEscrow(payload) => {
+                let mut escrow = state
+                    .get_escrow(&payload.escrow_id)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| VerificationError::AnyError(anyhow!("escrow not found")))?;
+
+                if let Some(release_at) = escrow.release_requested_at {
+                    let pending_at = release_at
+                        .checked_add(escrow.challenge_window)
+                        .ok_or(VerificationError::Overflow)?;
+                    state
+                        .remove_pending_release(pending_at, &escrow.id)
+                        .await
+                        .map_err(VerificationError::State)?;
+                }
+
+                escrow.release_requested_at = None;
+                escrow.pending_release_amount = None;
+
+                escrow.amount = escrow
+                    .amount
+                    .checked_sub(payload.amount)
+                    .ok_or(VerificationError::Overflow)?;
+                escrow.refunded_amount = escrow
+                    .refunded_amount
+                    .checked_add(payload.amount)
+                    .ok_or(VerificationError::Overflow)?;
+                escrow.state = if escrow.amount == 0 {
+                    crate::escrow::EscrowState::Refunded
+                } else {
+                    crate::escrow::EscrowState::Funded
+                };
+                escrow.updated_at = state.get_verification_topoheight();
+
+                let balance = state
+                    .get_receiver_balance(
+                        Cow::Owned(escrow.payer.clone()),
+                        Cow::Owned(escrow.asset.clone()),
+                    )
+                    .await
+                    .map_err(VerificationError::State)?;
+                *balance = balance
+                    .checked_add(payload.amount)
+                    .ok_or(VerificationError::Overflow)?;
+
+                state
+                    .set_escrow(&escrow)
+                    .await
+                    .map_err(VerificationError::State)?;
+                state
+                    .add_escrow_history(&escrow.id, escrow.updated_at, tx_hash)
+                    .await
+                    .map_err(VerificationError::State)?;
+            }
+            TransactionType::ChallengeEscrow(payload) => {
+                let mut escrow = state
+                    .get_escrow(&payload.escrow_id)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| VerificationError::AnyError(anyhow!("escrow not found")))?;
+
+                if let Some(release_at) = escrow.release_requested_at {
+                    let pending_at = release_at
+                        .checked_add(escrow.challenge_window)
+                        .ok_or(VerificationError::Overflow)?;
+                    state
+                        .remove_pending_release(pending_at, &escrow.id)
+                        .await
+                        .map_err(VerificationError::State)?;
+                }
+
+                escrow.state = crate::escrow::EscrowState::Challenged;
+                escrow.pending_release_amount = None;
+                escrow.challenge_deposit = escrow
+                    .challenge_deposit
+                    .checked_add(payload.deposit)
+                    .ok_or(VerificationError::Overflow)?;
+                escrow.amount = escrow
+                    .amount
+                    .checked_add(payload.deposit)
+                    .ok_or(VerificationError::Overflow)?;
+                escrow.total_amount = escrow
+                    .total_amount
+                    .checked_add(payload.deposit)
+                    .ok_or(VerificationError::Overflow)?;
+                escrow.updated_at = state.get_verification_topoheight();
+
+                state
+                    .set_escrow(&escrow)
+                    .await
+                    .map_err(VerificationError::State)?;
+                state
+                    .add_escrow_history(&escrow.id, escrow.updated_at, tx_hash)
+                    .await
+                    .map_err(VerificationError::State)?;
+            }
+            TransactionType::DisputeEscrow(payload) => {
+                let mut escrow = state
+                    .get_escrow(&payload.escrow_id)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| VerificationError::AnyError(anyhow!("escrow not found")))?;
+
+                if let Some(release_at) = escrow.release_requested_at {
+                    let pending_at = release_at
+                        .checked_add(escrow.challenge_window)
+                        .ok_or(VerificationError::Overflow)?;
+                    state
+                        .remove_pending_release(pending_at, &escrow.id)
+                        .await
+                        .map_err(VerificationError::State)?;
+                }
+
+                let current_height = state.get_verification_topoheight();
+                escrow.state = crate::escrow::EscrowState::Challenged;
+                escrow.pending_release_amount = None;
+                escrow.release_requested_at = None;
+                escrow.dispute = Some(crate::escrow::DisputeInfo {
+                    initiator: self.source.clone(),
+                    reason: payload.reason.clone(),
+                    evidence_hash: payload.evidence_hash.clone(),
+                    disputed_at: current_height,
+                    deadline: escrow.timeout_at,
+                });
+                escrow.dispute_id = Some(tx_hash.clone());
+                escrow.updated_at = current_height;
+
+                state
+                    .set_escrow(&escrow)
+                    .await
+                    .map_err(VerificationError::State)?;
+                state
+                    .add_escrow_history(&escrow.id, escrow.updated_at, tx_hash)
+                    .await
+                    .map_err(VerificationError::State)?;
+            }
+            TransactionType::AppealEscrow(payload) => {
+                let mut escrow = state
+                    .get_escrow(&payload.escrow_id)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| VerificationError::AnyError(anyhow!("escrow not found")))?;
+
+                let current_height = state.get_verification_topoheight();
+                let threshold = escrow
+                    .arbitration_config
+                    .as_ref()
+                    .and_then(|config| config.threshold)
+                    .unwrap_or(1);
+
+                if let Some(last) = escrow.resolutions.last_mut() {
+                    last.appealed = true;
+                }
+
+                escrow.state = crate::escrow::EscrowState::Challenged;
+                escrow.appeal = Some(crate::escrow::AppealInfo {
+                    appellant: self.source.clone(),
+                    reason: payload.reason.clone(),
+                    new_evidence_hash: payload.new_evidence_hash.clone(),
+                    deposit: payload.appeal_deposit,
+                    appealed_at: current_height,
+                    deadline: escrow.timeout_at,
+                    votes: Vec::new(),
+                    committee: Vec::new(),
+                    threshold,
+                });
+                escrow.amount = escrow
+                    .amount
+                    .checked_add(payload.appeal_deposit)
+                    .ok_or(VerificationError::Overflow)?;
+                escrow.total_amount = escrow
+                    .total_amount
+                    .checked_add(payload.appeal_deposit)
+                    .ok_or(VerificationError::Overflow)?;
+                escrow.updated_at = current_height;
+
+                state
+                    .set_escrow(&escrow)
+                    .await
+                    .map_err(VerificationError::State)?;
+                state
+                    .add_escrow_history(&escrow.id, escrow.updated_at, tx_hash)
+                    .await
+                    .map_err(VerificationError::State)?;
+            }
+            TransactionType::SubmitVerdict(payload) => {
+                let mut escrow = state
+                    .get_escrow(&payload.escrow_id)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| VerificationError::AnyError(anyhow!("escrow not found")))?;
+
+                if let Some(release_at) = escrow.release_requested_at {
+                    let pending_at = release_at
+                        .checked_add(escrow.challenge_window)
+                        .ok_or(VerificationError::Overflow)?;
+                    state
+                        .remove_pending_release(pending_at, &escrow.id)
+                        .await
+                        .map_err(VerificationError::State)?;
+                }
+
+                let total = payload
+                    .payer_amount
+                    .checked_add(payload.payee_amount)
+                    .ok_or(VerificationError::Overflow)?;
+
+                escrow.amount = escrow
+                    .amount
+                    .checked_sub(total)
+                    .ok_or(VerificationError::Overflow)?;
+                escrow.state = crate::escrow::EscrowState::Resolved;
+                escrow.pending_release_amount = None;
+                escrow.release_requested_at = None;
+                escrow.challenge_deposit = 0;
+                escrow.dispute_id = Some(payload.dispute_id.clone());
+                escrow.dispute_round = Some(payload.round);
+                escrow.updated_at = state.get_verification_topoheight();
+
+                let mut resolver = Vec::new();
+                let mut seen = std::collections::HashSet::new();
+                for sig in &payload.signatures {
+                    if seen.insert(sig.arbiter_pubkey.clone()) {
+                        resolver.push(sig.arbiter_pubkey.clone());
+                    }
+                }
+
+                let outcome = crate::arbitration::verdict::derive_dispute_outcome(
+                    payload.payer_amount,
+                    payload.payee_amount,
+                );
+                let resolution_hash = hash(&crate::arbitration::verdict::build_verdict_message(
+                    self.chain_id as u64,
+                    &payload.escrow_id,
+                    &payload.dispute_id,
+                    payload.round,
+                    outcome,
+                    payload.payer_amount,
+                    payload.payee_amount,
+                ));
+                let tier = match escrow
+                    .arbitration_config
+                    .as_ref()
+                    .map(|config| &config.mode)
+                {
+                    Some(crate::escrow::ArbitrationMode::Committee) => 2,
+                    Some(crate::escrow::ArbitrationMode::DaoGovernance) => 3,
+                    _ => 1,
+                };
+                escrow.resolutions.push(crate::escrow::ResolutionRecord {
+                    tier,
+                    resolver,
+                    client_amount: payload.payer_amount,
+                    provider_amount: payload.payee_amount,
+                    resolution_hash,
+                    resolved_at: escrow.updated_at,
+                    appealed: false,
+                });
+
+                if payload.payer_amount > 0 {
+                    let balance = state
+                        .get_receiver_balance(
+                            Cow::Owned(escrow.payer.clone()),
+                            Cow::Owned(escrow.asset.clone()),
+                        )
+                        .await
+                        .map_err(VerificationError::State)?;
+                    *balance = balance
+                        .checked_add(payload.payer_amount)
+                        .ok_or(VerificationError::Overflow)?;
+                    escrow.refunded_amount = escrow
+                        .refunded_amount
+                        .checked_add(payload.payer_amount)
+                        .ok_or(VerificationError::Overflow)?;
+                }
+
+                if payload.payee_amount > 0 {
+                    let balance = state
+                        .get_receiver_balance(
+                            Cow::Owned(escrow.payee.clone()),
+                            Cow::Owned(escrow.asset.clone()),
+                        )
+                        .await
+                        .map_err(VerificationError::State)?;
+                    *balance = balance
+                        .checked_add(payload.payee_amount)
+                        .ok_or(VerificationError::Overflow)?;
+                    escrow.released_amount = escrow
+                        .released_amount
+                        .checked_add(payload.payee_amount)
+                        .ok_or(VerificationError::Overflow)?;
+                }
+
+                state
+                    .set_escrow(&escrow)
+                    .await
+                    .map_err(VerificationError::State)?;
+                state
+                    .add_escrow_history(&escrow.id, escrow.updated_at, tx_hash)
+                    .await
+                    .map_err(VerificationError::State)?;
+            }
+            TransactionType::RegisterArbiter(payload) => {
+                let current_height = state.get_verification_topoheight();
+                let arbiter = crate::arbitration::ArbiterAccount {
+                    public_key: self.source.clone(),
+                    name: payload.get_name().to_string(),
+                    status: crate::arbitration::ArbiterStatus::Active,
+                    expertise: payload.get_expertise().to_vec(),
+                    stake_amount: payload.get_stake_amount(),
+                    fee_basis_points: payload.get_fee_basis_points(),
+                    min_escrow_value: payload.get_min_escrow_value(),
+                    max_escrow_value: payload.get_max_escrow_value(),
+                    reputation_score: 0,
+                    total_cases: 0,
+                    cases_overturned: 0,
+                    registered_at: current_height,
+                    last_active_at: current_height,
+                    pending_withdrawal: 0,
+                    deactivated_at: None,
+                    active_cases: 0,
+                    total_slashed: 0,
+                    slash_count: 0,
+                };
+                state
+                    .set_arbiter(&arbiter)
+                    .await
+                    .map_err(VerificationError::State)?;
+            }
+            TransactionType::UpdateArbiter(payload) => {
+                let mut arbiter = state
+                    .get_arbiter(&self.source)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or(VerificationError::ArbiterNotFound)?;
+
+                if payload.is_deactivate() {
+                    let current_height = state.get_verification_topoheight();
+                    arbiter.status = crate::arbitration::ArbiterStatus::Exiting;
+                    arbiter.deactivated_at = Some(current_height);
+                    arbiter.pending_withdrawal = arbiter.stake_amount;
+                    arbiter.last_active_at = current_height;
+                    state
+                        .set_arbiter(&arbiter)
+                        .await
+                        .map_err(VerificationError::State)?;
+                    return Ok(());
+                }
+
+                if let Some(name) = payload.get_name() {
+                    arbiter.name = name.to_string();
+                }
+                if let Some(expertise) = payload.get_expertise() {
+                    arbiter.expertise = expertise.to_vec();
+                }
+                if let Some(fee) = payload.get_fee_basis_points() {
+                    arbiter.fee_basis_points = fee;
+                }
+                if let Some(min_value) = payload.get_min_escrow_value() {
+                    arbiter.min_escrow_value = min_value;
+                }
+                if let Some(max_value) = payload.get_max_escrow_value() {
+                    arbiter.max_escrow_value = max_value;
+                }
+                if let Some(add_stake) = payload.get_add_stake() {
+                    if add_stake > 0 {
+                        arbiter.stake_amount = arbiter
+                            .stake_amount
+                            .checked_add(add_stake)
+                            .ok_or(VerificationError::Overflow)?;
+                    }
+                }
+                if let Some(status) = payload.get_status() {
+                    arbiter.status = status;
+                }
+                arbiter.last_active_at = state.get_verification_topoheight();
+
+                state
+                    .set_arbiter(&arbiter)
+                    .await
+                    .map_err(VerificationError::State)?;
+            }
+            TransactionType::SlashArbiter(payload) => {
+                let committee = state
+                    .get_committee(payload.get_committee_id())
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| {
+                        VerificationError::AnyError(anyhow::anyhow!(
+                            "Committee not found: {}",
+                            payload.get_committee_id()
+                        ))
+                    })?;
+
+                let current_time = state.get_verification_timestamp();
+                let network = state.get_network();
+                crate::kyc::verify_slash_arbiter_approvals(
+                    &network,
+                    &committee,
+                    payload.get_approvals(),
+                    payload.get_arbiter_pubkey(),
+                    payload.get_amount(),
+                    payload.get_reason_hash(),
+                    current_time,
+                )
+                .map_err(|e| VerificationError::AnyError(anyhow::anyhow!("{}", e)))?;
+
+                let mut arbiter = state
+                    .get_arbiter(payload.get_arbiter_pubkey())
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or(VerificationError::ArbiterNotFound)?;
+
+                arbiter
+                    .apply_slash(payload.get_amount())
+                    .map_err(|e| VerificationError::AnyError(anyhow::anyhow!("{e:?}")))?;
+
+                arbiter.last_active_at = state.get_verification_topoheight();
+
+                state
+                    .set_arbiter(&arbiter)
+                    .await
+                    .map_err(VerificationError::State)?;
+            }
+            TransactionType::RequestArbiterExit(_) => {
+                let mut arbiter = state
+                    .get_arbiter(&self.source)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or(VerificationError::ArbiterNotFound)?;
+                let current_height = state.get_verification_topoheight();
+                arbiter.status = crate::arbitration::ArbiterStatus::Exiting;
+                arbiter.deactivated_at = Some(current_height);
+                arbiter.pending_withdrawal = arbiter.stake_amount;
+                arbiter.last_active_at = current_height;
+                state
+                    .set_arbiter(&arbiter)
+                    .await
+                    .map_err(VerificationError::State)?;
+            }
+            TransactionType::WithdrawArbiterStake(payload) => {
+                let mut arbiter = state
+                    .get_arbiter(&self.source)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or(VerificationError::ArbiterNotFound)?;
+                let withdraw_amount = if payload.amount == 0 {
+                    arbiter.stake_amount
+                } else {
+                    payload.amount
+                };
+                arbiter.stake_amount = arbiter
+                    .stake_amount
+                    .checked_sub(withdraw_amount)
+                    .ok_or(VerificationError::Overflow)?;
+                arbiter.pending_withdrawal =
+                    arbiter.pending_withdrawal.saturating_sub(withdraw_amount);
+                if arbiter.stake_amount == 0 {
+                    arbiter.status = crate::arbitration::ArbiterStatus::Removed;
+                    arbiter.deactivated_at = None;
+                    arbiter.pending_withdrawal = 0;
+                }
+                arbiter.last_active_at = state.get_verification_topoheight();
+                state
+                    .set_arbiter(&arbiter)
+                    .await
+                    .map_err(VerificationError::State)?;
+                let balance = state
+                    .get_receiver_balance(Cow::Borrowed(&self.source), Cow::Borrowed(&TOS_ASSET))
+                    .await
+                    .map_err(VerificationError::State)?;
+                *balance = balance
+                    .checked_add(withdraw_amount)
+                    .ok_or(VerificationError::Overflow)?;
+            }
+            TransactionType::CancelArbiterExit(_) => {
+                let mut arbiter = state
+                    .get_arbiter(&self.source)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or(VerificationError::ArbiterNotFound)?;
+                let current_height = state.get_verification_topoheight();
+                arbiter.status = crate::arbitration::ArbiterStatus::Active;
+                arbiter.deactivated_at = None;
+                arbiter.pending_withdrawal = 0;
+                arbiter.last_active_at = current_height;
+                state
+                    .set_arbiter(&arbiter)
+                    .await
+                    .map_err(VerificationError::State)?;
+            }
             TransactionType::InvokeContract(payload) => {
                 if self.is_contract_available(state, &payload.contract).await? {
                     self.invoke_contract(
@@ -3820,7 +5090,6 @@ impl Transaction {
                         .await?;
 
                     // if it has failed, we don't want to deploy the contract
-                    // TODO: we must handle this carefully
                     if !is_success {
                         if log::log_enabled!(log::Level::Debug) {
                             debug!("Contract deploy for {contract_address} failed");
@@ -5192,21 +6461,21 @@ impl Transaction {
         // }
 
         // Calculate spending per asset (same logic as pre_verify)
-        let mut spending_per_asset: IndexMap<&'a Hash, u64> = IndexMap::new();
+        let mut spending_per_asset: IndexMap<Hash, u64> = IndexMap::new();
 
         match &self.data {
             TransactionType::Transfers(transfers) => {
                 for transfer in transfers {
                     let asset = transfer.get_asset();
                     let amount = transfer.get_amount();
-                    let current = spending_per_asset.entry(asset).or_insert(0);
+                    let current = spending_per_asset.entry(asset.clone()).or_insert(0);
                     *current = current
                         .checked_add(amount)
                         .ok_or(VerificationError::Overflow)?;
                 }
             }
             TransactionType::Burn(payload) => {
-                let current = spending_per_asset.entry(&payload.asset).or_insert(0);
+                let current = spending_per_asset.entry(payload.asset.clone()).or_insert(0);
                 *current = current
                     .checked_add(payload.amount)
                     .ok_or(VerificationError::Overflow)?;
@@ -5216,20 +6485,20 @@ impl Transaction {
                     let amount = deposit
                         .get_amount()
                         .map_err(|e| VerificationError::AnyError(anyhow!(e)))?;
-                    let current = spending_per_asset.entry(asset).or_insert(0);
+                    let current = spending_per_asset.entry(asset.clone()).or_insert(0);
                     *current = current
                         .checked_add(amount)
                         .ok_or(VerificationError::Overflow)?;
                 }
                 // Add max_gas to TOS spending
-                let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                let current = spending_per_asset.entry(TOS_ASSET.clone()).or_insert(0);
                 *current = current
                     .checked_add(payload.max_gas)
                     .ok_or(VerificationError::Overflow)?;
             }
             TransactionType::DeployContract(payload) => {
                 // Add BURN_PER_CONTRACT to TOS spending
-                let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                let current = spending_per_asset.entry(TOS_ASSET.clone()).or_insert(0);
                 *current = current
                     .checked_add(BURN_PER_CONTRACT)
                     .ok_or(VerificationError::Overflow)?;
@@ -5239,13 +6508,13 @@ impl Transaction {
                         let amount = deposit
                             .get_amount()
                             .map_err(|e| VerificationError::AnyError(anyhow!(e)))?;
-                        let current = spending_per_asset.entry(asset).or_insert(0);
+                        let current = spending_per_asset.entry(asset.clone()).or_insert(0);
                         *current = current
                             .checked_add(amount)
                             .ok_or(VerificationError::Overflow)?;
                     }
                     // Add max_gas to TOS spending
-                    let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                    let current = spending_per_asset.entry(TOS_ASSET.clone()).or_insert(0);
                     *current = current
                         .checked_add(invoke.max_gas)
                         .ok_or(VerificationError::Overflow)?;
@@ -5263,7 +6532,7 @@ impl Transaction {
                         // Only charge for balance portion (amount - recyclable)
                         let balance_required = amount.saturating_sub(recyclable_tos);
 
-                        let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                        let current = spending_per_asset.entry(TOS_ASSET.clone()).or_insert(0);
                         *current = current
                             .checked_add(balance_required)
                             .ok_or(VerificationError::Overflow)?;
@@ -5275,7 +6544,7 @@ impl Transaction {
                             .iter()
                             .try_fold(0u64, |acc, entry| acc.checked_add(entry.amount))
                             .ok_or(VerificationError::Overflow)?;
-                        let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+                        let current = spending_per_asset.entry(TOS_ASSET.clone()).or_insert(0);
                         *current = current
                             .checked_add(total)
                             .ok_or(VerificationError::Overflow)?;
@@ -5305,7 +6574,7 @@ impl Transaction {
             }
             TransactionType::BatchReferralReward(payload) => {
                 // BatchReferralReward spends total_amount of the specified asset
-                let current = spending_per_asset.entry(payload.get_asset()).or_insert(0);
+                let current = spending_per_asset.entry(payload.get_asset().clone()).or_insert(0);
                 *current = current
                     .checked_add(payload.get_total_amount())
                     .ok_or(VerificationError::Overflow)?;
@@ -5321,7 +6590,7 @@ impl Transaction {
                 for transfer in transfers {
                     let asset = transfer.get_asset();
                     let amount = transfer.get_amount();
-                    let current = spending_per_asset.entry(asset).or_insert(0);
+                    let current = spending_per_asset.entry(asset.clone()).or_insert(0);
                     *current = current
                         .checked_add(amount)
                         .ok_or(VerificationError::Overflow)?;
@@ -5336,11 +6605,76 @@ impl Transaction {
                 // TNS transactions: registration/message fees are paid via the fee field
                 // No additional spending verification needed here
             }
+            TransactionType::CreateEscrow(payload) => {
+                let current = spending_per_asset.entry(payload.asset.clone()).or_insert(0);
+                *current = current
+                    .checked_add(payload.amount)
+                    .ok_or(VerificationError::Overflow)?;
+            }
+            TransactionType::DepositEscrow(payload) => {
+                let escrow = state
+                    .get_escrow(&payload.escrow_id)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| VerificationError::AnyError(anyhow!("escrow not found")))?;
+                let current = spending_per_asset.entry(escrow.asset.clone()).or_insert(0);
+                *current = current
+                    .checked_add(payload.amount)
+                    .ok_or(VerificationError::Overflow)?;
+            }
+            TransactionType::ChallengeEscrow(payload) => {
+                let escrow = state
+                    .get_escrow(&payload.escrow_id)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| VerificationError::AnyError(anyhow!("escrow not found")))?;
+                let current = spending_per_asset.entry(escrow.asset.clone()).or_insert(0);
+                *current = current
+                    .checked_add(payload.deposit)
+                    .ok_or(VerificationError::Overflow)?;
+            }
+            TransactionType::DisputeEscrow(_) => {}
+            TransactionType::AppealEscrow(payload) => {
+                let escrow = state
+                    .get_escrow(&payload.escrow_id)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| VerificationError::AnyError(anyhow!("escrow not found")))?;
+                let current = spending_per_asset.entry(escrow.asset.clone()).or_insert(0);
+                *current = current
+                    .checked_add(payload.appeal_deposit)
+                    .ok_or(VerificationError::Overflow)?;
+            }
+            TransactionType::ReleaseEscrow(_)
+            | TransactionType::RefundEscrow(_)
+            | TransactionType::SubmitVerdict(_) => {
+                // Escrow releases/refunds/verdicts move funds from escrow, not sender balance
+            }
+            TransactionType::RegisterArbiter(payload) => {
+                let current = spending_per_asset.entry(TOS_ASSET.clone()).or_insert(0);
+                *current = current
+                    .checked_add(payload.get_stake_amount())
+                    .ok_or(VerificationError::Overflow)?;
+            }
+            TransactionType::UpdateArbiter(payload) => {
+                if let Some(add_stake) = payload.get_add_stake() {
+                    if add_stake > 0 {
+                        let current = spending_per_asset.entry(TOS_ASSET.clone()).or_insert(0);
+                        *current = current
+                            .checked_add(add_stake)
+                            .ok_or(VerificationError::Overflow)?;
+                    }
+                }
+            }
+            TransactionType::RequestArbiterExit(_)
+            | TransactionType::WithdrawArbiterStake(_)
+            | TransactionType::CancelArbiterExit(_)
+            | TransactionType::SlashArbiter(_) => {}
         };
 
         // Add fee to TOS spending (unless using energy fee)
         if !self.get_fee_type().is_energy() {
-            let current = spending_per_asset.entry(&TOS_ASSET).or_insert(0);
+            let current = spending_per_asset.entry(TOS_ASSET.clone()).or_insert(0);
             *current = current
                 .checked_add(self.fee)
                 .ok_or(VerificationError::Overflow)?;
@@ -5354,7 +6688,7 @@ impl Transaction {
             let current_balance = state
                 .get_sender_balance(
                     Cow::Borrowed(&self.source),
-                    Cow::Borrowed(asset),
+                    Cow::Owned(asset.clone()),
                     &self.reference,
                 )
                 .await

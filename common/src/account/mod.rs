@@ -41,21 +41,19 @@ pub enum CiphertextCache {
 
 impl CiphertextCache {
     pub fn computable(&mut self) -> Result<&mut Ciphertext, DecompressionError> {
-        Ok(match self {
-            Self::Compressed(c) => {
-                let decompressed = c.decompress()?;
-                *self = Self::Decompressed(decompressed);
-                match self {
-                    Self::Decompressed(e) => e,
-                    _ => unreachable!(),
+        loop {
+            match self {
+                Self::Compressed(c) => {
+                    let decompressed = c.decompress()?;
+                    *self = Self::Decompressed(decompressed);
+                }
+                Self::Decompressed(e) => return Ok(e),
+                Self::Both(_, e, dirty) => {
+                    *dirty = true;
+                    return Ok(e);
                 }
             }
-            Self::Decompressed(e) => e,
-            Self::Both(_, e, dirty) => {
-                *dirty = true;
-                e
-            }
-        })
+        }
     }
 
     pub fn compress<'a>(&'a self) -> Cow<'a, CompressedCiphertext> {
@@ -73,61 +71,51 @@ impl CiphertextCache {
     }
 
     pub fn compressed(&mut self) -> &CompressedCiphertext {
-        match self {
-            Self::Compressed(c) => c,
-            Self::Decompressed(e) => {
-                *self = Self::Both(e.compress(), e.clone(), false);
-                match self {
-                    Self::Both(c, _, _) => c,
-                    _ => unreachable!(),
+        loop {
+            match self {
+                Self::Compressed(c) => return c,
+                Self::Decompressed(e) => {
+                    *self = Self::Both(e.compress(), e.clone(), false);
                 }
-            }
-            Self::Both(c, d, dirty) => {
-                if *dirty {
-                    *c = d.compress();
+                Self::Both(c, d, dirty) => {
+                    if *dirty {
+                        *c = d.compress();
+                    }
+                    return c;
                 }
-                c
             }
         }
     }
 
     pub fn decompressed(&mut self) -> Result<&Ciphertext, DecompressionError> {
-        match self {
-            Self::Compressed(c) => {
-                let decompressed = c.decompress()?;
-                *self = Self::Both(c.clone(), decompressed, false);
-                match self {
-                    Self::Both(_, e, _) => Ok(e),
-                    _ => unreachable!(),
+        loop {
+            match self {
+                Self::Compressed(c) => {
+                    let decompressed = c.decompress()?;
+                    *self = Self::Both(c.clone(), decompressed, false);
                 }
+                Self::Decompressed(e) => return Ok(e),
+                Self::Both(_, e, _) => return Ok(e),
             }
-            Self::Decompressed(e) => Ok(e),
-            Self::Both(_, e, _) => Ok(e),
         }
     }
 
     pub fn both(&mut self) -> Result<(&CompressedCiphertext, &Ciphertext), DecompressionError> {
-        match self {
-            Self::Both(c, e, dirty) => {
-                if *dirty {
-                    *c = e.compress();
+        loop {
+            match self {
+                Self::Both(c, e, dirty) => {
+                    if *dirty {
+                        *c = e.compress();
+                    }
+                    return Ok((c, e));
                 }
-                Ok((c, e))
-            }
-            Self::Compressed(c) => {
-                let decompressed = c.decompress()?;
-                *self = Self::Both(c.clone(), decompressed, false);
-                match self {
-                    Self::Both(c, e, _) => Ok((c, e)),
-                    _ => unreachable!(),
+                Self::Compressed(c) => {
+                    let decompressed = c.decompress()?;
+                    *self = Self::Both(c.clone(), decompressed, false);
                 }
-            }
-            Self::Decompressed(e) => {
-                let compressed = e.compress();
-                *self = Self::Both(compressed, e.clone(), false);
-                match self {
-                    Self::Both(c, e, _) => Ok((c, e)),
-                    _ => unreachable!(),
+                Self::Decompressed(e) => {
+                    let compressed = e.compress();
+                    *self = Self::Both(compressed, e.clone(), false);
                 }
             }
         }

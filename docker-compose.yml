@@ -13,16 +13,37 @@ services:
     restart: unless-stopped
     ports:
       - "2125:2125"  # P2P port
-      - "2126:2126"  # RPC port
-      - "8080:8080"  # HTTP API port
+      - "8080:8080"  # RPC / HTTP API port
     volumes:
       - tos-data:/var/run/tos/data
       - tos-config:/var/run/tos/config
     environment:
       - RUST_LOG=${RUST_LOG:-info}
-      - TOS_NETWORK=${TOS_NETWORK:-mainnet}
+      - TOS_NETWORK=${TOS_NETWORK:-testnet}
       - TOS_DATA_DIR=/var/run/tos/data
       - TOS_CONFIG_DIR=/var/run/tos/config
+      - A2A_ESCROW_VALIDATE_STATES=${A2A_ESCROW_VALIDATE_STATES:-true}
+      - A2A_ESCROW_ALLOWED_STATES=${A2A_ESCROW_ALLOWED_STATES:-created,funded,pending-release,challenged}
+      - A2A_ESCROW_VALIDATE_TIMEOUT=${A2A_ESCROW_VALIDATE_TIMEOUT:-true}
+      - A2A_ESCROW_VALIDATE_AMOUNTS=${A2A_ESCROW_VALIDATE_AMOUNTS:-false}
+      - TOS_RPC_BIND_ADDRESS=${TOS_RPC_BIND_ADDRESS:-0.0.0.0:8080}
+      - TOS_P2P_BIND_ADDRESS=${TOS_P2P_BIND_ADDRESS:-0.0.0.0:2125}
+      - TOS_PRIORITY_NODES=${TOS_PRIORITY_NODES:-157.7.65.157:2125,157.7.78.65:2125,157.7.192.216:2125}
+      - TOS_EXCLUSIVE_NODES=${TOS_EXCLUSIVE_NODES:-}
+    command:
+      - sh
+      - -c
+      - |
+        tos_daemon --network ${TOS_NETWORK:-testnet} \
+          --dir-path ${TOS_DATA_DIR:-/var/run/tos/data} \
+          --rpc-bind-address ${TOS_RPC_BIND_ADDRESS:-0.0.0.0:8080} \
+          --p2p-bind-address ${TOS_P2P_BIND_ADDRESS:-0.0.0.0:2125} \
+          ${TOS_PRIORITY_NODES:+--priority-nodes ${TOS_PRIORITY_NODES}} \
+          ${TOS_EXCLUSIVE_NODES:+--exclusive-nodes ${TOS_EXCLUSIVE_NODES}} \
+          --a2a-escrow-validate-states ${A2A_ESCROW_VALIDATE_STATES:-true} \
+          --a2a-escrow-allowed-states ${A2A_ESCROW_ALLOWED_STATES:-created,funded,pending-release,challenged} \
+          --a2a-escrow-validate-timeout ${A2A_ESCROW_VALIDATE_TIMEOUT:-true} \
+          --a2a-escrow-validate-amounts ${A2A_ESCROW_VALIDATE_AMOUNTS:-false}
     networks:
       - tos-network
 

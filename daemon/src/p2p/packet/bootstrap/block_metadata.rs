@@ -54,10 +54,8 @@ impl Serializer for BlockMetadata {
 
         // We don't write it through IndexSet impl directly
         // as we must support any u16 len same as a BlockHeader
-        // TODO best would be a const type providing a configurable MAX_ITEMS
-
         let len = reader.read_u16()?;
-        let mut executed_transactions = IndexSet::new();
+        let mut executed_transactions = IndexSet::with_capacity(len as usize);
         for _ in 0..len {
             if !executed_transactions.insert(Hash::read(reader)?) {
                 return Err(ReaderError::InvalidValue);

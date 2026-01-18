@@ -1,7 +1,9 @@
 mod agent_account;
+mod arbitration;
 mod burn;
 mod contract;
 mod energy;
+mod escrow;
 mod kyc;
 mod multisig;
 mod referral;
@@ -12,9 +14,11 @@ mod uno_transfer;
 mod unshield_transfer;
 
 pub use agent_account::*;
+pub use arbitration::*;
 pub use burn::*;
 pub use contract::*;
 pub use energy::*;
+pub use escrow::*;
 pub use kyc::*;
 pub use multisig::*;
 pub use referral::*;

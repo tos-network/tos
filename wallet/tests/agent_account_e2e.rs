@@ -50,7 +50,7 @@ fn pick_free_port() -> u16 {
 async fn start_daemon(
     dir: &TempDir,
     owner: &Address,
-) -> (std::sync::Arc<DaemonRpcServer<RocksStorage>>, String) {
+) -> anyhow::Result<(std::sync::Arc<DaemonRpcServer<RocksStorage>>, String)> {
     let mut config: Config = serde_json::from_value(serde_json::json!({
         "rpc": { "getwork": {}, "prometheus": {} },
         "p2p": { "proxy": {} },
@@ -128,23 +128,23 @@ async fn start_daemon(
                 let address = format!("http://127.0.0.1:{port}");
                 // Wait for actix server to bind.
                 sleep(Duration::from_millis(100)).await;
-                return (rpc_server, address);
+                return Ok((rpc_server, address));
             }
             Err(err) => {
                 if err.to_string().contains("Address already in use") {
                     last_error = Some(err);
                     continue;
                 }
-                panic!("start rpc: {err}");
+                return Err(anyhow::anyhow!("start rpc: {err}"));
             }
         }
     }
-    panic!(
+    Err(anyhow::anyhow!(
         "start rpc: {}",
         last_error
             .map(|err| err.to_string())
             .unwrap_or_else(|| "unknown error".to_string())
-    );
+    ))
 }
 
 fn parse_wallet_address(output: &str) -> Option<String> {
@@ -197,7 +197,7 @@ async fn test_wallet_agent_show_end_to_end() -> anyhow::Result<()> {
     let address_str = parse_wallet_address(&format!("{stdout}\n{stderr}")).expect("wallet address");
     let address = Address::from_string(&address_str)?;
 
-    let (rpc_server, daemon_addr) = start_daemon(&daemon_dir, &address).await;
+    let (rpc_server, daemon_addr) = start_daemon(&daemon_dir, &address).await?;
 
     let output = Command::new(&wallet_bin)
         .args([

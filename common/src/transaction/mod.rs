@@ -77,6 +77,34 @@ pub enum TransactionType {
     RegisterName(RegisterNamePayload),
     /// TNS: Send an ephemeral message to a registered name
     EphemeralMessage(EphemeralMessagePayload),
+    /// A2A escrow: create escrow
+    CreateEscrow(CreateEscrowPayload),
+    /// A2A escrow: deposit funds
+    DepositEscrow(DepositEscrowPayload),
+    /// A2A escrow: request release
+    ReleaseEscrow(ReleaseEscrowPayload),
+    /// A2A escrow: refund payer
+    RefundEscrow(RefundEscrowPayload),
+    /// A2A escrow: challenge optimistic release
+    ChallengeEscrow(ChallengeEscrowPayload),
+    /// A2A escrow: dispute escrow
+    DisputeEscrow(DisputeEscrowPayload),
+    /// A2A escrow: appeal resolved dispute
+    AppealEscrow(AppealEscrowPayload),
+    /// A2A escrow: submit arbitration verdict
+    SubmitVerdict(SubmitVerdictPayload),
+    /// Arbitration: register arbiter
+    RegisterArbiter(RegisterArbiterPayload),
+    /// Arbitration: update arbiter
+    UpdateArbiter(UpdateArbiterPayload),
+    /// Arbitration: slash arbiter stake
+    SlashArbiter(SlashArbiterPayload),
+    /// Arbitration: request arbiter exit
+    RequestArbiterExit(RequestArbiterExitPayload),
+    /// Arbitration: withdraw arbiter stake
+    WithdrawArbiterStake(WithdrawArbiterStakePayload),
+    /// Arbitration: cancel arbiter exit
+    CancelArbiterExit(CancelArbiterExitPayload),
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -556,6 +584,62 @@ impl Serializer for TransactionType {
                 writer.write_u8(23);
                 payload.write(writer);
             }
+            TransactionType::CreateEscrow(payload) => {
+                writer.write_u8(24);
+                payload.write(writer);
+            }
+            TransactionType::DepositEscrow(payload) => {
+                writer.write_u8(25);
+                payload.write(writer);
+            }
+            TransactionType::ReleaseEscrow(payload) => {
+                writer.write_u8(26);
+                payload.write(writer);
+            }
+            TransactionType::RefundEscrow(payload) => {
+                writer.write_u8(27);
+                payload.write(writer);
+            }
+            TransactionType::ChallengeEscrow(payload) => {
+                writer.write_u8(28);
+                payload.write(writer);
+            }
+            TransactionType::SubmitVerdict(payload) => {
+                writer.write_u8(29);
+                payload.write(writer);
+            }
+            TransactionType::DisputeEscrow(payload) => {
+                writer.write_u8(30);
+                payload.write(writer);
+            }
+            TransactionType::AppealEscrow(payload) => {
+                writer.write_u8(31);
+                payload.write(writer);
+            }
+            TransactionType::RegisterArbiter(payload) => {
+                writer.write_u8(33);
+                payload.write(writer);
+            }
+            TransactionType::UpdateArbiter(payload) => {
+                writer.write_u8(34);
+                payload.write(writer);
+            }
+            TransactionType::SlashArbiter(payload) => {
+                writer.write_u8(44);
+                payload.write(writer);
+            }
+            TransactionType::RequestArbiterExit(payload) => {
+                writer.write_u8(45);
+                payload.write(writer);
+            }
+            TransactionType::WithdrawArbiterStake(payload) => {
+                writer.write_u8(46);
+                payload.write(writer);
+            }
+            TransactionType::CancelArbiterExit(payload) => {
+                writer.write_u8(47);
+                payload.write(writer);
+            }
             TransactionType::UnoTransfers(transfers) => {
                 writer.write_u8(18);
                 let len: u16 = transfers.len() as u16;
@@ -626,6 +710,20 @@ impl Serializer for TransactionType {
             16 => TransactionType::TransferKyc(TransferKycPayload::read(reader)?),
             17 => TransactionType::AppealKyc(AppealKycPayload::read(reader)?),
             23 => TransactionType::AgentAccount(AgentAccountPayload::read(reader)?),
+            24 => TransactionType::CreateEscrow(CreateEscrowPayload::read(reader)?),
+            25 => TransactionType::DepositEscrow(DepositEscrowPayload::read(reader)?),
+            26 => TransactionType::ReleaseEscrow(ReleaseEscrowPayload::read(reader)?),
+            27 => TransactionType::RefundEscrow(RefundEscrowPayload::read(reader)?),
+            28 => TransactionType::ChallengeEscrow(ChallengeEscrowPayload::read(reader)?),
+            29 => TransactionType::SubmitVerdict(SubmitVerdictPayload::read(reader)?),
+            30 => TransactionType::DisputeEscrow(DisputeEscrowPayload::read(reader)?),
+            31 => TransactionType::AppealEscrow(AppealEscrowPayload::read(reader)?),
+            33 => TransactionType::RegisterArbiter(RegisterArbiterPayload::read(reader)?),
+            34 => TransactionType::UpdateArbiter(UpdateArbiterPayload::read(reader)?),
+            44 => TransactionType::SlashArbiter(SlashArbiterPayload::read(reader)?),
+            45 => TransactionType::RequestArbiterExit(RequestArbiterExitPayload::read(reader)?),
+            46 => TransactionType::WithdrawArbiterStake(WithdrawArbiterStakePayload::read(reader)?),
+            47 => TransactionType::CancelArbiterExit(CancelArbiterExitPayload::read(reader)?),
             18 => {
                 let txs_count = reader.read_u16()?;
                 if txs_count == 0 || txs_count as usize > MAX_TRANSFER_COUNT {
@@ -696,6 +794,20 @@ impl Serializer for TransactionType {
             TransactionType::UpdateCommittee(payload) => payload.size(),
             TransactionType::EmergencySuspend(payload) => payload.size(),
             TransactionType::AgentAccount(payload) => payload.size(),
+            TransactionType::CreateEscrow(payload) => payload.size(),
+            TransactionType::DepositEscrow(payload) => payload.size(),
+            TransactionType::ReleaseEscrow(payload) => payload.size(),
+            TransactionType::RefundEscrow(payload) => payload.size(),
+            TransactionType::ChallengeEscrow(payload) => payload.size(),
+            TransactionType::SubmitVerdict(payload) => payload.size(),
+            TransactionType::DisputeEscrow(payload) => payload.size(),
+            TransactionType::AppealEscrow(payload) => payload.size(),
+            TransactionType::RegisterArbiter(payload) => payload.size(),
+            TransactionType::UpdateArbiter(payload) => payload.size(),
+            TransactionType::SlashArbiter(payload) => payload.size(),
+            TransactionType::RequestArbiterExit(payload) => payload.size(),
+            TransactionType::WithdrawArbiterStake(payload) => payload.size(),
+            TransactionType::CancelArbiterExit(payload) => payload.size(),
             TransactionType::UnoTransfers(txs) => {
                 // 2 bytes for count of transfers (u16)
                 let mut size = 2;

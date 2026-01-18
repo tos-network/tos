@@ -563,6 +563,34 @@ fn common_agent_card_to_proto(card: common::AgentCard) -> proto::AgentCard {
             .map(common_signature_to_proto)
             .collect(),
         tos_identity: card.tos_identity.map(common_identity_to_proto),
+        arbitration: card.arbitration.map(common_arbitration_extension_to_proto),
+    }
+}
+
+fn common_arbitration_extension_to_proto(
+    extension: common::ArbitrationExtension,
+) -> proto::ArbitrationExtension {
+    proto::ArbitrationExtension {
+        expertise_domains: extension.expertise_domains,
+        fee_basis_points: extension.fee_basis_points.into(),
+        min_escrow_value: extension.min_escrow_value,
+        max_escrow_value: extension.max_escrow_value,
+        committee_ids: extension.committee_ids,
+        avg_resolution_hours: extension.avg_resolution_hours.unwrap_or_default(),
+        languages: extension.languages,
+        contact_preferences: Some(common_contact_preferences_to_proto(
+            extension.contact_preferences,
+        )),
+    }
+}
+
+fn common_contact_preferences_to_proto(
+    preferences: common::ContactPreferences,
+) -> proto::ContactPreferences {
+    proto::ContactPreferences {
+        preferred_method: preferences.preferred_method,
+        response_time_hours: preferences.response_time_hours,
+        availability: preferences.availability.unwrap_or_default(),
     }
 }
 

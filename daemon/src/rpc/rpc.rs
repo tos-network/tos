@@ -1,4 +1,4 @@
-use super::{a2a as a2a_rpc, ApiError, InternalRpcError};
+use super::{a2a as a2a_rpc, agent_registry as agent_registry_rpc, ApiError, InternalRpcError};
 use crate::{
     config::{
         get_hard_forks as get_configured_hard_forks, DEV_FEES, DEV_PUBLIC_KEY, MILLIS_PER_SECOND,
@@ -732,6 +732,9 @@ pub fn register_methods<S: Storage>(
         async_handler!(get_account_registration_topoheight::<S>),
     );
 
+    crate::rpc::escrow::register_methods(handler);
+    crate::rpc::arbitration::register_methods(handler);
+
     // Useful methods
     handler.register_method("validate_address", async_handler!(validate_address::<S>));
     handler.register_method("split_address", async_handler!(split_address::<S>));
@@ -941,6 +944,7 @@ pub fn register_methods<S: Storage>(
 
     if enable_a2a {
         a2a_rpc::register_a2a_methods::<S>(handler);
+        agent_registry_rpc::register_agent_registry_methods::<S>(handler);
     }
 
     if allow_mining_methods {
@@ -1604,9 +1608,14 @@ async fn get_assets<S: Storage>(context: &Context, body: Value) -> Result<Value,
     let skip = params.skip.unwrap_or(0);
     let storage = blockchain.get_storage().read().await;
 
-    // TODO: verify params
     let min = params.minimum_topoheight;
     let max = params.maximum_topoheight;
+    if let (Some(min), Some(max)) = (min, max) {
+        if max < min {
+            return Err(InternalRpcError::InvalidJSONRequest)
+                .context("maximum_topoheight must be >= minimum_topoheight")?;
+        }
+    }
 
     let assets = storage
         .get_assets_with_data_in_range(min, max)
@@ -2489,6 +2498,24 @@ async fn get_account_history<S: Storage>(
                 TransactionType::RegisterName(_) | TransactionType::EphemeralMessage(_) => {
                     // TNS transactions are tracked in dedicated TNS history endpoints
                     // Not relevant to asset flow tracking
+                }
+                TransactionType::CreateEscrow(_)
+                | TransactionType::DepositEscrow(_)
+                | TransactionType::ReleaseEscrow(_)
+                | TransactionType::RefundEscrow(_)
+                | TransactionType::ChallengeEscrow(_)
+                | TransactionType::DisputeEscrow(_)
+                | TransactionType::AppealEscrow(_)
+                | TransactionType::SubmitVerdict(_) => {
+                    // Escrow transactions are not included in account history yet
+                }
+                TransactionType::RegisterArbiter(_)
+                | TransactionType::UpdateArbiter(_)
+                | TransactionType::SlashArbiter(_)
+                | TransactionType::RequestArbiterExit(_)
+                | TransactionType::WithdrawArbiterStake(_)
+                | TransactionType::CancelArbiterExit(_) => {
+                    // Arbiter registry updates are not included in account history yet
                 }
             }
         }

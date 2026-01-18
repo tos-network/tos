@@ -82,8 +82,7 @@ The `docker-build.sh` script provides easy building of Docker images.
 tos-daemon:
   ports:
     - "2125:2125"  # P2P port
-    - "2126:2126"  # RPC port
-    - "8080:8080"  # HTTP API port
+    - "8080:8080"  # RPC / HTTP API port
   volumes:
     - tos-data:/var/run/tos/data
     - tos-config:/var/run/tos/config
@@ -110,6 +109,50 @@ Key variables:
 - `TOS_NETWORK` - Network type (mainnet/testnet)
 - `TOS_MINER_ADDRESS` - Your mining wallet address
 - `RUST_LOG` - Logging level (debug/info/warn/error)
+- `TOS_RPC_BIND_ADDRESS` - RPC bind address (default `0.0.0.0:8080`)
+- `TOS_P2P_BIND_ADDRESS` - P2P bind address (default `0.0.0.0:2125`)
+- `TOS_PRIORITY_NODES` - Comma-separated seed/priority nodes
+- `TOS_EXCLUSIVE_NODES` - Comma-separated exclusive nodes (connect only to these)
+
+### A2A Escrow Validation Flags
+
+When running the daemon, you can pass these CLI flags to control on-chain escrow validation
+for A2A settlement requests:
+
+```
+--a2a-escrow-validate-states true
+--a2a-escrow-allowed-states created,funded,pending-release,challenged
+--a2a-escrow-validate-timeout true
+--a2a-escrow-validate-amounts false
+```
+
+### Testnet Nodes (2026-01-08)
+
+From `memo/08-Network/TestNet/TESTNET_NODES.md`:
+
+| Name | IP | Role |
+|------|----|------|
+| tos-testnode-1 | 157.7.65.157 | Seed + Miner |
+| tos-testnode-2 | 157.7.78.65 | Validator + Miner |
+| tos-testnode-3 | 157.7.192.216 | Validator + Miner |
+
+Example `.env` for a validator node:
+```bash
+TOS_NETWORK=testnet
+TOS_RPC_BIND_ADDRESS=0.0.0.0:8080
+TOS_P2P_BIND_ADDRESS=0.0.0.0:2125
+TOS_EXCLUSIVE_NODES=157.7.65.157:2125
+TOS_PRIORITY_NODES=
+```
+
+Example `.env` for a seed node:
+```bash
+TOS_NETWORK=testnet
+TOS_RPC_BIND_ADDRESS=0.0.0.0:8080
+TOS_P2P_BIND_ADDRESS=0.0.0.0:2125
+TOS_PRIORITY_NODES=
+TOS_EXCLUSIVE_NODES=
+```
 
 ### Profiles
 

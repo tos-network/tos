@@ -247,6 +247,24 @@ pub enum Column {
     // {topoheight}{nft:rnt:<collection_id><token_id>} => {Versioned<Option<NftRental>>}
     VersionedNftActiveRentals,
 
+    // ===== Escrow (A2A) =====
+
+    // Escrow accounts storage
+    // {escrow_id (32 bytes)} => {EscrowAccount}
+    EscrowAccounts,
+    // Escrow history index
+    // {escrow_id (32 bytes)}{topoheight (8 bytes)}{tx_hash (32 bytes)} => {tx_hash}
+    EscrowHistory,
+    // Pending releases index (by release_at)
+    // {release_at (8 bytes)}{escrow_id (32 bytes)} => {escrow_id}
+    EscrowPendingRelease,
+
+    // ===== Arbitration =====
+
+    // Arbiter accounts storage
+    // {arbiter_public_key (32 bytes)} => {ArbiterAccount}
+    ArbiterAccounts,
+
     // ===== TNS (TOS Name Service) =====
 
     // Name to owner mapping: name_hash -> owner_public_key
@@ -323,6 +341,11 @@ impl Column {
             AgentSessionKeys => Some(32),
             // TNS ephemeral messages: prefix by recipient name hash (32 bytes)
             TnsEphemeralMessages => Some(32),
+
+            // Escrow pending release: prefix by release_at (8 bytes)
+            EscrowPendingRelease => Some(PREFIX_TOPOHEIGHT_LEN),
+            // Escrow history: prefix by escrow_id (32 bytes)
+            EscrowHistory => Some(32),
 
             _ => None,
         }

@@ -103,6 +103,60 @@ const fn default_a2a_executor_concurrency() -> usize {
     4
 }
 
+const fn default_a2a_router_timeout_ms() -> u64 {
+    30_000
+}
+
+const fn default_a2a_router_retry_count() -> u32 {
+    2
+}
+
+const fn default_a2a_router_fallback_to_local() -> bool {
+    true
+}
+
+fn default_a2a_router_strategy() -> A2ARoutingStrategy {
+    A2ARoutingStrategy::LowestLatency
+}
+
+const fn default_a2a_escrow_validate_states() -> bool {
+    true
+}
+
+const fn default_a2a_escrow_validate_timeout() -> bool {
+    true
+}
+
+const fn default_a2a_escrow_validate_amounts() -> bool {
+    false
+}
+
+fn default_a2a_escrow_allowed_states() -> Vec<String> {
+    vec![
+        "created".to_string(),
+        "funded".to_string(),
+        "pending-release".to_string(),
+    ]
+}
+
+const fn default_a2a_registry_rate_limit_window_secs() -> u64 {
+    60
+}
+
+const fn default_a2a_registry_rate_limit_max() -> u32 {
+    10
+}
+
+#[derive(Debug, Clone, Copy, clap::ValueEnum, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum A2ARoutingStrategy {
+    FirstMatch,
+    LowestLatency,
+    HighestReputation,
+    RoundRobin,
+    WeightedRandom,
+}
+
 #[derive(Debug, Clone, clap::Args, Serialize, Deserialize)]
 pub struct GetWorkConfig {
     /// Disable GetWork Server (WebSocket for miners).
@@ -267,6 +321,71 @@ pub struct RPCConfig {
     )]
     #[serde(default = "default_a2a_executor_concurrency")]
     pub a2a_executor_concurrency: usize,
+    /// A2A router strategy for external agent selection.
+    #[clap(
+        name = "a2a-router-strategy",
+        long,
+        value_enum,
+        default_value_t = A2ARoutingStrategy::LowestLatency
+    )]
+    #[serde(default = "default_a2a_router_strategy")]
+    pub a2a_router_strategy: A2ARoutingStrategy,
+    /// A2A router timeout in milliseconds for external requests.
+    #[clap(
+        name = "a2a-router-timeout-ms",
+        long,
+        default_value_t = default_a2a_router_timeout_ms()
+    )]
+    #[serde(default = "default_a2a_router_timeout_ms")]
+    pub a2a_router_timeout_ms: u64,
+    /// A2A router retry count for external requests.
+    #[clap(
+        name = "a2a-router-retry-count",
+        long,
+        default_value_t = default_a2a_router_retry_count()
+    )]
+    #[serde(default = "default_a2a_router_retry_count")]
+    pub a2a_router_retry_count: u32,
+    /// Fallback to local executor when routing fails.
+    #[clap(
+        name = "a2a-router-fallback-to-local",
+        long,
+        default_value_t = default_a2a_router_fallback_to_local()
+    )]
+    #[serde(default = "default_a2a_router_fallback_to_local")]
+    pub a2a_router_fallback_to_local: bool,
+    /// Registration rate limit window in seconds (0 disables).
+    #[clap(
+        name = "a2a-registry-rate-limit-window-secs",
+        long,
+        default_value_t = default_a2a_registry_rate_limit_window_secs()
+    )]
+    #[serde(default = "default_a2a_registry_rate_limit_window_secs")]
+    pub a2a_registry_rate_limit_window_secs: u64,
+    /// Maximum registration requests per window (0 disables).
+    #[clap(
+        name = "a2a-registry-rate-limit-max",
+        long,
+        default_value_t = default_a2a_registry_rate_limit_max()
+    )]
+    #[serde(default = "default_a2a_registry_rate_limit_max")]
+    pub a2a_registry_rate_limit_max: u32,
+    /// Validate escrow state against allowed states when escrowHash is provided.
+    #[clap(name = "a2a-escrow-validate-states", long, default_value_t = default_a2a_escrow_validate_states())]
+    #[serde(default = "default_a2a_escrow_validate_states")]
+    pub a2a_escrow_validate_states: bool,
+    /// Allowed escrow states (kebab-case) when validating settlement.
+    #[clap(name = "a2a-escrow-allowed-states", long, value_delimiter = ',')]
+    #[serde(default = "default_a2a_escrow_allowed_states")]
+    pub a2a_escrow_allowed_states: Vec<String>,
+    /// Validate escrow timeout (topoheight < timeout_at) when escrowHash is provided.
+    #[clap(name = "a2a-escrow-validate-timeout", long, default_value_t = default_a2a_escrow_validate_timeout())]
+    #[serde(default = "default_a2a_escrow_validate_timeout")]
+    pub a2a_escrow_validate_timeout: bool,
+    /// Validate escrow amount vs requested cost when metadata.tosSettlement.maxCost is provided.
+    #[clap(name = "a2a-escrow-validate-amounts", long, default_value_t = default_a2a_escrow_validate_amounts())]
+    #[serde(default = "default_a2a_escrow_validate_amounts")]
+    pub a2a_escrow_validate_amounts: bool,
 }
 
 #[derive(Debug, Clone, Copy, clap::ValueEnum, Serialize, Deserialize, strum::Display)]

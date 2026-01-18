@@ -241,7 +241,8 @@ impl SecurityCommittee {
             | OperationType::Suspend
             | OperationType::Resume
             | OperationType::Dissolve
-            | OperationType::RegisterCommittee => self.threshold,
+            | OperationType::RegisterCommittee
+            | OperationType::SlashArbiter => self.threshold,
         }
     }
 
@@ -562,6 +563,7 @@ pub enum OperationType {
     Resume,
     Dissolve,
     RegisterCommittee,
+    SlashArbiter,
 }
 
 impl OperationType {
@@ -584,6 +586,7 @@ impl OperationType {
             OperationType::Resume => "Resume",
             OperationType::Dissolve => "Dissolve",
             OperationType::RegisterCommittee => "RegisterCommittee",
+            OperationType::SlashArbiter => "SlashArbiter",
         }
     }
 }
@@ -792,6 +795,29 @@ impl CommitteeApproval {
         message.extend_from_slice(account.as_bytes());
         message.extend_from_slice(reason_hash.as_bytes());
         message.extend_from_slice(&expires_at.to_le_bytes());
+        message.extend_from_slice(&timestamp.to_le_bytes());
+        message
+    }
+
+    /// Build domain-separated signing message for SlashArbiter
+    ///
+    /// Message format: "TOS_ARBITER_SLASH" || chain_id || committee_id || arbiter_pubkey
+    /// || amount || reason_hash || timestamp
+    pub fn build_slash_arbiter_message(
+        network: &Network,
+        committee_id: &Hash,
+        arbiter_pubkey: &PublicKey,
+        amount: u64,
+        reason_hash: &Hash,
+        timestamp: u64,
+    ) -> Vec<u8> {
+        let mut message = Vec::with_capacity(152);
+        message.extend_from_slice(b"TOS_ARBITER_SLASH");
+        message.extend_from_slice(&network.chain_id().to_le_bytes());
+        message.extend_from_slice(committee_id.as_bytes());
+        message.extend_from_slice(arbiter_pubkey.as_bytes());
+        message.extend_from_slice(&amount.to_le_bytes());
+        message.extend_from_slice(reason_hash.as_bytes());
         message.extend_from_slice(&timestamp.to_le_bytes());
         message
     }

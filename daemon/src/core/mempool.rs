@@ -517,7 +517,6 @@ impl Mempool {
 
                 // filter all txs hashes which are not found
                 // or where its nonce is smaller than the new nonce
-                // TODO when drain_filter is stable, use it (allow to get all hashes deleted)
                 let mut max: Option<u64> = None;
                 let mut min: Option<u64> = None;
 

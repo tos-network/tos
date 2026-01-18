@@ -122,10 +122,10 @@ async fn main() {
     // Warm-up run
     println!("Warming up...");
     for i in 0..100 {
-        blockchain
-            .process_transaction(TRANSFER_AMOUNT, i)
-            .await
-            .expect("Warm-up transaction should succeed");
+        if let Err(err) = blockchain.process_transaction(TRANSFER_AMOUNT, i).await {
+            eprintln!("Warm-up transaction failed: {err}");
+            return;
+        }
     }
     println!("Warm-up complete.\n");
 
@@ -139,10 +139,13 @@ async fn main() {
     let start = Instant::now();
 
     for nonce in 0..NUM_TRANSACTIONS {
-        blockchain
+        if let Err(err) = blockchain
             .process_transaction(TRANSFER_AMOUNT, nonce as u64)
             .await
-            .expect("Transaction should succeed");
+        {
+            eprintln!("Transaction failed at nonce {nonce}: {err}");
+            return;
+        }
     }
 
     let tx_duration = start.elapsed();
@@ -172,10 +175,13 @@ async fn main() {
 
         // Process transactions in this block
         for _ in 0..TXS_PER_BLOCK {
-            blockchain2
+            if let Err(err) = blockchain2
                 .process_transaction(TRANSFER_AMOUNT, block_nonce)
                 .await
-                .expect("Block transaction should succeed");
+            {
+                eprintln!("Block {block_num} transaction failed: {err}");
+                return;
+            }
             block_nonce += 1;
         }
 

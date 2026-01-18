@@ -470,7 +470,6 @@ impl InnerTree {
     }
 }
 
-// TODO: rework this
 // A reference to all the entries in a `Tree`.
 // So, even if it get changed while we iter, we still have a reference to the old entries.
 pub struct Iter {

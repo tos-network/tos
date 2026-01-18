@@ -1,7 +1,7 @@
 // Allowing await_holding_lock for std::sync::Mutex - this is a pre-existing architectural pattern.
 // The code uses synchronous Mutex from std library with async functions. While this could cause
 // deadlocks in theory, the current usage pattern is safe as locks are held briefly.
-// TODO: Consider migrating to async-aware mutexes (tokio::sync::Mutex) in future refactoring.
+// Consider migrating to async-aware mutexes (tokio::sync::Mutex) in future refactoring.
 #![allow(clippy::await_holding_lock)]
 
 use anyhow::{Context, Result};
@@ -651,13 +651,14 @@ async fn xswd_handle_request_permission(
             vec!["a", "d", "aa", "ad"],
         )
         .await?;
-    Ok(match answer.as_str() {
+    let result = match answer.as_str() {
         "a" => PermissionResult::Accept,
         "d" => PermissionResult::Reject,
         "aa" => PermissionResult::AlwaysAccept,
         "ad" => PermissionResult::AlwaysReject,
-        _ => unreachable!(),
-    })
+        other => return Err(anyhow::anyhow!("Unexpected permission response: {}", other)),
+    };
+    Ok(result)
 }
 
 // Apply the config passed in params
@@ -3785,6 +3786,90 @@ async fn transaction(
                     payload.get_recipient_name_hash()
                 ));
                 manager.message(format!("  TTL Blocks: {}", payload.get_ttl_blocks()));
+            }
+            TransactionType::CreateEscrow(payload) => {
+                manager.message("Type: CreateEscrow".to_string());
+                manager.message(format!("  Task ID: {}", payload.task_id));
+                manager.message(format!(
+                    "  Provider: {}",
+                    payload
+                        .provider
+                        .as_address(wallet.get_network().is_mainnet())
+                ));
+                manager.message(format!("  Amount: {}", payload.amount));
+                manager.message(format!("  Asset: {}", payload.asset));
+                manager.message(format!("  Challenge Window: {}", payload.challenge_window));
+                manager.message(format!(
+                    "  Challenge Deposit BPS: {}",
+                    payload.challenge_deposit_bps
+                ));
+                manager.message(format!("  Timeout Blocks: {}", payload.timeout_blocks));
+            }
+            TransactionType::DepositEscrow(payload) => {
+                manager.message("Type: DepositEscrow".to_string());
+                manager.message(format!("  Escrow ID: {}", payload.escrow_id));
+                manager.message(format!("  Amount: {}", payload.amount));
+            }
+            TransactionType::ReleaseEscrow(payload) => {
+                manager.message("Type: ReleaseEscrow".to_string());
+                manager.message(format!("  Escrow ID: {}", payload.escrow_id));
+                manager.message(format!("  Amount: {}", payload.amount));
+            }
+            TransactionType::RefundEscrow(payload) => {
+                manager.message("Type: RefundEscrow".to_string());
+                manager.message(format!("  Escrow ID: {}", payload.escrow_id));
+                manager.message(format!("  Amount: {}", payload.amount));
+            }
+            TransactionType::ChallengeEscrow(payload) => {
+                manager.message("Type: ChallengeEscrow".to_string());
+                manager.message(format!("  Escrow ID: {}", payload.escrow_id));
+                manager.message(format!("  Deposit: {}", payload.deposit));
+            }
+            TransactionType::DisputeEscrow(payload) => {
+                manager.message("Type: DisputeEscrow".to_string());
+                manager.message(format!("  Escrow ID: {}", payload.escrow_id));
+                manager.message(format!("  Reason: {}", payload.reason));
+            }
+            TransactionType::AppealEscrow(payload) => {
+                manager.message("Type: AppealEscrow".to_string());
+                manager.message(format!("  Escrow ID: {}", payload.escrow_id));
+                manager.message(format!("  Reason: {}", payload.reason));
+                manager.message(format!("  Deposit: {}", payload.appeal_deposit));
+                manager.message(format!("  Mode: {:?}", payload.appeal_mode));
+            }
+            TransactionType::SubmitVerdict(payload) => {
+                manager.message("Type: SubmitVerdict".to_string());
+                manager.message(format!("  Escrow ID: {}", payload.escrow_id));
+                manager.message(format!("  Dispute ID: {}", payload.dispute_id));
+                manager.message(format!("  Round: {}", payload.round));
+                manager.message(format!("  Payer Amount: {}", payload.payer_amount));
+                manager.message(format!("  Payee Amount: {}", payload.payee_amount));
+                manager.message(format!("  Signatures: {}", payload.signatures.len()));
+            }
+            TransactionType::RegisterArbiter(payload) => {
+                manager.message("Type: RegisterArbiter".to_string());
+                manager.message(format!("  Name: {}", payload.get_name()));
+                manager.message(format!("  Stake: {}", payload.get_stake_amount()));
+                manager.message(format!("  Fee BPS: {}", payload.get_fee_basis_points()));
+            }
+            TransactionType::UpdateArbiter(payload) => {
+                manager.message("Type: UpdateArbiter".to_string());
+                manager.message(format!("  Deactivate: {}", payload.is_deactivate()));
+            }
+            TransactionType::SlashArbiter(payload) => {
+                manager.message("Type: SlashArbiter".to_string());
+                manager.message(format!("  Arbiter: {:?}", payload.get_arbiter_pubkey()));
+                manager.message(format!("  Amount: {}", payload.get_amount()));
+            }
+            TransactionType::RequestArbiterExit(_) => {
+                manager.message("Type: RequestArbiterExit".to_string());
+            }
+            TransactionType::WithdrawArbiterStake(payload) => {
+                manager.message("Type: WithdrawArbiterStake".to_string());
+                manager.message(format!("  Amount: {}", payload.amount));
+            }
+            TransactionType::CancelArbiterExit(_) => {
+                manager.message("Type: CancelArbiterExit".to_string());
             }
         }
     }

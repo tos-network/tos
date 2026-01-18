@@ -57,10 +57,7 @@ impl Echange {
         }
     }
 
-    // Get the right balance to use for TX verification
-    // TODO we may need to check previous balances and up to the last output balance made
-    // So if in block A we spent TX A, and block B we got some funds, then we spent TX B in block C
-    // We are still able to use it even if it was built at same time as TX A
+    // Get the right balance to use for TX verification.
     fn get_balance(&mut self) -> &mut u64 {
         let output = self.output_balance_used || self.allow_output_balance;
         let (balance, used) = self.version.select_balance(output);
@@ -122,15 +119,15 @@ impl UnoEchange {
     }
 }
 
-struct Account<'a> {
+struct Account {
     // Account nonce used to verify valid transaction
     nonce: VersionedNonce,
     // Assets ready as source for any transfer/transaction
     // It will be added by next change at each TX
     // This is necessary to easily build the final user balance
-    assets: HashMap<&'a Hash, Echange>,
+    assets: HashMap<Hash, Echange>,
     // UNO (encrypted) assets for privacy-preserving transactions
-    uno_assets: HashMap<&'a Hash, UnoEchange>,
+    uno_assets: HashMap<Hash, UnoEchange>,
     // Multisig configured
     // This is used to verify the validity of the multisig setup
     multisig: Option<(VersionedState, Option<MultiSigPayload>)>,
@@ -149,7 +146,7 @@ pub struct ChainState<'a, S: Storage> {
     receiver_uno_balances: HashMap<Cow<'a, PublicKey>, HashMap<Cow<'a, Hash>, VersionedUnoBalance>>,
     // Sender accounts
     // This is used to verify ZK Proofs and store/update nonces
-    accounts: HashMap<Cow<'a, PublicKey>, Account<'a>>,
+    accounts: HashMap<Cow<'a, PublicKey>, Account>,
     // Cached energy resources
     energy_resources: HashMap<Cow<'a, PublicKey>, EnergyResource>,
     // Agent account metadata updates (None = delete)
@@ -250,13 +247,13 @@ impl<'a, S: Storage> ChainState<'a, S> {
     pub fn get_sender_balances<'b>(
         &'b self,
         key: &'b PublicKey,
-    ) -> Option<HashMap<&'b Hash, &'b VersionedBalance>> {
+    ) -> Option<HashMap<Hash, &'b VersionedBalance>> {
         let account = self.accounts.get(key)?;
         Some(
             account
                 .assets
                 .iter()
-                .map(|(k, v)| (*k, &v.version))
+                .map(|(k, v)| (k.clone(), &v.version))
                 .collect(),
         )
     }
@@ -289,7 +286,7 @@ impl<'a, S: Storage> ChainState<'a, S> {
         storage: &S,
         topoheight: TopoHeight,
         receiver_balances: &HashMap<Cow<'a, PublicKey>, HashMap<Cow<'a, Hash>, VersionedBalance>>,
-    ) -> Result<Account<'a>, BlockchainError> {
+    ) -> Result<Account, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!(
                 "create_sender_account for {} at topoheight {}",
@@ -473,7 +470,7 @@ impl<'a, S: Storage> ChainState<'a, S> {
     async fn internal_get_sender_verification_balance<'b>(
         &'b mut self,
         key: Cow<'a, PublicKey>,
-        asset: &'a Hash,
+        asset: &Hash,
         reference: &Reference,
     ) -> Result<&'b mut u64, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
@@ -487,7 +484,7 @@ impl<'a, S: Storage> ChainState<'a, S> {
         match self.accounts.entry(key.clone()) {
             Entry::Occupied(o) => {
                 let account = o.into_mut();
-                match account.assets.entry(asset) {
+                match account.assets.entry(asset.clone()) {
                     Entry::Occupied(o) => Ok(o.into_mut().get_balance()),
                     Entry::Vacant(e) => {
                         let echange = Self::create_sender_echange(
@@ -524,7 +521,7 @@ impl<'a, S: Storage> ChainState<'a, S> {
 
                 Ok(e.insert(account)
                     .assets
-                    .entry(asset)
+                    .entry(asset.clone())
                     .or_insert(echange)
                     .get_balance())
             }
@@ -561,7 +558,7 @@ impl<'a, S: Storage> ChainState<'a, S> {
     async fn internal_update_sender_echange(
         &mut self,
         key: Cow<'a, PublicKey>,
-        asset: &'a Hash,
+        asset: &Hash,
         new_ct: u64,
     ) -> Result<(), BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
@@ -672,7 +669,7 @@ impl<'a, S: Storage> ChainState<'a, S> {
         match self.accounts.entry(Cow::Borrowed(key)) {
             Entry::Occupied(o) => {
                 let account = o.into_mut();
-                match account.uno_assets.entry(asset) {
+                match account.uno_assets.entry(asset.clone()) {
                     Entry::Occupied(o) => o.into_mut().get_balance(),
                     Entry::Vacant(e) => {
                         // Check receiver_uno_balances first, then storage
@@ -734,7 +731,7 @@ impl<'a, S: Storage> ChainState<'a, S> {
 
                 e.insert(account)
                     .uno_assets
-                    .entry(asset)
+                    .entry(asset.clone())
                     .or_insert(echange)
                     .get_balance()
             }
@@ -772,7 +769,7 @@ impl<'a, S: Storage> ChainState<'a, S> {
     async fn get_internal_account(
         &mut self,
         key: &'a PublicKey,
-    ) -> Result<&mut Account<'a>, BlockchainError> {
+    ) -> Result<&mut Account, BlockchainError> {
         match self.accounts.entry(Cow::Borrowed(key)) {
             Entry::Occupied(o) => Ok(o.into_mut()),
             Entry::Vacant(e) => {
@@ -969,10 +966,7 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for ChainS
         asset: Cow<'a, Hash>,
         reference: &Reference,
     ) -> Result<&'b mut u64, BlockchainError> {
-        let asset = match asset {
-            Cow::Borrowed(asset) => asset,
-            Cow::Owned(_) => return Err(BlockchainError::CorruptedData),
-        };
+        let asset = asset.as_ref();
         Ok(self
             .internal_get_sender_verification_balance(account, asset, reference)
             .await?)
@@ -985,10 +979,7 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for ChainS
         asset: Cow<'a, Hash>,
         output: u64,
     ) -> Result<(), BlockchainError> {
-        let asset = match asset {
-            Cow::Borrowed(asset) => asset,
-            Cow::Owned(_) => return Err(BlockchainError::CorruptedData),
-        };
+        let asset = asset.as_ref();
         self.internal_update_sender_echange(account, asset, output)
             .await
     }
@@ -1304,5 +1295,19 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for ChainS
 
     async fn is_message_id_used(&self, message_id: &Hash) -> Result<bool, BlockchainError> {
         self.storage.is_message_id_used(message_id).await
+    }
+
+    async fn get_escrow(
+        &mut self,
+        escrow_id: &Hash,
+    ) -> Result<Option<tos_common::escrow::EscrowAccount>, BlockchainError> {
+        self.storage.get_escrow(escrow_id).await
+    }
+
+    async fn get_arbiter(
+        &mut self,
+        arbiter: &'a CompressedPublicKey,
+    ) -> Result<Option<tos_common::arbitration::ArbiterAccount>, BlockchainError> {
+        self.storage.get_arbiter(arbiter).await
     }
 }

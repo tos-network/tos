@@ -310,6 +310,20 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError>
     async fn is_message_id_used(&self, message_id: &Hash) -> Result<bool, BlockchainError> {
         self.inner.is_message_id_used(message_id).await
     }
+
+    async fn get_escrow(
+        &mut self,
+        escrow_id: &Hash,
+    ) -> Result<Option<tos_common::escrow::EscrowAccount>, BlockchainError> {
+        self.inner.storage.get_escrow(escrow_id).await
+    }
+
+    async fn get_arbiter(
+        &mut self,
+        arbiter: &'a CompressedPublicKey,
+    ) -> Result<Option<tos_common::arbitration::ArbiterAccount>, BlockchainError> {
+        self.inner.storage.get_arbiter(arbiter).await
+    }
 }
 
 #[async_trait]
@@ -593,6 +607,61 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for Applicable
         }
 
         Ok(())
+    }
+
+    async fn set_escrow(
+        &mut self,
+        escrow: &tos_common::escrow::EscrowAccount,
+    ) -> Result<(), BlockchainError> {
+        self.inner.storage.set_escrow(escrow).await
+    }
+
+    async fn add_pending_release(
+        &mut self,
+        release_at: u64,
+        escrow_id: &Hash,
+    ) -> Result<(), BlockchainError> {
+        self.inner
+            .storage
+            .add_pending_release(release_at, escrow_id)
+            .await
+    }
+
+    async fn remove_pending_release(
+        &mut self,
+        release_at: u64,
+        escrow_id: &Hash,
+    ) -> Result<(), BlockchainError> {
+        self.inner
+            .storage
+            .remove_pending_release(release_at, escrow_id)
+            .await
+    }
+
+    async fn add_escrow_history(
+        &mut self,
+        escrow_id: &Hash,
+        topoheight: u64,
+        tx_hash: &Hash,
+    ) -> Result<(), BlockchainError> {
+        self.inner
+            .storage
+            .add_escrow_history(escrow_id, topoheight, tx_hash)
+            .await
+    }
+
+    async fn set_arbiter(
+        &mut self,
+        arbiter: &tos_common::arbitration::ArbiterAccount,
+    ) -> Result<(), BlockchainError> {
+        self.inner.storage.set_arbiter(arbiter).await
+    }
+
+    async fn remove_arbiter(
+        &mut self,
+        arbiter: &CompressedPublicKey,
+    ) -> Result<(), BlockchainError> {
+        self.inner.storage.remove_arbiter(arbiter).await
     }
 
     // ===== KYC System Operations =====
@@ -1239,7 +1308,7 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
                 if log::log_enabled!(log::Level::Trace) {
                     trace!("sender output sum: {}", output_sum);
                 }
-                match balances.entry(Cow::Borrowed(asset.as_ref())) {
+                match balances.entry(Cow::Owned(asset.clone())) {
                     Entry::Occupied(mut o) => {
                         if log::log_enabled!(log::Level::Trace) {
                             trace!(
@@ -1378,7 +1447,7 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
                     ..
                 } = uno_echange;
 
-                match uno_balances.entry(Cow::Borrowed(asset.as_ref())) {
+                match uno_balances.entry(Cow::Owned(asset.clone())) {
                     Entry::Occupied(mut o) => {
                         if log::log_enabled!(log::Level::Trace) {
                             trace!(

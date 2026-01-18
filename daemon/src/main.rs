@@ -8,6 +8,7 @@ pub mod config;
 // VRF must be declared before core (core/config.rs uses WrappedVrfSecret)
 pub mod a2a;
 pub mod core;
+pub mod escrow;
 pub mod p2p;
 pub mod rpc;
 pub mod tako_integration;
@@ -825,7 +826,6 @@ async fn verify_chain<S: Storage>(
                     }
                 }
 
-                // TODO: with upcoming smart contracts, this may be biased due to the gas fee
                 if let Some(burned) = transaction.get_burned_amount(&TOS_ASSET) {
                     burned_sum += burned;
                 }

@@ -16,6 +16,7 @@ use tos_common::{
         elgamal::{Ciphertext, CompressedPublicKey},
         Hash, Hashable, KeyPair, PublicKey,
     },
+    escrow::EscrowAccount,
     immutable::Immutable,
     network::Network,
     nft::{NftCache, NftStorageProvider},
@@ -747,6 +748,17 @@ impl<'a> BlockchainApplyState<'a, DummyContractProvider, TestError> for TestChai
         Ok(())
     }
 
+    async fn set_arbiter(
+        &mut self,
+        _arbiter: &tos_common::arbitration::ArbiterAccount,
+    ) -> Result<(), TestError> {
+        Ok(())
+    }
+
+    async fn remove_arbiter(&mut self, _arbiter: &CompressedPublicKey) -> Result<(), TestError> {
+        Ok(())
+    }
+
     async fn bootstrap_global_committee(
         &mut self,
         _name: String,
@@ -851,6 +863,35 @@ impl<'a> BlockchainApplyState<'a, DummyContractProvider, TestError> for TestChai
     ) -> Result<(), TestError> {
         Ok(())
     }
+
+    async fn set_escrow(&mut self, _escrow: &EscrowAccount) -> Result<(), TestError> {
+        Ok(())
+    }
+
+    async fn add_pending_release(
+        &mut self,
+        _release_at: u64,
+        _escrow_id: &Hash,
+    ) -> Result<(), TestError> {
+        Ok(())
+    }
+
+    async fn remove_pending_release(
+        &mut self,
+        _release_at: u64,
+        _escrow_id: &Hash,
+    ) -> Result<(), TestError> {
+        Ok(())
+    }
+
+    async fn add_escrow_history(
+        &mut self,
+        _escrow_id: &Hash,
+        _topoheight: u64,
+        _tx_hash: &Hash,
+    ) -> Result<(), TestError> {
+        Ok(())
+    }
 }
 
 #[tokio::test]
@@ -922,10 +963,12 @@ async fn test_batch_referral_reward_refunds_remainder_e2e() {
 
     let tx = builder.build(&mut account_state, &alice).unwrap();
     let tx_hash = tx.hash();
+    assert!(matches!(
+        tx.get_data(),
+        tos_common::transaction::TransactionType::BatchReferralReward(_)
+    ));
     if let tos_common::transaction::TransactionType::BatchReferralReward(payload) = tx.get_data() {
         assert_eq!(payload.get_total_amount(), 1000);
-    } else {
-        panic!("Expected BatchReferralReward transaction");
     }
     assert_eq!(tx.get_source(), &alice_pk);
 

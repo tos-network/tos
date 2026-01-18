@@ -20,6 +20,7 @@ use crate::{
         tx_selector::{TxSelector, TxSelectorEntry},
         ScheduledExecutionConfig, TxCache,
     },
+    escrow::auto_release::apply_auto_release,
     p2p::P2pServer,
     rpc::{
         rpc::{get_block_response, get_block_type_for_block},
@@ -37,6 +38,7 @@ use metrics::{counter, gauge, histogram};
 use serde_json::{json, Value};
 use std::{
     borrow::Cow,
+    cmp::Reverse,
     collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
     net::{IpAddr, SocketAddr},
     sync::{
@@ -49,10 +51,10 @@ use tos_common::{
     api::{
         daemon::{
             AddressPaymentEvent, BlockOrderedEvent, BlockOrphanedEvent, BlockType, ContractEvent,
-            ContractTransferEvent, InvokeContractEvent, MempoolTransactionSummary, NewAssetEvent,
-            NewContractEvent, NotifyEvent, ScheduledExecutionExecutedEvent,
-            StableHeightChangedEvent, StableTopoHeightChangedEvent, TransactionExecutedEvent,
-            TransactionResponse,
+            ContractTransferEvent, EscrowAutoReleasedEvent, InvokeContractEvent,
+            MempoolTransactionSummary, NewAssetEvent, NewContractEvent, NotifyEvent,
+            ScheduledExecutionExecutedEvent, StableHeightChangedEvent,
+            StableTopoHeightChangedEvent, TransactionExecutedEvent, TransactionResponse,
         },
         payment::decode_payment_extra_data,
         RPCContractOutput, RPCTransaction,
@@ -1057,7 +1059,6 @@ impl<S: Storage> Blockchain<S> {
 
             let start = Instant::now();
             // delete balances for all assets
-            // TODO: this is currently going through ALL data, we need to only detect changes made in last..located
             storage
                 .delete_versioned_data_below_topoheight(located_sync_topoheight, true)
                 .await?;
@@ -3027,7 +3028,6 @@ impl<S: Storage> Blockchain<S> {
                         format_tos(tx.get_fee())
                     );
                 }
-                // TODO no clone
                 block.txs_hashes.insert(hash.as_ref().clone());
                 block_size += HASH_SIZE; // add the hash size
                 total_txs_size += size;
@@ -3590,11 +3590,18 @@ impl<S: Storage> Blockchain<S> {
                     }
                     let mut batches = vec![Vec::new(); batches_count];
 
-                    let mut i = 0;
-                    // TODO: load balance more!
-                    for group in txs_grouped.into_values() {
-                        batches[i % batches_count].extend(group);
-                        i += 1;
+                    let mut groups: Vec<_> = txs_grouped.into_values().collect();
+                    groups.sort_by_key(|group| Reverse(group.len()));
+                    let mut batch_sizes = vec![0usize; batches_count];
+                    for group in groups {
+                        let (idx, _) = batch_sizes
+                            .iter()
+                            .enumerate()
+                            .min_by_key(|(_, size)| *size)
+                            .unwrap_or((0, &0));
+                        let group_len = group.len();
+                        batches[idx].extend(group);
+                        batch_sizes[idx] = batch_sizes[idx].saturating_add(group_len);
                     }
 
                     let storage = &*storage;
@@ -3760,7 +3767,6 @@ impl<S: Storage> Blockchain<S> {
         }
 
         let mut tips = storage.get_tips().await?;
-        // TODO: best would be to not clone
         tips.insert(block_hash.as_ref().clone());
         for hash in block.get_tips() {
             tips.remove(hash);
@@ -4397,6 +4403,26 @@ impl<S: Storage> Blockchain<S> {
                             });
                             entry.push(value);
                         }
+                    }
+                }
+
+                // Auto-release optimistic escrows once challenge window expires
+                let auto_releases = apply_auto_release(&mut chain_state, highest_topo).await?;
+                if should_track_events.contains(&NotifyEvent::EscrowAutoReleased) {
+                    for release in auto_releases {
+                        let value = json!(EscrowAutoReleasedEvent {
+                            escrow_id: Cow::Owned(release.escrow_id),
+                            amount: release.amount,
+                            asset: Cow::Owned(release.asset),
+                            payee: Cow::Owned(release.payee),
+                            release_at: release.release_at,
+                            topoheight: highest_topo,
+                            block_hash: Cow::Borrowed(&hash),
+                        });
+                        events
+                            .entry(NotifyEvent::EscrowAutoReleased)
+                            .or_insert_with(Vec::new)
+                            .push(value);
                     }
                 }
 

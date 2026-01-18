@@ -417,6 +417,38 @@ pub fn verify_emergency_suspend_approvals(
     verify_approvals_internal(committee, approvals, build_message, required, current_time)
 }
 
+pub fn verify_slash_arbiter_approvals(
+    network: &Network,
+    committee: &SecurityCommittee,
+    approvals: &[CommitteeApproval],
+    arbiter_pubkey: &PublicKey,
+    amount: u64,
+    reason_hash: &Hash,
+    current_time: u64,
+) -> Result<ApprovalVerificationResult, ApprovalError> {
+    // Committee must be active
+    if committee.status != CommitteeStatus::Active {
+        return Err(ApprovalError::CommitteeNotActive(committee.id.clone()));
+    }
+
+    let committee_id = committee.id.clone();
+    let reason_hash = reason_hash.clone();
+
+    let build_message = move |approval: &CommitteeApproval| {
+        CommitteeApproval::build_slash_arbiter_message(
+            network,
+            &committee_id,
+            arbiter_pubkey,
+            amount,
+            &reason_hash,
+            approval.timestamp,
+        )
+    };
+
+    let required = committee.required_threshold(&OperationType::SlashArbiter, None);
+    verify_approvals_internal(committee, approvals, build_message, required, current_time)
+}
+
 /// Verify approvals for RegisterCommittee operation
 ///
 /// SECURITY FIX (Issue #44): Now requires network parameter for cross-network replay protection

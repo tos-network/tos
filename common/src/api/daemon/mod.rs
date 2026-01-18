@@ -1,10 +1,12 @@
 mod direction;
 
 use super::{default_true_value, DataElement, RPCContractOutput, RPCTransaction};
+use crate::escrow::{AppealInfo, DisputeInfo, EscrowAccount};
 use crate::{
     account::{Nonce, VersionedBalance, VersionedNonce, VersionedUnoBalance},
+    arbitration::ArbiterStatus,
     block::{Algorithm, BlockVersion, TopoHeight, EXTRA_NONCE_SIZE},
-    crypto::{Address, Hash},
+    crypto::{Address, Hash, PublicKey},
     difficulty::{CumulativeDifficulty, Difficulty},
     network::Network,
     time::{TimestampMillis, TimestampSeconds},
@@ -1398,6 +1400,9 @@ pub enum NotifyEvent {
     // When a transaction has been included in a valid block & executed on chain
     // it contains TransactionExecutedEvent struct as value
     TransactionExecuted,
+    // When an escrow is auto-released after the challenge window
+    // it contains EscrowAutoReleasedEvent struct as value
+    EscrowAutoReleased,
     // When the contract has been invoked
     // This allows to track all the contract invocations
     InvokeContract {
@@ -1500,6 +1505,18 @@ pub struct TransactionExecutedEvent<'a> {
     pub block_hash: Cow<'a, Hash>,
     pub tx_hash: Cow<'a, Hash>,
     pub topoheight: TopoHeight,
+}
+
+// Value of NotifyEvent::EscrowAutoReleased
+#[derive(Serialize, Deserialize)]
+pub struct EscrowAutoReleasedEvent<'a> {
+    pub escrow_id: Cow<'a, Hash>,
+    pub amount: u64,
+    pub asset: Cow<'a, Hash>,
+    pub payee: Cow<'a, PublicKey>,
+    pub release_at: TopoHeight,
+    pub topoheight: TopoHeight,
+    pub block_hash: Cow<'a, Hash>,
 }
 
 // Value of NotifyEvent::NewAsset
@@ -2331,4 +2348,131 @@ pub struct GetMessageByIdResult<'a> {
     /// The message if found
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<EphemeralMessageInfo<'a>>,
+}
+
+// Escrow RPC types
+
+#[derive(Serialize, Deserialize)]
+pub struct GetEscrowParams<'a> {
+    pub escrow_id: Cow<'a, Hash>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct GetEscrowsByClientParams {
+    pub address: Address,
+    pub maximum: Option<usize>,
+    pub skip: Option<usize>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct GetEscrowsByProviderParams {
+    pub address: Address,
+    pub maximum: Option<usize>,
+    pub skip: Option<usize>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct GetEscrowsByTaskParams<'a> {
+    pub task_id: Cow<'a, str>,
+    pub maximum: Option<usize>,
+    pub skip: Option<usize>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct GetEscrowHistoryParams<'a> {
+    pub escrow_id: Cow<'a, Hash>,
+    pub maximum: Option<usize>,
+    pub skip: Option<usize>,
+    #[serde(default)]
+    pub descending: bool,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct GetDisputeDetailsParams<'a> {
+    pub escrow_id: Cow<'a, Hash>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct GetAppealStatusParams<'a> {
+    pub escrow_id: Cow<'a, Hash>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct GetPendingReleasesParams {
+    pub up_to: Option<u64>,
+    pub limit: Option<usize>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct EscrowListResult {
+    pub escrows: Vec<EscrowAccount>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct EscrowHistoryResult {
+    pub escrow_id: Hash,
+    pub entries: Vec<EscrowHistoryEntry>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct EscrowHistoryEntry {
+    pub topoheight: u64,
+    pub tx_hash: Hash,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct PendingReleaseEntry {
+    pub release_at: u64,
+    pub escrow_id: Hash,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct DisputeDetailsResult {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dispute: Option<DisputeInfo>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dispute_id: Option<Hash>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dispute_round: Option<u32>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct AppealStatusResult {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub appeal: Option<AppealInfo>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct PendingReleasesResult {
+    pub entries: Vec<PendingReleaseEntry>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct GetArbiterWithdrawStatusParams {
+    pub address: Address,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct EstimateWithdrawableAmountParams {
+    pub address: Address,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct ArbiterWithdrawStatus {
+    pub status: ArbiterStatus,
+    pub stake_amount: u64,
+    pub total_slashed: u64,
+    pub can_withdraw: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub block_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cooldown_ends_at: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cooldown_remaining: Option<u64>,
+    pub active_cases: u64,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct EstimateWithdrawableAmountResult {
+    pub available: u64,
 }
