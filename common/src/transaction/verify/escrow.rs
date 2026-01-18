@@ -2,11 +2,11 @@ use thiserror::Error;
 
 use crate::{
     arbitration::verdict::{
-        derive_dispute_outcome, verify_verdict_signatures, ArbiterRegistry, VerdictArtifact,
-        VerdictVerificationError,
+        derive_dispute_outcome, verify_verdict_signatures_with_allowed, ArbiterRegistry,
+        VerdictArtifact, VerdictVerificationError,
     },
     crypto::PublicKey,
-    escrow::{EscrowAccount, EscrowState},
+    escrow::{ArbitrationMode, EscrowAccount, EscrowState},
     transaction::payload::{
         AppealEscrowPayload, ChallengeEscrowPayload, CreateEscrowPayload, DepositEscrowPayload,
         DisputeEscrowPayload, RefundEscrowPayload, ReleaseEscrowPayload, SubmitVerdictPayload,
@@ -67,6 +67,16 @@ pub enum EscrowVerificationError {
     InvalidReasonLength,
     #[error("insufficient escrow balance: required {required}, available {available}")]
     InsufficientEscrowBalance { required: u64, available: u64 },
+    #[error("optimistic release not enabled")]
+    OptimisticReleaseNotEnabled,
+    #[error("arbitration not configured")]
+    ArbitrationNotConfigured,
+    #[error("dispute record required")]
+    DisputeRecordRequired,
+    #[error("arbiter not assigned to this escrow")]
+    ArbiterNotAssigned,
+    #[error("invalid arbitration config: {0}")]
+    InvalidArbitrationConfig(String),
 }
 
 /// Verify create escrow payload (stateless).
@@ -92,6 +102,94 @@ pub fn verify_create_escrow(
     if &payload.provider == payer {
         return Err(EscrowVerificationError::Unauthorized);
     }
+
+    // Validate arbitration config if present
+    if let Some(config) = &payload.arbitration_config {
+        match config.mode {
+            ArbitrationMode::None => {
+                // Mode::None is not valid when arbitration_config is present
+                return Err(EscrowVerificationError::InvalidArbitrationConfig(
+                    "arbitration mode cannot be None when config is present".to_string(),
+                ));
+            }
+            ArbitrationMode::Single => {
+                // Single mode requires exactly one arbiter
+                if config.arbiters.len() != 1 {
+                    return Err(EscrowVerificationError::InvalidArbitrationConfig(format!(
+                        "Single mode requires exactly 1 arbiter, found {}",
+                        config.arbiters.len()
+                    )));
+                }
+                // Threshold must be 1 for Single mode (ignore if set otherwise)
+                if let Some(threshold) = config.threshold {
+                    if threshold != 1 {
+                        return Err(EscrowVerificationError::InvalidArbitrationConfig(format!(
+                            "Single mode requires threshold=1, found {}",
+                            threshold
+                        )));
+                    }
+                }
+            }
+            ArbitrationMode::Committee => {
+                // Committee mode requires at least one arbiter
+                if config.arbiters.is_empty() {
+                    return Err(EscrowVerificationError::InvalidArbitrationConfig(
+                        "Committee mode requires at least one arbiter".to_string(),
+                    ));
+                }
+                // Threshold must be valid: 1 <= threshold <= len(arbiters)
+                let threshold = config.threshold.unwrap_or(1);
+                if threshold == 0 {
+                    return Err(EscrowVerificationError::InvalidArbitrationConfig(
+                        "threshold cannot be zero".to_string(),
+                    ));
+                }
+                let arbiter_count = u8::try_from(config.arbiters.len()).unwrap_or(u8::MAX);
+                if threshold > arbiter_count {
+                    return Err(EscrowVerificationError::InvalidArbitrationConfig(format!(
+                        "threshold {} exceeds arbiter count {}",
+                        threshold, arbiter_count
+                    )));
+                }
+            }
+            ArbitrationMode::DaoGovernance => {
+                // DaoGovernance requires explicit arbiter assignment to prevent "any arbiter" bypass.
+                // The DAO committee members should be specified in the arbiters list.
+                // If on-chain committee membership is intended, that should be validated
+                // during verdict submission against the actual committee, not here.
+                if config.arbiters.is_empty() {
+                    return Err(EscrowVerificationError::InvalidArbitrationConfig(
+                        "DaoGovernance mode requires at least one arbiter".to_string(),
+                    ));
+                }
+                // Threshold must be valid if specified
+                if let Some(threshold) = config.threshold {
+                    if threshold == 0 {
+                        return Err(EscrowVerificationError::InvalidArbitrationConfig(
+                            "threshold cannot be zero".to_string(),
+                        ));
+                    }
+                    let arbiter_count = u8::try_from(config.arbiters.len()).unwrap_or(u8::MAX);
+                    if threshold > arbiter_count {
+                        return Err(EscrowVerificationError::InvalidArbitrationConfig(format!(
+                            "threshold {} exceeds arbiter count {}",
+                            threshold, arbiter_count
+                        )));
+                    }
+                }
+            }
+        }
+    }
+
+    // Optimistic release requires arbitration config for challenges to work.
+    // Without arbitration_config, the payee could request release and the payer
+    // would have no way to challenge, effectively bypassing dispute resolution.
+    if payload.optimistic_release && payload.arbitration_config.is_none() {
+        return Err(EscrowVerificationError::InvalidArbitrationConfig(
+            "optimistic_release requires arbitration_config for challenges to work".to_string(),
+        ));
+    }
+
     Ok(())
 }
 
@@ -110,6 +208,9 @@ pub fn verify_deposit_escrow(
 }
 
 /// Verify release escrow payload (read-only).
+///
+/// In the optimistic release flow, the **payee** (provider) requests release,
+/// and the **payer** (client) can challenge during the challenge window.
 pub fn verify_release_escrow(
     payload: &ReleaseEscrowPayload,
     escrow: &EscrowAccount,
@@ -118,11 +219,16 @@ pub fn verify_release_escrow(
     if payload.amount == 0 || payload.amount > escrow.amount {
         return Err(EscrowVerificationError::InvalidAmount);
     }
-    if caller != &escrow.payer {
+    // Payee (provider) requests release, not the payer
+    if caller != &escrow.payee {
         return Err(EscrowVerificationError::Unauthorized);
     }
     if escrow.state != EscrowState::Funded {
         return Err(EscrowVerificationError::InvalidState);
+    }
+    // Release requires optimistic_release to be enabled
+    if !escrow.optimistic_release {
+        return Err(EscrowVerificationError::OptimisticReleaseNotEnabled);
     }
     Ok(())
 }
@@ -208,6 +314,10 @@ pub fn verify_refund_escrow_with_balance(
 }
 
 /// Verify challenge escrow payload (read-only).
+///
+/// Challenge is only allowed when optimistic_release is enabled.
+/// The payer (client) can challenge during the challenge window after
+/// the payee requests release.
 pub fn verify_challenge_escrow(
     payload: &ChallengeEscrowPayload,
     escrow: &EscrowAccount,
@@ -217,11 +327,20 @@ pub fn verify_challenge_escrow(
     if payload.reason.is_empty() || payload.reason.len() > MAX_REASON_LEN {
         return Err(EscrowVerificationError::InvalidReasonLength);
     }
+    // Only payer (client) can challenge
     if caller != &escrow.payer {
         return Err(EscrowVerificationError::Unauthorized);
     }
     if escrow.state != EscrowState::PendingRelease {
         return Err(EscrowVerificationError::InvalidState);
+    }
+    // Challenge is only valid in optimistic release flow
+    if !escrow.optimistic_release {
+        return Err(EscrowVerificationError::OptimisticReleaseNotEnabled);
+    }
+    // Arbitration must be configured to handle challenged escrows
+    if escrow.arbitration_config.is_none() {
+        return Err(EscrowVerificationError::ArbitrationNotConfigured);
     }
     let release_at = escrow
         .release_requested_at
@@ -233,8 +352,12 @@ pub fn verify_challenge_escrow(
         return Err(EscrowVerificationError::ChallengeWindowExpired);
     }
 
-    let required = escrow
-        .amount
+    // Challenge deposit is based on the pending release amount, not the full escrow.
+    // This ensures challengers aren't overcharged when challenging partial releases.
+    let release_amount = escrow
+        .pending_release_amount
+        .ok_or(EscrowVerificationError::InvalidState)?;
+    let required = release_amount
         .checked_mul(u64::from(escrow.challenge_deposit_bps))
         .and_then(|value| value.checked_div(u64::from(MAX_BPS)))
         .ok_or(EscrowVerificationError::InvalidChallengeDepositBps)?;
@@ -259,9 +382,12 @@ pub fn verify_dispute_escrow(
     if caller != &escrow.payer && caller != &escrow.payee {
         return Err(EscrowVerificationError::Unauthorized);
     }
+    // Allow dispute creation from Funded, PendingRelease, or Challenged states.
+    // After ChallengeEscrow, the state is Challenged but we still need a dispute
+    // record to enable verdict submission by arbiters.
     if !matches!(
         escrow.state,
-        EscrowState::Funded | EscrowState::PendingRelease
+        EscrowState::Funded | EscrowState::PendingRelease | EscrowState::Challenged
     ) {
         return Err(EscrowVerificationError::InvalidState);
     }
@@ -323,6 +449,13 @@ pub fn verify_appeal_escrow(
 }
 
 /// Verify submit verdict payload (read-only).
+///
+/// Requires:
+/// 1. Escrow must be in Challenged state
+/// 2. A dispute record must exist (via DisputeEscrow transaction)
+/// 3. Dispute ID must match
+/// 4. Verdict amounts must equal escrow amount
+/// 5. Sufficient arbiter signatures from assigned arbiters
 pub fn verify_submit_verdict<R: ArbiterRegistry>(
     payload: &SubmitVerdictPayload,
     escrow: &EscrowAccount,
@@ -333,6 +466,15 @@ pub fn verify_submit_verdict<R: ArbiterRegistry>(
     if escrow.state != EscrowState::Challenged {
         return Err(EscrowVerificationError::InvalidState);
     }
+    // A proper dispute record is required (via DisputeEscrow transaction)
+    if escrow.dispute.is_none() {
+        return Err(EscrowVerificationError::DisputeRecordRequired);
+    }
+    // Arbitration config must be present
+    if escrow.arbitration_config.is_none() {
+        return Err(EscrowVerificationError::ArbitrationNotConfigured);
+    }
+    // Dispute ID must match if already set
     if let Some(dispute_id) = escrow.dispute_id.as_ref() {
         if dispute_id != &payload.dispute_id {
             return Err(EscrowVerificationError::InvalidVerdictRound);
@@ -365,8 +507,19 @@ pub fn verify_submit_verdict<R: ArbiterRegistry>(
         signatures: payload.signatures.clone(),
     };
 
-    verify_verdict_signatures(&artifact, required_threshold, registry)
-        .map_err(map_verdict_error)?;
+    // Extract allowed arbiters from arbitration config (checked above)
+    let allowed_arbiters = escrow
+        .arbitration_config
+        .as_ref()
+        .map(|c| c.arbiters.as_slice())
+        .unwrap_or(&[]);
+    verify_verdict_signatures_with_allowed(
+        &artifact,
+        required_threshold,
+        registry,
+        allowed_arbiters,
+    )
+    .map_err(map_verdict_error)?;
     Ok(())
 }
 
@@ -407,6 +560,7 @@ fn map_verdict_error(err: VerdictVerificationError) -> EscrowVerificationError {
         VerdictVerificationError::ArbiterStakeTooLow { required, found } => {
             EscrowVerificationError::ArbiterStakeTooLow { required, found }
         }
+        VerdictVerificationError::ArbiterNotAssigned => EscrowVerificationError::ArbiterNotAssigned,
         VerdictVerificationError::Registry(message) => EscrowVerificationError::Registry(message),
     }
 }
@@ -549,7 +703,8 @@ mod tests {
 
     #[test]
     fn challenge_requires_window() -> Result<(), Box<dyn std::error::Error>> {
-        let escrow = sample_escrow(EscrowState::PendingRelease)?;
+        let mut escrow = sample_escrow_with_arbitration(EscrowState::PendingRelease, false)?;
+        escrow.pending_release_amount = Some(10);
         let payload = ChallengeEscrowPayload {
             escrow_id: escrow.id.clone(),
             reason: "test".to_string(),
@@ -647,9 +802,19 @@ mod tests {
 
     #[test]
     fn submit_verdict_happy_path() -> Result<(), Box<dyn std::error::Error>> {
-        let escrow = sample_escrow(EscrowState::Challenged)?;
+        let mut escrow = sample_escrow_with_arbitration(EscrowState::Challenged, false)?;
         let keypair = KeyPair::new();
         let arbiter_pubkey = keypair.get_public_key().compress();
+        if let Some(config) = escrow.arbitration_config.as_mut() {
+            config.arbiters = vec![arbiter_pubkey.clone()];
+        }
+        escrow.dispute = Some(DisputeInfo {
+            initiator: escrow.payer.clone(),
+            reason: "dispute".to_string(),
+            evidence_hash: None,
+            disputed_at: 1,
+            deadline: escrow.timeout_at,
+        });
         let message = build_verdict_message(
             1,
             &escrow.id,
@@ -688,10 +853,20 @@ mod tests {
 
     #[test]
     fn submit_verdict_requires_round_zero_on_first() -> Result<(), Box<dyn std::error::Error>> {
-        let mut escrow = sample_escrow(EscrowState::Challenged)?;
+        let mut escrow = sample_escrow_with_arbitration(EscrowState::Challenged, false)?;
         escrow.dispute_round = None;
+        escrow.dispute = Some(DisputeInfo {
+            initiator: escrow.payer.clone(),
+            reason: "dispute".to_string(),
+            evidence_hash: None,
+            disputed_at: 1,
+            deadline: escrow.timeout_at,
+        });
         let keypair = KeyPair::new();
         let arbiter_pubkey = keypair.get_public_key().compress();
+        if let Some(config) = escrow.arbitration_config.as_mut() {
+            config.arbiters = vec![arbiter_pubkey.clone()];
+        }
         let message = build_verdict_message(
             1,
             &escrow.id,
@@ -734,9 +909,19 @@ mod tests {
 
     #[test]
     fn submit_verdict_rejects_inactive_arbiter() -> Result<(), Box<dyn std::error::Error>> {
-        let escrow = sample_escrow(EscrowState::Challenged)?;
+        let mut escrow = sample_escrow_with_arbitration(EscrowState::Challenged, false)?;
         let keypair = KeyPair::new();
         let arbiter_pubkey = keypair.get_public_key().compress();
+        if let Some(config) = escrow.arbitration_config.as_mut() {
+            config.arbiters = vec![arbiter_pubkey.clone()];
+        }
+        escrow.dispute = Some(DisputeInfo {
+            initiator: escrow.payer.clone(),
+            reason: "dispute".to_string(),
+            evidence_hash: None,
+            disputed_at: 1,
+            deadline: escrow.timeout_at,
+        });
         let message = build_verdict_message(
             1,
             &escrow.id,
@@ -777,9 +962,19 @@ mod tests {
 
     #[test]
     fn submit_verdict_rejects_low_stake() -> Result<(), Box<dyn std::error::Error>> {
-        let escrow = sample_escrow(EscrowState::Challenged)?;
+        let mut escrow = sample_escrow_with_arbitration(EscrowState::Challenged, false)?;
         let keypair = KeyPair::new();
         let arbiter_pubkey = keypair.get_public_key().compress();
+        if let Some(config) = escrow.arbitration_config.as_mut() {
+            config.arbiters = vec![arbiter_pubkey.clone()];
+        }
+        escrow.dispute = Some(DisputeInfo {
+            initiator: escrow.payer.clone(),
+            reason: "dispute".to_string(),
+            evidence_hash: None,
+            disputed_at: 1,
+            deadline: escrow.timeout_at,
+        });
         let message = build_verdict_message(
             1,
             &escrow.id,
@@ -825,9 +1020,19 @@ mod tests {
 
     #[test]
     fn submit_verdict_rejects_bad_signature() -> Result<(), Box<dyn std::error::Error>> {
-        let escrow = sample_escrow(EscrowState::Challenged)?;
+        let mut escrow = sample_escrow_with_arbitration(EscrowState::Challenged, false)?;
         let keypair = KeyPair::new();
         let arbiter_pubkey = keypair.get_public_key().compress();
+        if let Some(config) = escrow.arbitration_config.as_mut() {
+            config.arbiters = vec![arbiter_pubkey.clone()];
+        }
+        escrow.dispute = Some(DisputeInfo {
+            initiator: escrow.payer.clone(),
+            reason: "dispute".to_string(),
+            evidence_hash: None,
+            disputed_at: 1,
+            deadline: escrow.timeout_at,
+        });
         let message = build_verdict_message(
             1,
             &escrow.id,
@@ -876,7 +1081,7 @@ mod tests {
             amount: 50,
             completion_proof: None,
         };
-        let err = match verify_release_escrow_with_balance(&payload, &escrow, &escrow.payer, 10) {
+        let err = match verify_release_escrow_with_balance(&payload, &escrow, &escrow.payee, 10) {
             Ok(_) => return Err("expected error".into()),
             Err(err) => err,
         };
@@ -908,9 +1113,19 @@ mod tests {
 
     #[test]
     fn verdict_rejects_insufficient_balance() -> Result<(), Box<dyn std::error::Error>> {
-        let escrow = sample_escrow(EscrowState::Challenged)?;
+        let mut escrow = sample_escrow_with_arbitration(EscrowState::Challenged, false)?;
         let keypair = KeyPair::new();
         let arbiter_pubkey = keypair.get_public_key().compress();
+        if let Some(config) = escrow.arbitration_config.as_mut() {
+            config.arbiters = vec![arbiter_pubkey.clone()];
+        }
+        escrow.dispute = Some(DisputeInfo {
+            initiator: escrow.payer.clone(),
+            reason: "dispute".to_string(),
+            evidence_hash: None,
+            disputed_at: 1,
+            deadline: escrow.timeout_at,
+        });
         let message = build_verdict_message(
             1,
             &escrow.id,

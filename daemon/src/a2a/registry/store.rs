@@ -1,6 +1,6 @@
-use std::{fs, path::Path, sync::Arc};
+use std::{collections::HashSet, fs, path::Path, sync::Arc};
 
-use rocksdb::{IteratorMode, Options, DB};
+use rocksdb::{IteratorMode, Options, WriteBatch, DB};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
@@ -41,10 +41,143 @@ impl A2ARegistryStore {
         Ok(())
     }
 
+    pub fn save_agent_with_indexes(
+        &self,
+        agent: &RegisteredAgent,
+        skill_ids: &[String],
+    ) -> Result<(), RegistryError> {
+        let mut batch = WriteBatch::default();
+        let key = agent_key(&agent.agent_id);
+        let bytes = to_json(agent)?;
+        batch.put(key, bytes);
+
+        let id_hex = agent.agent_id.to_hex();
+        for skill in skill_ids {
+            let key = skill_key(skill);
+            let mut agents = self.load_skill_agents(&key)?;
+            if !agents.iter().any(|id| id == &id_hex) {
+                agents.push(id_hex.clone());
+                agents.sort();
+            }
+            let bytes = to_json(&agents)?;
+            batch.put(key, bytes);
+        }
+
+        if let Some(account) = agent.agent_account.as_ref() {
+            let key = account_key(account);
+            let bytes = to_json(&id_hex)?;
+            batch.put(key, bytes);
+        }
+
+        self.db
+            .write(batch)
+            .map_err(|e| RegistryError::Storage(e.to_string()))?;
+        Ok(())
+    }
+
     pub fn remove_agent(&self, agent_id: &Hash) -> Result<(), RegistryError> {
         let key = agent_key(agent_id);
         self.db
             .delete(key)
+            .map_err(|e| RegistryError::Storage(e.to_string()))?;
+        Ok(())
+    }
+
+    pub fn remove_agent_with_indexes(
+        &self,
+        agent: &RegisteredAgent,
+        skill_ids: &[String],
+    ) -> Result<(), RegistryError> {
+        let mut batch = WriteBatch::default();
+        let key = agent_key(&agent.agent_id);
+        batch.delete(key);
+
+        let id_hex = agent.agent_id.to_hex();
+        for skill in skill_ids {
+            let key = skill_key(skill);
+            let mut agents = self.load_skill_agents(&key)?;
+            let original_len = agents.len();
+            agents.retain(|id| id != &id_hex);
+            if agents.is_empty() {
+                batch.delete(key);
+            } else if agents.len() != original_len {
+                let bytes = to_json(&agents)?;
+                batch.put(key, bytes);
+            }
+        }
+
+        if let Some(account) = agent.agent_account.as_ref() {
+            let key = account_key(account);
+            batch.delete(key);
+        }
+
+        self.db
+            .write(batch)
+            .map_err(|e| RegistryError::Storage(e.to_string()))?;
+        Ok(())
+    }
+
+    pub fn update_agent_with_indexes(
+        &self,
+        existing: &RegisteredAgent,
+        updated: &RegisteredAgent,
+        existing_skills: &[String],
+        updated_skills: &[String],
+    ) -> Result<(), RegistryError> {
+        let mut batch = WriteBatch::default();
+        let key = agent_key(&updated.agent_id);
+        let bytes = to_json(updated)?;
+        batch.put(key, bytes);
+
+        let existing_set: HashSet<String> = existing_skills.iter().cloned().collect();
+        let updated_set: HashSet<String> = updated_skills.iter().cloned().collect();
+        let mut union: HashSet<String> = existing_set.union(&updated_set).cloned().collect();
+
+        let id_hex = updated.agent_id.to_hex();
+        for skill in union.drain() {
+            let key = skill_key(&skill);
+            let mut agents = self.load_skill_agents(&key)?;
+            let original_len = agents.len();
+
+            if existing_set.contains(&skill) && !updated_set.contains(&skill) {
+                agents.retain(|id| id != &id_hex);
+            } else if updated_set.contains(&skill) && !agents.iter().any(|id| id == &id_hex) {
+                agents.push(id_hex.clone());
+                agents.sort();
+            }
+
+            if agents.is_empty() {
+                batch.delete(key);
+            } else if agents.len() != original_len {
+                let bytes = to_json(&agents)?;
+                batch.put(key, bytes);
+            }
+        }
+
+        let existing_account = existing.agent_account.as_ref();
+        let updated_account = updated.agent_account.as_ref();
+        match (existing_account, updated_account) {
+            (Some(old), Some(new)) if old != new => {
+                batch.delete(account_key(old));
+                let bytes = to_json(&id_hex)?;
+                batch.put(account_key(new), bytes);
+            }
+            (Some(account), Some(_)) => {
+                let bytes = to_json(&id_hex)?;
+                batch.put(account_key(account), bytes);
+            }
+            (Some(account), None) => {
+                batch.delete(account_key(account));
+            }
+            (None, Some(account)) => {
+                let bytes = to_json(&id_hex)?;
+                batch.put(account_key(account), bytes);
+            }
+            (None, None) => {}
+        }
+
+        self.db
+            .write(batch)
             .map_err(|e| RegistryError::Storage(e.to_string()))?;
         Ok(())
     }

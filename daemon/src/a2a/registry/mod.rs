@@ -107,6 +107,14 @@ pub enum RegistryError {
     TimestampOverflow,
     #[error("storage error: {0}")]
     Storage(String),
+    #[error("cannot remove TOS identity once set")]
+    CannotRemoveTosIdentity,
+    #[error("cannot add TOS identity to anonymous agent")]
+    CannotAddTosIdentity,
+    #[error("agent account already registered")]
+    AgentAccountAlreadyRegistered,
+    #[error("cannot change agent account once set")]
+    CannotChangeAgentAccount,
 }
 
 pub struct AgentRegistry {
@@ -161,33 +169,61 @@ impl AgentRegistry {
 
         {
             let mut agents = self.agents.write().await;
+
+            // Check for duplicate agent_id
             if agents.contains_key(&agent_id) {
                 return Err(RegistryError::AgentAlreadyRegistered);
             }
+
+            // Enforce 1:1 mapping between agent_account and agent (inside write lock to prevent race)
+            // An account can only have one registered agent at a time
+            if let Some(ref account) = registered.agent_account {
+                let account_exists = agents
+                    .values()
+                    .any(|a| a.agent_account.as_ref() == Some(account));
+                if account_exists {
+                    return Err(RegistryError::AgentAccountAlreadyRegistered);
+                }
+            }
+
+            // Persist BEFORE updating in-memory state to prevent divergence on failure.
+            // This ensures that if persistence fails, the in-memory state is unchanged.
+            persist_agent_with_indexes(&registered)?;
+
+            // Only insert into in-memory state after successful persistence
             agents.insert(agent_id.clone(), registered.clone());
         }
 
+        // Index skills after registration is fully committed
         self.index_skills(agent_id.clone(), &registered.agent_card)
             .await;
 
-        persist_agent_record(&registered)?;
-        persist_index(&self.agents).await?;
-        add_store_indexes(&registered)?;
+        // Persist the full index (this is optional/optimization, not critical for consistency)
+        let _ = persist_index(&self.agents).await;
 
         Ok(registered)
     }
 
     /// Unregister an agent by ID.
     pub async fn unregister(&self, agent_id: &Hash) -> Result<(), RegistryError> {
-        let removed = {
-            let mut agents = self.agents.write().await;
-            agents.remove(agent_id)
-        };
-        let removed = removed.ok_or(RegistryError::AgentNotFound)?;
+        let mut agents = self.agents.write().await;
+        let removed = agents
+            .get(agent_id)
+            .cloned()
+            .ok_or(RegistryError::AgentNotFound)?;
+
+        // Persist removal BEFORE updating in-memory state to prevent divergence on failure
+        remove_agent_with_indexes(&removed)?;
+
+        // Only remove from in-memory state after successful persistence
+        agents.remove(agent_id);
+        drop(agents);
+
+        // Remove skill indexes after successful unregistration
         self.remove_skills(agent_id, &removed.agent_card).await;
-        remove_store_indexes(&removed)?;
-        remove_agent_record(&removed.agent_id)?;
-        persist_index(&self.agents).await?;
+
+        // Persist the full index (optional optimization)
+        let _ = persist_index(&self.agents).await;
         Ok(())
     }
 
@@ -231,6 +267,10 @@ impl AgentRegistry {
     }
 
     /// Update an existing agent's card.
+    ///
+    /// Note: The agent_id is assigned at registration and remains stable.
+    /// The endpoint_url is immutable. TOS identity cannot be removed once set
+    /// (to prevent disabling ownership verification).
     pub async fn update(
         &self,
         agent_id: &Hash,
@@ -243,8 +283,26 @@ impl AgentRegistry {
             .cloned()
             .ok_or(RegistryError::AgentNotFound)?;
 
-        self.remove_skills(agent_id, &existing.agent_card).await;
-        remove_store_indexes(&existing)?;
+        // Prevent removing TOS identity once set (security: prevents disabling ownership checks)
+        if existing.agent_account.is_some() && agent_card.tos_identity.is_none() {
+            return Err(RegistryError::CannotRemoveTosIdentity);
+        }
+
+        // Prevent adding TOS identity to anonymous agents (security: prevents hijacking)
+        // Agents registered without TOS identity must remain anonymous
+        if existing.agent_account.is_none() && agent_card.tos_identity.is_some() {
+            return Err(RegistryError::CannotAddTosIdentity);
+        }
+
+        // Prevent changing agent_account once set (security: prevents squatting on another account)
+        // The agent_account is immutable; to change it, unregister and re-register
+        if let (Some(existing_account), Some(new_identity)) =
+            (&existing.agent_account, &agent_card.tos_identity)
+        {
+            if existing_account != &new_identity.agent_account {
+                return Err(RegistryError::CannotChangeAgentAccount);
+            }
+        }
 
         let updated = RegisteredAgent {
             agent_id: existing.agent_id.clone(),
@@ -265,15 +323,21 @@ impl AgentRegistry {
             agent_card,
         };
 
+        // Persist BEFORE updating in-memory state to prevent divergence on failure.
+        // Update store indexes and record atomically (if either fails, in-memory state remains unchanged).
+        update_agent_with_indexes(&existing, &updated)?;
+
+        // Only update in-memory state after successful persistence
         agents.insert(existing.agent_id.clone(), updated.clone());
         drop(agents);
 
+        // Update skill indexes (best-effort, in-memory only)
+        self.remove_skills(agent_id, &existing.agent_card).await;
         self.index_skills(updated.agent_id.clone(), &updated.agent_card)
             .await;
 
-        persist_agent_record(&updated)?;
-        persist_index(&self.agents).await?;
-        add_store_indexes(&updated)?;
+        // Persist the full index (optional optimization)
+        let _ = persist_index(&self.agents).await;
 
         Ok(updated)
     }
@@ -358,34 +422,51 @@ impl AgentRegistry {
         status: Option<AgentHealthStatus>,
     ) -> Result<i64, RegistryError> {
         let now = current_timestamp_i64()?;
+
+        // Build updated agent record without modifying in-memory state yet
+        let updated = {
+            let agents = self.agents.read().await;
+            let agent = agents.get(agent_id).ok_or(RegistryError::AgentNotFound)?;
+            let mut updated = agent.clone();
+            updated.last_heartbeat = now;
+            if status.is_some() {
+                updated.last_health = status;
+            }
+            if updated.status == AgentStatus::Inactive {
+                updated.status = AgentStatus::Active;
+            }
+            updated
+        };
+
+        // Persist BEFORE updating in-memory state to prevent divergence on failure
+        persist_agent_record(&updated)?;
+
+        // Only update in-memory state after successful persistence
         let mut agents = self.agents.write().await;
-        let agent = agents
-            .get_mut(agent_id)
-            .ok_or(RegistryError::AgentNotFound)?;
-        agent.last_heartbeat = now;
-        if status.is_some() {
-            agent.last_health = status;
-        }
-        if agent.status == AgentStatus::Inactive {
-            agent.status = AgentStatus::Active;
-        }
-        let snapshot = agent.clone();
-        drop(agents);
-        persist_agent_record(&snapshot)?;
+        agents.insert(agent_id.clone(), updated);
+
         Ok(now)
     }
 
     /// Mark an agent as inactive and increment failure count.
     pub async fn mark_inactive(&self, agent_id: &Hash) -> Result<(), RegistryError> {
+        // Build updated agent record without modifying in-memory state yet
+        let updated = {
+            let agents = self.agents.read().await;
+            let agent = agents.get(agent_id).ok_or(RegistryError::AgentNotFound)?;
+            let mut updated = agent.clone();
+            updated.status = AgentStatus::Inactive;
+            updated.health_failures = updated.health_failures.saturating_add(1);
+            updated
+        };
+
+        // Persist BEFORE updating in-memory state to prevent divergence on failure
+        persist_agent_record(&updated)?;
+
+        // Only update in-memory state after successful persistence
         let mut agents = self.agents.write().await;
-        let agent = agents
-            .get_mut(agent_id)
-            .ok_or(RegistryError::AgentNotFound)?;
-        agent.status = AgentStatus::Inactive;
-        agent.health_failures = agent.health_failures.saturating_add(1);
-        let snapshot = agent.clone();
-        drop(agents);
-        persist_agent_record(&snapshot)?;
+        agents.insert(agent_id.clone(), updated);
+
         Ok(())
     }
 
@@ -396,26 +477,44 @@ impl AgentRegistry {
         failure_threshold: u32,
     ) -> Result<usize, RegistryError> {
         let now = get_current_time_in_seconds();
-        let mut updated: Vec<RegisteredAgent> = Vec::new();
-        {
-            let mut agents = self.agents.write().await;
-            for agent in agents.values_mut() {
-                if agent.status != AgentStatus::Active {
-                    continue;
-                }
-                let last = u64::try_from(agent.last_heartbeat).unwrap_or(0);
-                if now.saturating_sub(last) > timeout_secs {
-                    agent.health_failures = agent.health_failures.saturating_add(1);
-                    if agent.health_failures >= failure_threshold {
-                        agent.status = AgentStatus::Inactive;
+
+        // Build list of updated agent records without modifying in-memory state yet
+        let updated: Vec<RegisteredAgent> = {
+            let agents = self.agents.read().await;
+            agents
+                .values()
+                .filter_map(|agent| {
+                    if agent.status != AgentStatus::Active {
+                        return None;
                     }
-                    updated.push(agent.clone());
-                }
-            }
-        }
+                    let last = u64::try_from(agent.last_heartbeat).unwrap_or(0);
+                    if now.saturating_sub(last) > timeout_secs {
+                        let mut updated = agent.clone();
+                        updated.health_failures = updated.health_failures.saturating_add(1);
+                        if updated.health_failures >= failure_threshold {
+                            updated.status = AgentStatus::Inactive;
+                        }
+                        Some(updated)
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        };
+
+        // Persist BEFORE updating in-memory state to prevent divergence on failure
         for agent in &updated {
             persist_agent_record(agent)?;
         }
+
+        // Only update in-memory state after ALL persistence succeeds
+        {
+            let mut agents = self.agents.write().await;
+            for agent in &updated {
+                agents.insert(agent.agent_id.clone(), agent.clone());
+            }
+        }
+
         Ok(updated.len())
     }
 
@@ -448,12 +547,47 @@ impl AgentRegistry {
 }
 
 /// Compute deterministic agent ID from card + endpoint URL.
+/// Uses canonical JSON serialization to ensure consistent IDs across processes.
 pub fn compute_agent_id(card: &AgentCard, endpoint_url: &str) -> Result<Hash, RegistryError> {
-    let card_bytes = serde_json::to_vec(card).map_err(|_| RegistryError::SerializeAgentCard)?;
+    let card_bytes = canonical_serialize_card(card)?;
     let mut material = Vec::with_capacity(card_bytes.len() + endpoint_url.len() + 8);
     material.extend_from_slice(endpoint_url.as_bytes());
     material.extend_from_slice(&card_bytes);
     Ok(hash(&material))
+}
+
+/// Serialize an AgentCard in a canonical (deterministic) format.
+/// This ensures that HashMap fields are serialized with sorted keys.
+fn canonical_serialize_card(card: &AgentCard) -> Result<Vec<u8>, RegistryError> {
+    // Convert to serde_json::Value first
+    let mut value = serde_json::to_value(card).map_err(|_| RegistryError::SerializeAgentCard)?;
+
+    // Recursively sort all object keys to ensure deterministic serialization
+    canonicalize_json_value(&mut value);
+
+    // Serialize to bytes
+    serde_json::to_vec(&value).map_err(|_| RegistryError::SerializeAgentCard)
+}
+
+/// Recursively sort all object keys in a JSON value for deterministic serialization.
+fn canonicalize_json_value(value: &mut Value) {
+    match value {
+        Value::Object(map) => {
+            // Sort the keys by extracting, sorting, and reinserting
+            let mut entries: Vec<_> = std::mem::take(map).into_iter().collect();
+            entries.sort_by(|(a, _), (b, _)| a.cmp(b));
+            for (k, mut v) in entries {
+                canonicalize_json_value(&mut v);
+                map.insert(k, v);
+            }
+        }
+        Value::Array(arr) => {
+            for item in arr {
+                canonicalize_json_value(item);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn supports_input_mode(agent: &RegisteredAgent, input_mode: &str) -> bool {
@@ -716,6 +850,44 @@ fn add_store_indexes(agent: &RegisteredAgent) -> Result<(), RegistryError> {
     Ok(())
 }
 
+fn persist_agent_with_indexes(agent: &RegisteredAgent) -> Result<(), RegistryError> {
+    if let Some(store) = registry_store()? {
+        let skills = extract_skill_ids(&agent.agent_card);
+        store.save_agent_with_indexes(agent, &skills)?;
+        return Ok(());
+    }
+    persist_agent_record(agent)?;
+    add_store_indexes(agent)?;
+    Ok(())
+}
+
+fn remove_agent_with_indexes(agent: &RegisteredAgent) -> Result<(), RegistryError> {
+    if let Some(store) = registry_store()? {
+        let skills = extract_skill_ids(&agent.agent_card);
+        store.remove_agent_with_indexes(agent, &skills)?;
+        return Ok(());
+    }
+    remove_store_indexes(agent)?;
+    remove_agent_record(&agent.agent_id)?;
+    Ok(())
+}
+
+fn update_agent_with_indexes(
+    existing: &RegisteredAgent,
+    updated: &RegisteredAgent,
+) -> Result<(), RegistryError> {
+    if let Some(store) = registry_store()? {
+        let existing_skills = extract_skill_ids(&existing.agent_card);
+        let updated_skills = extract_skill_ids(&updated.agent_card);
+        store.update_agent_with_indexes(existing, updated, &existing_skills, &updated_skills)?;
+        return Ok(());
+    }
+    remove_store_indexes(existing)?;
+    persist_agent_record(updated)?;
+    add_store_indexes(updated)?;
+    Ok(())
+}
+
 fn remove_store_indexes(agent: &RegisteredAgent) -> Result<(), RegistryError> {
     let Some(store) = registry_store()? else {
         return Ok(());
@@ -780,8 +952,7 @@ fn load_registry_snapshot(registry: &Arc<AgentRegistry>) {
 
         if let Ok(Some(_store)) = registry_store() {
             for agent in agents.values() {
-                let _ = persist_agent_record(agent);
-                let _ = add_store_indexes(agent);
+                let _ = persist_agent_with_indexes(agent);
             }
         }
     }

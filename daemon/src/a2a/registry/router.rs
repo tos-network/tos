@@ -162,9 +162,21 @@ impl AgentRouter {
         }
         match strategy {
             RoutingStrategy::FirstMatch => candidates.into_iter().next(),
-            RoutingStrategy::LowestLatency => candidates
-                .into_iter()
-                .max_by(|a, b| a.last_heartbeat.cmp(&b.last_heartbeat)),
+            RoutingStrategy::LowestLatency => {
+                // Prefer agents with lowest reported latency.
+                // If no latency data available, fall back to most recent heartbeat.
+                candidates.into_iter().min_by(|a, b| {
+                    let latency_a = a.last_health.as_ref().map(|h| h.avg_latency_ms);
+                    let latency_b = b.last_health.as_ref().map(|h| h.avg_latency_ms);
+                    match (latency_a, latency_b) {
+                        (Some(la), Some(lb)) => la.cmp(&lb),
+                        (Some(_), None) => std::cmp::Ordering::Less,
+                        (None, Some(_)) => std::cmp::Ordering::Greater,
+                        // Both have no latency data - prefer more recent heartbeat
+                        (None, None) => b.last_heartbeat.cmp(&a.last_heartbeat),
+                    }
+                })
+            }
             RoutingStrategy::HighestReputation => candidates
                 .into_iter()
                 .max_by(|a, b| compare_reputation(a, b)),
@@ -297,9 +309,11 @@ mod tests {
         name: &str,
         skill_ids: &[&str],
         rep: Option<u32>,
+        account_seed: u8,
     ) -> Result<AgentCard, Box<dyn std::error::Error>> {
-        let agent_account = tos_common::crypto::PublicKey::from_bytes(&[1u8; 32])?;
-        let controller = tos_common::crypto::PublicKey::from_bytes(&[2u8; 32])?;
+        let agent_account = tos_common::crypto::PublicKey::from_bytes(&[account_seed; 32])?;
+        let controller =
+            tos_common::crypto::PublicKey::from_bytes(&[account_seed.wrapping_add(1); 32])?;
         Ok(AgentCard {
             protocol_version: "1.0".to_string(),
             name: name.to_string(),
@@ -353,8 +367,8 @@ mod tests {
     #[tokio::test]
     async fn router_selects_highest_reputation() -> Result<(), Box<dyn std::error::Error>> {
         let registry = Arc::new(AgentRegistry::new());
-        let card_a = sample_card("agent-a", &["skill:a"], Some(100))?;
-        let card_b = sample_card("agent-b", &["skill:a"], Some(500))?;
+        let card_a = sample_card("agent-a", &["skill:a"], Some(100), 1)?;
+        let card_b = sample_card("agent-b", &["skill:a"], Some(500), 3)?;
 
         let _ = registry
             .register(card_a, "https://a.test".to_string())
@@ -376,8 +390,8 @@ mod tests {
     #[tokio::test]
     async fn router_round_robin() -> Result<(), Box<dyn std::error::Error>> {
         let registry = Arc::new(AgentRegistry::new());
-        let card_a = sample_card("agent-a", &["skill:a"], None)?;
-        let card_b = sample_card("agent-b", &["skill:a"], None)?;
+        let card_a = sample_card("agent-a", &["skill:a"], None, 5)?;
+        let card_b = sample_card("agent-b", &["skill:a"], None, 7)?;
 
         let _ = registry
             .register(card_a, "https://a.test".to_string())
@@ -403,8 +417,8 @@ mod tests {
     #[tokio::test]
     async fn router_weighted_random_selects_candidate() -> Result<(), Box<dyn std::error::Error>> {
         let registry = Arc::new(AgentRegistry::new());
-        let card_a = sample_card("agent-a", &["skill:a"], Some(0))?;
-        let card_b = sample_card("agent-b", &["skill:a"], Some(1000))?;
+        let card_a = sample_card("agent-a", &["skill:a"], Some(0), 9)?;
+        let card_b = sample_card("agent-b", &["skill:a"], Some(1000), 11)?;
 
         let _ = registry
             .register(card_a, "https://a.test".to_string())
@@ -426,8 +440,8 @@ mod tests {
     #[tokio::test]
     async fn router_intersection_then_fallback_any() -> Result<(), Box<dyn std::error::Error>> {
         let registry = Arc::new(AgentRegistry::new());
-        let card_a = sample_card("agent-a", &["skill:a", "skill:b"], None)?;
-        let card_b = sample_card("agent-b", &["skill:a"], None)?;
+        let card_a = sample_card("agent-a", &["skill:a", "skill:b"], None, 13)?;
+        let card_b = sample_card("agent-b", &["skill:a"], None, 15)?;
 
         let _ = registry
             .register(card_a, "https://a.test".to_string())
