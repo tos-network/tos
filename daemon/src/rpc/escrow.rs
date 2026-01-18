@@ -1,19 +1,28 @@
 use std::sync::Arc;
 
+use actix_web::{
+    error::{ErrorBadRequest, ErrorInternalServerError},
+    web, Error as ActixError, HttpResponse,
+};
 use anyhow::Context as AnyhowContext;
+use serde::Deserialize;
 use serde_json::{json, Value};
 use tos_common::{
     api::daemon::{
         AppealStatusResult, DisputeDetailsResult, EscrowHistoryResult, EscrowListResult,
         GetAppealStatusParams, GetDisputeDetailsParams, GetEscrowHistoryParams, GetEscrowParams,
         GetEscrowsByClientParams, GetEscrowsByProviderParams, GetEscrowsByTaskParams,
+        GetPendingReleasesParams, PendingReleaseEntry, PendingReleasesResult,
     },
     async_handler,
     context::Context,
+    rpc::server::RPCServerHandler,
     rpc::{parse_params, InternalRpcError, RPCHandler},
 };
 
 use crate::core::{blockchain::Blockchain, storage::Storage};
+
+use super::DaemonRpcServer;
 
 const MAX_ESCROWS: usize = 200;
 
@@ -34,6 +43,10 @@ pub fn register_methods<S: Storage>(handler: &mut RPCHandler<Arc<Blockchain<S>>>
     handler.register_method(
         "get_escrow_history",
         async_handler!(get_escrow_history::<S>),
+    );
+    handler.register_method(
+        "get_pending_releases",
+        async_handler!(get_pending_releases::<S>),
     );
     handler.register_method(
         "get_dispute_details",
@@ -146,6 +159,28 @@ async fn get_escrow_history<S: Storage>(
     }))
 }
 
+async fn get_pending_releases<S: Storage>(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    let params: GetPendingReleasesParams = parse_params(body)?;
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let limit = params.limit.unwrap_or(MAX_ESCROWS).min(MAX_ESCROWS);
+    let up_to = params.up_to.unwrap_or_else(|| blockchain.get_topo_height());
+    let storage = blockchain.get_storage().read().await;
+    let entries = storage
+        .list_pending_releases(up_to, limit)
+        .await
+        .context("Failed to list pending releases")?
+        .into_iter()
+        .map(|(release_at, escrow_id)| PendingReleaseEntry {
+            release_at,
+            escrow_id,
+        })
+        .collect::<Vec<_>>();
+    Ok(json!(PendingReleasesResult { entries }))
+}
+
 async fn get_dispute_details<S: Storage>(
     context: &Context,
     body: Value,
@@ -180,4 +215,54 @@ async fn get_appeal_status<S: Storage>(
     Ok(json!(AppealStatusResult {
         appeal: escrow.appeal
     }))
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct PendingReleasesQuery {
+    up_to: Option<u64>,
+    limit: Option<usize>,
+}
+
+pub(crate) async fn get_pending_releases_http<S: Storage>(
+    server: web::Data<DaemonRpcServer<S>>,
+    body: web::Bytes,
+) -> Result<HttpResponse, ActixError> {
+    let params: GetPendingReleasesParams =
+        serde_json::from_slice(&body).map_err(|e| ErrorBadRequest(e.to_string()))?;
+    let blockchain = server.get_rpc_handler().get_data().clone();
+    let limit = params.limit.unwrap_or(MAX_ESCROWS).min(MAX_ESCROWS);
+    let up_to = params.up_to.unwrap_or_else(|| blockchain.get_topo_height());
+    let storage = blockchain.get_storage().read().await;
+    let entries = storage
+        .list_pending_releases(up_to, limit)
+        .await
+        .map_err(|e| ErrorInternalServerError(e.to_string()))?
+        .into_iter()
+        .map(|(release_at, escrow_id)| PendingReleaseEntry {
+            release_at,
+            escrow_id,
+        })
+        .collect::<Vec<_>>();
+    Ok(HttpResponse::Ok().json(PendingReleasesResult { entries }))
+}
+
+pub(crate) async fn get_pending_releases_http_get<S: Storage>(
+    server: web::Data<DaemonRpcServer<S>>,
+    query: web::Query<PendingReleasesQuery>,
+) -> Result<HttpResponse, ActixError> {
+    let blockchain = server.get_rpc_handler().get_data().clone();
+    let limit = query.limit.unwrap_or(MAX_ESCROWS).min(MAX_ESCROWS);
+    let up_to = query.up_to.unwrap_or_else(|| blockchain.get_topo_height());
+    let storage = blockchain.get_storage().read().await;
+    let entries = storage
+        .list_pending_releases(up_to, limit)
+        .await
+        .map_err(|e| ErrorInternalServerError(e.to_string()))?
+        .into_iter()
+        .map(|(release_at, escrow_id)| PendingReleaseEntry {
+            release_at,
+            escrow_id,
+        })
+        .collect::<Vec<_>>();
+    Ok(HttpResponse::Ok().json(PendingReleasesResult { entries }))
 }

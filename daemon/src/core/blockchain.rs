@@ -51,10 +51,10 @@ use tos_common::{
     api::{
         daemon::{
             AddressPaymentEvent, BlockOrderedEvent, BlockOrphanedEvent, BlockType, ContractEvent,
-            ContractTransferEvent, InvokeContractEvent, MempoolTransactionSummary, NewAssetEvent,
-            NewContractEvent, NotifyEvent, ScheduledExecutionExecutedEvent,
-            StableHeightChangedEvent, StableTopoHeightChangedEvent, TransactionExecutedEvent,
-            TransactionResponse,
+            ContractTransferEvent, EscrowAutoReleasedEvent, InvokeContractEvent,
+            MempoolTransactionSummary, NewAssetEvent, NewContractEvent, NotifyEvent,
+            ScheduledExecutionExecutedEvent, StableHeightChangedEvent,
+            StableTopoHeightChangedEvent, TransactionExecutedEvent, TransactionResponse,
         },
         payment::decode_payment_extra_data,
         RPCContractOutput, RPCTransaction,
@@ -4407,7 +4407,24 @@ impl<S: Storage> Blockchain<S> {
                 }
 
                 // Auto-release optimistic escrows once challenge window expires
-                apply_auto_release(&mut chain_state, highest_topo).await?;
+                let auto_releases = apply_auto_release(&mut chain_state, highest_topo).await?;
+                if should_track_events.contains(&NotifyEvent::EscrowAutoReleased) {
+                    for release in auto_releases {
+                        let value = json!(EscrowAutoReleasedEvent {
+                            escrow_id: Cow::Owned(release.escrow_id),
+                            amount: release.amount,
+                            asset: Cow::Owned(release.asset),
+                            payee: Cow::Owned(release.payee),
+                            release_at: release.release_at,
+                            topoheight: highest_topo,
+                            block_hash: Cow::Borrowed(&hash),
+                        });
+                        events
+                            .entry(NotifyEvent::EscrowAutoReleased)
+                            .or_insert_with(Vec::new)
+                            .push(value);
+                    }
+                }
 
                 // apply changes from Chain State
                 let burned_supply = chain_state.get_burned_supply();

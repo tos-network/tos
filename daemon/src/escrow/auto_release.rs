@@ -1,24 +1,36 @@
 use std::borrow::Cow;
 
 use crate::core::{error::BlockchainError, state::ApplicableChainState, storage::Storage};
+use metrics::counter;
+use tos_common::crypto::{Hash, PublicKey};
 use tos_common::escrow::EscrowState;
 use tos_common::transaction::verify::{BlockchainApplyState, BlockchainVerificationState};
 
 pub const DEFAULT_AUTO_RELEASE_BATCH: usize = 256;
 
+#[derive(Clone, Debug)]
+pub struct AutoReleaseRecord {
+    pub release_at: u64,
+    pub escrow_id: Hash,
+    pub amount: u64,
+    pub asset: Hash,
+    pub payee: PublicKey,
+}
+
 pub async fn apply_auto_release<'a, S: Storage>(
     state: &mut ApplicableChainState<'a, S>,
     current_topoheight: u64,
-) -> Result<usize, BlockchainError> {
+) -> Result<Vec<AutoReleaseRecord>, BlockchainError> {
     let pending = state
         .get_mut_storage()
         .list_pending_releases(current_topoheight, DEFAULT_AUTO_RELEASE_BATCH)
         .await?;
     if pending.is_empty() {
-        return Ok(0);
+        return Ok(Vec::new());
     }
 
-    let mut released = 0usize;
+    counter!("tos_escrow_auto_release_pending").increment(pending.len() as u64);
+    let mut released = Vec::new();
 
     for (release_at, escrow_id) in pending {
         let mut escrow = match state.get_escrow(&escrow_id).await? {
@@ -81,7 +93,15 @@ pub async fn apply_auto_release<'a, S: Storage>(
             .remove_pending_release(release_at, &escrow_id)
             .await?;
 
-        released += 1;
+        counter!("tos_escrow_auto_release_total").increment(1);
+        counter!("tos_escrow_auto_release_amount").increment(release_amount);
+        released.push(AutoReleaseRecord {
+            release_at,
+            escrow_id,
+            amount: release_amount,
+            asset: escrow.asset.clone(),
+            payee: escrow.payee.clone(),
+        });
     }
 
     Ok(released)

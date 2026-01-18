@@ -5,7 +5,7 @@ use crate::escrow::{AppealInfo, DisputeInfo, EscrowAccount};
 use crate::{
     account::{Nonce, VersionedBalance, VersionedNonce, VersionedUnoBalance},
     block::{Algorithm, BlockVersion, TopoHeight, EXTRA_NONCE_SIZE},
-    crypto::{Address, Hash},
+    crypto::{Address, Hash, PublicKey},
     difficulty::{CumulativeDifficulty, Difficulty},
     network::Network,
     time::{TimestampMillis, TimestampSeconds},
@@ -1399,6 +1399,9 @@ pub enum NotifyEvent {
     // When a transaction has been included in a valid block & executed on chain
     // it contains TransactionExecutedEvent struct as value
     TransactionExecuted,
+    // When an escrow is auto-released after the challenge window
+    // it contains EscrowAutoReleasedEvent struct as value
+    EscrowAutoReleased,
     // When the contract has been invoked
     // This allows to track all the contract invocations
     InvokeContract {
@@ -1501,6 +1504,18 @@ pub struct TransactionExecutedEvent<'a> {
     pub block_hash: Cow<'a, Hash>,
     pub tx_hash: Cow<'a, Hash>,
     pub topoheight: TopoHeight,
+}
+
+// Value of NotifyEvent::EscrowAutoReleased
+#[derive(Serialize, Deserialize)]
+pub struct EscrowAutoReleasedEvent<'a> {
+    pub escrow_id: Cow<'a, Hash>,
+    pub amount: u64,
+    pub asset: Cow<'a, Hash>,
+    pub payee: Cow<'a, PublicKey>,
+    pub release_at: TopoHeight,
+    pub topoheight: TopoHeight,
+    pub block_hash: Cow<'a, Hash>,
 }
 
 // Value of NotifyEvent::NewAsset
@@ -2382,6 +2397,12 @@ pub struct GetAppealStatusParams<'a> {
 }
 
 #[derive(Serialize, Deserialize)]
+pub struct GetPendingReleasesParams {
+    pub up_to: Option<u64>,
+    pub limit: Option<usize>,
+}
+
+#[derive(Serialize, Deserialize)]
 pub struct EscrowListResult {
     pub escrows: Vec<EscrowAccount>,
 }
@@ -2399,6 +2420,12 @@ pub struct EscrowHistoryEntry {
 }
 
 #[derive(Serialize, Deserialize)]
+pub struct PendingReleaseEntry {
+    pub release_at: u64,
+    pub escrow_id: Hash,
+}
+
+#[derive(Serialize, Deserialize)]
 pub struct DisputeDetailsResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dispute: Option<DisputeInfo>,
@@ -2412,4 +2439,9 @@ pub struct DisputeDetailsResult {
 pub struct AppealStatusResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub appeal: Option<AppealInfo>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct PendingReleasesResult {
+    pub entries: Vec<PendingReleaseEntry>,
 }

@@ -266,6 +266,14 @@ impl<S: Storage> DaemonRpcServer<S> {
                             web::get().to(agent_registry::discover_committee_members_http_get::<S>),
                         )
                         .route(
+                            "/escrows:pending",
+                            web::post().to(escrow::get_pending_releases_http::<S>),
+                        )
+                        .route(
+                            "/escrows:pending",
+                            web::get().to(escrow::get_pending_releases_http_get::<S>),
+                        )
+                        .route(
                             "/agents",
                             web::get().to(agent_registry::list_agents_http::<S>),
                         )
@@ -341,6 +349,14 @@ impl<S: Storage> DaemonRpcServer<S> {
                         .route(
                             "/v1/committees/{id}:members",
                             web::get().to(agent_registry::discover_committee_members_http_get::<S>),
+                        )
+                        .route(
+                            "/v1/escrows:pending",
+                            web::post().to(escrow::get_pending_releases_http::<S>),
+                        )
+                        .route(
+                            "/v1/escrows:pending",
+                            web::get().to(escrow::get_pending_releases_http_get::<S>),
                         )
                         .route(
                             "/v1/agents",
