@@ -665,15 +665,21 @@ fn validate_settlement_anchor_with_config(
 ) -> A2AResult<Option<TosTaskAnchor>> {
     let anchor = parse_settlement_anchor(metadata)?;
     let escrow_hash = parse_escrow_hash(metadata)?;
-    let Some(_escrow_hash) = escrow_hash else {
-        return Ok(anchor);
+
+    // If no anchor data, no validation needed
+    let Some(anchor) = anchor else {
+        return Ok(None);
     };
 
-    let Some(anchor) = anchor else {
+    // If anchor exists but escrowHash is missing, reject
+    // This prevents bypassing validation by omitting escrowHash
+    let Some(_escrow_hash) = escrow_hash else {
         return Err(A2AError::TosEscrowFailed {
-            reason: "missing tosSettlement anchor fields".to_string(),
+            reason: "escrowHash is required when tosSettlement anchor data is present".to_string(),
         });
     };
+
+    // anchor was already unwrapped above
     let Some(escrow) = escrow else {
         return Err(A2AError::TosEscrowFailed {
             reason: "escrow not found".to_string(),

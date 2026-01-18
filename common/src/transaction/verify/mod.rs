@@ -1395,11 +1395,13 @@ impl Transaction {
                     .map_err(VerificationError::State)?
                     .ok_or_else(|| VerificationError::AnyError(anyhow!("escrow not found")))?;
 
+                // Enforce minimum threshold of 1 to prevent zero-signature verdicts
                 let required_threshold = escrow_account
                     .arbitration_config
                     .as_ref()
                     .and_then(|config| config.threshold)
-                    .unwrap_or(1);
+                    .unwrap_or(1)
+                    .max(1);
 
                 let mut arbiters = HashMap::new();
                 for sig in &payload.signatures {
@@ -3165,11 +3167,13 @@ impl Transaction {
                     .map_err(VerificationError::State)?
                     .ok_or_else(|| VerificationError::AnyError(anyhow!("escrow not found")))?;
 
+                // Enforce minimum threshold of 1 to prevent zero-signature verdicts
                 let required_threshold = escrow_account
                     .arbitration_config
                     .as_ref()
                     .and_then(|config| config.threshold)
-                    .unwrap_or(1);
+                    .unwrap_or(1)
+                    .max(1);
 
                 let mut arbiters = HashMap::new();
                 for sig in &payload.signatures {

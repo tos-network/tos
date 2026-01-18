@@ -65,6 +65,11 @@ pub trait ArbiterRegistry {
     fn stake(&self, arbiter: &PublicKey) -> Result<u64, Self::Error>;
     /// Returns the minimum stake required to sign verdicts.
     fn min_stake(&self) -> Result<u64, Self::Error>;
+    /// Returns true if the arbiter is assigned to the given escrow (in allowed_arbiters list).
+    /// Default implementation returns true if allowed_arbiters is empty or arbiter is in the list.
+    fn is_assigned(&self, arbiter: &PublicKey, allowed_arbiters: &[PublicKey]) -> bool {
+        allowed_arbiters.is_empty() || allowed_arbiters.contains(arbiter)
+    }
 }
 
 /// Verdict signature verification errors.
@@ -82,6 +87,8 @@ pub enum VerdictVerificationError {
     ArbiterNotActive,
     #[error("arbiter stake too low: required {required}, found {found}")]
     ArbiterStakeTooLow { required: u64, found: u64 },
+    #[error("arbiter not assigned to this escrow")]
+    ArbiterNotAssigned,
     #[error("registry error: {0}")]
     Registry(String),
 }
@@ -120,10 +127,32 @@ pub fn build_verdict_message(
 }
 
 /// Verify arbiter signatures against a verdict artifact.
+///
+/// This function checks:
+/// 1. Verdict amounts are valid
+/// 2. Outcome matches derived outcome from amounts
+/// 3. Each signing arbiter is assigned to this escrow (if allowed_arbiters is non-empty)
+/// 4. Each signing arbiter is active and has sufficient stake
+/// 5. Signatures are cryptographically valid
+/// 6. Threshold number of valid signatures is met
 pub fn verify_verdict_signatures<R: ArbiterRegistry>(
     artifact: &VerdictArtifact,
     required_threshold: u8,
     registry: &R,
+) -> Result<(), VerdictVerificationError> {
+    // Call the extended version with empty allowed_arbiters for backwards compatibility
+    verify_verdict_signatures_with_allowed(artifact, required_threshold, registry, &[])
+}
+
+/// Verify arbiter signatures against a verdict artifact with specific allowed arbiters.
+///
+/// If allowed_arbiters is non-empty, only arbiters in that list can sign the verdict.
+/// This prevents unauthorized arbiters from resolving escrows they weren't assigned to.
+pub fn verify_verdict_signatures_with_allowed<R: ArbiterRegistry>(
+    artifact: &VerdictArtifact,
+    required_threshold: u8,
+    registry: &R,
+    allowed_arbiters: &[PublicKey],
 ) -> Result<(), VerdictVerificationError> {
     let total = artifact
         .payer_amount
@@ -149,6 +178,10 @@ pub fn verify_verdict_signatures<R: ArbiterRegistry>(
     for sig in &artifact.signatures {
         if !seen.insert(sig.arbiter_pubkey.clone()) {
             continue;
+        }
+        // Check if arbiter is assigned to this escrow
+        if !registry.is_assigned(&sig.arbiter_pubkey, allowed_arbiters) {
+            return Err(VerdictVerificationError::ArbiterNotAssigned);
         }
         let is_active = registry
             .is_active(&sig.arbiter_pubkey)

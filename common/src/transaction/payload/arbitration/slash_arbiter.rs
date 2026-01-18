@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    crypto::PublicKey,
     crypto::Hash,
+    crypto::PublicKey,
     kyc::CommitteeApproval,
     serializer::{Reader, ReaderError, Serializer, Writer},
 };
