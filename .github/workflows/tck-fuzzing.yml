@@ -38,6 +38,9 @@ jobs:
       - name: Setup Rust nightly
         uses: dtolnay/rust-toolchain@nightly
 
+      - name: Install protobuf compiler
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
       - name: Install cargo-fuzz
         run: cargo install cargo-fuzz
 
@@ -81,6 +84,9 @@ jobs:
       - name: Setup Rust nightly
         uses: dtolnay/rust-toolchain@nightly
 
+      - name: Install protobuf compiler
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
       - name: Install cargo-fuzz
         run: cargo install cargo-fuzz
 
@@ -121,6 +127,9 @@ jobs:
       - name: Setup Rust nightly
         uses: dtolnay/rust-toolchain@nightly
 
+      - name: Install protobuf compiler
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
       - name: Install cargo-fuzz
         run: cargo install cargo-fuzz
 
@@ -160,6 +169,9 @@ jobs:
 
       - name: Setup Rust nightly
         uses: dtolnay/rust-toolchain@nightly
+
+      - name: Install protobuf compiler
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
 
       - name: Install cargo-fuzz
         run: cargo install cargo-fuzz

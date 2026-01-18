@@ -40,6 +40,9 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-tck-
 
+      - name: Install protobuf compiler
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
       - name: Run conformance tests
         run: |
           echo "=========================================="
@@ -88,6 +91,9 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-tck-
 
+      - name: Install protobuf compiler
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
       - name: Run TCK unit tests
         run: |
           echo "=========================================="
@@ -118,6 +124,9 @@ jobs:
 
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@nightly
+
+      - name: Install protobuf compiler
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
 
       - name: Install Kani
         run: |
@@ -168,6 +177,9 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-tck-
 
+      - name: Install protobuf compiler
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
       - name: Run property-based tests
         run: |
           echo "=========================================="
@@ -203,6 +215,9 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-tck-
 
+      - name: Install protobuf compiler
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
       - name: Run clippy on TCK
         run: |
           echo "=========================================="
@@ -224,6 +239,9 @@ jobs:
 
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Install protobuf compiler
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
 
       - name: Install cargo-tarpaulin
         run: |
