@@ -3856,6 +3856,21 @@ async fn transaction(
                 manager.message("Type: UpdateArbiter".to_string());
                 manager.message(format!("  Deactivate: {}", payload.is_deactivate()));
             }
+            TransactionType::SlashArbiter(payload) => {
+                manager.message("Type: SlashArbiter".to_string());
+                manager.message(format!("  Arbiter: {:?}", payload.get_arbiter_pubkey()));
+                manager.message(format!("  Amount: {}", payload.get_amount()));
+            }
+            TransactionType::RequestArbiterExit(_) => {
+                manager.message("Type: RequestArbiterExit".to_string());
+            }
+            TransactionType::WithdrawArbiterStake(payload) => {
+                manager.message("Type: WithdrawArbiterStake".to_string());
+                manager.message(format!("  Amount: {}", payload.amount));
+            }
+            TransactionType::CancelArbiterExit(_) => {
+                manager.message("Type: CancelArbiterExit".to_string());
+            }
         }
     }
 

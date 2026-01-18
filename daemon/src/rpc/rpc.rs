@@ -733,6 +733,7 @@ pub fn register_methods<S: Storage>(
     );
 
     crate::rpc::escrow::register_methods(handler);
+    crate::rpc::arbitration::register_methods(handler);
 
     // Useful methods
     handler.register_method("validate_address", async_handler!(validate_address::<S>));
@@ -2508,7 +2509,12 @@ async fn get_account_history<S: Storage>(
                 | TransactionType::SubmitVerdict(_) => {
                     // Escrow transactions are not included in account history yet
                 }
-                TransactionType::RegisterArbiter(_) | TransactionType::UpdateArbiter(_) => {
+                TransactionType::RegisterArbiter(_)
+                | TransactionType::UpdateArbiter(_)
+                | TransactionType::SlashArbiter(_)
+                | TransactionType::RequestArbiterExit(_)
+                | TransactionType::WithdrawArbiterStake(_)
+                | TransactionType::CancelArbiterExit(_) => {
                     // Arbiter registry updates are not included in account history yet
                 }
             }

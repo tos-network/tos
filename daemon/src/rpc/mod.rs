@@ -1,5 +1,6 @@
 pub mod a2a;
 pub mod agent_registry;
+pub mod arbitration;
 pub mod callback;
 pub mod escrow;
 pub mod getwork;

@@ -22,7 +22,7 @@ pub struct UpdateArbiterPayload {
     add_stake: Option<u64>,
     /// Optional status update (self-suspension).
     status: Option<ArbiterStatus>,
-    /// Deactivate and withdraw stake.
+    /// Request exit (starts cooldown for withdrawal).
     deactivate: bool,
 }
 

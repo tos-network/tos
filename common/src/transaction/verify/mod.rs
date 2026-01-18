@@ -230,7 +230,11 @@ impl Transaction {
                     | TransactionType::AppealEscrow(_)
                     | TransactionType::SubmitVerdict(_)
                     | TransactionType::RegisterArbiter(_)
-                    | TransactionType::UpdateArbiter(_) => true,
+                    | TransactionType::UpdateArbiter(_)
+                    | TransactionType::SlashArbiter(_)
+                    | TransactionType::RequestArbiterExit(_)
+                    | TransactionType::WithdrawArbiterStake(_)
+                    | TransactionType::CancelArbiterExit(_) => true,
                 }
             }
         }
@@ -466,6 +470,10 @@ impl Transaction {
                     }
                 }
             }
+            TransactionType::RequestArbiterExit(_)
+            | TransactionType::WithdrawArbiterStake(_)
+            | TransactionType::CancelArbiterExit(_)
+            | TransactionType::SlashArbiter(_) => {}
             TransactionType::MultiSig(_)
             | TransactionType::BindReferrer(_)
             | TransactionType::BatchReferralReward(_)
@@ -1439,6 +1447,15 @@ impl Transaction {
                     .map_err(VerificationError::State)?
                     .ok_or(VerificationError::ArbiterNotFound)?;
 
+                if payload.is_deactivate() {
+                    if existing.status != crate::arbitration::ArbiterStatus::Active {
+                        return Err(VerificationError::ArbiterInvalidStatus);
+                    }
+                    if existing.stake_amount == 0 {
+                        return Err(VerificationError::ArbiterNoStakeToWithdraw);
+                    }
+                }
+
                 let min_value = payload
                     .get_min_escrow_value()
                     .unwrap_or(existing.min_escrow_value);
@@ -1449,6 +1466,86 @@ impl Transaction {
                     return Err(VerificationError::ArbiterEscrowRangeInvalid {
                         min: min_value,
                         max: max_value,
+                    });
+                }
+            }
+            TransactionType::SlashArbiter(payload) => {
+                arbitration::verify_slash_arbiter(payload)?;
+                if state
+                    .get_arbiter(payload.get_arbiter_pubkey())
+                    .await
+                    .map_err(VerificationError::State)?
+                    .is_none()
+                {
+                    return Err(VerificationError::ArbiterNotFound);
+                }
+            }
+            TransactionType::RequestArbiterExit(_) => {
+                let arbiter = state
+                    .get_arbiter(&self.source)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or(VerificationError::ArbiterNotFound)?;
+                if arbiter.status != crate::arbitration::ArbiterStatus::Active {
+                    return Err(VerificationError::ArbiterInvalidStatus);
+                }
+                if arbiter.stake_amount == 0 {
+                    return Err(VerificationError::ArbiterNoStakeToWithdraw);
+                }
+            }
+            TransactionType::WithdrawArbiterStake(payload) => {
+                let arbiter = state
+                    .get_arbiter(&self.source)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or(VerificationError::ArbiterNotFound)?;
+                let current_topoheight = state.get_verification_topoheight();
+                let available = match arbiter.can_withdraw(current_topoheight) {
+                    Ok(amount) => amount,
+                    Err(err) => {
+                        return Err(match err {
+                            crate::arbitration::ArbiterWithdrawError::NotActive
+                            | crate::arbitration::ArbiterWithdrawError::NotInExitProcess => {
+                                VerificationError::ArbiterNotInExitProcess
+                            }
+                            crate::arbitration::ArbiterWithdrawError::NoStakeToWithdraw => {
+                                VerificationError::ArbiterNoStakeToWithdraw
+                            }
+                            crate::arbitration::ArbiterWithdrawError::CooldownNotComplete {
+                                current,
+                                required,
+                            } => {
+                                VerificationError::ArbiterCooldownNotComplete { current, required }
+                            }
+                            crate::arbitration::ArbiterWithdrawError::HasActiveCases { count } => {
+                                VerificationError::ArbiterHasActiveCases { count }
+                            }
+                            crate::arbitration::ArbiterWithdrawError::ArbiterAlreadyRemoved => {
+                                VerificationError::ArbiterAlreadyRemoved
+                            }
+                        });
+                    }
+                };
+                if payload.amount > 0 && payload.amount > available {
+                    return Err(VerificationError::ArbiterStakeTooLow {
+                        required: payload.amount,
+                        found: available,
+                    });
+                }
+            }
+            TransactionType::CancelArbiterExit(_) => {
+                let arbiter = state
+                    .get_arbiter(&self.source)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or(VerificationError::ArbiterNotFound)?;
+                if arbiter.status != crate::arbitration::ArbiterStatus::Exiting {
+                    return Err(VerificationError::ArbiterNotInExitProcess);
+                }
+                if arbiter.stake_amount < crate::config::MIN_ARBITER_STAKE {
+                    return Err(VerificationError::ArbiterStakeTooLow {
+                        required: crate::config::MIN_ARBITER_STAKE,
+                        found: arbiter.stake_amount,
                     });
                 }
             }
@@ -1646,6 +1743,10 @@ impl Transaction {
                     }
                 }
             }
+            TransactionType::RequestArbiterExit(_)
+            | TransactionType::WithdrawArbiterStake(_)
+            | TransactionType::CancelArbiterExit(_)
+            | TransactionType::SlashArbiter(_) => {}
             TransactionType::ReleaseEscrow(_)
             | TransactionType::RefundEscrow(_)
             | TransactionType::SubmitVerdict(_) => {
@@ -3103,6 +3204,12 @@ impl Transaction {
             TransactionType::UpdateArbiter(payload) => {
                 arbitration::verify_update_arbiter(payload)?;
             }
+            TransactionType::SlashArbiter(payload) => {
+                arbitration::verify_slash_arbiter(payload)?;
+            }
+            TransactionType::RequestArbiterExit(_) => {}
+            TransactionType::WithdrawArbiterStake(_) => {}
+            TransactionType::CancelArbiterExit(_) => {}
         };
 
         // 0.a Verify chain_id for T1+ transactions (cross-network replay protection)
@@ -3354,7 +3461,12 @@ impl Transaction {
             | TransactionType::SubmitVerdict(_) => {
                 // Escrow transactions: verification handled in escrow module
             }
-            TransactionType::RegisterArbiter(_) | TransactionType::UpdateArbiter(_) => {
+            TransactionType::RegisterArbiter(_)
+            | TransactionType::UpdateArbiter(_)
+            | TransactionType::SlashArbiter(_)
+            | TransactionType::RequestArbiterExit(_)
+            | TransactionType::WithdrawArbiterStake(_)
+            | TransactionType::CancelArbiterExit(_) => {
                 // Arbiter registry txs handled in arbitration module
             }
         }
@@ -3565,6 +3677,10 @@ impl Transaction {
                     }
                 }
             }
+            TransactionType::RequestArbiterExit(_)
+            | TransactionType::WithdrawArbiterStake(_)
+            | TransactionType::CancelArbiterExit(_)
+            | TransactionType::SlashArbiter(_) => {}
             TransactionType::ReleaseEscrow(_)
             | TransactionType::RefundEscrow(_)
             | TransactionType::SubmitVerdict(_) => {
@@ -4050,6 +4166,10 @@ impl Transaction {
                     }
                 }
             }
+            TransactionType::RequestArbiterExit(_)
+            | TransactionType::WithdrawArbiterStake(_)
+            | TransactionType::CancelArbiterExit(_)
+            | TransactionType::SlashArbiter(_) => {}
             TransactionType::ReleaseEscrow(_)
             | TransactionType::RefundEscrow(_)
             | TransactionType::SubmitVerdict(_) => {
@@ -4737,6 +4857,11 @@ impl Transaction {
                     cases_overturned: 0,
                     registered_at: current_height,
                     last_active_at: current_height,
+                    pending_withdrawal: 0,
+                    deactivated_at: None,
+                    active_cases: 0,
+                    total_slashed: 0,
+                    slash_count: 0,
                 };
                 state
                     .set_arbiter(&arbiter)
@@ -4751,20 +4876,13 @@ impl Transaction {
                     .ok_or(VerificationError::ArbiterNotFound)?;
 
                 if payload.is_deactivate() {
-                    if arbiter.stake_amount > 0 {
-                        let balance = state
-                            .get_receiver_balance(
-                                Cow::Borrowed(&self.source),
-                                Cow::Borrowed(&TOS_ASSET),
-                            )
-                            .await
-                            .map_err(VerificationError::State)?;
-                        *balance = balance
-                            .checked_add(arbiter.stake_amount)
-                            .ok_or(VerificationError::Overflow)?;
-                    }
+                    let current_height = state.get_verification_topoheight();
+                    arbiter.status = crate::arbitration::ArbiterStatus::Exiting;
+                    arbiter.deactivated_at = Some(current_height);
+                    arbiter.pending_withdrawal = arbiter.stake_amount;
+                    arbiter.last_active_at = current_height;
                     state
-                        .remove_arbiter(&self.source)
+                        .set_arbiter(&arbiter)
                         .await
                         .map_err(VerificationError::State)?;
                     return Ok(());
@@ -4798,6 +4916,115 @@ impl Transaction {
                 }
                 arbiter.last_active_at = state.get_verification_topoheight();
 
+                state
+                    .set_arbiter(&arbiter)
+                    .await
+                    .map_err(VerificationError::State)?;
+            }
+            TransactionType::SlashArbiter(payload) => {
+                let committee = state
+                    .get_committee(payload.get_committee_id())
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| {
+                        VerificationError::AnyError(anyhow::anyhow!(
+                            "Committee not found: {}",
+                            payload.get_committee_id()
+                        ))
+                    })?;
+
+                let current_time = state.get_verification_timestamp();
+                let network = state.get_network();
+                crate::kyc::verify_slash_arbiter_approvals(
+                    &network,
+                    &committee,
+                    payload.get_approvals(),
+                    payload.get_arbiter_pubkey(),
+                    payload.get_amount(),
+                    payload.get_reason_hash(),
+                    current_time,
+                )
+                .map_err(|e| VerificationError::AnyError(anyhow::anyhow!("{}", e)))?;
+
+                let mut arbiter = state
+                    .get_arbiter(payload.get_arbiter_pubkey())
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or(VerificationError::ArbiterNotFound)?;
+
+                arbiter
+                    .apply_slash(payload.get_amount())
+                    .map_err(|e| VerificationError::AnyError(anyhow::anyhow!("{e:?}")))?;
+
+                arbiter.last_active_at = state.get_verification_topoheight();
+
+                state
+                    .set_arbiter(&arbiter)
+                    .await
+                    .map_err(VerificationError::State)?;
+            }
+            TransactionType::RequestArbiterExit(_) => {
+                let mut arbiter = state
+                    .get_arbiter(&self.source)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or(VerificationError::ArbiterNotFound)?;
+                let current_height = state.get_verification_topoheight();
+                arbiter.status = crate::arbitration::ArbiterStatus::Exiting;
+                arbiter.deactivated_at = Some(current_height);
+                arbiter.pending_withdrawal = arbiter.stake_amount;
+                arbiter.last_active_at = current_height;
+                state
+                    .set_arbiter(&arbiter)
+                    .await
+                    .map_err(VerificationError::State)?;
+            }
+            TransactionType::WithdrawArbiterStake(payload) => {
+                let mut arbiter = state
+                    .get_arbiter(&self.source)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or(VerificationError::ArbiterNotFound)?;
+                let withdraw_amount = if payload.amount == 0 {
+                    arbiter.stake_amount
+                } else {
+                    payload.amount
+                };
+                arbiter.stake_amount = arbiter
+                    .stake_amount
+                    .checked_sub(withdraw_amount)
+                    .ok_or(VerificationError::Overflow)?;
+                arbiter.pending_withdrawal =
+                    arbiter.pending_withdrawal.saturating_sub(withdraw_amount);
+                if arbiter.stake_amount == 0 {
+                    arbiter.status = crate::arbitration::ArbiterStatus::Removed;
+                    arbiter.deactivated_at = None;
+                    arbiter.pending_withdrawal = 0;
+                }
+                arbiter.last_active_at = state.get_verification_topoheight();
+                state
+                    .set_arbiter(&arbiter)
+                    .await
+                    .map_err(VerificationError::State)?;
+                let balance = state
+                    .get_receiver_balance(Cow::Borrowed(&self.source), Cow::Borrowed(&TOS_ASSET))
+                    .await
+                    .map_err(VerificationError::State)?;
+                *balance = balance
+                    .checked_add(withdraw_amount)
+                    .ok_or(VerificationError::Overflow)?;
+            }
+            TransactionType::CancelArbiterExit(_) => {
+                let mut arbiter = state
+                    .get_arbiter(&self.source)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or(VerificationError::ArbiterNotFound)?;
+                let current_height = state.get_verification_topoheight();
+                arbiter.status = crate::arbitration::ArbiterStatus::Active;
+                arbiter.deactivated_at = None;
+                arbiter.pending_withdrawal = 0;
+                arbiter.last_active_at = current_height;
                 state
                     .set_arbiter(&arbiter)
                     .await
@@ -6435,6 +6662,10 @@ impl Transaction {
                     }
                 }
             }
+            TransactionType::RequestArbiterExit(_)
+            | TransactionType::WithdrawArbiterStake(_)
+            | TransactionType::CancelArbiterExit(_)
+            | TransactionType::SlashArbiter(_) => {}
         };
 
         // Add fee to TOS spending (unless using energy fee)

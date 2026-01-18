@@ -1308,6 +1308,18 @@ fn is_valid_fee_type_combination(tx_type: &TransactionType, fee_type: &FeeType) 
         (TransactionType::UpdateArbiter(_), FeeType::TOS) => true,
         (TransactionType::UpdateArbiter(_), FeeType::Energy) => false,
         (TransactionType::UpdateArbiter(_), FeeType::UNO) => false,
+        (TransactionType::SlashArbiter(_), FeeType::TOS) => true,
+        (TransactionType::SlashArbiter(_), FeeType::Energy) => false,
+        (TransactionType::SlashArbiter(_), FeeType::UNO) => false,
+        (TransactionType::RequestArbiterExit(_), FeeType::TOS) => true,
+        (TransactionType::RequestArbiterExit(_), FeeType::Energy) => false,
+        (TransactionType::RequestArbiterExit(_), FeeType::UNO) => false,
+        (TransactionType::WithdrawArbiterStake(_), FeeType::TOS) => true,
+        (TransactionType::WithdrawArbiterStake(_), FeeType::Energy) => false,
+        (TransactionType::WithdrawArbiterStake(_), FeeType::UNO) => false,
+        (TransactionType::CancelArbiterExit(_), FeeType::TOS) => true,
+        (TransactionType::CancelArbiterExit(_), FeeType::Energy) => false,
+        (TransactionType::CancelArbiterExit(_), FeeType::UNO) => false,
     }
 }
 

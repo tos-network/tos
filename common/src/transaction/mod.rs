@@ -97,6 +97,14 @@ pub enum TransactionType {
     RegisterArbiter(RegisterArbiterPayload),
     /// Arbitration: update arbiter
     UpdateArbiter(UpdateArbiterPayload),
+    /// Arbitration: slash arbiter stake
+    SlashArbiter(SlashArbiterPayload),
+    /// Arbitration: request arbiter exit
+    RequestArbiterExit(RequestArbiterExitPayload),
+    /// Arbitration: withdraw arbiter stake
+    WithdrawArbiterStake(WithdrawArbiterStakePayload),
+    /// Arbitration: cancel arbiter exit
+    CancelArbiterExit(CancelArbiterExitPayload),
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -616,6 +624,22 @@ impl Serializer for TransactionType {
                 writer.write_u8(34);
                 payload.write(writer);
             }
+            TransactionType::SlashArbiter(payload) => {
+                writer.write_u8(44);
+                payload.write(writer);
+            }
+            TransactionType::RequestArbiterExit(payload) => {
+                writer.write_u8(45);
+                payload.write(writer);
+            }
+            TransactionType::WithdrawArbiterStake(payload) => {
+                writer.write_u8(46);
+                payload.write(writer);
+            }
+            TransactionType::CancelArbiterExit(payload) => {
+                writer.write_u8(47);
+                payload.write(writer);
+            }
             TransactionType::UnoTransfers(transfers) => {
                 writer.write_u8(18);
                 let len: u16 = transfers.len() as u16;
@@ -696,6 +720,10 @@ impl Serializer for TransactionType {
             31 => TransactionType::AppealEscrow(AppealEscrowPayload::read(reader)?),
             33 => TransactionType::RegisterArbiter(RegisterArbiterPayload::read(reader)?),
             34 => TransactionType::UpdateArbiter(UpdateArbiterPayload::read(reader)?),
+            44 => TransactionType::SlashArbiter(SlashArbiterPayload::read(reader)?),
+            45 => TransactionType::RequestArbiterExit(RequestArbiterExitPayload::read(reader)?),
+            46 => TransactionType::WithdrawArbiterStake(WithdrawArbiterStakePayload::read(reader)?),
+            47 => TransactionType::CancelArbiterExit(CancelArbiterExitPayload::read(reader)?),
             18 => {
                 let txs_count = reader.read_u16()?;
                 if txs_count == 0 || txs_count as usize > MAX_TRANSFER_COUNT {
@@ -776,6 +804,10 @@ impl Serializer for TransactionType {
             TransactionType::AppealEscrow(payload) => payload.size(),
             TransactionType::RegisterArbiter(payload) => payload.size(),
             TransactionType::UpdateArbiter(payload) => payload.size(),
+            TransactionType::SlashArbiter(payload) => payload.size(),
+            TransactionType::RequestArbiterExit(payload) => payload.size(),
+            TransactionType::WithdrawArbiterStake(payload) => payload.size(),
+            TransactionType::CancelArbiterExit(payload) => payload.size(),
             TransactionType::UnoTransfers(txs) => {
                 // 2 bytes for count of transfers (u16)
                 let mut size = 2;

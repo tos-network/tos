@@ -148,4 +148,14 @@ pub enum VerificationError<T> {
     ArbiterInvalidStatus,
     #[error("Arbiter deactivation cannot add stake")]
     ArbiterDeactivateWithStake,
+    #[error("Arbiter has no stake to withdraw")]
+    ArbiterNoStakeToWithdraw,
+    #[error("Arbiter not in exit process")]
+    ArbiterNotInExitProcess,
+    #[error("Arbiter cooldown not complete: current {current}, required {required}")]
+    ArbiterCooldownNotComplete { current: u64, required: u64 },
+    #[error("Arbiter has active cases: {count}")]
+    ArbiterHasActiveCases { count: u64 },
+    #[error("Arbiter already removed")]
+    ArbiterAlreadyRemoved,
 }

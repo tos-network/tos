@@ -3,7 +3,7 @@
 use crate::{
     arbitration::ArbiterStatus,
     config::MIN_ARBITER_STAKE,
-    transaction::payload::{RegisterArbiterPayload, UpdateArbiterPayload},
+    transaction::payload::{RegisterArbiterPayload, SlashArbiterPayload, UpdateArbiterPayload},
 };
 
 use super::VerificationError;
@@ -96,6 +96,29 @@ pub fn verify_update_arbiter<E>(
                 return Err(VerificationError::ArbiterDeactivateWithStake);
             }
         }
+    }
+
+    Ok(())
+}
+
+/// Verify SlashArbiter payload.
+pub fn verify_slash_arbiter<E>(payload: &SlashArbiterPayload) -> Result<(), VerificationError<E>> {
+    if payload.get_amount() == 0 {
+        return Err(VerificationError::AnyError(anyhow::anyhow!(
+            "Slash amount must be greater than 0"
+        )));
+    }
+
+    if payload.get_approvals().is_empty() {
+        return Err(VerificationError::AnyError(anyhow::anyhow!(
+            "SlashArbiter requires at least one approval"
+        )));
+    }
+
+    if payload.get_reason_hash() == &crate::crypto::Hash::zero() {
+        return Err(VerificationError::AnyError(anyhow::anyhow!(
+            "SlashArbiter reason hash cannot be empty"
+        )));
     }
 
     Ok(())

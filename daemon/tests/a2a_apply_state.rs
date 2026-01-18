@@ -221,6 +221,7 @@ pub struct TestApplyState {
     arbiters: HashMap<PublicKey, ArbiterAccount>,
     escrow_history: HashMap<Hash, Vec<(u64, Hash)>>,
     pending_releases: HashSet<(u64, Hash)>,
+    committees: HashMap<Hash, tos_common::kyc::SecurityCommittee>,
     env: Environment,
     block: Block,
     block_hash: Hash,
@@ -243,6 +244,7 @@ impl TestApplyState {
             arbiters: HashMap::new(),
             escrow_history: HashMap::new(),
             pending_releases: HashSet::new(),
+            committees: HashMap::new(),
             env: Environment::new(),
             block,
             block_hash,
@@ -261,6 +263,16 @@ impl TestApplyState {
             .or_default()
             .insert(tos_common::config::TOS_ASSET, balance);
         self.nonces.insert(key, nonce);
+    }
+
+    #[allow(dead_code)]
+    pub fn set_topoheight(&mut self, topoheight: u64) {
+        self.topoheight = topoheight;
+    }
+
+    #[allow(dead_code)]
+    pub fn insert_committee(&mut self, committee: tos_common::kyc::SecurityCommittee) {
+        self.committees.insert(committee.id.clone(), committee);
     }
 
     #[allow(dead_code)]
@@ -629,9 +641,9 @@ impl<'a> BlockchainApplyState<'a, DummyContractProvider, TestError> for TestAppl
 
     async fn get_committee(
         &self,
-        _committee_id: &'a Hash,
+        committee_id: &'a Hash,
     ) -> Result<Option<tos_common::kyc::SecurityCommittee>, TestError> {
-        Ok(None)
+        Ok(self.committees.get(committee_id).cloned())
     }
 
     async fn get_verifying_committee(

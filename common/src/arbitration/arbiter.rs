@@ -13,6 +13,8 @@ pub enum ArbiterStatus {
     Active,
     /// Arbiter is temporarily suspended.
     Suspended,
+    /// Arbiter is exiting and in cooldown before withdrawal.
+    Exiting,
     /// Arbiter has been removed and is no longer eligible.
     Removed,
 }
@@ -22,7 +24,8 @@ impl Serializer for ArbiterStatus {
         let value = match self {
             ArbiterStatus::Active => 0u8,
             ArbiterStatus::Suspended => 1u8,
-            ArbiterStatus::Removed => 2u8,
+            ArbiterStatus::Exiting => 2u8,
+            ArbiterStatus::Removed => 3u8,
         };
         value.write(writer);
     }
@@ -32,7 +35,8 @@ impl Serializer for ArbiterStatus {
         match value {
             0 => Ok(ArbiterStatus::Active),
             1 => Ok(ArbiterStatus::Suspended),
-            2 => Ok(ArbiterStatus::Removed),
+            2 => Ok(ArbiterStatus::Exiting),
+            3 => Ok(ArbiterStatus::Removed),
             _ => Err(ReaderError::InvalidValue),
         }
     }
@@ -197,6 +201,16 @@ pub struct ArbiterAccount {
     pub registered_at: u64,
     /// Block height when last active.
     pub last_active_at: u64,
+    /// Amount pending withdrawal (after cooldown).
+    pub pending_withdrawal: u64,
+    /// Topoheight when deactivation was requested.
+    pub deactivated_at: Option<u64>,
+    /// Number of active cases currently assigned.
+    pub active_cases: u64,
+    /// Total slashed amount (cumulative).
+    pub total_slashed: u64,
+    /// Number of slashes applied.
+    pub slash_count: u32,
 }
 
 impl Serializer for ArbiterAccount {
@@ -214,6 +228,11 @@ impl Serializer for ArbiterAccount {
         self.cases_overturned.write(writer);
         self.registered_at.write(writer);
         self.last_active_at.write(writer);
+        self.pending_withdrawal.write(writer);
+        self.deactivated_at.write(writer);
+        self.active_cases.write(writer);
+        self.total_slashed.write(writer);
+        self.slash_count.write(writer);
     }
 
     fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
@@ -231,6 +250,11 @@ impl Serializer for ArbiterAccount {
             cases_overturned: u64::read(reader)?,
             registered_at: u64::read(reader)?,
             last_active_at: u64::read(reader)?,
+            pending_withdrawal: u64::read(reader)?,
+            deactivated_at: Option::read(reader)?,
+            active_cases: u64::read(reader)?,
+            total_slashed: u64::read(reader)?,
+            slash_count: u32::read(reader)?,
         })
     }
 
@@ -248,6 +272,88 @@ impl Serializer for ArbiterAccount {
             + self.cases_overturned.size()
             + self.registered_at.size()
             + self.last_active_at.size()
+            + self.pending_withdrawal.size()
+            + self.deactivated_at.size()
+            + self.active_cases.size()
+            + self.total_slashed.size()
+            + self.slash_count.size()
+    }
+}
+
+/// Cooldown period after deactivation (in topoheight, ~14 days at 15s blocks).
+pub const ARBITER_COOLDOWN_TOPOHEIGHT: u64 = 14 * 24 * 60 * 4;
+/// Minimum time between deactivation request and withdrawal.
+pub const MIN_COOLDOWN_TOPOHEIGHT: u64 = 24 * 60 * 4;
+/// Grace period after case assignment to complete (in topoheight).
+pub const CASE_COMPLETION_GRACE_TOPOHEIGHT: u64 = 30 * 24 * 60 * 4;
+/// Maximum withdrawal per transaction (0 = unlimited).
+pub const MAX_WITHDRAWAL_PER_TX: u64 = 0;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ArbiterWithdrawError {
+    NotActive,
+    NoStakeToWithdraw,
+    NotInExitProcess,
+    CooldownNotComplete { current: u64, required: u64 },
+    HasActiveCases { count: u64 },
+    ArbiterAlreadyRemoved,
+}
+
+impl ArbiterAccount {
+    pub fn can_request_exit(&self) -> Result<(), ArbiterWithdrawError> {
+        if self.status != ArbiterStatus::Active {
+            return Err(ArbiterWithdrawError::NotActive);
+        }
+        if self.stake_amount == 0 {
+            return Err(ArbiterWithdrawError::NoStakeToWithdraw);
+        }
+        Ok(())
+    }
+
+    pub fn can_withdraw(&self, current_topoheight: u64) -> Result<u64, ArbiterWithdrawError> {
+        if self.status != ArbiterStatus::Exiting {
+            return Err(ArbiterWithdrawError::NotInExitProcess);
+        }
+        let deactivated_at = self
+            .deactivated_at
+            .ok_or(ArbiterWithdrawError::NotInExitProcess)?;
+        let cooldown_end = deactivated_at
+            .checked_add(ARBITER_COOLDOWN_TOPOHEIGHT)
+            .ok_or(ArbiterWithdrawError::CooldownNotComplete {
+                current: current_topoheight,
+                required: u64::MAX,
+            })?;
+        if current_topoheight < cooldown_end {
+            return Err(ArbiterWithdrawError::CooldownNotComplete {
+                current: current_topoheight,
+                required: cooldown_end,
+            });
+        }
+        if self.active_cases > 0 {
+            return Err(ArbiterWithdrawError::HasActiveCases {
+                count: self.active_cases,
+            });
+        }
+        Ok(self.stake_amount)
+    }
+
+    pub fn apply_slash(&mut self, slash_amount: u64) -> Result<u64, ArbiterWithdrawError> {
+        if self.status == ArbiterStatus::Removed {
+            return Err(ArbiterWithdrawError::ArbiterAlreadyRemoved);
+        }
+        let actual_slash = slash_amount.min(self.stake_amount);
+        self.stake_amount = self.stake_amount.saturating_sub(actual_slash);
+        self.total_slashed = self.total_slashed.saturating_add(actual_slash);
+        self.slash_count = self.slash_count.saturating_add(1);
+        if self.pending_withdrawal > self.stake_amount {
+            self.pending_withdrawal = self.stake_amount;
+        }
+        if self.stake_amount == 0 {
+            self.status = ArbiterStatus::Removed;
+            self.deactivated_at = None;
+            self.pending_withdrawal = 0;
+        }
+        Ok(actual_slash)
     }
 }
 
@@ -290,6 +396,11 @@ mod tests {
             cases_overturned: 2,
             registered_at: 100,
             last_active_at: 120,
+            pending_withdrawal: 0,
+            deactivated_at: None,
+            active_cases: 0,
+            total_slashed: 0,
+            slash_count: 0,
         };
 
         let data = serde_json::to_vec(&account)?;

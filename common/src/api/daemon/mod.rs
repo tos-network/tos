@@ -4,6 +4,7 @@ use super::{default_true_value, DataElement, RPCContractOutput, RPCTransaction};
 use crate::escrow::{AppealInfo, DisputeInfo, EscrowAccount};
 use crate::{
     account::{Nonce, VersionedBalance, VersionedNonce, VersionedUnoBalance},
+    arbitration::ArbiterStatus,
     block::{Algorithm, BlockVersion, TopoHeight, EXTRA_NONCE_SIZE},
     crypto::{Address, Hash, PublicKey},
     difficulty::{CumulativeDifficulty, Difficulty},
@@ -2444,4 +2445,34 @@ pub struct AppealStatusResult {
 #[derive(Serialize, Deserialize)]
 pub struct PendingReleasesResult {
     pub entries: Vec<PendingReleaseEntry>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct GetArbiterWithdrawStatusParams {
+    pub address: Address,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct EstimateWithdrawableAmountParams {
+    pub address: Address,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct ArbiterWithdrawStatus {
+    pub status: ArbiterStatus,
+    pub stake_amount: u64,
+    pub total_slashed: u64,
+    pub can_withdraw: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub block_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cooldown_ends_at: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cooldown_remaining: Option<u64>,
+    pub active_cases: u64,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct EstimateWithdrawableAmountResult {
+    pub available: u64,
 }

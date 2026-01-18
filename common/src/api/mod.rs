@@ -19,14 +19,16 @@ use crate::{
     transaction::{
         extra_data::UnknownExtraDataFormat, multisig::MultiSig, AgentAccountPayload,
         AppealEscrowPayload, AppealKycPayload, BatchReferralRewardPayload, BindReferrerPayload,
-        BootstrapCommitteePayload, BurnPayload, ChallengeEscrowPayload, CreateEscrowPayload,
-        DeployContractPayload, DepositEscrowPayload, DisputeEscrowPayload, EmergencySuspendPayload,
-        EnergyPayload, EphemeralMessagePayload, FeeType, InvokeContractPayload, MultiSigPayload,
-        Reference, RefundEscrowPayload, RegisterArbiterPayload, RegisterCommitteePayload,
-        RegisterNamePayload, ReleaseEscrowPayload, RenewKycPayload, RevokeKycPayload,
-        SetKycPayload, ShieldTransferPayload, SubmitVerdictPayload, Transaction, TransactionType,
-        TransferKycPayload, TransferPayload, TxVersion, UnoTransferPayload,
-        UnshieldTransferPayload, UpdateArbiterPayload, UpdateCommitteePayload,
+        BootstrapCommitteePayload, BurnPayload, CancelArbiterExitPayload, ChallengeEscrowPayload,
+        CreateEscrowPayload, DeployContractPayload, DepositEscrowPayload, DisputeEscrowPayload,
+        EmergencySuspendPayload, EnergyPayload, EphemeralMessagePayload, FeeType,
+        InvokeContractPayload, MultiSigPayload, Reference, RefundEscrowPayload,
+        RegisterArbiterPayload, RegisterCommitteePayload, RegisterNamePayload,
+        ReleaseEscrowPayload, RenewKycPayload, RequestArbiterExitPayload, RevokeKycPayload,
+        SetKycPayload, ShieldTransferPayload, SlashArbiterPayload, SubmitVerdictPayload,
+        Transaction, TransactionType, TransferKycPayload, TransferPayload, TxVersion,
+        UnoTransferPayload, UnshieldTransferPayload, UpdateArbiterPayload, UpdateCommitteePayload,
+        WithdrawArbiterStakePayload,
     },
 };
 pub use data::*;
@@ -110,6 +112,10 @@ pub enum RPCTransactionType<'a> {
     // Arbitration transaction types
     RegisterArbiter(Cow<'a, RegisterArbiterPayload>),
     UpdateArbiter(Cow<'a, UpdateArbiterPayload>),
+    SlashArbiter(Cow<'a, SlashArbiterPayload>),
+    RequestArbiterExit(Cow<'a, RequestArbiterExitPayload>),
+    WithdrawArbiterStake(Cow<'a, WithdrawArbiterStakePayload>),
+    CancelArbiterExit(Cow<'a, CancelArbiterExitPayload>),
 }
 
 impl<'a> RPCTransactionType<'a> {
@@ -186,6 +192,16 @@ impl<'a> RPCTransactionType<'a> {
                 Self::RegisterArbiter(Cow::Borrowed(payload))
             }
             TransactionType::UpdateArbiter(payload) => Self::UpdateArbiter(Cow::Borrowed(payload)),
+            TransactionType::SlashArbiter(payload) => Self::SlashArbiter(Cow::Borrowed(payload)),
+            TransactionType::RequestArbiterExit(payload) => {
+                Self::RequestArbiterExit(Cow::Borrowed(payload))
+            }
+            TransactionType::WithdrawArbiterStake(payload) => {
+                Self::WithdrawArbiterStake(Cow::Borrowed(payload))
+            }
+            TransactionType::CancelArbiterExit(payload) => {
+                Self::CancelArbiterExit(Cow::Borrowed(payload))
+            }
         }
     }
 }
@@ -265,6 +281,18 @@ impl From<RPCTransactionType<'_>> for TransactionType {
             }
             RPCTransactionType::UpdateArbiter(payload) => {
                 TransactionType::UpdateArbiter(payload.into_owned())
+            }
+            RPCTransactionType::SlashArbiter(payload) => {
+                TransactionType::SlashArbiter(payload.into_owned())
+            }
+            RPCTransactionType::RequestArbiterExit(payload) => {
+                TransactionType::RequestArbiterExit(payload.into_owned())
+            }
+            RPCTransactionType::WithdrawArbiterStake(payload) => {
+                TransactionType::WithdrawArbiterStake(payload.into_owned())
+            }
+            RPCTransactionType::CancelArbiterExit(payload) => {
+                TransactionType::CancelArbiterExit(payload.into_owned())
             }
             RPCTransactionType::CreateEscrow(payload) => {
                 TransactionType::CreateEscrow(payload.into_owned())
