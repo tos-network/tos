@@ -1,0 +1,185 @@
+use std::{fs, path::Path, sync::Arc};
+
+use rocksdb::{IteratorMode, Options, DB};
+use serde::de::DeserializeOwned;
+use serde::Serialize;
+
+use tos_common::crypto::{Hash, PublicKey};
+
+use super::{RegisteredAgent, RegistryError};
+
+const AGENT_PREFIX: &[u8] = b"agent:";
+const SKILL_PREFIX: &[u8] = b"skill:";
+const ACCOUNT_PREFIX: &[u8] = b"account:";
+
+#[derive(Clone)]
+pub(super) struct A2ARegistryStore {
+    db: Arc<DB>,
+}
+
+impl A2ARegistryStore {
+    pub fn open(path: &Path) -> Result<Self, RegistryError> {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).map_err(|e| RegistryError::Storage(e.to_string()))?;
+        } else {
+            fs::create_dir_all(path).map_err(|e| RegistryError::Storage(e.to_string()))?;
+        }
+
+        let mut opts = Options::default();
+        opts.create_if_missing(true);
+
+        let db = DB::open(&opts, path).map_err(|e| RegistryError::Storage(e.to_string()))?;
+        Ok(Self { db: Arc::new(db) })
+    }
+
+    pub fn save_agent(&self, agent: &RegisteredAgent) -> Result<(), RegistryError> {
+        let key = agent_key(&agent.agent_id);
+        let bytes = to_json(agent)?;
+        self.db
+            .put(key, bytes)
+            .map_err(|e| RegistryError::Storage(e.to_string()))?;
+        Ok(())
+    }
+
+    pub fn remove_agent(&self, agent_id: &Hash) -> Result<(), RegistryError> {
+        let key = agent_key(agent_id);
+        self.db
+            .delete(key)
+            .map_err(|e| RegistryError::Storage(e.to_string()))?;
+        Ok(())
+    }
+
+    pub fn load_agents(&self) -> Result<Vec<RegisteredAgent>, RegistryError> {
+        let mut agents = Vec::new();
+        let iter = self.db.iterator(IteratorMode::Start);
+        for item in iter {
+            let (key, value) = item.map_err(|e| RegistryError::Storage(e.to_string()))?;
+            if !key.starts_with(AGENT_PREFIX) {
+                continue;
+            }
+            let agent: RegisteredAgent = from_json(&value)?;
+            agents.push(agent);
+        }
+        Ok(agents)
+    }
+
+    pub fn add_agent_to_skill(&self, agent_id: &Hash, skill_id: &str) -> Result<(), RegistryError> {
+        let key = skill_key(skill_id);
+        let mut agents = self.load_skill_agents(&key)?;
+        let id_hex = agent_id.to_hex();
+        if !agents.iter().any(|id| id == &id_hex) {
+            agents.push(id_hex);
+            agents.sort();
+        }
+        let bytes = to_json(&agents)?;
+        self.db
+            .put(key, bytes)
+            .map_err(|e| RegistryError::Storage(e.to_string()))?;
+        Ok(())
+    }
+
+    pub fn remove_agent_from_skill(
+        &self,
+        agent_id: &Hash,
+        skill_id: &str,
+    ) -> Result<(), RegistryError> {
+        let key = skill_key(skill_id);
+        let mut agents = self.load_skill_agents(&key)?;
+        let id_hex = agent_id.to_hex();
+        let original_len = agents.len();
+        agents.retain(|id| id != &id_hex);
+        if agents.is_empty() {
+            self.db
+                .delete(key)
+                .map_err(|e| RegistryError::Storage(e.to_string()))?;
+            return Ok(());
+        }
+        if agents.len() != original_len {
+            let bytes = to_json(&agents)?;
+            self.db
+                .put(key, bytes)
+                .map_err(|e| RegistryError::Storage(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    pub fn set_account_index(
+        &self,
+        account: &PublicKey,
+        agent_id: &Hash,
+    ) -> Result<(), RegistryError> {
+        let key = account_key(account);
+        let bytes = to_json(&agent_id.to_hex())?;
+        self.db
+            .put(key, bytes)
+            .map_err(|e| RegistryError::Storage(e.to_string()))?;
+        Ok(())
+    }
+
+    pub fn remove_account_index(&self, account: &PublicKey) -> Result<(), RegistryError> {
+        let key = account_key(account);
+        self.db
+            .delete(key)
+            .map_err(|e| RegistryError::Storage(e.to_string()))?;
+        Ok(())
+    }
+
+    pub fn get_agent_id_by_account(
+        &self,
+        account: &PublicKey,
+    ) -> Result<Option<Hash>, RegistryError> {
+        let key = account_key(account);
+        let Some(raw) = self
+            .db
+            .get(key)
+            .map_err(|e| RegistryError::Storage(e.to_string()))?
+        else {
+            return Ok(None);
+        };
+        let id_hex: String = from_json(&raw)?;
+        id_hex
+            .parse::<Hash>()
+            .map(Some)
+            .map_err(|_| RegistryError::Storage("invalid agent id".to_string()))
+    }
+
+    fn load_skill_agents(&self, key: &[u8]) -> Result<Vec<String>, RegistryError> {
+        let Some(raw) = self
+            .db
+            .get(key)
+            .map_err(|e| RegistryError::Storage(e.to_string()))?
+        else {
+            return Ok(Vec::new());
+        };
+        from_json(&raw)
+    }
+}
+
+fn to_json<T: Serialize>(value: &T) -> Result<Vec<u8>, RegistryError> {
+    serde_json::to_vec(value).map_err(|e| RegistryError::Storage(e.to_string()))
+}
+
+fn from_json<T: DeserializeOwned>(bytes: &[u8]) -> Result<T, RegistryError> {
+    serde_json::from_slice(bytes).map_err(|e| RegistryError::Storage(e.to_string()))
+}
+
+fn agent_key(agent_id: &Hash) -> Vec<u8> {
+    let mut key = Vec::with_capacity(AGENT_PREFIX.len() + 32);
+    key.extend_from_slice(AGENT_PREFIX);
+    key.extend_from_slice(agent_id.as_bytes());
+    key
+}
+
+fn skill_key(skill_id: &str) -> Vec<u8> {
+    let mut key = Vec::with_capacity(SKILL_PREFIX.len() + skill_id.len());
+    key.extend_from_slice(SKILL_PREFIX);
+    key.extend_from_slice(skill_id.as_bytes());
+    key
+}
+
+fn account_key(account: &PublicKey) -> Vec<u8> {
+    let mut key = Vec::with_capacity(ACCOUNT_PREFIX.len() + 32);
+    key.extend_from_slice(ACCOUNT_PREFIX);
+    key.extend_from_slice(account.as_bytes());
+    key
+}

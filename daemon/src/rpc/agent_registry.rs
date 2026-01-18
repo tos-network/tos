@@ -19,6 +19,7 @@ use tokio::sync::Mutex;
 use tos_common::{
     a2a::{verify_tos_signature, AgentCard, TosSignature, TosSignerType},
     a2a::{HEADER_VERSION, PROTOCOL_VERSION},
+    arbitration::{expertise_domains_to_skill_tags, ArbiterAccount},
     async_handler,
     context::Context,
     crypto::{hash, Hash, PublicKey},
@@ -326,7 +327,13 @@ async fn get_agent<S: Storage>(context: &Context, body: Value) -> Result<Value, 
 
     let registry = global_registry();
     let agent = registry.get(&agent_id).await;
-    let response = agent.map(|agent| to_agent_summary(&agent));
+    let response = if let Some(agent) = agent {
+        let blockchain: &Arc<Blockchain<S>> = context.get()?;
+        let storage = blockchain.get_storage().read().await;
+        Some(enrich_agent_summary(&*storage, &agent).await)
+    } else {
+        None
+    };
     serde_json::to_value(response).map_err(InternalRpcError::SerializeResponse)
 }
 
@@ -336,10 +343,12 @@ async fn discover_agents<S: Storage>(
 ) -> Result<Value, InternalRpcError> {
     require_registry_auth_context(context).await?;
     let filter: AgentFilter = parse_params(body)?;
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let storage = blockchain.get_storage().read().await;
     let registry = global_registry();
     let agents = registry.filter(&filter).await;
     let response = DiscoverAgentsResponse {
-        agents: agents.iter().map(to_agent_summary).collect(),
+        agents: enrich_agent_summaries(&*storage, &agents).await,
     };
     serde_json::to_value(response).map_err(InternalRpcError::SerializeResponse)
 }
@@ -360,10 +369,12 @@ async fn list_agents<S: Storage>(
     _body: Value,
 ) -> Result<Value, InternalRpcError> {
     require_registry_auth_context(context).await?;
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let storage = blockchain.get_storage().read().await;
     let registry = global_registry();
     let agents = registry.list().await;
     let response = DiscoverAgentsResponse {
-        agents: agents.iter().map(to_agent_summary).collect(),
+        agents: enrich_agent_summaries(&*storage, &agents).await,
     };
     serde_json::to_value(response).map_err(InternalRpcError::SerializeResponse)
 }
@@ -402,7 +413,7 @@ pub async fn register_agent_http<S: Storage>(
 
 /// HTTP endpoint: PATCH /agents/{id}
 pub async fn update_agent_http<S: Storage>(
-    _server: web::Data<DaemonRpcServer<S>>,
+    server: web::Data<DaemonRpcServer<S>>,
     request: HttpRequest,
     path: web::Path<AgentPath>,
     body: web::Bytes,
@@ -420,12 +431,18 @@ pub async fn update_agent_http<S: Storage>(
         .await
         .map_err(AgentRegistryRpcError::from)
         .map_err(map_http_error)?;
-    Ok(HttpResponse::Ok().json(to_agent_summary(&updated)))
+    let storage = server
+        .get_rpc_handler()
+        .get_data()
+        .get_storage()
+        .read()
+        .await;
+    Ok(HttpResponse::Ok().json(enrich_agent_summary(&*storage, &updated).await))
 }
 
 /// HTTP endpoint: GET /agents/{id}
 pub async fn get_agent_http<S: Storage>(
-    _server: web::Data<DaemonRpcServer<S>>,
+    server: web::Data<DaemonRpcServer<S>>,
     request: HttpRequest,
     path: web::Path<AgentPath>,
 ) -> Result<HttpResponse, ActixError> {
@@ -434,21 +451,35 @@ pub async fn get_agent_http<S: Storage>(
     let registry = global_registry();
     let agent = registry.get(&agent_id).await;
     match agent {
-        Some(agent) => Ok(HttpResponse::Ok().json(to_agent_summary(&agent))),
+        Some(agent) => {
+            let storage = server
+                .get_rpc_handler()
+                .get_data()
+                .get_storage()
+                .read()
+                .await;
+            Ok(HttpResponse::Ok().json(enrich_agent_summary(&*storage, &agent).await))
+        }
         None => Err(ErrorNotFound("Agent not found")),
     }
 }
 
 /// HTTP endpoint: GET /agents
 pub async fn list_agents_http<S: Storage>(
-    _server: web::Data<DaemonRpcServer<S>>,
+    server: web::Data<DaemonRpcServer<S>>,
     request: HttpRequest,
 ) -> Result<HttpResponse, ActixError> {
     require_registry_auth_http(&request, &[]).await?;
     let registry = global_registry();
     let agents = registry.list().await;
+    let storage = server
+        .get_rpc_handler()
+        .get_data()
+        .get_storage()
+        .read()
+        .await;
     let response = DiscoverAgentsResponse {
-        agents: agents.iter().map(to_agent_summary).collect(),
+        agents: enrich_agent_summaries(&*storage, &agents).await,
     };
     Ok(HttpResponse::Ok().json(response))
 }
@@ -472,7 +503,7 @@ pub async fn unregister_agent_http<S: Storage>(
 
 /// HTTP endpoint: POST /agents:discover
 pub async fn discover_agents_http<S: Storage>(
-    _server: web::Data<DaemonRpcServer<S>>,
+    server: web::Data<DaemonRpcServer<S>>,
     request: HttpRequest,
     body: web::Bytes,
 ) -> Result<HttpResponse, ActixError> {
@@ -481,8 +512,14 @@ pub async fn discover_agents_http<S: Storage>(
         serde_json::from_slice(&body).map_err(|e| ErrorBadRequest(e.to_string()))?;
     let registry = global_registry();
     let agents = registry.filter(&filter).await;
+    let storage = server
+        .get_rpc_handler()
+        .get_data()
+        .get_storage()
+        .read()
+        .await;
     let response = DiscoverAgentsResponse {
-        agents: agents.iter().map(to_agent_summary).collect(),
+        agents: enrich_agent_summaries(&*storage, &agents).await,
     };
     Ok(HttpResponse::Ok().json(response))
 }
@@ -505,7 +542,7 @@ pub async fn discover_committee_members_http<S: Storage>(
 
 /// HTTP endpoint: GET /agents:discover
 pub async fn discover_agents_http_get<S: Storage>(
-    _server: web::Data<DaemonRpcServer<S>>,
+    server: web::Data<DaemonRpcServer<S>>,
     request: HttpRequest,
     query: web::Query<AgentListQuery>,
 ) -> Result<HttpResponse, ActixError> {
@@ -513,8 +550,14 @@ pub async fn discover_agents_http_get<S: Storage>(
     let filter = filter_from_query(&query);
     let registry = global_registry();
     let agents = registry.filter(&filter).await;
+    let storage = server
+        .get_rpc_handler()
+        .get_data()
+        .get_storage()
+        .read()
+        .await;
     let response = DiscoverAgentsResponse {
-        agents: agents.iter().map(to_agent_summary).collect(),
+        agents: enrich_agent_summaries(&*storage, &agents).await,
     };
     Ok(HttpResponse::Ok().json(response))
 }
@@ -729,6 +772,7 @@ async fn register_agent_impl<S: Storage>(
                 found: arbiter.stake_amount,
             });
         }
+        reconcile_arbiter_card_fields(&mut request.agent_card, &arbiter);
         arbiter_reputation = Some(arbiter.reputation_score);
     }
 
@@ -772,25 +816,19 @@ async fn discover_committee_members_impl<S: Storage>(
         .ok_or(AgentRegistryRpcError::CommitteeNotFound)?;
 
     let registry = global_registry();
-    let active_agents = registry.list_active().await;
-    let mut agent_by_account: HashMap<String, (String, String)> = HashMap::new();
-    for agent in active_agents {
-        if let Some(identity) = agent.agent_card.tos_identity.as_ref() {
-            let key = hex::encode(identity.agent_account.as_bytes());
-            agent_by_account.insert(key, (agent.agent_id.to_hex(), agent.endpoint_url.clone()));
-        }
-    }
-
     let mut members = Vec::new();
     for member in &committee.members {
         if request.active_only && member.status != tos_common::kyc::MemberStatus::Active {
             continue;
         }
+        let (agent_id, endpoint_url) = match registry.get_by_account(&member.public_key).await {
+            Some(agent) if agent.status == AgentStatus::Active => (
+                Some(agent.agent_id.to_hex()),
+                Some(agent.endpoint_url.clone()),
+            ),
+            _ => (None, None),
+        };
         let key = hex::encode(member.public_key.as_bytes());
-        let (agent_id, endpoint_url) = agent_by_account
-            .get(&key)
-            .map(|(id, url)| (Some(id.clone()), Some(url.clone())))
-            .unwrap_or((None, None));
         let reputation_score = storage
             .get_arbiter(&member.public_key)
             .await
@@ -960,6 +998,64 @@ fn to_agent_summary(agent: &RegisteredAgent) -> AgentSummary {
         }
         .to_string(),
         tos_identity: agent.agent_card.tos_identity.clone(),
+    }
+}
+
+async fn enrich_agent_summary<S: Storage>(storage: &S, agent: &RegisteredAgent) -> AgentSummary {
+    let mut summary = to_agent_summary(agent);
+    if let Some(mut identity) = summary.tos_identity.clone() {
+        if let Ok(Some(arbiter)) = storage.get_arbiter(&identity.agent_account).await {
+            identity.reputation_score_bps = Some(u32::from(arbiter.reputation_score));
+            summary.tos_identity = Some(identity);
+        }
+    }
+    summary
+}
+
+async fn enrich_agent_summaries<S: Storage>(
+    storage: &S,
+    agents: &[RegisteredAgent],
+) -> Vec<AgentSummary> {
+    let mut out = Vec::with_capacity(agents.len());
+    for agent in agents {
+        out.push(enrich_agent_summary(storage, agent).await);
+    }
+    out
+}
+
+fn arbitration_expertise_domains(arbiter: &ArbiterAccount) -> Vec<String> {
+    arbiter
+        .expertise
+        .iter()
+        .map(|domain| domain.as_str().to_string())
+        .collect()
+}
+
+fn reconcile_arbiter_card_fields(card: &mut AgentCard, arbiter: &ArbiterAccount) {
+    let tags = expertise_domains_to_skill_tags(&arbiter.expertise);
+    let existing: std::collections::HashSet<String> =
+        card.skills.iter().map(|skill| skill.id.clone()).collect();
+    for tag in tags {
+        if !existing.contains(tag) {
+            card.skills.push(tos_common::a2a::AgentSkill {
+                id: tag.to_string(),
+                name: tag.to_string(),
+                description: "Arbitration expertise".to_string(),
+                tags: Vec::new(),
+                examples: Vec::new(),
+                input_modes: Vec::new(),
+                output_modes: Vec::new(),
+                security: Vec::new(),
+                tos_base_cost: None,
+            });
+        }
+    }
+
+    if let Some(extension) = card.arbitration.as_mut() {
+        extension.expertise_domains = arbitration_expertise_domains(arbiter);
+        extension.fee_basis_points = arbiter.fee_basis_points;
+        extension.min_escrow_value = arbiter.min_escrow_value;
+        extension.max_escrow_value = arbiter.max_escrow_value;
     }
 }
 

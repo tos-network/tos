@@ -19,6 +19,9 @@ use tos_common::{
 };
 
 pub mod router;
+mod store;
+
+use store::A2ARegistryStore;
 
 const DEFAULT_HEALTH_CHECK_INTERVAL_SECS: u64 = 300;
 const DEFAULT_HEARTBEAT_TIMEOUT_SECS: u64 = 120;
@@ -169,6 +172,7 @@ impl AgentRegistry {
 
         persist_agent_record(&registered)?;
         persist_index(&self.agents).await?;
+        add_store_indexes(&registered)?;
 
         Ok(registered)
     }
@@ -181,6 +185,7 @@ impl AgentRegistry {
         };
         let removed = removed.ok_or(RegistryError::AgentNotFound)?;
         self.remove_skills(agent_id, &removed.agent_card).await;
+        remove_store_indexes(&removed)?;
         remove_agent_record(&removed.agent_id)?;
         persist_index(&self.agents).await?;
         Ok(())
@@ -208,6 +213,23 @@ impl AgentRegistry {
             .collect()
     }
 
+    /// Fetch a registered agent by on-chain account.
+    pub async fn get_by_account(&self, account: &PublicKey) -> Option<RegisteredAgent> {
+        if let Ok(Some(store)) = registry_store() {
+            if let Ok(Some(agent_id)) = store.get_agent_id_by_account(account) {
+                if let Some(agent) = self.get(&agent_id).await {
+                    return Some(agent);
+                }
+            }
+        }
+
+        let agents = self.agents.read().await;
+        agents
+            .values()
+            .find(|agent| agent.agent_account.as_ref() == Some(account))
+            .cloned()
+    }
+
     /// Update an existing agent's card.
     pub async fn update(
         &self,
@@ -222,6 +244,7 @@ impl AgentRegistry {
             .ok_or(RegistryError::AgentNotFound)?;
 
         self.remove_skills(agent_id, &existing.agent_card).await;
+        remove_store_indexes(&existing)?;
 
         let updated = RegisteredAgent {
             agent_id: existing.agent_id.clone(),
@@ -250,6 +273,7 @@ impl AgentRegistry {
 
         persist_agent_record(&updated)?;
         persist_index(&self.agents).await?;
+        add_store_indexes(&updated)?;
 
         Ok(updated)
     }
@@ -548,6 +572,7 @@ struct RegistryIndex {
 
 static REGISTRY_BASE_DIR: OnceCell<PathBuf> = OnceCell::new();
 static REGISTRY_LOADED: OnceCell<()> = OnceCell::new();
+static REGISTRY_STORE: OnceCell<A2ARegistryStore> = OnceCell::new();
 static GLOBAL_REGISTRY: Lazy<Arc<AgentRegistry>> = Lazy::new(|| Arc::new(AgentRegistry::new()));
 
 /// Set base directory for registry persistence.
@@ -589,6 +614,18 @@ fn registry_root() -> Option<PathBuf> {
     Some(path)
 }
 
+fn registry_store() -> Result<Option<&'static A2ARegistryStore>, RegistryError> {
+    let base = REGISTRY_BASE_DIR.get_or_init(|| PathBuf::from(""));
+    if base.as_os_str().is_empty() {
+        return Ok(None);
+    }
+    let mut path = base.clone();
+    path.push("a2a");
+    path.push("registry");
+    let store = REGISTRY_STORE.get_or_try_init(|| A2ARegistryStore::open(&path))?;
+    Ok(Some(store))
+}
+
 fn ensure_registry_dir(path: &Path) -> Result<(), RegistryError> {
     fs::create_dir_all(path).map_err(|e| RegistryError::Storage(e.to_string()))
 }
@@ -613,6 +650,11 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), RegistryError> {
 }
 
 fn persist_agent_record(agent: &RegisteredAgent) -> Result<(), RegistryError> {
+    if let Some(store) = registry_store()? {
+        store.save_agent(agent)?;
+        return Ok(());
+    }
+
     let Some(root) = registry_root() else {
         return Ok(());
     };
@@ -625,6 +667,11 @@ fn persist_agent_record(agent: &RegisteredAgent) -> Result<(), RegistryError> {
 }
 
 fn remove_agent_record(agent_id: &Hash) -> Result<(), RegistryError> {
+    if let Some(store) = registry_store()? {
+        store.remove_agent(agent_id)?;
+        return Ok(());
+    }
+
     let Some(root) = registry_root() else {
         return Ok(());
     };
@@ -638,6 +685,10 @@ fn remove_agent_record(agent_id: &Hash) -> Result<(), RegistryError> {
 async fn persist_index(
     agents: &RwLock<HashMap<Hash, RegisteredAgent>>,
 ) -> Result<(), RegistryError> {
+    if registry_store()?.is_some() {
+        return Ok(());
+    }
+
     let Some(root) = registry_root() else {
         return Ok(());
     };
@@ -652,38 +703,85 @@ async fn persist_index(
     Ok(())
 }
 
-fn load_registry_snapshot(registry: &Arc<AgentRegistry>) {
-    let Some(root) = registry_root() else {
-        return;
+fn add_store_indexes(agent: &RegisteredAgent) -> Result<(), RegistryError> {
+    let Some(store) = registry_store()? else {
+        return Ok(());
     };
-    let index_path = index_path(&root);
+    for skill in extract_skill_ids(&agent.agent_card) {
+        store.add_agent_to_skill(&agent.agent_id, &skill)?;
+    }
+    if let Some(account) = agent.agent_account.as_ref() {
+        store.set_account_index(account, &agent.agent_id)?;
+    }
+    Ok(())
+}
+
+fn remove_store_indexes(agent: &RegisteredAgent) -> Result<(), RegistryError> {
+    let Some(store) = registry_store()? else {
+        return Ok(());
+    };
+    for skill in extract_skill_ids(&agent.agent_card) {
+        store.remove_agent_from_skill(&agent.agent_id, &skill)?;
+    }
+    if let Some(account) = agent.agent_account.as_ref() {
+        store.remove_account_index(account)?;
+    }
+    Ok(())
+}
+
+fn load_registry_snapshot(registry: &Arc<AgentRegistry>) {
     let mut agents = HashMap::new();
-    if let Ok(raw) = fs::read(&index_path) {
-        if let Ok(index) = serde_json::from_slice::<RegistryIndex>(&raw) {
-            for id in index.agent_ids {
-                if let Ok(hash) = id.parse::<Hash>() {
-                    let path = agent_path(&root, &hash);
-                    if let Ok(bytes) = fs::read(&path) {
-                        if let Ok(agent) = serde_json::from_slice::<RegisteredAgent>(&bytes) {
-                            agents.insert(hash, agent);
+    let mut loaded_from_store = false;
+    if let Ok(Some(store)) = registry_store() {
+        if let Ok(store_agents) = store.load_agents() {
+            if !store_agents.is_empty() {
+                for agent in store_agents {
+                    agents.insert(agent.agent_id.clone(), agent);
+                }
+                loaded_from_store = true;
+            }
+        }
+    }
+
+    if !loaded_from_store {
+        let Some(root) = registry_root() else {
+            return;
+        };
+        let index_path = index_path(&root);
+        if let Ok(raw) = fs::read(&index_path) {
+            if let Ok(index) = serde_json::from_slice::<RegistryIndex>(&raw) {
+                for id in index.agent_ids {
+                    if let Ok(hash) = id.parse::<Hash>() {
+                        let path = agent_path(&root, &hash);
+                        if let Ok(bytes) = fs::read(&path) {
+                            if let Ok(agent) = serde_json::from_slice::<RegisteredAgent>(&bytes) {
+                                agents.insert(hash, agent);
+                            }
                         }
                     }
                 }
             }
-        }
-    } else if let Ok(entries) = fs::read_dir(&root) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.file_name().and_then(|s| s.to_str()) == Some("index.json") {
-                continue;
-            }
-            if path.extension().and_then(|s| s.to_str()) != Some("json") {
-                continue;
-            }
-            if let Ok(bytes) = fs::read(&path) {
-                if let Ok(agent) = serde_json::from_slice::<RegisteredAgent>(&bytes) {
-                    agents.insert(agent.agent_id.clone(), agent);
+        } else if let Ok(entries) = fs::read_dir(&root) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.file_name().and_then(|s| s.to_str()) == Some("index.json") {
+                    continue;
                 }
+                if path.extension().and_then(|s| s.to_str()) != Some("json") {
+                    continue;
+                }
+                if let Ok(bytes) = fs::read(&path) {
+                    if let Ok(agent) = serde_json::from_slice::<RegisteredAgent>(&bytes) {
+                        agents.insert(agent.agent_id.clone(), agent);
+                    }
+                }
+            }
+        }
+
+        if let Ok(Some(_store)) = registry_store() {
+            for agent in agents.values() {
+                let _ = persist_agent_record(agent);
+                let _ = add_store_indexes(agent);
             }
         }
     }

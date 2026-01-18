@@ -76,6 +76,50 @@ pub enum ExpertiseDomain {
     Nft,
 }
 
+impl ExpertiseDomain {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ExpertiseDomain::General => "general",
+            ExpertiseDomain::AIAgent => "ai-agent",
+            ExpertiseDomain::SmartContract => "smart-contract",
+            ExpertiseDomain::Payment => "payment",
+            ExpertiseDomain::DeFi => "defi",
+            ExpertiseDomain::Governance => "governance",
+            ExpertiseDomain::Identity => "identity",
+            ExpertiseDomain::Data => "data",
+            ExpertiseDomain::Security => "security",
+            ExpertiseDomain::Gaming => "gaming",
+            ExpertiseDomain::DataService => "data-service",
+            ExpertiseDomain::DigitalAsset => "digital-asset",
+            ExpertiseDomain::CrossChain => "cross-chain",
+            ExpertiseDomain::Nft => "nft",
+        }
+    }
+
+    pub fn skill_tag(&self) -> &'static str {
+        match self {
+            ExpertiseDomain::General => "arbitration:general",
+            ExpertiseDomain::AIAgent => "arbitration:ai-agent",
+            ExpertiseDomain::SmartContract => "arbitration:smart-contract",
+            ExpertiseDomain::Payment => "arbitration:payment",
+            ExpertiseDomain::DeFi => "arbitration:defi",
+            ExpertiseDomain::Governance => "arbitration:governance",
+            ExpertiseDomain::Identity => "arbitration:identity",
+            ExpertiseDomain::Data => "arbitration:data",
+            ExpertiseDomain::Security => "arbitration:security",
+            ExpertiseDomain::Gaming => "arbitration:gaming",
+            ExpertiseDomain::DataService => "arbitration:data-service",
+            ExpertiseDomain::DigitalAsset => "arbitration:digital-asset",
+            ExpertiseDomain::CrossChain => "arbitration:cross-chain",
+            ExpertiseDomain::Nft => "arbitration:nft",
+        }
+    }
+}
+
+pub fn expertise_domains_to_skill_tags(domains: &[ExpertiseDomain]) -> Vec<&'static str> {
+    domains.iter().map(ExpertiseDomain::skill_tag).collect()
+}
+
 impl Serializer for ExpertiseDomain {
     fn write(&self, writer: &mut Writer) {
         let value = match self {

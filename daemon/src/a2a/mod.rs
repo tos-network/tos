@@ -898,6 +898,42 @@ fn validate_message_limits(message: &Message) -> A2AResult<()> {
     Ok(())
 }
 
+fn validate_arbitration_evidence(message: &Message) -> A2AResult<()> {
+    let Some(metadata) = message.metadata.as_ref() else {
+        return Ok(());
+    };
+    let keys = ["dispute_id", "escrow_id", "party_role"];
+    let has_any = keys.iter().any(|key| metadata.contains_key(*key));
+    if !has_any {
+        return Ok(());
+    }
+    for key in keys {
+        match metadata.get(key) {
+            Some(Value::String(value)) if !value.trim().is_empty() => {}
+            Some(_) => {
+                return Err(A2AError::InvalidParams {
+                    message: format!("metadata.{key} must be a non-empty string"),
+                })
+            }
+            None => {
+                return Err(A2AError::InvalidParams {
+                    message: format!("metadata.{key} is required for evidence submission"),
+                })
+            }
+        }
+    }
+    let has_file = message
+        .parts
+        .iter()
+        .any(|part| matches!(part.content, PartContent::File { .. }));
+    if !has_file {
+        return Err(A2AError::InvalidParams {
+            message: "evidence submission requires a file part".to_string(),
+        });
+    }
+    Ok(())
+}
+
 /// Check if adding a message would exceed history limit
 fn check_history_limit(task: &Task) -> A2AResult<()> {
     if task.history.len() >= MAX_HISTORY_LENGTH {
@@ -1009,6 +1045,7 @@ impl<S: Storage + Send + Sync + 'static> A2AService for A2ADaemonService<S> {
 
         // Validate Anti-DoS limits
         validate_message_limits(&message)?;
+        validate_arbitration_evidence(&message)?;
 
         // Validate request metadata keys limit
         if let Some(metadata) = &request.metadata {
@@ -1165,6 +1202,7 @@ impl<S: Storage + Send + Sync + 'static> A2AService for A2ADaemonService<S> {
 
         // Validate Anti-DoS limits
         validate_message_limits(&message)?;
+        validate_arbitration_evidence(&message)?;
 
         // Validate request metadata keys limit
         if let Some(metadata) = &request.metadata {
