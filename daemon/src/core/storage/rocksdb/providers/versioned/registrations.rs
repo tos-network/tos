@@ -1,15 +1,13 @@
+use async_trait::async_trait;
+use tos_common::{block::TopoHeight, serializer::Serializer};
+
 use crate::core::{
     error::BlockchainError,
     storage::{
         rocksdb::{AccountId, Column, IteratorMode},
+        snapshot::Direction,
         RocksStorage, VersionedRegistrationsProvider,
     },
-};
-use async_trait::async_trait;
-use rocksdb::Direction;
-use tos_common::{
-    block::TopoHeight,
-    serializer::{RawBytes, Serializer},
 };
 
 #[async_trait]
@@ -20,9 +18,10 @@ impl VersionedRegistrationsProvider for RocksStorage {
         topoheight: TopoHeight,
     ) -> Result<(), BlockchainError> {
         let prefix = topoheight.to_be_bytes();
-        for res in Self::iter_owned_internal::<RawBytes, ()>(
+        let snapshot = self.snapshot.clone();
+        for res in Self::iter_raw_internal(
             &self.db,
-            self.snapshot.as_ref(),
+            snapshot.as_ref(),
             IteratorMode::WithPrefix(&prefix, Direction::Forward),
             Column::PrefixedRegistrations,
         )? {
@@ -62,10 +61,11 @@ impl VersionedRegistrationsProvider for RocksStorage {
         &mut self,
         topoheight: TopoHeight,
     ) -> Result<(), BlockchainError> {
-        let prefix = topoheight.to_be_bytes();
-        for res in Self::iter_owned_internal::<RawBytes, ()>(
+        let prefix = (topoheight + 1).to_be_bytes();
+        let snapshot = self.snapshot.clone();
+        for res in Self::iter_raw_internal(
             &self.db,
-            self.snapshot.as_ref(),
+            snapshot.as_ref(),
             IteratorMode::From(&prefix, Direction::Forward),
             Column::PrefixedRegistrations,
         )? {

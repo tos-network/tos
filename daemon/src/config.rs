@@ -98,6 +98,12 @@ pub const PRUNE_SAFETY_LIMIT: u64 = STABLE_LIMIT * 10;
 // in how many height we consider the block stable
 pub const STABLE_LIMIT: u64 = 8;
 
+pub const fn get_stable_limit(version: BlockVersion) -> u64 {
+    match version {
+        BlockVersion::Nobunaga => STABLE_LIMIT,
+    }
+}
+
 // Blocks propagation queue capacity: STABLE_LIMIT * TIPS_LIMIT = 8 * 3 = 24
 pub const BLOCKS_PROPAGATION_CAPACITY: usize =
     STABLE_LIMIT as usize * tos_common::config::TIPS_LIMIT;

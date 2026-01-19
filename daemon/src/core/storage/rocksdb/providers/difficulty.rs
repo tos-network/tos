@@ -8,6 +8,7 @@ use crate::core::{
 use async_trait::async_trait;
 use indexmap::IndexSet;
 use log::trace;
+use std::sync::Arc;
 use tos_common::{
     block::{BlockHeader, BlockVersion},
     crypto::Hash,
@@ -72,8 +73,32 @@ impl DifficultyProvider for RocksStorage {
         if log::log_enabled!(log::Level::Trace) {
             trace!("get cumulative difficulty for block hash {}", hash);
         }
-        self.load_block_difficulty(hash)
-            .map(|block_difficulty| block_difficulty.cumulative_difficulty)
+        let use_cache = self
+            .snapshot
+            .as_ref()
+            .and_then(|s| s.contains(Column::BlockDifficulty, hash.as_bytes()))
+            .is_none();
+
+        if use_cache {
+            if let Some(objects) = &self.cache().objects {
+                if let Some(value) = objects.cumulative_difficulty_cache.lock().await.get(hash) {
+                    return Ok(value.clone());
+                }
+            }
+        }
+
+        let block_difficulty = self.load_block_difficulty(hash)?;
+        if use_cache {
+            if let Some(objects) = &self.cache().objects {
+                objects
+                    .cumulative_difficulty_cache
+                    .lock()
+                    .await
+                    .put(hash.clone(), block_difficulty.cumulative_difficulty.clone());
+            }
+        }
+
+        Ok(block_difficulty.cumulative_difficulty)
     }
 
     // Get past blocks (block tips) for a specific block hash
@@ -93,10 +118,45 @@ impl DifficultyProvider for RocksStorage {
         &self,
         hash: &Hash,
     ) -> Result<Immutable<BlockHeader>, BlockchainError> {
+        eprintln!("[debug] get_block_header_by_hash: start, hash={}", hash);
         if log::log_enabled!(log::Level::Trace) {
             trace!("get block header by hash {}", hash);
         }
-        self.load_from_disk(Column::Blocks, hash)
+        let use_cache = self
+            .snapshot
+            .as_ref()
+            .and_then(|s| s.contains(Column::Blocks, hash.as_bytes()))
+            .is_none();
+        eprintln!("[debug] get_block_header_by_hash: use_cache={}", use_cache);
+
+        if use_cache {
+            if let Some(objects) = &self.cache().objects {
+                eprintln!("[debug] get_block_header_by_hash: about to lock blocks_cache");
+                if let Some(block) = objects.blocks_cache.lock().await.get(hash) {
+                    eprintln!("[debug] get_block_header_by_hash: cache hit");
+                    return Ok(Immutable::Arc(block.clone()));
+                }
+                eprintln!("[debug] get_block_header_by_hash: cache miss");
+            }
+        }
+
+        eprintln!("[debug] get_block_header_by_hash: loading from disk");
+        let block: Arc<BlockHeader> = Arc::new(self.load_from_disk(Column::Blocks, hash)?);
+        eprintln!("[debug] get_block_header_by_hash: loaded from disk");
+        if use_cache {
+            if let Some(objects) = &self.cache().objects {
+                eprintln!("[debug] get_block_header_by_hash: about to lock cache for put");
+                objects
+                    .blocks_cache
+                    .lock()
+                    .await
+                    .put(hash.clone(), block.clone());
+                eprintln!("[debug] get_block_header_by_hash: put to cache done");
+            }
+        }
+
+        eprintln!("[debug] get_block_header_by_hash: done");
+        Ok(Immutable::Arc(block))
     }
 
     // Retrieve the estimated covariance (P) for a block hash

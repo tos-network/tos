@@ -50,10 +50,7 @@ impl BlockExecutionOrderProvider for RocksStorage {
     // Get the number of blocks executed
     async fn get_blocks_execution_count(&self) -> u64 {
         trace!("get blocks execution count");
-        self.load_optional_from_disk(Column::Common, BLOCKS_EXECUTION_ORDER_COUNT)
-            .ok()
-            .flatten()
-            .unwrap_or(0)
+        self.cache().counter.blocks_execution_count
     }
 
     // Swap the position of two blocks in the execution order
@@ -77,13 +74,12 @@ impl BlockExecutionOrderProvider for RocksStorage {
 
 impl RocksStorage {
     fn get_next_block_position(&mut self) -> Result<u64, BlockchainError> {
-        let position = self
-            .load_optional_from_disk(Column::Common, BLOCKS_EXECUTION_ORDER_COUNT)?
-            .unwrap_or(0);
+        let position = self.cache().counter.blocks_execution_count;
 
         if log::log_enabled!(log::Level::Trace) {
             trace!("next block position is {}", position);
         }
+        self.cache_mut().counter.blocks_execution_count = position + 1;
         self.insert_into_disk(
             Column::Common,
             BLOCKS_EXECUTION_ORDER_COUNT,

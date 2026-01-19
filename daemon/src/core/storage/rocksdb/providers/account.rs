@@ -1,13 +1,14 @@
 use crate::core::{
     error::BlockchainError,
     storage::{
+        constants::NEXT_ACCOUNT_ID,
         rocksdb::{Account, AccountId, AssetId, Column, IteratorMode},
+        snapshot::Direction,
         AccountProvider, NetworkProvider, RocksStorage,
     },
 };
 use async_trait::async_trait;
 use log::trace;
-use rocksdb::Direction;
 use tos_common::{block::TopoHeight, crypto::PublicKey, serializer::Skip};
 
 #[async_trait]
@@ -262,12 +263,9 @@ impl AccountProvider for RocksStorage {
 }
 
 impl RocksStorage {
-    const NEXT_ACCOUNT_ID: &[u8] = b"NAID";
-
     fn get_last_account_id(&self) -> Result<AccountId, BlockchainError> {
         trace!("get current account id");
-        self.load_optional_from_disk::<_, AccountId>(Column::Common, Self::NEXT_ACCOUNT_ID)
-            .map(|v| v.unwrap_or(0))
+        Ok(self.cache().counter.accounts_count)
     }
 
     fn get_next_account_id(&mut self) -> Result<u64, BlockchainError> {
@@ -276,7 +274,8 @@ impl RocksStorage {
         if log::log_enabled!(log::Level::Trace) {
             trace!("next account id is {}", id);
         }
-        self.insert_into_disk(Column::Common, Self::NEXT_ACCOUNT_ID, &(id + 1))?;
+        self.cache_mut().counter.accounts_count = id + 1;
+        self.insert_into_disk(Column::Common, NEXT_ACCOUNT_ID, &(id + 1))?;
 
         Ok(id)
     }

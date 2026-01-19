@@ -2,12 +2,12 @@ use crate::core::{
     error::BlockchainError,
     storage::{
         rocksdb::{AssetId, Column, ContractId, IteratorMode},
+        snapshot::Direction,
         ContractBalanceProvider, RocksStorage, VersionedContractBalance,
     },
 };
 use async_trait::async_trait;
 use log::trace;
-use rocksdb::Direction;
 use tos_common::{block::TopoHeight, crypto::Hash, serializer::Skip};
 
 #[async_trait]

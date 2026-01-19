@@ -2,11 +2,11 @@ use crate::core::{
     error::BlockchainError,
     storage::{
         rocksdb::{Column, IteratorMode, RocksStorage},
+        snapshot::Direction,
         ArbitrationCommitProvider,
     },
 };
 use async_trait::async_trait;
-use rocksdb::Direction;
 use tos_common::{
     arbitration::{ArbitrationJurorVoteKey, ArbitrationRequestKey, ArbitrationRoundKey},
     crypto::Hash,

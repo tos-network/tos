@@ -15,7 +15,32 @@ impl DagOrderProvider for RocksStorage {
         if log::log_enabled!(log::Level::Trace) {
             trace!("get topo height for hash {}", hash);
         }
-        self.load_from_disk(Column::TopoByHash, hash)
+        let use_cache = self
+            .snapshot
+            .as_ref()
+            .and_then(|s| s.contains(Column::TopoByHash, hash.as_bytes()))
+            .is_none();
+
+        if use_cache {
+            if let Some(objects) = &self.cache().objects {
+                if let Some(value) = objects.topo_by_hash_cache.lock().await.get(hash) {
+                    return Ok(*value);
+                }
+            }
+        }
+
+        let topoheight: TopoHeight = self.load_from_disk(Column::TopoByHash, hash)?;
+        if use_cache {
+            if let Some(objects) = &self.cache().objects {
+                objects
+                    .topo_by_hash_cache
+                    .lock()
+                    .await
+                    .put(hash.clone(), topoheight);
+            }
+        }
+
+        Ok(topoheight)
     }
 
     async fn set_topo_height_for_block(
@@ -27,7 +52,20 @@ impl DagOrderProvider for RocksStorage {
             trace!("set topo height for block {} to {}", hash, topoheight);
         }
         self.insert_into_disk(Column::TopoByHash, hash, &topoheight)?;
-        self.insert_into_disk(Column::HashAtTopo, topoheight.to_be_bytes(), hash)
+        self.insert_into_disk(Column::HashAtTopo, topoheight.to_be_bytes(), hash)?;
+        if let Some(objects) = &self.cache().objects {
+            objects
+                .topo_by_hash_cache
+                .lock()
+                .await
+                .put(hash.clone(), topoheight);
+            objects
+                .hash_at_topo_cache
+                .lock()
+                .await
+                .put(topoheight, hash.clone());
+        }
+        Ok(())
     }
 
     async fn is_block_topological_ordered(&self, hash: &Hash) -> Result<bool, BlockchainError> {
@@ -53,10 +91,49 @@ impl DagOrderProvider for RocksStorage {
         &self,
         topoheight: TopoHeight,
     ) -> Result<Hash, BlockchainError> {
+        eprintln!(
+            "[debug] get_hash_at_topo_height: start, topoheight={}",
+            topoheight
+        );
         if log::log_enabled!(log::Level::Trace) {
             trace!("get hash at topo height {}", topoheight);
         }
-        self.load_from_disk(Column::HashAtTopo, &topoheight.to_be_bytes())
+        let key = topoheight.to_be_bytes();
+        let use_cache = self
+            .snapshot
+            .as_ref()
+            .and_then(|s| s.contains(Column::HashAtTopo, &key))
+            .is_none();
+        eprintln!("[debug] get_hash_at_topo_height: use_cache={}", use_cache);
+
+        if use_cache {
+            if let Some(objects) = &self.cache().objects {
+                eprintln!("[debug] get_hash_at_topo_height: about to lock hash_at_topo_cache");
+                if let Some(value) = objects.hash_at_topo_cache.lock().await.get(&topoheight) {
+                    eprintln!("[debug] get_hash_at_topo_height: cache hit");
+                    return Ok(value.clone());
+                }
+                eprintln!("[debug] get_hash_at_topo_height: cache miss");
+            }
+        }
+
+        eprintln!("[debug] get_hash_at_topo_height: loading from disk");
+        let hash: Hash = self.load_from_disk(Column::HashAtTopo, &key)?;
+        eprintln!("[debug] get_hash_at_topo_height: loaded from disk");
+        if use_cache {
+            if let Some(objects) = &self.cache().objects {
+                eprintln!("[debug] get_hash_at_topo_height: about to lock cache for put");
+                objects
+                    .hash_at_topo_cache
+                    .lock()
+                    .await
+                    .put(topoheight, hash.clone());
+                eprintln!("[debug] get_hash_at_topo_height: put to cache done");
+            }
+        }
+
+        eprintln!("[debug] get_hash_at_topo_height: done");
+        Ok(hash)
     }
 
     async fn has_hash_at_topoheight(

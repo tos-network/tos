@@ -1,21 +1,20 @@
 use crate::core::{
     error::BlockchainError,
     storage::{
+        constants::ASSETS_ID,
         rocksdb::{Asset, AssetId, Column, IteratorMode},
+        snapshot::Direction,
         AssetProvider, NetworkProvider, RocksStorage,
     },
 };
 use async_trait::async_trait;
 use log::trace;
-use rocksdb::Direction;
 use tos_common::{
     asset::{AssetData, VersionedAssetData},
     block::TopoHeight,
     crypto::{Hash, PublicKey},
     serializer::Skip,
 };
-
-pub const ASSETS_ID: &[u8] = b"ASID";
 
 #[async_trait]
 impl AssetProvider for RocksStorage {
@@ -50,12 +49,37 @@ impl AssetProvider for RocksStorage {
         if log::log_enabled!(log::Level::Trace) {
             trace!("get asset {} topoheight", hash);
         }
+        let use_cache = self
+            .snapshot
+            .as_ref()
+            .and_then(|s| s.contains(Column::Assets, hash.as_bytes()))
+            .is_none();
+
+        if use_cache {
+            if let Some(objects) = &self.cache().objects {
+                if let Some(topoheight) = objects.assets_cache.lock().await.get(hash) {
+                    return Ok(Some(*topoheight));
+                }
+            }
+        }
+
         let Some(asset) = self.get_optional_asset_type(hash)? else {
             if log::log_enabled!(log::Level::Trace) {
                 trace!("asset {} not found", hash);
             }
             return Ok(None);
         };
+
+        if use_cache {
+            if let Some(objects) = &self.cache().objects {
+                let mut cache = objects.assets_cache.lock().await;
+                if let Some(topoheight) = asset.data_pointer {
+                    cache.put(hash.clone(), topoheight);
+                } else {
+                    cache.pop(hash);
+                }
+            }
+        }
 
         Ok(asset.data_pointer)
     }
@@ -220,8 +244,7 @@ impl AssetProvider for RocksStorage {
     // Count the number of assets stored
     async fn count_assets(&self) -> Result<u64, BlockchainError> {
         trace!("count assets");
-        self.load_optional_from_disk(Column::Common, &ASSETS_ID)
-            .map(|v| v.unwrap_or(0))
+        Ok(self.cache().counter.assets_count)
     }
 
     // Add an asset to the storage
@@ -252,6 +275,15 @@ impl AssetProvider for RocksStorage {
         };
 
         self.insert_into_disk(Column::Assets, hash, &asset)?;
+        if let Some(objects) = &self.cache().objects {
+            if let Some(topoheight) = asset.data_pointer {
+                objects
+                    .assets_cache
+                    .lock()
+                    .await
+                    .put(hash.clone(), topoheight);
+            }
+        }
 
         let key = Self::get_asset_versioned_key(topoheight, asset.id);
         self.insert_into_disk(Column::VersionedAssets, &key, &data)
@@ -261,14 +293,13 @@ impl AssetProvider for RocksStorage {
 impl RocksStorage {
     fn get_next_asset_id(&mut self) -> Result<AssetId, BlockchainError> {
         trace!("get next asset id");
-        let id = self
-            .load_optional_from_disk(Column::Common, &ASSETS_ID)?
-            .unwrap_or(0);
+        let id = self.cache().counter.assets_count;
 
         if log::log_enabled!(log::Level::Trace) {
             trace!("next asset id: {}", id);
         }
-        self.insert_into_disk(Column::Common, &ASSETS_ID, &(id + 1))?;
+        self.cache_mut().counter.assets_count = id + 1;
+        self.insert_into_disk(Column::Common, ASSETS_ID, &(id + 1))?;
 
         Ok(id)
     }

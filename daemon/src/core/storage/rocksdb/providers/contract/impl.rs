@@ -1,6 +1,7 @@
 use crate::core::{
     error::BlockchainError,
     storage::{
+        constants::NEXT_CONTRACT_ID,
         rocksdb::{Column, Contract, ContractId, IteratorMode},
         ContractProvider, RocksStorage, VersionedContract,
     },
@@ -262,12 +263,9 @@ impl ContractProvider for RocksStorage {
 }
 
 impl RocksStorage {
-    const NEXT_CONTRACT_ID: &[u8] = b"NCID";
-
     fn get_last_contract_id(&self) -> Result<ContractId, BlockchainError> {
         trace!("get current contract id");
-        self.load_optional_from_disk(Column::Common, Self::NEXT_CONTRACT_ID)
-            .map(|v| v.unwrap_or(0))
+        Ok(self.cache().counter.contracts_count)
     }
 
     fn get_next_contract_id(&mut self) -> Result<u64, BlockchainError> {
@@ -276,7 +274,8 @@ impl RocksStorage {
         if log::log_enabled!(log::Level::Trace) {
             trace!("next contract id is {}", id);
         }
-        self.insert_into_disk(Column::Common, Self::NEXT_CONTRACT_ID, &(id + 1))?;
+        self.cache_mut().counter.contracts_count = id + 1;
+        self.insert_into_disk(Column::Common, NEXT_CONTRACT_ID, &(id + 1))?;
 
         Ok(id)
     }

@@ -53,7 +53,7 @@ impl VersionedContractBalanceProvider for RocksStorage {
                 topoheight
             );
         }
-        self.delete_versioned_below_topoheight(
+        self.delete_versioned_below_topoheight_default(
             Column::ContractsBalances,
             Column::VersionedContractsBalances,
             topoheight,

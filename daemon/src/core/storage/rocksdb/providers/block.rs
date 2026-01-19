@@ -30,16 +30,17 @@ impl BlockProvider for RocksStorage {
     // Count the number of blocks stored
     async fn count_blocks(&self) -> Result<u64, BlockchainError> {
         trace!("count blocks");
-        self.load_optional_from_disk(Column::Common, BLOCKS_COUNT)
-            .map(|v| v.unwrap_or(0))
+        Ok(self.cache().counter.blocks_count)
     }
 
     async fn decrease_blocks_count(&mut self, minus: u64) -> Result<(), BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("decrease blocks count by {}", minus);
         }
-        let count = self.count_blocks().await?;
-        self.insert_into_disk(Column::Common, BLOCKS_COUNT, &(count.saturating_sub(minus)))
+        let count = self.cache().counter.blocks_count;
+        let next_count = count.saturating_sub(minus);
+        self.cache_mut().counter.blocks_count = next_count;
+        self.insert_into_disk(Column::Common, BLOCKS_COUNT, &next_count)
     }
 
     // Check if the block exists using its hash
@@ -75,7 +76,7 @@ impl BlockProvider for RocksStorage {
     ) -> Result<(), BlockchainError> {
         trace!("save block");
 
-        let mut count_txs = 0;
+        let mut count_txs: u64 = 0;
         for (hash, transaction) in block.get_transactions().iter().zip(txs.iter()) {
             if !self.has_transaction(hash).await? {
                 self.add_transaction(hash, &transaction).await?;
@@ -84,6 +85,19 @@ impl BlockProvider for RocksStorage {
         }
 
         self.insert_into_disk(Column::Blocks, hash.as_bytes(), &block)?;
+        if let Some(objects) = &self.cache().objects {
+            let hash = hash.as_ref().clone();
+            objects
+                .blocks_cache
+                .lock()
+                .await
+                .put(hash.clone(), block.clone());
+            objects
+                .cumulative_difficulty_cache
+                .lock()
+                .await
+                .put(hash.clone(), cumulative_difficulty.clone());
+        }
 
         let block_difficulty = BlockDifficulty {
             covariance,
@@ -96,12 +110,14 @@ impl BlockProvider for RocksStorage {
             .await?;
 
         if count_txs > 0 {
-            count_txs += self.count_transactions().await?;
-            self.insert_into_disk(Column::Common, TXS_COUNT, &count_txs)?;
+            let next_count = self.cache().counter.transactions_count + count_txs;
+            self.cache_mut().counter.transactions_count = next_count;
+            self.insert_into_disk(Column::Common, TXS_COUNT, &next_count)?;
         }
 
-        let blocks_count = self.count_blocks().await?;
-        self.insert_into_disk(Column::Common, BLOCKS_COUNT, &(blocks_count + 1))
+        let blocks_count = self.cache().counter.blocks_count + 1;
+        self.cache_mut().counter.blocks_count = blocks_count;
+        self.insert_into_disk(Column::Common, BLOCKS_COUNT, &blocks_count)
     }
 
     // Delete a block using its hash
@@ -109,6 +125,10 @@ impl BlockProvider for RocksStorage {
         trace!("delete block with hash");
         let block = self.get_block_by_hash(hash).await?;
         self.remove_from_disk(Column::Blocks, hash)?;
+        if let Some(objects) = &self.cache().objects {
+            objects.blocks_cache.lock().await.pop(hash);
+            objects.cumulative_difficulty_cache.lock().await.pop(hash);
+        }
 
         Ok(block)
     }
