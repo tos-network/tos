@@ -276,10 +276,6 @@ impl<S: Storage> Blockchain<S> {
         } else {
             (0, 0)
         };
-        eprintln!(
-            "[debug] Blockchain::new: height={}, topoheight={}",
-            height, topoheight
-        );
 
         let environment = build_environment::<S>().build();
 
@@ -3044,10 +3040,6 @@ impl<S: Storage> Blockchain<S> {
         broadcast: BroadcastOption,
         mining: bool,
     ) -> Result<(), BlockchainError> {
-        eprintln!(
-            "[debug] add_new_block_with_storage: start, height={}",
-            block.get_height()
-        );
         let mut block = block;
         let start = Instant::now();
 
@@ -3197,10 +3189,6 @@ impl<S: Storage> Blockchain<S> {
 
         let block_height_by_tips =
             blockdag::calculate_height_at_tips(&*storage, block.get_tips().iter()).await?;
-        eprintln!(
-            "[debug] add_new_block_with_storage: calculate_height_at_tips done, result={}",
-            block_height_by_tips
-        );
         if block_height_by_tips != block.get_height() {
             if log::log_enabled!(log::Level::Debug) {
                 debug!(
@@ -3235,10 +3223,6 @@ impl<S: Storage> Blockchain<S> {
         // Verify the reachability of the block
         let reachability_ok =
             blockdag::verify_non_reachability(&*storage, block.get_tips(), version).await?;
-        eprintln!(
-            "[debug] add_new_block_with_storage: verify_non_reachability done, result={}",
-            reachability_ok
-        );
         if !reachability_ok {
             if log::log_enabled!(log::Level::Debug) {
                 debug!(
@@ -3737,10 +3721,6 @@ impl<S: Storage> Blockchain<S> {
         }
 
         let mut tips = storage.get_tips().await?;
-        eprintln!(
-            "[debug] add_new_block_with_storage: get_tips done, tips.len()={}",
-            tips.len()
-        );
         tips.insert(block_hash.as_ref().clone());
         for hash in block.get_tips() {
             tips.remove(hash);
@@ -3777,10 +3757,6 @@ impl<S: Storage> Blockchain<S> {
                 base_topo_height,
             )
             .await?;
-        eprintln!(
-            "[debug] add_new_block_with_storage: generate_full_order done, size={}",
-            full_order.len()
-        );
         if log::log_enabled!(log::Level::Debug) {
             debug!(
                 "Generated full order size: {}, with base ({}) topo height: {}",
@@ -3930,10 +3906,6 @@ impl<S: Storage> Blockchain<S> {
                 );
             }
             for (i, hash) in full_order.into_iter().enumerate() {
-                eprintln!(
-                    "[debug] add_new_block_with_storage: ordering loop iteration {}",
-                    i
-                );
                 highest_topo = base_topo_height + skipped + i as u64;
 
                 // if block is not re-ordered and it's not genesis block
@@ -4036,13 +4008,7 @@ impl<S: Storage> Blockchain<S> {
                         block_hash
                     );
                 }
-                eprintln!(
-                    "[debug] add_new_block_with_storage: calling verify_block_vrf_data (2nd time)"
-                );
                 let vrf_data = self.verify_block_vrf_data(&hash, &block)?;
-                eprintln!(
-                    "[debug] add_new_block_with_storage: verify_block_vrf_data done (2nd time)"
-                );
                 let _vrf_guard = VrfExecutorGuard::new(&self.executor, &hash, vrf_data);
                 let mut chain_state = ApplicableChainState::new(
                     &mut *storage,
@@ -4057,10 +4023,6 @@ impl<S: Storage> Blockchain<S> {
                 );
 
                 total_txs_executed += block.get_txs_count();
-                eprintln!(
-                    "[debug] add_new_block_with_storage: starting TX loop, txs_count={}",
-                    block.get_txs_count()
-                );
 
                 // compute rewards & execute txs
                 for (tx, tx_hash) in block.get_transactions().iter().zip(block.get_txs_hashes()) {
@@ -4458,10 +4420,6 @@ impl<S: Storage> Blockchain<S> {
 
         let best_height = storage.get_height_for_block_hash(best_tip).await?;
         let mut new_tips = Vec::new();
-        eprintln!(
-            "[debug] add_new_block_with_storage: starting tips loop, tips.len()={}",
-            tips.len()
-        );
         for hash in tips {
             if self
                 .is_near_enough_from_main_chain(&*storage, &hash, current_height)
@@ -4486,9 +4444,6 @@ impl<S: Storage> Blockchain<S> {
         let best_tip = blockdag::find_best_tip_by_cumulative_difficulty(&*storage, new_tips.iter())
             .await?
             .clone();
-        eprintln!(
-            "[debug] add_new_block_with_storage: find_best_tip_by_cumulative_difficulty done"
-        );
         for hash in new_tips {
             if best_tip != hash {
                 if !self.validate_tips(&*storage, &best_tip, &hash).await? {
@@ -4506,10 +4461,6 @@ impl<S: Storage> Blockchain<S> {
         tips.insert(best_tip);
 
         // save highest topo height
-        eprintln!(
-            "[debug] add_new_block_with_storage: checking highest topo, extended={}",
-            highest_topo > current_topoheight
-        );
         if log::log_enabled!(log::Level::Debug) {
             debug!("Highest topo height found: {}", highest_topo);
         }
@@ -4726,10 +4677,6 @@ impl<S: Storage> Blockchain<S> {
         }
 
         // Now we can try to add back all transactions
-        eprintln!(
-            "[debug] add_new_block_with_storage: orphaned_transactions.len()={}",
-            orphaned_transactions.len()
-        );
         {
             counter!("tos_orphaned_txs").increment(orphaned_transactions.len() as u64);
 
