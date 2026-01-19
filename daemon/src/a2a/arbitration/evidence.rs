@@ -1,4 +1,4 @@
-use std::net::IpAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::time::Duration;
 
 use reqwest::redirect::Policy;
@@ -111,31 +111,45 @@ async fn fetch_evidence_once(
         return Err(FetchFailure::Fatal("unsupported scheme".to_string()));
     }
 
-    let mut client = Client::builder()
-        .redirect(Policy::none())
-        .timeout(Duration::from_secs(evidence_timeout_secs()))
-        .build()
-        .map_err(|e| FetchFailure::Fatal(e.to_string()))?;
-
-    if let Ok(bundle_path) = std::env::var(ENV_CA_BUNDLE) {
+    // Load optional CA bundle
+    let ca_cert = if let Ok(bundle_path) = std::env::var(ENV_CA_BUNDLE) {
         let pem = std::fs::read(&bundle_path).map_err(|e| FetchFailure::Fatal(e.to_string()))?;
-        let cert =
-            reqwest::Certificate::from_pem(&pem).map_err(|e| FetchFailure::Fatal(e.to_string()))?;
-        client = Client::builder()
-            .redirect(Policy::none())
-            .timeout(Duration::from_secs(evidence_timeout_secs()))
-            .add_root_certificate(cert)
-            .build()
-            .map_err(|e| FetchFailure::Fatal(e.to_string()))?;
-    }
+        Some(reqwest::Certificate::from_pem(&pem).map_err(|e| FetchFailure::Fatal(e.to_string()))?)
+    } else {
+        None
+    };
 
     let mut redirects = 0usize;
+    let max_bytes = evidence_max_bytes();
     loop {
-        if !allow_local_hosts() {
-            validate_url_host(&url)
+        // Resolve DNS upfront and validate all IPs BEFORE connecting.
+        // This prevents SSRF via DNS rebinding attacks where an attacker
+        // could pass validation with a public IP, then rebind to internal IP.
+        let (host, resolved_addrs) = if allow_local_hosts() {
+            (String::new(), Vec::new())
+        } else {
+            resolve_and_validate_host(&url)
                 .await
-                .map_err(|e| FetchFailure::Fatal(e.to_string()))?;
+                .map_err(|e| FetchFailure::Fatal(e.to_string()))?
+        };
+
+        // Build client with pinned DNS resolution to prevent rebinding
+        let mut builder = Client::builder()
+            .redirect(Policy::none())
+            .timeout(Duration::from_secs(evidence_timeout_secs()));
+
+        if let Some(ref cert) = ca_cert {
+            builder = builder.add_root_certificate(cert.clone());
         }
+
+        // Pin resolved addresses to prevent DNS rebinding between resolve and connect
+        for addr in &resolved_addrs {
+            builder = builder.resolve(&host, *addr);
+        }
+
+        let client = builder
+            .build()
+            .map_err(|e| FetchFailure::Fatal(e.to_string()))?;
 
         let response = match client.get(url.clone()).send().await {
             Ok(response) => response,
@@ -186,13 +200,19 @@ async fn fetch_evidence_once(
             }
         }
 
-        let bytes = response
-            .bytes()
+        // Stream body with size limit to prevent memory exhaustion.
+        // Check size WHILE accumulating, not after buffering entire response.
+        let mut bytes = Vec::new();
+        let mut response = response;
+        while let Some(chunk) = response
+            .chunk()
             .await
             .map_err(|e| FetchFailure::Fatal(e.to_string()))?
-            .to_vec();
-        if bytes.len() > evidence_max_bytes() {
-            return Err(FetchFailure::Fatal("evidence too large".to_string()));
+        {
+            if bytes.len().saturating_add(chunk.len()) > max_bytes {
+                return Err(FetchFailure::Fatal("evidence too large".to_string()));
+            }
+            bytes.extend_from_slice(&chunk);
         }
 
         let hash = compute_hash(&bytes);
@@ -207,23 +227,36 @@ async fn fetch_evidence_once(
     }
 }
 
-async fn validate_url_host(url: &Url) -> Result<(), ArbitrationError> {
+/// Resolves DNS for the URL host and validates all resolved IPs.
+/// Returns the host string and validated socket addresses for DNS pinning.
+/// This prevents SSRF via DNS rebinding by resolving once and pinning.
+async fn resolve_and_validate_host(
+    url: &Url,
+) -> Result<(String, Vec<SocketAddr>), ArbitrationError> {
     let host = url
         .host_str()
         .ok_or_else(|| ArbitrationError::Evidence("missing host".to_string()))?;
     let port = url.port_or_known_default().unwrap_or(443);
 
-    let addrs = tokio::net::lookup_host((host, port))
+    let lookup_result = tokio::net::lookup_host((host, port))
         .await
         .map_err(|_| ArbitrationError::Evidence("dns failure".to_string()))?;
 
-    for addr in addrs {
+    let all_addrs: Vec<SocketAddr> = lookup_result.collect();
+    if all_addrs.is_empty() {
+        return Err(ArbitrationError::Evidence(
+            "no addresses resolved".to_string(),
+        ));
+    }
+
+    // Check if any address is blocked
+    for addr in &all_addrs {
         if is_blocked_ip(addr.ip()) {
             return Err(ArbitrationError::Evidence("blocked ip".to_string()));
         }
     }
 
-    Ok(())
+    Ok((host.to_string(), all_addrs))
 }
 
 fn allow_local_hosts() -> bool {

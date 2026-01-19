@@ -99,7 +99,7 @@ impl CoordinatorService {
             .map(|pk| pubkey_to_address(blockchain, pk))
             .collect::<Vec<_>>();
 
-        let selected_jurors_hash = hash_string_list(&selected_jurors);
+        let selected_jurors_hash = hash_selected_jurors(&selected_jurors)?;
         let arbitration_open_hash = canonical_hash_without_signature(&open, "signature")
             .map_err(|e| ArbitrationError::Storage(e.to_string()))?;
 
@@ -325,11 +325,40 @@ fn sha3_hash(bytes: &[u8]) -> [u8; 32] {
     hasher.finalize().into()
 }
 
-fn hash_string_list(items: &[String]) -> Hash {
-    let mut sorted = items.to_vec();
-    sorted.sort();
-    let payload = serde_json::to_vec(&sorted).unwrap_or_default();
-    Hash::new(sha3_hash(&payload))
+/// Domain separator for A2A Arbitration protocol to prevent cross-protocol attacks.
+const DOMAIN_SEPARATOR: &[u8] = b"TOS-A2A-ARBITRATION-V1";
+
+/// Hash selected jurors using raw 32-byte account IDs with domain separator.
+/// Per spec: hash(domain_separator || "TOS_SELECTED_JURORS_HASH_V1" || u32 length || concat(sorted raw keys))
+/// Using raw 32-byte keys ensures deterministic, compact representation.
+fn hash_selected_jurors(accounts: &[String]) -> Result<Hash, ArbitrationError> {
+    use sha3::{Digest, Sha3_256};
+
+    // Parse bech32 addresses to extract raw 32-byte public keys
+    let mut raw_keys: Vec<[u8; 32]> = Vec::with_capacity(accounts.len());
+    for account in accounts {
+        let address = Address::from_string(account).map_err(|e| {
+            ArbitrationError::InvalidMessage(format!("invalid address {account}: {e}"))
+        })?;
+        let pubkey = address.get_public_key();
+        let bytes: [u8; 32] = *pubkey.as_bytes();
+        raw_keys.push(bytes);
+    }
+
+    // Sort and deduplicate for deterministic ordering
+    raw_keys.sort();
+    raw_keys.dedup();
+
+    // Compute hash with domain separator and length prefix
+    let mut hasher = Sha3_256::new();
+    hasher.update(DOMAIN_SEPARATOR);
+    hasher.update(b"TOS_SELECTED_JURORS_HASH_V1");
+    hasher.update((raw_keys.len() as u32).to_le_bytes());
+    for key in &raw_keys {
+        hasher.update(key);
+    }
+
+    Ok(Hash::new(hasher.finalize().into()))
 }
 
 fn pubkey_to_address<S: Storage>(blockchain: &Blockchain<S>, pubkey: &PublicKey) -> String {
@@ -342,14 +371,26 @@ fn build_verdict(
     escrow: &EscrowAccount,
     coordinator_keypair: &KeyPair,
 ) -> Result<VerdictBundle, ArbitrationError> {
+    use tos_common::arbitration::JurorSignature;
+
     let outcome = aggregate_votes(&case.votes);
     let _amounts = compute_amounts(&outcome, escrow.amount);
 
-    let signatures = case
+    // Per spec: only include signatures from jurors who voted for the winning outcome,
+    // sorted by juror_pubkey in ascending byte order.
+    let outcome_key = vote_choice_key(&outcome);
+    let mut signatures: Vec<JurorSignature> = case
         .votes
         .iter()
-        .map(|vote| vote.signature.clone())
-        .collect::<Vec<_>>();
+        .filter(|vote| vote_choice_key(&vote.vote) == outcome_key)
+        .map(|vote| JurorSignature {
+            juror_pubkey: vote.juror_pubkey.clone(),
+            signature: vote.signature.clone(),
+        })
+        .collect();
+
+    // Sort by juror pubkey in ascending byte order per spec
+    signatures.sort_by(|a, b| a.juror_pubkey.as_bytes().cmp(b.juror_pubkey.as_bytes()));
 
     let mut verdict = VerdictBundle {
         message_type: "VerdictBundle".to_string(),

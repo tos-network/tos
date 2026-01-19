@@ -2,6 +2,16 @@ use serde::{Deserialize, Serialize};
 
 use crate::crypto::{Hash, PublicKey, Signature};
 
+/// Juror signature entry for VerdictBundle.
+/// Per spec: signatures array contains juror pubkey + signature pairs,
+/// sorted by juror pubkey in ascending byte order.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JurorSignature {
+    pub juror_pubkey: PublicKey,
+    pub signature: Signature,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ArbitrationOpen {
@@ -108,7 +118,13 @@ pub struct VerdictBundle {
     pub vote_request_hash: Hash,
     pub outcome: VoteChoice,
     pub vote_count: u32,
-    pub juror_signatures: Vec<Signature>,
+    /// Per spec: signatures from jurors who voted for the winning outcome,
+    /// sorted by juror_pubkey in ascending byte order.
+    /// NOTE (light version): These are JurorVote signatures (TOS_JUROR_VOTE_V1),
+    /// not VerdictBundle signatures (TOS_VERDICT_BUNDLE_V1). The full protocol
+    /// would require jurors to sign the VerdictBundle separately after outcome
+    /// is determined. Light version uses vote signatures as proof of vote.
+    pub juror_signatures: Vec<JurorSignature>,
     pub coordinator_pubkey: PublicKey,
     pub coordinator_signature: Signature,
     pub issued_at: u64,
