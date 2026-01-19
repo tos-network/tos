@@ -113,14 +113,14 @@ fn test_log_collection_hello_world() {
 
     println!("Contract loaded: {} bytes", bytecode.len());
 
-    let mut provider = MockProvider;
+    let provider = MockProvider;
     let contract_hash = Hash::zero();
     let topoheight = 100;
 
     println!("Executing contract with log collection enabled...");
 
     // Execute the contract
-    let result = TakoExecutor::execute_simple(&bytecode, &mut provider, topoheight, &contract_hash);
+    let result = TakoExecutor::execute_simple(&bytecode, &provider, topoheight, &contract_hash);
 
     match result {
         Ok(exec_result) => {
@@ -176,10 +176,10 @@ fn test_log_collection_field_exists() {
     let contract_path = "tests/fixtures/hello_world.so";
     let bytecode = std::fs::read(contract_path).expect("Failed to read hello_world.so");
 
-    let mut provider = MockProvider;
+    let provider = MockProvider;
     let contract_hash = Hash::zero();
 
-    let result = TakoExecutor::execute_simple(&bytecode, &mut provider, 100, &contract_hash);
+    let result = TakoExecutor::execute_simple(&bytecode, &provider, 100, &contract_hash);
 
     match result {
         Ok(exec_result) => {
@@ -202,10 +202,10 @@ fn test_log_messages_format() {
     let contract_path = "tests/fixtures/hello_world.so";
     let bytecode = std::fs::read(contract_path).expect("Failed to read hello_world.so");
 
-    let mut provider = MockProvider;
+    let provider = MockProvider;
     let contract_hash = Hash::zero();
 
-    let result = TakoExecutor::execute_simple(&bytecode, &mut provider, 100, &contract_hash);
+    let result = TakoExecutor::execute_simple(&bytecode, &provider, 100, &contract_hash);
 
     match result {
         Ok(exec_result) => {
@@ -249,10 +249,10 @@ fn test_empty_logs_for_non_logging_contract() {
 
     let bytecode = std::fs::read(contract_path).expect("Failed to read counter.so");
 
-    let mut provider = MockProvider;
+    let provider = MockProvider;
     let contract_hash = Hash::zero();
 
-    let result = TakoExecutor::execute_simple(&bytecode, &mut provider, 100, &contract_hash);
+    let result = TakoExecutor::execute_simple(&bytecode, &provider, 100, &contract_hash);
 
     match result {
         Ok(exec_result) => {

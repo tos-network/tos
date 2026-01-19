@@ -22,7 +22,7 @@ use tos_common::{
     arbitration::{expertise_domains_to_skill_tags, ArbiterAccount},
     async_handler,
     context::Context,
-    crypto::{hash, Hash, PublicKey},
+    crypto::{hash, Address, Hash, PublicKey},
     rpc::{
         parse_params,
         server::{RPCServerHandler, RequestMetadata},
@@ -386,6 +386,12 @@ pub struct GetAgentRequest {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct GetAgentByAccountRequest {
+    pub agent_account: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct HeartbeatRequest {
     pub agent_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -465,6 +471,11 @@ pub struct AgentListQuery {
 }
 
 #[derive(Clone, Debug, Deserialize)]
+pub struct AgentByAccountQuery {
+    pub account: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
 pub struct CommitteeMembersQuery {
     pub active_only: Option<bool>,
 }
@@ -479,6 +490,8 @@ pub enum AgentRegistryRpcError {
     InvalidVersion(String),
     #[error("invalid agent id")]
     InvalidAgentId,
+    #[error("invalid agent account")]
+    InvalidAgentAccount,
     #[error("invalid committee id")]
     InvalidCommitteeId,
     #[error("committee not found")]
@@ -528,6 +541,14 @@ pub fn register_agent_registry_methods<S: Storage>(handler: &mut RPCHandler<Arc<
     handler.register_method("UnregisterAgent", async_handler!(unregister_agent::<S>));
     handler.register_method("get_agent", async_handler!(get_agent::<S>));
     handler.register_method("GetRegisteredAgent", async_handler!(get_agent::<S>));
+    handler.register_method(
+        "get_agent_by_account",
+        async_handler!(get_agent_by_account::<S>),
+    );
+    handler.register_method(
+        "GetAgentByAccount",
+        async_handler!(get_agent_by_account::<S>),
+    );
     handler.register_method("discover_agents", async_handler!(discover_agents::<S>));
     handler.register_method("DiscoverAgents", async_handler!(discover_agents::<S>));
     handler.register_method("list_agents", async_handler!(list_agents::<S>));
@@ -674,6 +695,26 @@ async fn get_agent<S: Storage>(context: &Context, body: Value) -> Result<Value, 
 
     let registry = global_registry();
     let agent = registry.get(&agent_id).await;
+    let response = if let Some(agent) = agent {
+        let blockchain: &Arc<Blockchain<S>> = context.get()?;
+        let storage = blockchain.get_storage().read().await;
+        Some(enrich_agent_summary(&*storage, &agent).await)
+    } else {
+        None
+    };
+    serde_json::to_value(response).map_err(InternalRpcError::SerializeResponse)
+}
+
+async fn get_agent_by_account<S: Storage>(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    require_registry_auth_context(context).await?;
+    let request: GetAgentByAccountRequest = parse_params(body)?;
+    let agent_account = parse_agent_account(&request.agent_account).map_err(map_error)?;
+
+    let registry = global_registry();
+    let agent = registry.get_by_account(&agent_account).await;
     let response = if let Some(agent) = agent {
         let blockchain: &Arc<Blockchain<S>> = context.get()?;
         let storage = blockchain.get_storage().read().await;
@@ -880,6 +921,30 @@ pub async fn get_agent_http<S: Storage>(
     let agent_id = parse_agent_id_http(&path.id).map_err(map_http_error)?;
     let registry = global_registry();
     let agent = registry.get(&agent_id).await;
+    match agent {
+        Some(agent) => {
+            let storage = server
+                .get_rpc_handler()
+                .get_data()
+                .get_storage()
+                .read()
+                .await;
+            Ok(HttpResponse::Ok().json(enrich_agent_summary(&*storage, &agent).await))
+        }
+        None => Err(ErrorNotFound("Agent not found")),
+    }
+}
+
+/// HTTP endpoint: GET /agents:by-account?account=tos1...
+pub async fn get_agent_by_account_http<S: Storage>(
+    server: web::Data<DaemonRpcServer<S>>,
+    request: HttpRequest,
+    query: web::Query<AgentByAccountQuery>,
+) -> Result<HttpResponse, ActixError> {
+    require_registry_auth_http(&request, &[]).await?;
+    let agent_account = parse_agent_account(&query.account).map_err(map_http_error)?;
+    let registry = global_registry();
+    let agent = registry.get_by_account(&agent_account).await;
     match agent {
         Some(agent) => {
             let storage = server
@@ -1111,6 +1176,12 @@ fn parse_agent_id(value: &str) -> Result<Hash, InternalRpcError> {
 
 fn parse_agent_id_http(value: &str) -> Result<Hash, AgentRegistryRpcError> {
     Hash::from_str(value).map_err(|_| AgentRegistryRpcError::InvalidAgentId)
+}
+
+fn parse_agent_account(value: &str) -> Result<PublicKey, AgentRegistryRpcError> {
+    Address::from_string(value)
+        .map(|address| address.to_public_key())
+        .map_err(|_| AgentRegistryRpcError::InvalidAgentAccount)
 }
 
 fn parse_committee_id(value: &str) -> Result<Hash, AgentRegistryRpcError> {
@@ -1494,6 +1565,7 @@ fn map_error(err: AgentRegistryRpcError) -> InternalRpcError {
         AgentRegistryRpcError::MissingTosSignature
         | AgentRegistryRpcError::MissingTosIdentity
         | AgentRegistryRpcError::InvalidAgentId
+        | AgentRegistryRpcError::InvalidAgentAccount
         | AgentRegistryRpcError::InvalidCommitteeId
         | AgentRegistryRpcError::CommitteeNotFound
         | AgentRegistryRpcError::InvalidVersion(_)
@@ -1531,6 +1603,7 @@ fn map_http_error(err: AgentRegistryRpcError) -> ActixError {
         AgentRegistryRpcError::MissingTosSignature
         | AgentRegistryRpcError::MissingTosIdentity
         | AgentRegistryRpcError::InvalidAgentId
+        | AgentRegistryRpcError::InvalidAgentAccount
         | AgentRegistryRpcError::InvalidCommitteeId
         | AgentRegistryRpcError::InvalidVersion(_)
         | AgentRegistryRpcError::SerializeAgentCard
@@ -1723,6 +1796,7 @@ mod tests {
     use std::collections::HashSet;
     use std::sync::Once;
     use tos_common::a2a::{AgentCapabilities, AgentInterface, AgentSkill, TosSignerType};
+    use tos_common::crypto::AddressType;
     use tos_common::serializer::Serializer;
 
     static AUTH_INIT: Once = Once::new();
@@ -1809,6 +1883,17 @@ mod tests {
             &sig,
         )?;
         assert!(!msg.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn parse_agent_account_accepts_address() -> Result<(), Box<dyn std::error::Error>> {
+        let pubkey = PublicKey::from_bytes(&[7u8; 32])?;
+        let address = Address::new(true, AddressType::Normal, pubkey.clone())
+            .as_string()
+            .expect("address");
+        let parsed = parse_agent_account(&address)?;
+        assert_eq!(parsed, pubkey);
         Ok(())
     }
 

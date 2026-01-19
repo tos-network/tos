@@ -96,6 +96,18 @@ pub const MIN_UNFREEZE_TOS_AMOUNT: u64 = COIN_VALUE;
 pub const MIN_SHIELD_TOS_AMOUNT: u64 = COIN_VALUE * 100;
 /// Minimum arbiter stake (1000 TOS)
 pub const MIN_ARBITER_STAKE: u64 = COIN_VALUE * 1000;
+/// Juror submit window after coordinator deadline (in blocks)
+pub const JUROR_SUBMIT_WINDOW: u64 = 86_400;
+/// Max bytes for ArbitrationOpen payload (canonical JSON bytes)
+pub const MAX_ARBITRATION_OPEN_BYTES: usize = 64 * 1024;
+/// Max bytes for VoteRequest payload (canonical JSON bytes)
+pub const MAX_VOTE_REQUEST_BYTES: usize = 64 * 1024;
+/// Max bytes for SelectionCommitment payload
+pub const MAX_SELECTION_COMMITMENT_BYTES: usize = 64 * 1024;
+/// Max bytes for JurorVote payload (canonical JSON bytes)
+pub const MAX_JUROR_VOTE_BYTES: usize = 8 * 1024;
+/// Max bytes for VerdictBundle payload
+pub const MAX_VERDICT_BUNDLE_BYTES: usize = 128 * 1024;
 
 // ===== ENERGY SYSTEM LIMITS =====
 // Maximum freeze records per account (self-freeze + delegation combined)

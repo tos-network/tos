@@ -259,6 +259,10 @@ impl<S: Storage> DaemonRpcServer<S> {
                             web::get().to(agent_registry::discover_agents_http_get::<S>),
                         )
                         .route(
+                            "/agents:by-account",
+                            web::get().to(agent_registry::get_agent_by_account_http::<S>),
+                        )
+                        .route(
                             "/committees:members",
                             web::post().to(agent_registry::discover_committee_members_http::<S>),
                         )
@@ -342,6 +346,10 @@ impl<S: Storage> DaemonRpcServer<S> {
                         .route(
                             "/v1/agents:discover",
                             web::get().to(agent_registry::discover_agents_http_get::<S>),
+                        )
+                        .route(
+                            "/v1/agents:by-account",
+                            web::get().to(agent_registry::get_agent_by_account_http::<S>),
                         )
                         .route(
                             "/v1/committees:members",

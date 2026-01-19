@@ -175,7 +175,7 @@ fn test_aave_v3_initialize() {
     println!("\n=== Aave V3 Pool Initialize Test ===");
     println!("Contract size: {} bytes", bytecode.len());
 
-    let mut provider = MockProvider::new();
+    let provider = MockProvider::new();
     let contract_hash = Hash::zero();
     let topoheight = 100;
 
@@ -188,7 +188,7 @@ fn test_aave_v3_initialize() {
 
     let result = TakoExecutor::execute(
         &bytecode,
-        &mut provider,
+        &provider,
         topoheight,
         &contract_hash,
         &Hash::zero(),    // block_hash
@@ -232,7 +232,7 @@ fn test_aave_v3_initialize_reserve() {
 
     println!("\n=== Aave V3 Initialize Reserve Test ===");
 
-    let mut provider = MockProvider::new();
+    let provider = MockProvider::new();
     let contract_hash = Hash::zero();
     let topoheight = 100;
 
@@ -251,7 +251,7 @@ fn test_aave_v3_initialize_reserve() {
 
     let result = TakoExecutor::execute(
         &bytecode,
-        &mut provider,
+        &provider,
         topoheight,
         &contract_hash,
         &Hash::zero(),   // block_hash
@@ -288,7 +288,7 @@ fn test_aave_v3_supply() {
 
     println!("\n=== Aave V3 Supply Test ===");
 
-    let mut provider = MockProvider::new();
+    let provider = MockProvider::new();
     let contract_hash = Hash::zero();
     let topoheight = 100;
 
@@ -313,7 +313,7 @@ fn test_aave_v3_supply() {
 
     let result = TakoExecutor::execute(
         &bytecode,
-        &mut provider,
+        &provider,
         topoheight,
         &contract_hash,
         &Hash::zero(),   // block_hash
@@ -347,7 +347,7 @@ fn test_aave_v3_borrow() {
 
     println!("\n=== Aave V3 Borrow Test ===");
 
-    let mut provider = MockProvider::new();
+    let provider = MockProvider::new();
     let contract_hash = Hash::zero();
     let topoheight = 100;
 
@@ -367,7 +367,7 @@ fn test_aave_v3_borrow() {
 
     let result = TakoExecutor::execute(
         &bytecode,
-        &mut provider,
+        &provider,
         topoheight,
         &contract_hash,
         &Hash::zero(),   // block_hash

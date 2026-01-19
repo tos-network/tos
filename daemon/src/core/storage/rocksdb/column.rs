@@ -264,6 +264,21 @@ pub enum Column {
     // Arbiter accounts storage
     // {arbiter_public_key (32 bytes)} => {ArbiterAccount}
     ArbiterAccounts,
+    // ArbitrationOpen commit indexed by escrow/dispute/round
+    // {escrow_id (32 bytes)}{dispute_id (32 bytes)}{round (4 bytes)} => {CommitArbitrationOpenPayload}
+    ArbitrationCommitOpenByRound,
+    // ArbitrationOpen commit indexed by request_id
+    // {request_id (32 bytes)} => {CommitArbitrationOpenPayload}
+    ArbitrationCommitOpenByRequest,
+    // VoteRequest commit indexed by request_id
+    // {request_id (32 bytes)} => {CommitVoteRequestPayload}
+    ArbitrationCommitVoteRequest,
+    // Selection commitment indexed by request_id
+    // {request_id (32 bytes)} => {CommitSelectionCommitmentPayload}
+    ArbitrationCommitSelectionCommitment,
+    // Juror votes indexed by request_id + juror pubkey
+    // {request_id (32 bytes)}{juror_public_key (32 bytes)} => {CommitJurorVotePayload}
+    ArbitrationCommitJurorVote,
 
     // ===== TNS (TOS Name Service) =====
 
@@ -346,6 +361,8 @@ impl Column {
             EscrowPendingRelease => Some(PREFIX_TOPOHEIGHT_LEN),
             // Escrow history: prefix by escrow_id (32 bytes)
             EscrowHistory => Some(32),
+            // Arbitration juror votes: prefix by request_id (32 bytes)
+            ArbitrationCommitJurorVote => Some(32),
 
             _ => None,
         }

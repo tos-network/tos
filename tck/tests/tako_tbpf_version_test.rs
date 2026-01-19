@@ -224,13 +224,13 @@ fn test_v0_contract_with_default_features() {
     let e_flags = get_e_flags(&bytecode);
     assert_eq!(e_flags, 0, "Expected V0 contract (e_flags=0)");
 
-    let mut provider = MockProvider::new();
+    let provider = MockProvider::new();
     let contract_hash = Hash::zero();
 
     // Default features should support V0
     let result = TakoExecutor::execute(
         &bytecode,
-        &mut provider,
+        &provider,
         100,
         &contract_hash,
         &Hash::zero(),
@@ -252,13 +252,13 @@ fn test_v0_contract_with_default_features() {
 #[test]
 fn test_v0_contract_with_production_features() {
     let bytecode = load_contract(V0_CONTRACT_PATH);
-    let mut provider = MockProvider::new();
+    let provider = MockProvider::new();
     let contract_hash = Hash::zero();
 
     // Production features (V0-V3) should support V0
     let result = TakoExecutor::execute_with_features(
         &bytecode,
-        &mut provider,
+        &provider,
         100,
         &contract_hash,
         &Hash::zero(),
@@ -281,13 +281,13 @@ fn test_v0_contract_with_production_features() {
 #[test]
 fn test_v0_contract_rejected_by_v3_only() {
     let bytecode = load_contract(V0_CONTRACT_PATH);
-    let mut provider = MockProvider::new();
+    let provider = MockProvider::new();
     let contract_hash = Hash::zero();
 
     // V3-only features should reject V0 contracts
     let result = TakoExecutor::execute_with_features(
         &bytecode,
-        &mut provider,
+        &provider,
         100,
         &contract_hash,
         &Hash::zero(),
@@ -332,7 +332,7 @@ fn test_v3_contract_loads_with_production_features() {
     let e_flags = get_e_flags(&bytecode);
     assert_eq!(e_flags, 3, "Expected V3 contract (e_flags=3)");
 
-    let mut provider = MockProvider::new();
+    let provider = MockProvider::new();
     let contract_hash = Hash::zero();
 
     // Production features (V0-V3) should allow V3 contract to load
@@ -341,7 +341,7 @@ fn test_v3_contract_loads_with_production_features() {
     // uses EXIT (0x95) uniformly across all versions.
     let result = TakoExecutor::execute_with_features(
         &bytecode,
-        &mut provider,
+        &provider,
         100,
         &contract_hash,
         &Hash::zero(),
@@ -381,14 +381,14 @@ fn test_v3_contract_loads_with_production_features() {
 #[test]
 fn test_v3_contract_loads_with_v3_only_features() {
     let bytecode = load_contract(V3_CONTRACT_PATH);
-    let mut provider = MockProvider::new();
+    let provider = MockProvider::new();
     let contract_hash = Hash::zero();
 
     // V3-only features should allow V3 contract to load
     // Same note as above: test fixture uses obsolete RETURN (0x9d) opcode
     let result = TakoExecutor::execute_with_features(
         &bytecode,
-        &mut provider,
+        &provider,
         100,
         &contract_hash,
         &Hash::zero(),
@@ -424,13 +424,13 @@ fn test_v3_contract_loads_with_v3_only_features() {
 #[test]
 fn test_v3_contract_rejected_by_default_features() {
     let bytecode = load_contract(V3_CONTRACT_PATH);
-    let mut provider = MockProvider::new();
+    let provider = MockProvider::new();
     let contract_hash = Hash::zero();
 
     // Default features (V0 only) should reject V3 contracts at ELF loading
     let result = TakoExecutor::execute_with_features(
         &bytecode,
-        &mut provider,
+        &provider,
         100,
         &contract_hash,
         &Hash::zero(),
@@ -508,12 +508,12 @@ fn test_tbpf_version_support_summary() {
     println!("| Contract | Default | Production | V3-Only |");
     println!("|----------|---------|------------|---------|");
 
-    let mut provider = MockProvider::new();
+    let provider = MockProvider::new();
 
     // V0 contract execution matrix
     let v0_default = TakoExecutor::execute_with_features(
         &v0_bytecode,
-        &mut provider,
+        &provider,
         100,
         &Hash::zero(),
         &Hash::zero(),
@@ -529,7 +529,7 @@ fn test_tbpf_version_support_summary() {
 
     let v0_production = TakoExecutor::execute_with_features(
         &v0_bytecode,
-        &mut provider,
+        &provider,
         100,
         &Hash::zero(),
         &Hash::zero(),
@@ -545,7 +545,7 @@ fn test_tbpf_version_support_summary() {
 
     let v0_v3only = TakoExecutor::execute_with_features(
         &v0_bytecode,
-        &mut provider,
+        &provider,
         100,
         &Hash::zero(),
         &Hash::zero(),
@@ -569,7 +569,7 @@ fn test_tbpf_version_support_summary() {
     // V3 contract execution matrix
     let v3_default = TakoExecutor::execute_with_features(
         &v3_bytecode,
-        &mut provider,
+        &provider,
         100,
         &Hash::zero(),
         &Hash::zero(),
@@ -585,7 +585,7 @@ fn test_tbpf_version_support_summary() {
 
     let v3_production = TakoExecutor::execute_with_features(
         &v3_bytecode,
-        &mut provider,
+        &provider,
         100,
         &Hash::zero(),
         &Hash::zero(),
@@ -601,7 +601,7 @@ fn test_tbpf_version_support_summary() {
 
     let v3_v3only = TakoExecutor::execute_with_features(
         &v3_bytecode,
-        &mut provider,
+        &provider,
         100,
         &Hash::zero(),
         &Hash::zero(),

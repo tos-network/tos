@@ -1879,7 +1879,7 @@ async fn test_transfer_extra_data_limits() {
                 "Expected ExtraDataTooLarge error"
             );
         }
-        Ok(_) => assert!(false, "Transaction with oversized extra data should fail"),
+        Ok(_) => panic!("Transaction with oversized extra data should fail"),
     }
 
     // Test multiple transfers with total extra data exceeding limit
@@ -1931,10 +1931,7 @@ async fn test_transfer_extra_data_limits() {
                 "Expected ExtraDataTooLarge or EncryptedExtraDataTooLarge error for total size"
             );
         }
-        Ok(_) => assert!(
-            false,
-            "Transaction with total oversized extra data should fail"
-        ),
+        Ok(_) => panic!("Transaction with total oversized extra data should fail"),
     }
 }
 
@@ -2822,8 +2819,8 @@ async fn test_p04_double_spend_prevention() {
             println!("Double-spend prevented: available={available}, required={required}");
             assert!(available < required, "Should have insufficient funds");
         }
-        Err(other) => assert!(false, "Expected InsufficientFunds error, got {other:?}"),
-        Ok(_) => assert!(false, "Expected InsufficientFunds error, got Ok"),
+        Err(other) => panic!("Expected InsufficientFunds error, got {other:?}"),
+        Ok(_) => panic!("Expected InsufficientFunds error, got Ok"),
     }
 }
 
@@ -2881,8 +2878,8 @@ async fn test_p04_insufficient_balance() {
             );
             assert!(required > available, "Required should exceed available");
         }
-        Err(other) => assert!(false, "Expected InsufficientFunds error, got {other:?}"),
-        Ok(_) => assert!(false, "Expected InsufficientFunds error, got Ok"),
+        Err(other) => panic!("Expected InsufficientFunds error, got {other:?}"),
+        Ok(_) => panic!("Expected InsufficientFunds error, got Ok"),
     }
 }
 
@@ -2954,7 +2951,7 @@ async fn test_p04_overflow_protection() {
         return;
     }
 
-    assert!(false, "Should have detected overflow");
+    panic!("Should have detected overflow");
 }
 
 // Test 5: Fee deduction with TOS

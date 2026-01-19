@@ -203,7 +203,7 @@ fn test_factory_pattern_init() {
         }
     };
 
-    let mut provider = MockProvider::new();
+    let provider = MockProvider::new();
     let contract_hash = Hash::zero();
     let topoheight = 100;
 
@@ -214,7 +214,7 @@ fn test_factory_pattern_init() {
 
     let result = TakoExecutor::execute(
         &bytecode,
-        &mut provider,
+        &provider,
         topoheight,
         &contract_hash,
         &Hash::zero(),     // block_hash
@@ -286,7 +286,7 @@ fn test_governance_init() {
         }
     };
 
-    let mut provider = MockProvider::new();
+    let provider = MockProvider::new();
     let contract_hash = Hash::zero();
     let topoheight = 100;
 
@@ -299,7 +299,7 @@ fn test_governance_init() {
 
     let result = TakoExecutor::execute(
         &bytecode,
-        &mut provider,
+        &provider,
         topoheight,
         &contract_hash,
         &Hash::zero(),     // block_hash
@@ -373,7 +373,7 @@ fn test_multisig_wallet_init() {
         }
     };
 
-    let mut provider = MockProvider::new();
+    let provider = MockProvider::new();
     let contract_hash = Hash::zero();
     let topoheight = 100;
 
@@ -392,7 +392,7 @@ fn test_multisig_wallet_init() {
 
     let result = TakoExecutor::execute(
         &bytecode,
-        &mut provider,
+        &provider,
         topoheight,
         &contract_hash,
         &Hash::zero(),      // block_hash
@@ -466,7 +466,7 @@ fn test_staking_contract_init() {
         }
     };
 
-    let mut provider = MockProvider::new();
+    let provider = MockProvider::new();
     let contract_hash = Hash::zero();
     let topoheight = 100;
 
@@ -478,7 +478,7 @@ fn test_staking_contract_init() {
 
     let result = TakoExecutor::execute(
         &bytecode,
-        &mut provider,
+        &provider,
         topoheight,
         &contract_hash,
         &Hash::zero(),     // block_hash
@@ -550,7 +550,7 @@ fn test_timelock_init() {
         }
     };
 
-    let mut provider = MockProvider::new();
+    let provider = MockProvider::new();
     let contract_hash = Hash::zero();
     let topoheight = 100;
 
@@ -562,7 +562,7 @@ fn test_timelock_init() {
 
     let result = TakoExecutor::execute(
         &bytecode,
-        &mut provider,
+        &provider,
         topoheight,
         &contract_hash,
         &Hash::zero(),     // block_hash

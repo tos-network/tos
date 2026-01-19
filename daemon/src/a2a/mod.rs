@@ -1,3 +1,4 @@
+pub mod arbitration;
 pub mod auth;
 pub mod executor;
 pub mod grpc;
@@ -45,6 +46,7 @@ use storage::{
 pub fn set_base_dir(dir: &str) {
     storage::set_base_dir(dir);
     registry::set_base_dir(dir);
+    arbitration::set_base_dir(dir);
 }
 
 #[cfg(test)]

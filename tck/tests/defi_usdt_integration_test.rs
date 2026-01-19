@@ -128,7 +128,7 @@ fn test_usdt_initialize() {
     println!("\n=== USDT Initialize Test ===");
     println!("Contract size: {} bytes", bytecode.len());
 
-    let mut provider = MockProvider;
+    let provider = MockProvider;
     let contract_hash = Hash::zero();
     let topoheight = 100;
 
@@ -156,7 +156,7 @@ fn test_usdt_initialize() {
 
     let result = TakoExecutor::execute(
         &bytecode,
-        &mut provider,
+        &provider,
         topoheight,
         &contract_hash,
         &Hash::zero(),    // block_hash
@@ -200,7 +200,7 @@ fn test_usdt_transfer() {
 
     println!("\n=== USDT Transfer Test ===");
 
-    let mut provider = MockProvider;
+    let provider = MockProvider;
     let contract_hash = Hash::zero();
     let topoheight = 100;
 
@@ -220,7 +220,7 @@ fn test_usdt_transfer() {
 
     let result = TakoExecutor::execute(
         &bytecode,
-        &mut provider,
+        &provider,
         topoheight,
         &contract_hash,
         &Hash::zero(), // block_hash
@@ -254,7 +254,7 @@ fn test_usdt_blacklist() {
 
     println!("\n=== USDT Blacklist Test ===");
 
-    let mut provider = MockProvider;
+    let provider = MockProvider;
     let contract_hash = Hash::zero();
     let topoheight = 100;
 
@@ -271,7 +271,7 @@ fn test_usdt_blacklist() {
 
     let result = TakoExecutor::execute(
         &bytecode,
-        &mut provider,
+        &provider,
         topoheight,
         &contract_hash,
         &Hash::zero(), // block_hash

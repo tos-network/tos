@@ -417,7 +417,7 @@ async fn stress_storage_recovery() {
                     let expected = generate_test_data(i);
                     assert_eq!(data, expected, "Data corruption detected after recovery");
                 }
-                Err(_) => assert!(false, "Failed to read item {} after recovery", i),
+                Err(_) => panic!("Failed to read item {} after recovery", i),
             }
         }
     }

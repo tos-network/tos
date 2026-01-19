@@ -128,7 +128,7 @@ fn test_usdc_initialize() {
     println!("\n=== USDC Initialize Test ===");
     println!("Contract size: {} bytes", bytecode.len());
 
-    let mut provider = MockProvider;
+    let provider = MockProvider;
     let contract_hash = Hash::zero();
     let topoheight = 100;
 
@@ -153,7 +153,7 @@ fn test_usdc_initialize() {
 
     let result = TakoExecutor::execute(
         &bytecode,
-        &mut provider,
+        &provider,
         topoheight,
         &contract_hash,
         &Hash::zero(),    // block_hash
@@ -197,7 +197,7 @@ fn test_usdc_transfer() {
 
     println!("\n=== USDC Transfer Test ===");
 
-    let mut provider = MockProvider;
+    let provider = MockProvider;
     let contract_hash = Hash::zero();
     let topoheight = 100;
 
@@ -217,7 +217,7 @@ fn test_usdc_transfer() {
 
     let result = TakoExecutor::execute(
         &bytecode,
-        &mut provider,
+        &provider,
         topoheight,
         &contract_hash,
         &Hash::zero(), // block_hash
@@ -251,7 +251,7 @@ fn test_usdc_approve() {
 
     println!("\n=== USDC Approve Test ===");
 
-    let mut provider = MockProvider;
+    let provider = MockProvider;
     let contract_hash = Hash::zero();
     let topoheight = 100;
 
@@ -271,7 +271,7 @@ fn test_usdc_approve() {
 
     let result = TakoExecutor::execute(
         &bytecode,
-        &mut provider,
+        &provider,
         topoheight,
         &contract_hash,
         &Hash::zero(), // block_hash
@@ -305,7 +305,7 @@ fn test_usdc_configure_minter() {
 
     println!("\n=== USDC Configure Minter Test ===");
 
-    let mut provider = MockProvider;
+    let provider = MockProvider;
     let contract_hash = Hash::zero();
     let topoheight = 100;
 
@@ -325,7 +325,7 @@ fn test_usdc_configure_minter() {
 
     let result = TakoExecutor::execute(
         &bytecode,
-        &mut provider,
+        &provider,
         topoheight,
         &contract_hash,
         &Hash::zero(), // block_hash

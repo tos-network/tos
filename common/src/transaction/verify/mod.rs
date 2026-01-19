@@ -229,6 +229,11 @@ impl Transaction {
                     | TransactionType::DisputeEscrow(_)
                     | TransactionType::AppealEscrow(_)
                     | TransactionType::SubmitVerdict(_)
+                    | TransactionType::SubmitVerdictByJuror(_)
+                    | TransactionType::CommitArbitrationOpen(_)
+                    | TransactionType::CommitVoteRequest(_)
+                    | TransactionType::CommitSelectionCommitment(_)
+                    | TransactionType::CommitJurorVote(_)
                     | TransactionType::RegisterArbiter(_)
                     | TransactionType::UpdateArbiter(_)
                     | TransactionType::SlashArbiter(_)
@@ -495,7 +500,12 @@ impl Transaction {
             | TransactionType::ChallengeEscrow(_)
             | TransactionType::DisputeEscrow(_)
             | TransactionType::AppealEscrow(_)
-            | TransactionType::SubmitVerdict(_) => {}
+            | TransactionType::SubmitVerdict(_)
+            | TransactionType::SubmitVerdictByJuror(_)
+            | TransactionType::CommitArbitrationOpen(_)
+            | TransactionType::CommitVoteRequest(_)
+            | TransactionType::CommitSelectionCommitment(_)
+            | TransactionType::CommitJurorVote(_) => {}
         }
 
         Ok(AgentPolicyView {
@@ -1429,6 +1439,347 @@ impl Transaction {
                     escrow_account.amount,
                 )
                 .map_err(|e| VerificationError::AnyError(anyhow!(e)))?;
+
+                if matches!(
+                    escrow_account
+                        .arbitration_config
+                        .as_ref()
+                        .map(|config| &config.mode),
+                    Some(crate::escrow::ArbitrationMode::Committee)
+                ) {
+                    let commit_open = state
+                        .get_commit_arbitration_open(
+                            &payload.escrow_id,
+                            &payload.dispute_id,
+                            payload.round,
+                        )
+                        .await
+                        .map_err(VerificationError::State)?
+                        .ok_or_else(|| {
+                            VerificationError::AnyError(anyhow!("CommitArbitrationOpen missing"))
+                        })?;
+
+                    let vote_request = state
+                        .get_commit_vote_request(&commit_open.request_id)
+                        .await
+                        .map_err(VerificationError::State)?
+                        .ok_or_else(|| {
+                            VerificationError::AnyError(anyhow!("CommitVoteRequest missing"))
+                        })?;
+
+                    if vote_request.request_id != commit_open.request_id {
+                        return Err(VerificationError::InvalidFormat);
+                    }
+
+                    if state
+                        .get_commit_selection_commitment(&commit_open.request_id)
+                        .await
+                        .map_err(VerificationError::State)?
+                        .is_none()
+                    {
+                        return Err(VerificationError::AnyError(anyhow!(
+                            "CommitSelectionCommitment missing"
+                        )));
+                    }
+
+                    let juror_votes = state
+                        .list_commit_juror_votes(&commit_open.request_id)
+                        .await
+                        .map_err(VerificationError::State)?;
+
+                    if juror_votes.len() < required_threshold as usize {
+                        return Err(VerificationError::AnyError(anyhow!(
+                            "insufficient committed juror votes"
+                        )));
+                    }
+
+                    let committed: std::collections::HashSet<_> = juror_votes
+                        .iter()
+                        .map(|vote| vote.juror_pubkey.clone())
+                        .collect();
+
+                    for sig in &payload.signatures {
+                        if !committed.contains(&sig.arbiter_pubkey) {
+                            return Err(VerificationError::AnyError(anyhow!(
+                                "missing committed juror vote"
+                            )));
+                        }
+                    }
+                }
+            }
+            TransactionType::SubmitVerdictByJuror(payload) => {
+                let escrow_account = state
+                    .get_escrow(&payload.escrow_id)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| VerificationError::AnyError(anyhow!("escrow not found")))?;
+
+                let required_threshold = escrow_account
+                    .arbitration_config
+                    .as_ref()
+                    .and_then(|config| config.threshold)
+                    .unwrap_or(1)
+                    .max(1);
+
+                let mut arbiters = HashMap::new();
+                for sig in &payload.signatures {
+                    if arbiters.contains_key(&sig.arbiter_pubkey) {
+                        continue;
+                    }
+                    if let Some(arbiter) = state
+                        .get_arbiter(&sig.arbiter_pubkey)
+                        .await
+                        .map_err(VerificationError::State)?
+                    {
+                        arbiters.insert(sig.arbiter_pubkey.clone(), arbiter);
+                    }
+                }
+                let registry = StateArbiterRegistry {
+                    arbiters,
+                    min_stake: crate::config::MIN_ARBITER_STAKE,
+                };
+                let current_height = state.get_verification_topoheight();
+                escrow::verify_submit_verdict_by_juror(
+                    payload,
+                    &escrow_account,
+                    self.chain_id as u64,
+                    required_threshold,
+                    &registry,
+                    escrow_account.amount,
+                    &self.source,
+                    current_height,
+                    crate::config::JUROR_SUBMIT_WINDOW,
+                )
+                .map_err(|e| VerificationError::AnyError(anyhow!(e)))?;
+
+                if matches!(
+                    escrow_account
+                        .arbitration_config
+                        .as_ref()
+                        .map(|config| &config.mode),
+                    Some(crate::escrow::ArbitrationMode::Committee)
+                ) {
+                    let commit_open = state
+                        .get_commit_arbitration_open(
+                            &payload.escrow_id,
+                            &payload.dispute_id,
+                            payload.round,
+                        )
+                        .await
+                        .map_err(VerificationError::State)?
+                        .ok_or_else(|| {
+                            VerificationError::AnyError(anyhow!("CommitArbitrationOpen missing"))
+                        })?;
+
+                    let vote_request = state
+                        .get_commit_vote_request(&commit_open.request_id)
+                        .await
+                        .map_err(VerificationError::State)?
+                        .ok_or_else(|| {
+                            VerificationError::AnyError(anyhow!("CommitVoteRequest missing"))
+                        })?;
+
+                    if vote_request.request_id != commit_open.request_id {
+                        return Err(VerificationError::InvalidFormat);
+                    }
+
+                    if state
+                        .get_commit_selection_commitment(&commit_open.request_id)
+                        .await
+                        .map_err(VerificationError::State)?
+                        .is_none()
+                    {
+                        return Err(VerificationError::AnyError(anyhow!(
+                            "CommitSelectionCommitment missing"
+                        )));
+                    }
+
+                    let juror_votes = state
+                        .list_commit_juror_votes(&commit_open.request_id)
+                        .await
+                        .map_err(VerificationError::State)?;
+
+                    if juror_votes.len() < required_threshold as usize {
+                        return Err(VerificationError::AnyError(anyhow!(
+                            "insufficient committed juror votes"
+                        )));
+                    }
+
+                    let committed: std::collections::HashSet<_> = juror_votes
+                        .iter()
+                        .map(|vote| vote.juror_pubkey.clone())
+                        .collect();
+
+                    for sig in &payload.signatures {
+                        if !committed.contains(&sig.arbiter_pubkey) {
+                            return Err(VerificationError::AnyError(anyhow!(
+                                "missing committed juror vote"
+                            )));
+                        }
+                    }
+                }
+            }
+            TransactionType::CommitArbitrationOpen(payload) => {
+                let open = arbitration::verify_commit_arbitration_open(payload, &self.source)?;
+
+                if state
+                    .get_commit_arbitration_open(
+                        &payload.escrow_id,
+                        &payload.dispute_id,
+                        payload.round,
+                    )
+                    .await
+                    .map_err(VerificationError::State)?
+                    .is_some()
+                {
+                    return Err(VerificationError::AnyError(anyhow!(
+                        "CommitArbitrationOpen already exists for round"
+                    )));
+                }
+
+                if state
+                    .get_commit_arbitration_open_by_request(&payload.request_id)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .is_some()
+                {
+                    return Err(VerificationError::AnyError(anyhow!(
+                        "CommitArbitrationOpen already exists for request_id"
+                    )));
+                }
+
+                let escrow_account = state
+                    .get_escrow(&payload.escrow_id)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| VerificationError::AnyError(anyhow!("escrow not found")))?;
+
+                if !matches!(
+                    escrow_account
+                        .arbitration_config
+                        .as_ref()
+                        .map(|config| &config.mode),
+                    Some(crate::escrow::ArbitrationMode::Committee)
+                ) {
+                    return Err(VerificationError::AnyError(anyhow!(
+                        "CommitArbitrationOpen requires committee arbitration"
+                    )));
+                }
+
+                if open.escrow_id != payload.escrow_id || open.dispute_id != payload.dispute_id {
+                    return Err(VerificationError::InvalidFormat);
+                }
+            }
+            TransactionType::CommitVoteRequest(payload) => {
+                let request = arbitration::verify_commit_vote_request(payload, &self.source)?;
+
+                if state
+                    .get_commit_vote_request(&payload.request_id)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .is_some()
+                {
+                    return Err(VerificationError::AnyError(anyhow!(
+                        "CommitVoteRequest already exists for request_id"
+                    )));
+                }
+
+                let open = state
+                    .get_commit_arbitration_open_by_request(&payload.request_id)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| {
+                        VerificationError::AnyError(anyhow!("CommitArbitrationOpen missing"))
+                    })?;
+
+                if request.arbitration_open_hash != open.arbitration_open_hash {
+                    return Err(VerificationError::InvalidFormat);
+                }
+
+                if request.escrow_id != open.escrow_id
+                    || request.dispute_id != open.dispute_id
+                    || request.round != open.round
+                {
+                    return Err(VerificationError::InvalidFormat);
+                }
+            }
+            TransactionType::CommitSelectionCommitment(payload) => {
+                arbitration::verify_commit_selection_commitment(payload)?;
+
+                if state
+                    .get_commit_selection_commitment(&payload.request_id)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .is_some()
+                {
+                    return Err(VerificationError::AnyError(anyhow!(
+                        "CommitSelectionCommitment already exists for request_id"
+                    )));
+                }
+
+                if state
+                    .get_commit_arbitration_open_by_request(&payload.request_id)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .is_none()
+                {
+                    return Err(VerificationError::AnyError(anyhow!(
+                        "CommitArbitrationOpen missing"
+                    )))?;
+                }
+            }
+            TransactionType::CommitJurorVote(payload) => {
+                let vote = arbitration::verify_commit_juror_vote(payload)?;
+
+                if state
+                    .get_commit_juror_vote(&payload.request_id, &payload.juror_pubkey)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .is_some()
+                {
+                    return Err(VerificationError::AnyError(anyhow!(
+                        "CommitJurorVote already exists for juror"
+                    )));
+                }
+
+                let vote_request = state
+                    .get_commit_vote_request(&payload.request_id)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| {
+                        VerificationError::AnyError(anyhow!("CommitVoteRequest missing"))
+                    })?;
+
+                let open = state
+                    .get_commit_arbitration_open_by_request(&payload.request_id)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| {
+                        VerificationError::AnyError(anyhow!("CommitArbitrationOpen missing"))
+                    })?;
+
+                let selection_commitment = state
+                    .get_commit_selection_commitment(&payload.request_id)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| {
+                        VerificationError::AnyError(anyhow!("CommitSelectionCommitment missing"))
+                    })?;
+
+                if vote.escrow_id != open.escrow_id
+                    || vote.dispute_id != open.dispute_id
+                    || vote.round != open.round
+                {
+                    return Err(VerificationError::InvalidFormat);
+                }
+
+                if vote.vote_request_hash != vote_request.vote_request_hash {
+                    return Err(VerificationError::InvalidFormat);
+                }
+
+                if vote.selection_commitment_id != selection_commitment.selection_commitment_id {
+                    return Err(VerificationError::InvalidFormat);
+                }
             }
             TransactionType::RegisterArbiter(payload) => {
                 arbitration::verify_register_arbiter(payload)?;
@@ -1751,7 +2102,12 @@ impl Transaction {
             | TransactionType::SlashArbiter(_) => {}
             TransactionType::ReleaseEscrow(_)
             | TransactionType::RefundEscrow(_)
-            | TransactionType::SubmitVerdict(_) => {
+            | TransactionType::SubmitVerdict(_)
+            | TransactionType::SubmitVerdictByJuror(_)
+            | TransactionType::CommitArbitrationOpen(_)
+            | TransactionType::CommitVoteRequest(_)
+            | TransactionType::CommitSelectionCommitment(_)
+            | TransactionType::CommitJurorVote(_) => {
                 // Escrow releases/refunds/verdicts move funds from escrow, not sender balance
             }
         };
@@ -3202,6 +3558,213 @@ impl Transaction {
                 )
                 .map_err(|e| VerificationError::AnyError(anyhow!(e)))?;
             }
+            TransactionType::SubmitVerdictByJuror(payload) => {
+                let escrow_account = state
+                    .get_escrow(&payload.escrow_id)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| VerificationError::AnyError(anyhow!("escrow not found")))?;
+
+                let required_threshold = escrow_account
+                    .arbitration_config
+                    .as_ref()
+                    .and_then(|config| config.threshold)
+                    .unwrap_or(1)
+                    .max(1);
+
+                let mut arbiters = HashMap::new();
+                for sig in &payload.signatures {
+                    if arbiters.contains_key(&sig.arbiter_pubkey) {
+                        continue;
+                    }
+                    if let Some(arbiter) = state
+                        .get_arbiter(&sig.arbiter_pubkey)
+                        .await
+                        .map_err(VerificationError::State)?
+                    {
+                        arbiters.insert(sig.arbiter_pubkey.clone(), arbiter);
+                    }
+                }
+                let registry = StateArbiterRegistry {
+                    arbiters,
+                    min_stake: crate::config::MIN_ARBITER_STAKE,
+                };
+                let current_height = state.get_verification_topoheight();
+                escrow::verify_submit_verdict_by_juror(
+                    payload,
+                    &escrow_account,
+                    self.chain_id as u64,
+                    required_threshold,
+                    &registry,
+                    escrow_account.amount,
+                    &self.source,
+                    current_height,
+                    crate::config::JUROR_SUBMIT_WINDOW,
+                )
+                .map_err(|e| VerificationError::AnyError(anyhow!(e)))?;
+            }
+            TransactionType::CommitArbitrationOpen(payload) => {
+                let open = arbitration::verify_commit_arbitration_open(payload, &self.source)?;
+
+                if state
+                    .get_commit_arbitration_open(
+                        &payload.escrow_id,
+                        &payload.dispute_id,
+                        payload.round,
+                    )
+                    .await
+                    .map_err(VerificationError::State)?
+                    .is_some()
+                {
+                    return Err(VerificationError::AnyError(anyhow!(
+                        "CommitArbitrationOpen already exists for round"
+                    )));
+                }
+
+                if state
+                    .get_commit_arbitration_open_by_request(&payload.request_id)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .is_some()
+                {
+                    return Err(VerificationError::AnyError(anyhow!(
+                        "CommitArbitrationOpen already exists for request_id"
+                    )));
+                }
+
+                let escrow_account = state
+                    .get_escrow(&payload.escrow_id)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| VerificationError::AnyError(anyhow!("escrow not found")))?;
+
+                if !matches!(
+                    escrow_account
+                        .arbitration_config
+                        .as_ref()
+                        .map(|config| &config.mode),
+                    Some(crate::escrow::ArbitrationMode::Committee)
+                ) {
+                    return Err(VerificationError::AnyError(anyhow!(
+                        "CommitArbitrationOpen requires committee arbitration"
+                    )));
+                }
+
+                if open.escrow_id != payload.escrow_id || open.dispute_id != payload.dispute_id {
+                    return Err(VerificationError::InvalidFormat);
+                }
+            }
+            TransactionType::CommitVoteRequest(payload) => {
+                let request = arbitration::verify_commit_vote_request(payload, &self.source)?;
+
+                if state
+                    .get_commit_vote_request(&payload.request_id)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .is_some()
+                {
+                    return Err(VerificationError::AnyError(anyhow!(
+                        "CommitVoteRequest already exists for request_id"
+                    )));
+                }
+
+                let open = state
+                    .get_commit_arbitration_open_by_request(&payload.request_id)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| {
+                        VerificationError::AnyError(anyhow!("CommitArbitrationOpen missing"))
+                    })?;
+
+                if request.arbitration_open_hash != open.arbitration_open_hash {
+                    return Err(VerificationError::InvalidFormat);
+                }
+
+                if request.escrow_id != open.escrow_id
+                    || request.dispute_id != open.dispute_id
+                    || request.round != open.round
+                {
+                    return Err(VerificationError::InvalidFormat);
+                }
+            }
+            TransactionType::CommitSelectionCommitment(payload) => {
+                arbitration::verify_commit_selection_commitment(payload)?;
+
+                if state
+                    .get_commit_selection_commitment(&payload.request_id)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .is_some()
+                {
+                    return Err(VerificationError::AnyError(anyhow!(
+                        "CommitSelectionCommitment already exists for request_id"
+                    )));
+                }
+
+                if state
+                    .get_commit_arbitration_open_by_request(&payload.request_id)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .is_none()
+                {
+                    return Err(VerificationError::AnyError(anyhow!(
+                        "CommitArbitrationOpen missing"
+                    )))?;
+                }
+            }
+            TransactionType::CommitJurorVote(payload) => {
+                let vote = arbitration::verify_commit_juror_vote(payload)?;
+
+                if state
+                    .get_commit_juror_vote(&payload.request_id, &payload.juror_pubkey)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .is_some()
+                {
+                    return Err(VerificationError::AnyError(anyhow!(
+                        "CommitJurorVote already exists for juror"
+                    )));
+                }
+
+                let vote_request = state
+                    .get_commit_vote_request(&payload.request_id)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| {
+                        VerificationError::AnyError(anyhow!("CommitVoteRequest missing"))
+                    })?;
+
+                let open = state
+                    .get_commit_arbitration_open_by_request(&payload.request_id)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| {
+                        VerificationError::AnyError(anyhow!("CommitArbitrationOpen missing"))
+                    })?;
+
+                let selection_commitment = state
+                    .get_commit_selection_commitment(&payload.request_id)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| {
+                        VerificationError::AnyError(anyhow!("CommitSelectionCommitment missing"))
+                    })?;
+
+                if vote.escrow_id != open.escrow_id
+                    || vote.dispute_id != open.dispute_id
+                    || vote.round != open.round
+                {
+                    return Err(VerificationError::InvalidFormat);
+                }
+
+                if vote.vote_request_hash != vote_request.vote_request_hash {
+                    return Err(VerificationError::InvalidFormat);
+                }
+
+                if vote.selection_commitment_id != selection_commitment.selection_commitment_id {
+                    return Err(VerificationError::InvalidFormat);
+                }
+            }
             TransactionType::RegisterArbiter(payload) => {
                 arbitration::verify_register_arbiter(payload)?;
             }
@@ -3462,7 +4025,8 @@ impl Transaction {
             | TransactionType::ChallengeEscrow(_)
             | TransactionType::DisputeEscrow(_)
             | TransactionType::AppealEscrow(_)
-            | TransactionType::SubmitVerdict(_) => {
+            | TransactionType::SubmitVerdict(_)
+            | TransactionType::SubmitVerdictByJuror(_) => {
                 // Escrow transactions: verification handled in escrow module
             }
             TransactionType::RegisterArbiter(_)
@@ -3470,7 +4034,11 @@ impl Transaction {
             | TransactionType::SlashArbiter(_)
             | TransactionType::RequestArbiterExit(_)
             | TransactionType::WithdrawArbiterStake(_)
-            | TransactionType::CancelArbiterExit(_) => {
+            | TransactionType::CancelArbiterExit(_)
+            | TransactionType::CommitArbitrationOpen(_)
+            | TransactionType::CommitVoteRequest(_)
+            | TransactionType::CommitSelectionCommitment(_)
+            | TransactionType::CommitJurorVote(_) => {
                 // Arbiter registry txs handled in arbitration module
             }
         }
@@ -3687,7 +4255,12 @@ impl Transaction {
             | TransactionType::SlashArbiter(_) => {}
             TransactionType::ReleaseEscrow(_)
             | TransactionType::RefundEscrow(_)
-            | TransactionType::SubmitVerdict(_) => {
+            | TransactionType::SubmitVerdict(_)
+            | TransactionType::SubmitVerdictByJuror(_)
+            | TransactionType::CommitArbitrationOpen(_)
+            | TransactionType::CommitVoteRequest(_)
+            | TransactionType::CommitSelectionCommitment(_)
+            | TransactionType::CommitJurorVote(_) => {
                 // Escrow releases/refunds/verdicts move funds from escrow, not sender balance
             }
         };
@@ -4176,7 +4749,12 @@ impl Transaction {
             | TransactionType::SlashArbiter(_) => {}
             TransactionType::ReleaseEscrow(_)
             | TransactionType::RefundEscrow(_)
-            | TransactionType::SubmitVerdict(_) => {
+            | TransactionType::SubmitVerdict(_)
+            | TransactionType::SubmitVerdictByJuror(_)
+            | TransactionType::CommitArbitrationOpen(_)
+            | TransactionType::CommitVoteRequest(_)
+            | TransactionType::CommitSelectionCommitment(_)
+            | TransactionType::CommitJurorVote(_) => {
                 // Escrow releases/refunds/verdicts move funds from escrow, not sender balance
             }
         };
@@ -4842,6 +5420,152 @@ impl Transaction {
                     .map_err(VerificationError::State)?;
                 state
                     .add_escrow_history(&escrow.id, escrow.updated_at, tx_hash)
+                    .await
+                    .map_err(VerificationError::State)?;
+            }
+            TransactionType::SubmitVerdictByJuror(payload) => {
+                let mut escrow = state
+                    .get_escrow(&payload.escrow_id)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .ok_or_else(|| VerificationError::AnyError(anyhow!("escrow not found")))?;
+
+                if let Some(release_at) = escrow.release_requested_at {
+                    let pending_at = release_at
+                        .checked_add(escrow.challenge_window)
+                        .ok_or(VerificationError::Overflow)?;
+                    state
+                        .remove_pending_release(pending_at, &escrow.id)
+                        .await
+                        .map_err(VerificationError::State)?;
+                }
+
+                let total = payload
+                    .payer_amount
+                    .checked_add(payload.payee_amount)
+                    .ok_or(VerificationError::Overflow)?;
+
+                escrow.amount = escrow
+                    .amount
+                    .checked_sub(total)
+                    .ok_or(VerificationError::Overflow)?;
+                escrow.state = crate::escrow::EscrowState::Resolved;
+                escrow.pending_release_amount = None;
+                escrow.release_requested_at = None;
+                escrow.challenge_deposit = 0;
+                escrow.dispute_id = Some(payload.dispute_id.clone());
+                escrow.dispute_round = Some(payload.round);
+                escrow.updated_at = state.get_verification_topoheight();
+
+                let mut resolver = Vec::new();
+                let mut seen = std::collections::HashSet::new();
+                for sig in &payload.signatures {
+                    if seen.insert(sig.arbiter_pubkey.clone()) {
+                        resolver.push(sig.arbiter_pubkey.clone());
+                    }
+                }
+
+                let outcome = crate::arbitration::verdict::derive_dispute_outcome(
+                    payload.payer_amount,
+                    payload.payee_amount,
+                );
+                let resolution_hash = hash(&crate::arbitration::verdict::build_verdict_message(
+                    self.chain_id as u64,
+                    &payload.escrow_id,
+                    &payload.dispute_id,
+                    payload.round,
+                    outcome,
+                    payload.payer_amount,
+                    payload.payee_amount,
+                ));
+                let tier = match escrow
+                    .arbitration_config
+                    .as_ref()
+                    .map(|config| &config.mode)
+                {
+                    Some(crate::escrow::ArbitrationMode::Committee) => 2,
+                    Some(crate::escrow::ArbitrationMode::DaoGovernance) => 3,
+                    _ => 1,
+                };
+                escrow.resolutions.push(crate::escrow::ResolutionRecord {
+                    tier,
+                    resolver,
+                    client_amount: payload.payer_amount,
+                    provider_amount: payload.payee_amount,
+                    resolution_hash,
+                    resolved_at: escrow.updated_at,
+                    appealed: false,
+                });
+
+                if payload.payer_amount > 0 {
+                    let balance = state
+                        .get_receiver_balance(
+                            Cow::Owned(escrow.payer.clone()),
+                            Cow::Owned(escrow.asset.clone()),
+                        )
+                        .await
+                        .map_err(VerificationError::State)?;
+                    *balance = balance
+                        .checked_add(payload.payer_amount)
+                        .ok_or(VerificationError::Overflow)?;
+                    escrow.refunded_amount = escrow
+                        .refunded_amount
+                        .checked_add(payload.payer_amount)
+                        .ok_or(VerificationError::Overflow)?;
+                }
+
+                if payload.payee_amount > 0 {
+                    let balance = state
+                        .get_receiver_balance(
+                            Cow::Owned(escrow.payee.clone()),
+                            Cow::Owned(escrow.asset.clone()),
+                        )
+                        .await
+                        .map_err(VerificationError::State)?;
+                    *balance = balance
+                        .checked_add(payload.payee_amount)
+                        .ok_or(VerificationError::Overflow)?;
+                    escrow.released_amount = escrow
+                        .released_amount
+                        .checked_add(payload.payee_amount)
+                        .ok_or(VerificationError::Overflow)?;
+                }
+
+                state
+                    .set_escrow(&escrow)
+                    .await
+                    .map_err(VerificationError::State)?;
+                state
+                    .add_escrow_history(&escrow.id, escrow.updated_at, tx_hash)
+                    .await
+                    .map_err(VerificationError::State)?;
+            }
+            TransactionType::CommitArbitrationOpen(payload) => {
+                state
+                    .set_commit_arbitration_open(
+                        &payload.escrow_id,
+                        &payload.dispute_id,
+                        payload.round,
+                        payload,
+                    )
+                    .await
+                    .map_err(VerificationError::State)?;
+            }
+            TransactionType::CommitVoteRequest(payload) => {
+                state
+                    .set_commit_vote_request(&payload.request_id, payload)
+                    .await
+                    .map_err(VerificationError::State)?;
+            }
+            TransactionType::CommitSelectionCommitment(payload) => {
+                state
+                    .set_commit_selection_commitment(&payload.request_id, payload)
+                    .await
+                    .map_err(VerificationError::State)?;
+            }
+            TransactionType::CommitJurorVote(payload) => {
+                state
+                    .set_commit_juror_vote(&payload.request_id, &payload.juror_pubkey, payload)
                     .await
                     .map_err(VerificationError::State)?;
             }
@@ -6647,7 +7371,12 @@ impl Transaction {
             }
             TransactionType::ReleaseEscrow(_)
             | TransactionType::RefundEscrow(_)
-            | TransactionType::SubmitVerdict(_) => {
+            | TransactionType::SubmitVerdict(_)
+            | TransactionType::SubmitVerdictByJuror(_)
+            | TransactionType::CommitArbitrationOpen(_)
+            | TransactionType::CommitVoteRequest(_)
+            | TransactionType::CommitSelectionCommitment(_)
+            | TransactionType::CommitJurorVote(_) => {
                 // Escrow releases/refunds/verdicts move funds from escrow, not sender balance
             }
             TransactionType::RegisterArbiter(payload) => {

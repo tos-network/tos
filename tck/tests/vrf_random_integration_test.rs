@@ -65,10 +65,10 @@ async fn execute_vrf_contract(
     let contract_hash = Hash::zero();
     let tx_sender = keypair_to_hash(&owner);
 
-    let mut storage_write = storage.write().await;
+    let storage_write = storage.write().await;
     let result = TakoExecutor::execute_with_vrf(
         bytecode,
-        &mut *storage_write,
+        &*storage_write,
         1,
         &contract_hash,
         block_hash,

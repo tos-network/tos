@@ -183,7 +183,7 @@ async fn test_cpi_e2e_basic_invocation() {
     let callee_hash = Hash::from_bytes(&callee_address).expect("Valid hash");
     let caller_hash = Hash::zero();
 
-    let mut provider = CpiTestProvider::new().with_contract(callee_hash, callee_bytecode.clone());
+    let provider = CpiTestProvider::new().with_contract(callee_hash, callee_bytecode.clone());
 
     let executor = TakoContractExecutor::new();
 
@@ -193,7 +193,7 @@ async fn test_cpi_e2e_basic_invocation() {
     let result = executor
         .execute(
             &caller_bytecode,
-            &mut provider,
+            &provider,
             100,           // topoheight
             &caller_hash,  // caller contract hash
             &Hash::zero(), // block_hash
@@ -280,7 +280,7 @@ async fn test_cpi_e2e_storage_operations() {
     let callee_bytecode = std::fs::read(&callee_path).expect("Failed to load CPI callee contract");
 
     let callee_hash = Hash::zero();
-    let mut provider = CpiTestProvider::new();
+    let provider = CpiTestProvider::new();
     let executor = TakoContractExecutor::new();
 
     println!("Test Setup:");
@@ -300,7 +300,7 @@ async fn test_cpi_e2e_storage_operations() {
         let result = executor
             .execute(
                 &callee_bytecode,
-                &mut provider,
+                &provider,
                 100,
                 &callee_hash,
                 &Hash::zero(),
@@ -361,7 +361,7 @@ async fn test_cpi_e2e_compute_budget_tracking() {
     let callee_bytecode = std::fs::read(&callee_path).expect("Failed to load CPI callee contract");
 
     let callee_hash = Hash::zero();
-    let mut provider = CpiTestProvider::new();
+    let provider = CpiTestProvider::new();
     let executor = TakoContractExecutor::new();
 
     // Test with different compute budgets
@@ -380,7 +380,7 @@ async fn test_cpi_e2e_compute_budget_tracking() {
         let result = executor
             .execute(
                 &callee_bytecode,
-                &mut provider,
+                &provider,
                 100,
                 &callee_hash,
                 &Hash::zero(),
@@ -436,7 +436,7 @@ async fn test_cpi_e2e_performance_metrics() {
     let callee_hash = Hash::from_bytes(&callee_address).expect("Valid hash");
     let caller_hash = Hash::zero();
 
-    let mut provider = CpiTestProvider::new().with_contract(callee_hash, callee_bytecode.clone());
+    let provider = CpiTestProvider::new().with_contract(callee_hash, callee_bytecode.clone());
 
     let executor = TakoContractExecutor::new();
 
@@ -448,7 +448,7 @@ async fn test_cpi_e2e_performance_metrics() {
     let result = executor
         .execute(
             &caller_bytecode,
-            &mut provider,
+            &provider,
             100,
             &caller_hash,
             &Hash::zero(),

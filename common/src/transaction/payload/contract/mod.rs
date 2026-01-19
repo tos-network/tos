@@ -622,8 +622,8 @@ mod tests {
                 assert_eq!(max, MAX_VALUE_CELL_DEPTH);
                 assert_eq!(actual, 65);
             }
-            Err(other) => assert!(false, "Expected ExceedsMaxDepth error, got {other:?}"),
-            Ok(_) => assert!(false, "Expected ExceedsMaxDepth error, got Ok"),
+            Err(other) => panic!("Expected ExceedsMaxDepth error, got {other:?}"),
+            Ok(_) => panic!("Expected ExceedsMaxDepth error, got Ok"),
         }
     }
 
@@ -647,8 +647,8 @@ mod tests {
                 assert_eq!(max, MAX_ARRAY_SIZE);
                 assert_eq!(actual, 10001);
             }
-            Err(other) => assert!(false, "Expected ExceedsMaxArraySize error, got {other:?}"),
-            Ok(_) => assert!(false, "Expected ExceedsMaxArraySize error, got Ok"),
+            Err(other) => panic!("Expected ExceedsMaxArraySize error, got {other:?}"),
+            Ok(_) => panic!("Expected ExceedsMaxArraySize error, got Ok"),
         }
     }
 
@@ -672,8 +672,8 @@ mod tests {
                 assert_eq!(max, MAX_BYTES_SIZE);
                 assert_eq!(actual, MAX_BYTES_SIZE + 1);
             }
-            Err(other) => assert!(false, "Expected ExceedsMaxBytesSize error, got {other:?}"),
-            Ok(_) => assert!(false, "Expected ExceedsMaxBytesSize error, got Ok"),
+            Err(other) => panic!("Expected ExceedsMaxBytesSize error, got {other:?}"),
+            Ok(_) => panic!("Expected ExceedsMaxBytesSize error, got Ok"),
         }
     }
 }

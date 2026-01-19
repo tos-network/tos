@@ -2506,7 +2506,8 @@ async fn get_account_history<S: Storage>(
                 | TransactionType::ChallengeEscrow(_)
                 | TransactionType::DisputeEscrow(_)
                 | TransactionType::AppealEscrow(_)
-                | TransactionType::SubmitVerdict(_) => {
+                | TransactionType::SubmitVerdict(_)
+                | TransactionType::SubmitVerdictByJuror(_) => {
                     // Escrow transactions are not included in account history yet
                 }
                 TransactionType::RegisterArbiter(_)
@@ -2514,7 +2515,11 @@ async fn get_account_history<S: Storage>(
                 | TransactionType::SlashArbiter(_)
                 | TransactionType::RequestArbiterExit(_)
                 | TransactionType::WithdrawArbiterStake(_)
-                | TransactionType::CancelArbiterExit(_) => {
+                | TransactionType::CancelArbiterExit(_)
+                | TransactionType::CommitArbitrationOpen(_)
+                | TransactionType::CommitVoteRequest(_)
+                | TransactionType::CommitSelectionCommitment(_)
+                | TransactionType::CommitJurorVote(_) => {
                     // Arbiter registry updates are not included in account history yet
                 }
             }

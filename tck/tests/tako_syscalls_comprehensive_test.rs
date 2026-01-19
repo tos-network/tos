@@ -177,12 +177,12 @@ fn test_transient_storage_execution() {
     println!("\n=== Transient Storage Execution Test ===");
     println!("Contract size: {} bytes", bytecode.len());
 
-    let mut provider = MockProvider::new();
+    let provider = MockProvider::new();
     let contract_hash = Hash::zero();
     let topoheight = 100;
 
     // Execute entrypoint (runs all 5 tests)
-    let result = TakoExecutor::execute_simple(&bytecode, &mut provider, topoheight, &contract_hash);
+    let result = TakoExecutor::execute_simple(&bytecode, &provider, topoheight, &contract_hash);
 
     match result {
         Ok(exec_result) => {
@@ -249,7 +249,7 @@ fn test_balance_transfer_execution() {
     println!("\n=== Balance/Transfer Execution Test ===");
     println!("Contract size: {} bytes", bytecode.len());
 
-    let mut provider = MockProvider::new();
+    let provider = MockProvider::new();
     let contract_hash = Hash::zero();
     let contract_asset = Hash::zero();
     let topoheight = 100;
@@ -259,7 +259,7 @@ fn test_balance_transfer_execution() {
     println!("✓ Set initial contract balance: 10000");
 
     // Execute entrypoint (runs all 6 tests)
-    let result = TakoExecutor::execute_simple(&bytecode, &mut provider, topoheight, &contract_hash);
+    let result = TakoExecutor::execute_simple(&bytecode, &provider, topoheight, &contract_hash);
 
     match result {
         Ok(exec_result) => {
@@ -323,7 +323,7 @@ fn test_code_ops_execution() {
     println!("\n=== Code Operations Execution Test ===");
     println!("Contract size: {} bytes", bytecode.len());
 
-    let mut provider = MockProvider::new();
+    let provider = MockProvider::new();
     let contract_hash = Hash::zero();
     let topoheight = 100;
 
@@ -332,7 +332,7 @@ fn test_code_ops_execution() {
     println!("✓ Registered contract bytecode: {} bytes", bytecode.len());
 
     // Execute entrypoint (runs all 7 tests)
-    let result = TakoExecutor::execute_simple(&bytecode, &mut provider, topoheight, &contract_hash);
+    let result = TakoExecutor::execute_simple(&bytecode, &provider, topoheight, &contract_hash);
 
     match result {
         Ok(exec_result) => {
@@ -396,12 +396,12 @@ fn test_events_execution() {
     println!("\n=== Events Execution Test ===");
     println!("Contract size: {} bytes", bytecode.len());
 
-    let mut provider = MockProvider::new();
+    let provider = MockProvider::new();
     let contract_hash = Hash::zero();
     let topoheight = 100;
 
     // Execute entrypoint (runs all 9 tests)
-    let result = TakoExecutor::execute_simple(&bytecode, &mut provider, topoheight, &contract_hash);
+    let result = TakoExecutor::execute_simple(&bytecode, &provider, topoheight, &contract_hash);
 
     match result {
         Ok(exec_result) => {
@@ -465,12 +465,12 @@ fn test_environment_execution() {
     println!("\n=== Environment Execution Test ===");
     println!("Contract size: {} bytes", bytecode.len());
 
-    let mut provider = MockProvider::new();
+    let provider = MockProvider::new();
     let contract_hash = Hash::zero();
     let topoheight = 100;
 
     // Execute entrypoint (runs all 7 tests)
-    let result = TakoExecutor::execute_simple(&bytecode, &mut provider, topoheight, &contract_hash);
+    let result = TakoExecutor::execute_simple(&bytecode, &provider, topoheight, &contract_hash);
 
     match result {
         Ok(exec_result) => {

@@ -140,7 +140,7 @@ async fn test_tako_executor_hello_world() {
         std::fs::read(&contract_path).expect("Failed to load hello-world contract from fixtures");
 
     // Create mock provider
-    let mut provider = MockProvider::new();
+    let provider = MockProvider::new();
 
     // Create TAKO executor
     let executor = TakoContractExecutor::new();
@@ -155,7 +155,7 @@ async fn test_tako_executor_hello_world() {
     let result = executor
         .execute(
             &bytecode,
-            &mut provider,
+            &provider,
             100,           // topoheight
             &Hash::zero(), // contract_hash
             &Hash::zero(), // block_hash
@@ -213,14 +213,14 @@ async fn test_multi_executor_execution() {
     let bytecode =
         std::fs::read(&contract_path).expect("Failed to load hello-world contract from fixtures");
 
-    let mut provider = MockProvider::new();
+    let provider = MockProvider::new();
     let executor = TakoContractExecutor::new();
 
     // Execute via TakoContractExecutor (should auto-dispatch to TAKO)
     let result = executor
         .execute(
             &bytecode,
-            &mut provider,
+            &provider,
             100,
             &Hash::zero(),
             &Hash::zero(),
@@ -249,7 +249,7 @@ async fn test_gas_metering() {
     let bytecode =
         std::fs::read(&contract_path).expect("Failed to load hello-world contract from fixtures");
 
-    let mut provider = MockProvider::new();
+    let provider = MockProvider::new();
     let executor = TakoContractExecutor::new();
 
     // Test with different gas limits
@@ -259,7 +259,7 @@ async fn test_gas_metering() {
         let result = executor
             .execute(
                 &bytecode,
-                &mut provider,
+                &provider,
                 100,
                 &Hash::zero(),
                 &Hash::zero(),
@@ -295,13 +295,13 @@ async fn test_contract_with_storage() {
     let contract_path = format!("{manifest_dir}/tests/fixtures/hello_world.so");
     let bytecode = std::fs::read(&contract_path).expect("Failed to load contract from fixtures");
 
-    let mut provider = MockProvider::new();
+    let provider = MockProvider::new();
     let executor = TakoContractExecutor::new();
 
     let result = executor
         .execute(
             &bytecode,
-            &mut provider,
+            &provider,
             100,
             &Hash::zero(),
             &Hash::zero(),

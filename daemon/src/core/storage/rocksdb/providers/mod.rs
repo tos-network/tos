@@ -1,6 +1,7 @@
 mod account;
 mod agent_account;
 mod arbiter;
+mod arbitration_commit;
 mod asset;
 mod balance;
 mod block;

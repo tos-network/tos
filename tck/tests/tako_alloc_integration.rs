@@ -124,7 +124,7 @@ fn test_alloc_basic_vec_operations() {
     let bytecode = load_example_contract("basic");
 
     // Create mock provider
-    let mut provider = MockProvider;
+    let provider = MockProvider;
 
     // Prepare execution parameters
     let contract_hash = Hash::zero();
@@ -135,7 +135,7 @@ fn test_alloc_basic_vec_operations() {
     // Execute contract
     let result = TakoExecutor::execute(
         &bytecode,
-        &mut provider,
+        &provider,
         0, // topoheight
         &contract_hash,
         &block_hash,
@@ -179,7 +179,7 @@ fn test_alloc_basic_vec_operations() {
 #[test]
 fn test_alloc_heap_usage() {
     let bytecode = load_example_contract("basic");
-    let mut provider = MockProvider;
+    let provider = MockProvider;
 
     let contract_hash = Hash::zero();
     let block_hash = Hash::zero();
@@ -188,7 +188,7 @@ fn test_alloc_heap_usage() {
 
     let result = TakoExecutor::execute(
         &bytecode,
-        &mut provider,
+        &provider,
         0,
         &contract_hash,
         &block_hash,
@@ -222,7 +222,7 @@ fn test_alloc_heap_usage() {
 #[test]
 fn test_alloc_out_of_memory() {
     let bytecode = load_example_contract("oom");
-    let mut provider = MockProvider;
+    let provider = MockProvider;
 
     let contract_hash = Hash::zero();
     let block_hash = Hash::zero();
@@ -231,7 +231,7 @@ fn test_alloc_out_of_memory() {
 
     let result = TakoExecutor::execute(
         &bytecode,
-        &mut provider,
+        &provider,
         0,
         &contract_hash,
         &block_hash,

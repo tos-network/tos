@@ -75,6 +75,10 @@ pub enum EscrowVerificationError {
     DisputeRecordRequired,
     #[error("arbiter not assigned to this escrow")]
     ArbiterNotAssigned,
+    #[error("coordinator deadline not reached")]
+    CoordinatorDeadlineNotReached,
+    #[error("juror submit window expired")]
+    JurorSubmitWindowExpired,
     #[error("invalid arbitration config: {0}")]
     InvalidArbitrationConfig(String),
 }
@@ -546,6 +550,53 @@ pub fn verify_submit_verdict_with_balance<R: ArbiterRegistry>(
     Ok(())
 }
 
+/// Verify submit verdict by juror payload (stateful, includes escrow balance and window checks).
+pub fn verify_submit_verdict_by_juror<R: ArbiterRegistry>(
+    payload: &SubmitVerdictPayload,
+    escrow: &EscrowAccount,
+    chain_id: u64,
+    required_threshold: u8,
+    registry: &R,
+    escrow_balance: u64,
+    submitter: &PublicKey,
+    current_height: u64,
+    juror_submit_window: u64,
+) -> Result<(), EscrowVerificationError> {
+    verify_submit_verdict_with_balance(
+        payload,
+        escrow,
+        chain_id,
+        required_threshold,
+        registry,
+        escrow_balance,
+    )?;
+
+    let dispute = escrow
+        .dispute
+        .as_ref()
+        .ok_or(EscrowVerificationError::DisputeRecordRequired)?;
+    if current_height <= dispute.deadline {
+        return Err(EscrowVerificationError::CoordinatorDeadlineNotReached);
+    }
+    let submit_deadline = dispute
+        .deadline
+        .checked_add(juror_submit_window)
+        .ok_or(EscrowVerificationError::InvalidTimeoutBlocks)?;
+    if current_height > submit_deadline {
+        return Err(EscrowVerificationError::JurorSubmitWindowExpired);
+    }
+
+    let allowed = escrow
+        .arbitration_config
+        .as_ref()
+        .map(|config| config.arbiters.as_slice())
+        .unwrap_or(&[]);
+    if !allowed.iter().any(|arbiter| arbiter == submitter) {
+        return Err(EscrowVerificationError::ArbiterNotAssigned);
+    }
+    Ok(())
+}
+
 fn map_verdict_error(err: VerdictVerificationError) -> EscrowVerificationError {
     match err {
         VerdictVerificationError::InvalidVerdictAmounts
@@ -848,6 +899,264 @@ mod tests {
         };
 
         verify_submit_verdict(&payload, &escrow, 1, 1, &registry)?;
+        Ok(())
+    }
+
+    #[test]
+    fn submit_verdict_by_juror_happy_path() -> Result<(), Box<dyn std::error::Error>> {
+        let mut escrow = sample_escrow_with_arbitration(EscrowState::Challenged, false)?;
+        let keypair = KeyPair::new();
+        let arbiter_pubkey = keypair.get_public_key().compress();
+        if let Some(config) = escrow.arbitration_config.as_mut() {
+            config.arbiters = vec![arbiter_pubkey.clone()];
+        }
+        escrow.dispute = Some(DisputeInfo {
+            initiator: escrow.payer.clone(),
+            reason: "dispute".to_string(),
+            evidence_hash: None,
+            disputed_at: 1,
+            deadline: 10,
+        });
+        let message = build_verdict_message(
+            1,
+            &escrow.id,
+            &Hash::max(),
+            0,
+            DisputeOutcome::Split,
+            50,
+            50,
+        );
+        let signature = keypair.sign(&message);
+
+        let payload = SubmitVerdictPayload {
+            escrow_id: escrow.id.clone(),
+            dispute_id: Hash::max(),
+            round: 0,
+            payer_amount: 50,
+            payee_amount: 50,
+            signatures: vec![ArbiterSignature {
+                arbiter_pubkey: arbiter_pubkey.clone(),
+                signature,
+                timestamp: 1,
+            }],
+        };
+
+        let mut active = HashSet::new();
+        active.insert(arbiter_pubkey.clone());
+        let registry = TestRegistry {
+            active,
+            stake: 1000,
+            min_stake: 1,
+        };
+
+        verify_submit_verdict_by_juror(
+            &payload,
+            &escrow,
+            1,
+            1,
+            &registry,
+            escrow.amount,
+            &arbiter_pubkey,
+            12,
+            5,
+        )?;
+        Ok(())
+    }
+
+    #[test]
+    fn submit_verdict_by_juror_rejects_before_deadline() -> Result<(), Box<dyn std::error::Error>> {
+        let mut escrow = sample_escrow_with_arbitration(EscrowState::Challenged, false)?;
+        let keypair = KeyPair::new();
+        let arbiter_pubkey = keypair.get_public_key().compress();
+        if let Some(config) = escrow.arbitration_config.as_mut() {
+            config.arbiters = vec![arbiter_pubkey.clone()];
+        }
+        escrow.dispute = Some(DisputeInfo {
+            initiator: escrow.payer.clone(),
+            reason: "dispute".to_string(),
+            evidence_hash: None,
+            disputed_at: 1,
+            deadline: 10,
+        });
+        let message = build_verdict_message(
+            1,
+            &escrow.id,
+            &Hash::max(),
+            0,
+            DisputeOutcome::Split,
+            50,
+            50,
+        );
+        let signature = keypair.sign(&message);
+
+        let payload = SubmitVerdictPayload {
+            escrow_id: escrow.id.clone(),
+            dispute_id: Hash::max(),
+            round: 0,
+            payer_amount: 50,
+            payee_amount: 50,
+            signatures: vec![ArbiterSignature {
+                arbiter_pubkey: arbiter_pubkey.clone(),
+                signature,
+                timestamp: 1,
+            }],
+        };
+
+        let mut active = HashSet::new();
+        active.insert(arbiter_pubkey.clone());
+        let registry = TestRegistry {
+            active,
+            stake: 1000,
+            min_stake: 1,
+        };
+
+        let err = verify_submit_verdict_by_juror(
+            &payload,
+            &escrow,
+            1,
+            1,
+            &registry,
+            escrow.amount,
+            &arbiter_pubkey,
+            10,
+            5,
+        )
+        .expect_err("expected deadline error");
+        assert!(matches!(
+            err,
+            EscrowVerificationError::CoordinatorDeadlineNotReached
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn submit_verdict_by_juror_rejects_after_window() -> Result<(), Box<dyn std::error::Error>> {
+        let mut escrow = sample_escrow_with_arbitration(EscrowState::Challenged, false)?;
+        let keypair = KeyPair::new();
+        let arbiter_pubkey = keypair.get_public_key().compress();
+        if let Some(config) = escrow.arbitration_config.as_mut() {
+            config.arbiters = vec![arbiter_pubkey.clone()];
+        }
+        escrow.dispute = Some(DisputeInfo {
+            initiator: escrow.payer.clone(),
+            reason: "dispute".to_string(),
+            evidence_hash: None,
+            disputed_at: 1,
+            deadline: 10,
+        });
+        let message = build_verdict_message(
+            1,
+            &escrow.id,
+            &Hash::max(),
+            0,
+            DisputeOutcome::Split,
+            50,
+            50,
+        );
+        let signature = keypair.sign(&message);
+
+        let payload = SubmitVerdictPayload {
+            escrow_id: escrow.id.clone(),
+            dispute_id: Hash::max(),
+            round: 0,
+            payer_amount: 50,
+            payee_amount: 50,
+            signatures: vec![ArbiterSignature {
+                arbiter_pubkey: arbiter_pubkey.clone(),
+                signature,
+                timestamp: 1,
+            }],
+        };
+
+        let mut active = HashSet::new();
+        active.insert(arbiter_pubkey.clone());
+        let registry = TestRegistry {
+            active,
+            stake: 1000,
+            min_stake: 1,
+        };
+
+        let err = verify_submit_verdict_by_juror(
+            &payload,
+            &escrow,
+            1,
+            1,
+            &registry,
+            escrow.amount,
+            &arbiter_pubkey,
+            20,
+            5,
+        )
+        .expect_err("expected window error");
+        assert!(matches!(
+            err,
+            EscrowVerificationError::JurorSubmitWindowExpired
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn submit_verdict_by_juror_requires_assigned_submitter(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut escrow = sample_escrow_with_arbitration(EscrowState::Challenged, false)?;
+        let keypair = KeyPair::new();
+        let arbiter_pubkey = keypair.get_public_key().compress();
+        if let Some(config) = escrow.arbitration_config.as_mut() {
+            config.arbiters = vec![arbiter_pubkey.clone()];
+        }
+        escrow.dispute = Some(DisputeInfo {
+            initiator: escrow.payer.clone(),
+            reason: "dispute".to_string(),
+            evidence_hash: None,
+            disputed_at: 1,
+            deadline: 10,
+        });
+        let message = build_verdict_message(
+            1,
+            &escrow.id,
+            &Hash::max(),
+            0,
+            DisputeOutcome::Split,
+            50,
+            50,
+        );
+        let signature = keypair.sign(&message);
+
+        let payload = SubmitVerdictPayload {
+            escrow_id: escrow.id.clone(),
+            dispute_id: Hash::max(),
+            round: 0,
+            payer_amount: 50,
+            payee_amount: 50,
+            signatures: vec![ArbiterSignature {
+                arbiter_pubkey: arbiter_pubkey.clone(),
+                signature,
+                timestamp: 1,
+            }],
+        };
+
+        let mut active = HashSet::new();
+        active.insert(arbiter_pubkey.clone());
+        let registry = TestRegistry {
+            active,
+            stake: 1000,
+            min_stake: 1,
+        };
+
+        let other = PublicKey::from_bytes(&[9u8; 32])?;
+        let err = verify_submit_verdict_by_juror(
+            &payload,
+            &escrow,
+            1,
+            1,
+            &registry,
+            escrow.amount,
+            &other,
+            12,
+            5,
+        )
+        .expect_err("expected assignment error");
+        assert!(matches!(err, EscrowVerificationError::ArbiterNotAssigned));
         Ok(())
     }
 

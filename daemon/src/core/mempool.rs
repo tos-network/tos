@@ -164,10 +164,7 @@ impl Mempool {
                 BlockchainError::AccountNotFound(tx.get_source().as_address(self.mainnet))
             })?;
 
-        let balances = balances
-            .into_iter()
-            .map(|(asset, balance)| (asset.clone(), balance))
-            .collect();
+        let balances = balances.into_iter().collect();
 
         let nonce = tx.get_nonce();
         self.update_cache_for_sender(

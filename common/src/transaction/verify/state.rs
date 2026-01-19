@@ -10,10 +10,13 @@ use crate::{
     },
     crypto::{
         elgamal::{Ciphertext, CompressedPublicKey},
-        Hash,
+        Hash, PublicKey,
     },
     nft::NftCache,
-    transaction::{ContractDeposit, MultiSigPayload, Reference, Transaction},
+    transaction::{
+        CommitArbitrationOpenPayload, CommitJurorVotePayload, CommitSelectionCommitmentPayload,
+        CommitVoteRequestPayload, ContractDeposit, MultiSigPayload, Reference, Transaction,
+    },
 };
 use async_trait::async_trait;
 use indexmap::IndexMap;
@@ -175,6 +178,88 @@ pub trait BlockchainVerificationState<'a, E> {
         _arbiter: &'a CompressedPublicKey,
     ) -> Result<Option<ArbiterAccount>, E> {
         Ok(None)
+    }
+
+    // ===== Arbitration Commit Methods =====
+
+    async fn get_commit_arbitration_open(
+        &mut self,
+        _escrow_id: &Hash,
+        _dispute_id: &Hash,
+        _round: u32,
+    ) -> Result<Option<CommitArbitrationOpenPayload>, E> {
+        Ok(None)
+    }
+
+    async fn get_commit_arbitration_open_by_request(
+        &mut self,
+        _request_id: &Hash,
+    ) -> Result<Option<CommitArbitrationOpenPayload>, E> {
+        Ok(None)
+    }
+
+    async fn set_commit_arbitration_open(
+        &mut self,
+        _escrow_id: &Hash,
+        _dispute_id: &Hash,
+        _round: u32,
+        _payload: &CommitArbitrationOpenPayload,
+    ) -> Result<(), E> {
+        Ok(())
+    }
+
+    async fn get_commit_vote_request(
+        &mut self,
+        _request_id: &Hash,
+    ) -> Result<Option<CommitVoteRequestPayload>, E> {
+        Ok(None)
+    }
+
+    async fn set_commit_vote_request(
+        &mut self,
+        _request_id: &Hash,
+        _payload: &CommitVoteRequestPayload,
+    ) -> Result<(), E> {
+        Ok(())
+    }
+
+    async fn get_commit_selection_commitment(
+        &mut self,
+        _request_id: &Hash,
+    ) -> Result<Option<CommitSelectionCommitmentPayload>, E> {
+        Ok(None)
+    }
+
+    async fn set_commit_selection_commitment(
+        &mut self,
+        _request_id: &Hash,
+        _payload: &CommitSelectionCommitmentPayload,
+    ) -> Result<(), E> {
+        Ok(())
+    }
+
+    async fn get_commit_juror_vote(
+        &mut self,
+        _request_id: &Hash,
+        _juror_pubkey: &PublicKey,
+    ) -> Result<Option<CommitJurorVotePayload>, E> {
+        Ok(None)
+    }
+
+    async fn set_commit_juror_vote(
+        &mut self,
+        _request_id: &Hash,
+        _juror_pubkey: &PublicKey,
+        _payload: &CommitJurorVotePayload,
+    ) -> Result<(), E> {
+        Ok(())
+    }
+
+    async fn list_commit_juror_votes(
+        &mut self,
+        _request_id: &Hash,
+    ) -> Result<Vec<CommitJurorVotePayload>, E> {
+        Ok(Vec::new())
     }
 
     /// Get the block version in which TX is executed

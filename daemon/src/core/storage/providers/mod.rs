@@ -1,6 +1,7 @@
 mod account;
 mod agent_account;
 mod arbiter;
+mod arbitration_commit;
 mod asset;
 mod balance;
 mod block;
@@ -35,6 +36,7 @@ mod versioned;
 pub use account::*;
 pub use agent_account::*;
 pub use arbiter::*;
+pub use arbitration_commit::*;
 pub use asset::*;
 pub use balance::*;
 pub use block::*;

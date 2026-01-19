@@ -1014,7 +1014,7 @@ async fn aa_sk_09_revoke_session_key_success() {
     assert!(result.is_ok(), "RevokeSessionKey should succeed");
 
     assert!(
-        state.session_keys.get(&(owner.clone(), 1)).is_none(),
+        !state.session_keys.contains_key(&(owner.clone(), 1)),
         "Session key should be deleted"
     );
 }
@@ -2235,7 +2235,7 @@ async fn aa_integration_01_full_lifecycle() {
         .await
         .expect("RevokeSessionKey should succeed");
 
-    assert!(state.session_keys.get(&(owner.clone(), 1)).is_none());
+    assert!(!state.session_keys.contains_key(&(owner.clone(), 1)));
 }
 
 #[tokio::test]
@@ -2263,7 +2263,7 @@ async fn aa_integration_02_multiple_session_keys() {
         let payload = AgentAccountPayload::AddSessionKey { key };
         verify_agent_account_payload(&payload, &owner, &mut state)
             .await
-            .expect(&format!("AddSessionKey {} should succeed", i));
+            .unwrap_or_else(|e| panic!("AddSessionKey {} should succeed: {:?}", i, e));
     }
 
     let keys = state
@@ -2276,7 +2276,7 @@ async fn aa_integration_02_multiple_session_keys() {
         let payload = AgentAccountPayload::RevokeSessionKey { key_id: i };
         verify_agent_account_payload(&payload, &owner, &mut state)
             .await
-            .expect(&format!("RevokeSessionKey {} should succeed", i));
+            .unwrap_or_else(|e| panic!("RevokeSessionKey {} should succeed: {:?}", i, e));
     }
 
     let keys = state
@@ -2311,7 +2311,7 @@ async fn aa_limits_17_max_session_keys_enforced() {
         let payload = AgentAccountPayload::AddSessionKey { key };
         verify_agent_account_payload(&payload, &owner, &mut state)
             .await
-            .expect(&format!("AddSessionKey {} should succeed", i));
+            .unwrap_or_else(|e| panic!("AddSessionKey {} should succeed: {:?}", i, e));
     }
 
     let extra_key = create_session_key(2048, 5000, 1000);
