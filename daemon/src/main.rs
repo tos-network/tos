@@ -1733,7 +1733,7 @@ async fn snapshot_mode<S: Storage>(
     manager.message("Starting snapshot mode...");
     let mut storage = blockchain.get_storage().write().await;
     storage
-        .start_commit_point()
+        .start_snapshot()
         .await
         .context("Error on commit point")?;
     manager.message("Snapshot mode enabled");
@@ -1813,8 +1813,8 @@ async fn status<S: Storage>(
 
     let height = blockchain.get_height();
     let topoheight = blockchain.get_topo_height();
-    let stableheight = blockchain.get_stable_height();
-    let stable_topoheight = blockchain.get_stable_topoheight();
+    let stableheight = blockchain.get_stable_height().await;
+    let stable_topoheight = blockchain.get_stable_topoheight().await;
     let difficulty = blockchain.get_difficulty().await;
 
     debug!("Retrieving blockchain info from storage");
@@ -1866,7 +1866,7 @@ async fn status<S: Storage>(
         .await
         .context("Error while retrieving pruned topoheight")?;
     let snapshot = storage
-        .has_commit_point()
+        .has_snapshot()
         .await
         .context("Error while checking snapshot")?;
     let version = get_version_at_height(blockchain.get_network(), height);
@@ -2051,7 +2051,7 @@ async fn clear_caches<S: Storage>(
     let mut storage = blockchain.get_storage().write().await;
 
     storage
-        .clear_caches()
+        .clear_objects_cache()
         .await
         .context("Error while clearing caches")?;
     manager.message("Caches cleared");

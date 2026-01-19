@@ -1007,7 +1007,7 @@ async fn get_stable_height<S: Storage>(
 ) -> Result<Value, InternalRpcError> {
     require_no_params(body)?;
     let blockchain: &Arc<Blockchain<S>> = context.get()?;
-    Ok(json!(blockchain.get_stable_height()))
+    Ok(json!(blockchain.get_stable_height().await))
 }
 
 async fn get_stable_topoheight<S: Storage>(
@@ -1016,7 +1016,7 @@ async fn get_stable_topoheight<S: Storage>(
 ) -> Result<Value, InternalRpcError> {
     require_no_params(body)?;
     let blockchain: &Arc<Blockchain<S>> = context.get()?;
-    Ok(json!(blockchain.get_stable_topoheight()))
+    Ok(json!(blockchain.get_stable_topoheight().await))
 }
 
 async fn get_hard_forks<S: Storage>(
@@ -1215,7 +1215,7 @@ async fn get_stable_balance<S: Storage>(
     }
 
     let top_topoheight = blockchain.get_topo_height();
-    let stable_topoheight = blockchain.get_stable_topoheight();
+    let stable_topoheight = blockchain.get_stable_topoheight().await;
     let storage = blockchain.get_storage().read().await;
 
     let mut stable_version = None;
@@ -1291,8 +1291,8 @@ async fn get_info<S: Storage>(context: &Context, body: Value) -> Result<Value, I
     let blockchain: &Arc<Blockchain<S>> = context.get()?;
     let height = blockchain.get_height();
     let topoheight = blockchain.get_topo_height();
-    let stableheight = blockchain.get_stable_height();
-    let stable_topoheight = blockchain.get_stable_topoheight();
+    let stableheight = blockchain.get_stable_height().await;
+    let stable_topoheight = blockchain.get_stable_topoheight().await;
     let (top_block_hash, emitted_supply, burned_supply, pruned_topoheight, average_block_time) = {
         let storage = blockchain.get_storage().read().await;
         let top_block_hash = storage
@@ -2685,8 +2685,11 @@ async fn is_account_registered<S: Storage>(
     let storage = blockchain.get_storage().read().await;
     let key = params.address.get_public_key();
     let registered = if params.in_stable_height {
+        // Note: Use storage.chain_cache() directly instead of blockchain.get_stable_topoheight().await
+        // to avoid deadlock - we're already holding storage.read()
+        let stable_topoheight = storage.chain_cache().await.stable_topoheight;
         storage
-            .is_account_registered_for_topoheight(key, blockchain.get_stable_topoheight())
+            .is_account_registered_for_topoheight(key, stable_topoheight)
             .await
             .context("Error while checking if account is registered in stable height")?
     } else {
@@ -4022,8 +4025,9 @@ async fn get_address_payments<S: Storage>(
 
     let key = address.clone().to_public_key();
 
-    // Get stable topoheight for confirmation info
-    let stable_topoheight = blockchain.get_stable_topoheight();
+    // Note: Use storage.chain_cache() directly instead of blockchain.get_stable_topoheight().await
+    // to avoid deadlock - we're already holding storage.read()
+    let stable_topoheight = storage.chain_cache().await.stable_topoheight;
     let current_topoheight = blockchain.get_topo_height();
 
     // Check if account exists and get balance
@@ -4629,7 +4633,7 @@ async fn clear_caches<S: Storage>(
     let mut storage = blockchain.get_storage().write().await;
 
     storage
-        .clear_caches()
+        .clear_objects_cache()
         .await
         .context("Error while clearing caches")?;
 

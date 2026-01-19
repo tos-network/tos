@@ -23,7 +23,15 @@ use tos_common::{
 
 use crate::{
     config::{CHAIN_SYNC_TOP_BLOCKS, PEER_OBJECTS_CONCURRENCY, STABLE_LIMIT},
-    core::{blockchain::BroadcastOption, blockdag, error::BlockchainError, storage::Storage},
+    core::{
+        blockchain::BroadcastOption,
+        blockdag,
+        error::BlockchainError,
+        storage::{
+            snapshot::{SnapshotWrapper, StorageHolder},
+            Storage,
+        },
+    },
     p2p::{
         error::P2pError,
         packet::{ChainRequest, ObjectRequest, Packet, PacketWrapper},
@@ -149,7 +157,9 @@ impl<S: Storage> P2pServer<S> {
                 top_topoheight - topoheight < accepted_response_size as u64;
             if should_search_alt_tips {
                 debug!("Peer is near to be synced, will send him alt tips blocks");
-                unstable_height = Some(self.blockchain.get_stable_height() + 1);
+                // Note: Use storage.chain_cache() directly instead of self.blockchain.get_stable_height().await
+                // to avoid deadlock - we're already holding storage.read()
+                unstable_height = Some(storage.chain_cache().await.stable_height + 1);
             }
 
             // Search the lowest height
@@ -253,6 +263,7 @@ impl<S: Storage> P2pServer<S> {
         &self,
         peer: &Arc<Peer>,
         mut chain_validator: ChainValidator<'_, S>,
+        snapshot: &SnapshotWrapper<'_, S>,
         blocks: IndexSet<Hash>,
     ) -> Result<(), BlockchainError> {
         // now retrieve all txs from all blocks header and add block in chain
@@ -361,8 +372,8 @@ impl<S: Storage> P2pServer<S> {
                 Some(res) = scheduler.next() => {
                     let future = async move {
                         match res? {
-                            ResponseHelper::Requested(block, hash) => self.blockchain.add_new_block(block, Some(hash), BroadcastOption::Miners, false).await,
-                            ResponseHelper::NotRequested(hash) => self.try_re_execution_block(hash).await,
+                            ResponseHelper::Requested(block, hash) => self.blockchain.add_new_block_with_storage(StorageHolder::Snapshot(snapshot), block, Some(hash), BroadcastOption::Miners, false).await,
+                            ResponseHelper::NotRequested(hash) => self.try_re_execution_block_with_storage(hash, StorageHolder::Snapshot(snapshot)).await,
                         }
                     };
 
@@ -389,6 +400,7 @@ impl<S: Storage> P2pServer<S> {
         peer: &Arc<Peer>,
         pop_count: u64,
         chain_validator: ChainValidator<'_, S>,
+        snapshot: &SnapshotWrapper<'_, S>,
         blocks: IndexSet<Hash>,
     ) -> Result<
         (
@@ -404,12 +416,17 @@ impl<S: Storage> P2pServer<S> {
                 peer, pop_count
             );
         }
-        let (topoheight, txs) = self.blockchain.rewind_chain(pop_count, false).await?;
+        let (topoheight, txs) = {
+            let mut snapshot = snapshot.lock().await?;
+            self.blockchain
+                .rewind_chain_for_storage(&mut snapshot, pop_count, false)
+                .await?
+        };
         if log::log_enabled!(log::Level::Debug) {
             debug!("Rewinded chain until topoheight {}", topoheight);
         }
         let res = self
-            .handle_blocks_from_chain_validator(peer, chain_validator, blocks)
+            .handle_blocks_from_chain_validator(peer, chain_validator, snapshot, blocks)
             .await;
 
         // Mark peer as failed if P2P error occurred (unless it's a priority node)
@@ -489,11 +506,16 @@ impl<S: Storage> P2pServer<S> {
         }
         let pop_count = {
             let storage = self.blockchain.get_storage().read().await;
+            // Note: Use storage.chain_cache() directly instead of self.blockchain.get_stable_*().await
+            // to avoid deadlock - we're already holding storage.read()
+            let chain_cache = storage.chain_cache().await;
+            let stable_topoheight = chain_cache.stable_topoheight;
+            let stable_height = chain_cache.stable_height;
+
             let expected_common_topoheight = storage
                 .get_topo_height_for_hash(common_point.get_hash())
                 .await?;
 
-            let stable_topoheight = self.blockchain.get_stable_topoheight();
             if expected_common_topoheight != common_topoheight {
                 if log::log_enabled!(log::Level::Warn) {
                     warn!(
@@ -519,25 +541,24 @@ impl<S: Storage> P2pServer<S> {
                 trace!(
                     "block height: {}, stable height: {}, topoheight: {}, hash: {}",
                     block_height,
-                    self.blockchain.get_stable_height(),
+                    stable_height,
                     expected_common_topoheight,
                     common_point.get_hash()
                 );
             }
             // We are under the stable height, rewind is necessary
-            let mut count = if skip_stable_height_check
-                || peer.is_priority()
-                || lowest_height <= self.blockchain.get_stable_height()
-            {
-                let our_topoheight = self.blockchain.get_topo_height();
-                if our_topoheight > expected_common_topoheight {
-                    our_topoheight - expected_common_topoheight
+            let mut count =
+                if skip_stable_height_check || peer.is_priority() || lowest_height <= stable_height
+                {
+                    let our_topoheight = self.blockchain.get_topo_height();
+                    if our_topoheight > expected_common_topoheight {
+                        our_topoheight - expected_common_topoheight
+                    } else {
+                        expected_common_topoheight - our_topoheight
+                    }
                 } else {
-                    expected_common_topoheight - our_topoheight
-                }
-            } else {
-                0
-            };
+                    0
+                };
 
             if let Some(pruned_topo) = storage.get_pruned_topoheight().await? {
                 let available_diff = self.blockchain.get_topo_height() - pruned_topo;
@@ -584,7 +605,7 @@ impl<S: Storage> P2pServer<S> {
 
         // if node asks us to pop blocks, check that the peer's height/topoheight is in advance on us
         let peer_topoheight = peer.get_topoheight();
-        let our_stable_topoheight = self.blockchain.get_stable_topoheight();
+        let our_stable_topoheight = self.blockchain.get_stable_topoheight().await;
 
         if pop_count > 0
             && peer_topoheight > our_previous_topoheight
@@ -698,14 +719,16 @@ impl<S: Storage> P2pServer<S> {
                 }
 
                 // Handle the chain validator
-                {
-                    info!("Starting commit point for chain validator");
-                    let mut storage = self.blockchain.get_storage().write().await;
-                    storage.start_commit_point().await?;
-                    info!("Commit point started for chain validator");
-                }
+                info!("Starting commit point for chain validator");
+                let storage = SnapshotWrapper::new(self.blockchain.get_storage());
                 let mut res = self
-                    .handle_chain_validator_with_rewind(peer, pop_count, chain_validator, blocks)
+                    .handle_chain_validator_with_rewind(
+                        peer,
+                        pop_count,
+                        chain_validator,
+                        &storage,
+                        blocks,
+                    )
                     .await;
                 {
                     info!("Ending commit point for chain validator");
@@ -713,20 +736,28 @@ impl<S: Storage> P2pServer<S> {
                         // In case we got a partially good chain only, and that its still better than ours
                         // we can partially switch to it if the topoheight AND the cumulative difficulty is bigger
                         Ok((_, res)) => {
-                            res.is_ok()
-                                || (our_previous_topoheight < self.blockchain.get_topo_height()
-                                    && current_cumulative_difficulty
-                                        < self.blockchain.get_cumulative_difficulty().await?)
+                            if res.is_ok() {
+                                true
+                            } else {
+                                let storage = storage.lock().await?;
+                                let chain_cache = storage.chain_cache().await;
+                                let topoheight = chain_cache.topoheight;
+                                let top_hash = storage.get_top_block_hash().await?;
+                                let cumulative_difficulty = storage
+                                    .get_cumulative_difficulty_for_block_hash(&top_hash)
+                                    .await?;
+                                our_previous_topoheight < topoheight
+                                    && current_cumulative_difficulty < cumulative_difficulty
+                            }
                         }
                         Err(_) => false,
                     };
 
                     {
                         debug!("locking storage write mode for commit point");
-                        let mut storage = self.blockchain.get_storage().write().await;
+                        let mut storage = storage.lock().await?;
                         debug!("locked storage write mode for commit point");
-
-                        storage.end_commit_point(apply).await?;
+                        storage.end_snapshot(apply)?;
                         if log::log_enabled!(log::Level::Info) {
                             info!("Commit point ended for chain validator, apply: {}", apply);
                         }
@@ -875,7 +906,13 @@ impl<S: Storage> P2pServer<S> {
                                         Ok(true)
                                     },
                                     ResponseHelper::NotRequested(hash) => {
-                                        if let Err(e) = self.try_re_execution_block(hash).await {
+                                        if let Err(e) = self
+                                            .try_re_execution_block_with_storage(
+                                                hash,
+                                                StorageHolder::Storage(self.blockchain.get_storage()),
+                                            )
+                                            .await
+                                        {
                                             self.object_tracker.mark_group_as_fail(group_id).await;
                                             return Err(e)
                                         }
@@ -957,7 +994,11 @@ impl<S: Storage> P2pServer<S> {
     }
 
     // Try to re-execute the block requested if its not included in DAG order (it has no topoheight assigned)
-    async fn try_re_execution_block(&self, hash: Immutable<Hash>) -> Result<(), BlockchainError> {
+    async fn try_re_execution_block_with_storage(
+        &self,
+        hash: Immutable<Hash>,
+        holder: StorageHolder<'_, S>,
+    ) -> Result<(), BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("check re execution block {}", hash);
         }
@@ -968,7 +1009,7 @@ impl<S: Storage> P2pServer<S> {
         }
 
         {
-            let storage = self.blockchain.get_storage().read().await;
+            let storage = holder.read().await?;
             if storage.is_block_topological_ordered(&hash).await? {
                 if log::log_enabled!(log::Level::Trace) {
                     trace!("block {} is already ordered", hash);
@@ -981,7 +1022,7 @@ impl<S: Storage> P2pServer<S> {
             warn!("Forcing block {} re-execution", hash);
         }
         let block = {
-            let mut storage = self.blockchain.get_storage().write().await;
+            let mut storage = holder.write().await?;
             debug!("storage write acquired for block forced re-execution");
 
             let block = storage.delete_block_with_hash(&hash).await?;
@@ -998,7 +1039,7 @@ impl<S: Storage> P2pServer<S> {
 
         // Replicate same behavior as above branch
         self.blockchain
-            .add_new_block(block, Some(hash), BroadcastOption::Miners, false)
+            .add_new_block_with_storage(holder, block, Some(hash), BroadcastOption::Miners, false)
             .await
     }
 }

@@ -75,6 +75,27 @@ impl ClientProtocolProvider for RocksStorage {
         }
     }
 
+    // Unlink the transaction from the block
+    fn unlink_transaction_from_block(
+        &mut self,
+        tx: &Hash,
+        block: &Hash,
+    ) -> Result<bool, BlockchainError> {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("unlink transaction {} from block {}", tx, block);
+        }
+        let mut hashes: HashSet<Cow<'_, Hash>> = self
+            .load_optional_from_disk(Column::TransactionInBlocks, tx)?
+            .unwrap_or_else(HashSet::new);
+
+        let removed = hashes.remove(block);
+        if removed {
+            self.insert_into_disk(Column::TransactionInBlocks, tx, &hashes)?;
+        }
+
+        Ok(removed)
+    }
+
     // Get all blocks in which the transaction is included
     fn get_blocks_for_tx(&self, hash: &Hash) -> Result<Tips, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {

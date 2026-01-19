@@ -2,13 +2,13 @@
 
 use async_trait::async_trait;
 use log::trace;
-use rocksdb::Direction;
 use tos_common::{block::TopoHeight, contract::ScheduledExecution};
 
 use crate::core::{
     error::BlockchainError,
     storage::{
         rocksdb::{Column, ContractId, IteratorMode, RocksStorage},
+        snapshot::Direction,
         VersionedScheduledExecutionProvider,
     },
 };

@@ -4,8 +4,8 @@ use crate::core::{
     error::BlockchainError,
     hard_fork::{get_pow_algorithm_for_version, get_version_at_height},
     storage::{
-        BlocksAtHeightProvider, DagOrderProvider, DifficultyProvider, MerkleHashProvider,
-        PrunedTopoheightProvider, Storage,
+        BlocksAtHeightProvider, CacheProvider, DagOrderProvider, DifficultyProvider,
+        MerkleHashProvider, PrunedTopoheightProvider, Storage,
     },
 };
 use async_trait::async_trait;
@@ -56,6 +56,23 @@ impl<'a, S: Storage> ChainValidatorProvider<'a, S> {
     // Check in chain validator or in storage if block exists
     pub async fn has_block_with_hash(&self, hash: &Hash) -> Result<bool, BlockchainError> {
         Ok(self.parent.blocks.contains_key(hash) || self.storage.has_block_with_hash(hash).await?)
+    }
+}
+
+#[async_trait]
+impl<S: Storage + CacheProvider> CacheProvider for ChainValidatorProvider<'_, S> {
+    async fn clear_objects_cache(&mut self) -> Result<(), BlockchainError> {
+        Ok(())
+    }
+
+    async fn chain_cache_mut(
+        &mut self,
+    ) -> Result<&mut crate::core::storage::ChainCache, BlockchainError> {
+        Err(BlockchainError::InvalidConfig)
+    }
+
+    async fn chain_cache(&self) -> &crate::core::storage::ChainCache {
+        self.storage.chain_cache().await
     }
 }
 

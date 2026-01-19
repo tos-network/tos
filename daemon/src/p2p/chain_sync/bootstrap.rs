@@ -57,6 +57,9 @@ impl<S: Storage> P2pServer<S> {
         }
 
         let storage = self.blockchain.get_storage().read().await;
+        // Note: Use storage.chain_cache() directly instead of self.blockchain.get_stable_topoheight().await
+        // to avoid deadlock - we're already holding storage.read()
+        let stable_topoheight = storage.chain_cache().await.stable_topoheight;
         let pruned_topoheight = storage.get_pruned_topoheight().await?.unwrap_or(0);
         if let Some(topoheight) = request.get_requested_topoheight() {
             let our_topoheight = self.blockchain.get_topo_height();
@@ -74,13 +77,11 @@ impl<S: Storage> P2pServer<S> {
             }
 
             // Check that the block is in stable topoheight
-            if topoheight > self.blockchain.get_stable_topoheight() {
+            if topoheight > stable_topoheight {
                 if log::log_enabled!(log::Level::Warn) {
                     warn!(
                         "Requested topoheight {} is not stable ({}), ignoring {:?}",
-                        topoheight,
-                        self.blockchain.get_stable_topoheight(),
-                        request_kind
+                        topoheight, stable_topoheight, request_kind
                     );
                 }
                 return Err(P2pError::InvalidRequestedTopoheight.into());
@@ -165,7 +166,8 @@ impl<S: Storage> P2pServer<S> {
                     return Err(P2pError::InvalidPacket.into());
                 }
 
-                if max > self.blockchain.get_stable_topoheight() {
+                // Use stable_topoheight variable already read from chain_cache above
+                if max > stable_topoheight {
                     if log_enabled!(Level::Warn) {
                         warn!("Requested spendable balances...");
                     }

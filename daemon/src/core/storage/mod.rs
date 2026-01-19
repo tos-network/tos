@@ -1,9 +1,11 @@
+mod cache;
 mod constants;
 mod providers;
 
 pub mod rocksdb;
+pub mod snapshot;
 
-pub use self::{providers::*, rocksdb::RocksStorage};
+pub use self::{cache::*, providers::*, rocksdb::RocksStorage};
 
 use crate::{config::PRUNE_SAFETY_LIMIT, core::error::BlockchainError};
 use async_trait::async_trait;
@@ -35,7 +37,7 @@ pub trait Storage:
     + NetworkProvider
     + MultiSigProvider
     + TipsProvider
-    + CommitPointProvider
+    + SnapshotProvider
     + ContractProvider
     + ContractDataProvider
     + ContractOutputsProvider
@@ -211,7 +213,7 @@ pub trait Storage:
 
         trace!("Cleaning caches");
         // Clear all caches to not have old data after rewind
-        self.clear_caches().await?;
+        self.clear_objects_cache().await?;
 
         trace!("Storing new pointers");
         // store the new tips and topo topoheight

@@ -4,12 +4,12 @@ use crate::core::{
     error::BlockchainError,
     storage::{
         rocksdb::{Column, IteratorMode, RocksStorage},
+        snapshot::Direction,
         MessageIndexEntry, NetworkProvider, StoredEphemeralMessage, TnsProvider,
     },
 };
 use async_trait::async_trait;
 use log::trace;
-use rocksdb::Direction;
 use tos_common::{
     block::TopoHeight,
     crypto::{Hash, PublicKey},

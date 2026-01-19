@@ -8,7 +8,11 @@ use crate::core::{
 use async_trait::async_trait;
 use log::trace;
 use std::collections::{HashMap, HashSet};
-use tos_common::{block::TopoHeight, crypto::Address, serializer::RawBytes};
+use tos_common::{
+    block::TopoHeight,
+    crypto::Address,
+    serializer::{RawBytes, Serializer},
+};
 
 fn parse_energy_key(key: &[u8]) -> Result<(TopoHeight, String), BlockchainError> {
     let key_str = std::str::from_utf8(key).map_err(|_| BlockchainError::CorruptedData)?;
@@ -61,13 +65,15 @@ impl VersionedEnergyProvider for RocksStorage {
         let mut max_below: HashMap<String, TopoHeight> = HashMap::new();
         let mut to_delete: Vec<(RawBytes, String)> = Vec::new();
 
-        for res in Self::iter_owned_internal::<RawBytes, RawBytes>(
+        let snapshot = self.snapshot.clone();
+        for res in Self::iter_raw_internal(
             &self.db,
-            self.snapshot.as_ref(),
+            snapshot.as_ref(),
             IteratorMode::Start,
             Column::VersionedEnergyResources,
         )? {
             let (key, _) = res?;
+            let key = RawBytes::from_bytes(&key)?;
             let (entry_topo, address) = parse_energy_key(&key)?;
             if entry_topo == topoheight {
                 to_delete.push((key, address));
@@ -114,13 +120,15 @@ impl VersionedEnergyProvider for RocksStorage {
         let mut max_at_or_below: HashMap<String, TopoHeight> = HashMap::new();
         let mut to_delete: Vec<(RawBytes, String)> = Vec::new();
 
-        for res in Self::iter_owned_internal::<RawBytes, RawBytes>(
+        let snapshot = self.snapshot.clone();
+        for res in Self::iter_raw_internal(
             &self.db,
-            self.snapshot.as_ref(),
+            snapshot.as_ref(),
             IteratorMode::Start,
             Column::VersionedEnergyResources,
         )? {
             let (key, _) = res?;
+            let key = RawBytes::from_bytes(&key)?;
             let (entry_topo, address) = parse_energy_key(&key)?;
             if entry_topo > topoheight {
                 to_delete.push((key, address));
@@ -172,13 +180,15 @@ impl VersionedEnergyProvider for RocksStorage {
         let mut candidates: Vec<(RawBytes, String, TopoHeight)> = Vec::new();
         let mut addresses_with_deletions: HashSet<String> = HashSet::new();
 
-        for res in Self::iter_owned_internal::<RawBytes, RawBytes>(
+        let snapshot = self.snapshot.clone();
+        for res in Self::iter_raw_internal(
             &self.db,
-            self.snapshot.as_ref(),
+            snapshot.as_ref(),
             IteratorMode::Start,
             Column::VersionedEnergyResources,
         )? {
             let (key, _) = res?;
+            let key = RawBytes::from_bytes(&key)?;
             let (entry_topo, address) = parse_energy_key(&key)?;
             if entry_topo < topoheight {
                 if keep_last {

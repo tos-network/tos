@@ -53,7 +53,7 @@ impl VersionedContractDataProvider for RocksStorage {
                 topoheight
             );
         }
-        self.delete_versioned_below_topoheight(
+        self.delete_versioned_below_topoheight_default(
             Column::ContractsData,
             Column::VersionedContractsData,
             topoheight,

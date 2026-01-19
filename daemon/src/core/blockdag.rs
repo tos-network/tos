@@ -2,9 +2,15 @@ use super::{
     error::BlockchainError,
     storage::{DifficultyProvider, Storage},
 };
+use indexmap::IndexSet;
 use itertools::Either;
-use log::trace;
-use tos_common::{crypto::Hash, difficulty::CumulativeDifficulty, time::TimestampMillis};
+use log::{debug, trace};
+use std::collections::{HashSet, VecDeque};
+use tos_common::{
+    block::BlockVersion, crypto::Hash, difficulty::CumulativeDifficulty, time::TimestampMillis,
+};
+
+use crate::config::get_stable_limit;
 
 // sort the scores by cumulative difficulty and, if equals, by hash value
 pub fn sort_descending_by_cumulative_difficulty<T>(scores: &mut Vec<(T, CumulativeDifficulty)>)
@@ -169,4 +175,72 @@ where
             Ok((newest_tip.ok_or(BlockchainError::ExpectedTips)?, timestamp))
         }
     }
+}
+
+pub async fn build_reachability<P: DifficultyProvider>(
+    provider: &P,
+    hash: Hash,
+    block_version: BlockVersion,
+) -> Result<HashSet<Hash>, BlockchainError> {
+    let mut set = HashSet::new();
+    let mut stack: VecDeque<(Hash, u64)> = VecDeque::new();
+    stack.push_back((hash, 0));
+
+    let stable_limit = get_stable_limit(block_version);
+    while let Some((current_hash, current_level)) = stack.pop_back() {
+        if current_level >= 2 * stable_limit {
+            trace!("Level limit reached, adding {}", current_hash);
+            set.insert(current_hash);
+        } else {
+            trace!("Level {} reached with hash {}", current_level, current_hash);
+            let tips = provider
+                .get_past_blocks_for_block_hash(&current_hash)
+                .await?;
+            set.insert(current_hash);
+            for past_hash in tips.iter() {
+                if !set.contains(past_hash) {
+                    stack.push_back((past_hash.clone(), current_level + 1));
+                }
+            }
+        }
+    }
+
+    Ok(set)
+}
+
+// this function check that a TIP cannot be refered as past block in another TIP
+pub async fn verify_non_reachability<P: DifficultyProvider>(
+    provider: &P,
+    tips: &IndexSet<Hash>,
+    block_version: BlockVersion,
+) -> Result<bool, BlockchainError> {
+    trace!("Verifying non reachability for block");
+    let tips_count = tips.len();
+    let mut reach = Vec::with_capacity(tips_count);
+    for hash in tips {
+        let set = build_reachability(provider, hash.clone(), block_version).await?;
+        reach.push(set);
+    }
+
+    for i in 0..tips_count {
+        for j in 0..tips_count {
+            // if a tip can be referenced as another's past block, its not a tip
+            if i != j && reach[j].contains(&tips[i]) {
+                debug!(
+                    "Tip {} (index {}) is reachable from tip {} (index {})",
+                    tips[i], i, tips[j], j
+                );
+                trace!(
+                    "reach: {}",
+                    reach[j]
+                        .iter()
+                        .map(|x| x.to_string())
+                        .collect::<Vec<String>>()
+                        .join(", ")
+                );
+                return Ok(false);
+            }
+        }
+    }
+    Ok(true)
 }

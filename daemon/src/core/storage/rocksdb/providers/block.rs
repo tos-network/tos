@@ -3,8 +3,8 @@ use crate::core::{
     storage::{
         constants::{BLOCKS_COUNT, TXS_COUNT},
         rocksdb::{BlockDifficulty, Column},
-        BlockProvider, BlocksAtHeightProvider, DifficultyProvider, RocksStorage,
-        TransactionProvider,
+        BlockProvider, BlocksAtHeightProvider, ClientProtocolProvider, DifficultyProvider,
+        RocksStorage, TransactionProvider,
     },
 };
 use async_trait::async_trait;
@@ -30,16 +30,19 @@ impl BlockProvider for RocksStorage {
     // Count the number of blocks stored
     async fn count_blocks(&self) -> Result<u64, BlockchainError> {
         trace!("count blocks");
-        self.load_optional_from_disk(Column::Common, BLOCKS_COUNT)
-            .map(|v| v.unwrap_or(0))
+        Ok(self.cache().counter.blocks_count)
     }
 
     async fn decrease_blocks_count(&mut self, minus: u64) -> Result<(), BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("decrease blocks count by {}", minus);
         }
-        let count = self.count_blocks().await?;
-        self.insert_into_disk(Column::Common, BLOCKS_COUNT, &(count.saturating_sub(minus)))
+        let count = self.cache().counter.blocks_count;
+        let next_count = count.saturating_sub(minus);
+        // Write disk first, then update cache (prevents stale cache on disk failure)
+        self.insert_into_disk(Column::Common, BLOCKS_COUNT, &next_count)?;
+        self.cache_mut().counter.blocks_count = next_count;
+        Ok(())
     }
 
     // Check if the block exists using its hash
@@ -75,7 +78,7 @@ impl BlockProvider for RocksStorage {
     ) -> Result<(), BlockchainError> {
         trace!("save block");
 
-        let mut count_txs = 0;
+        let mut count_txs: u64 = 0;
         for (hash, transaction) in block.get_transactions().iter().zip(txs.iter()) {
             if !self.has_transaction(hash).await? {
                 self.add_transaction(hash, &transaction).await?;
@@ -88,27 +91,92 @@ impl BlockProvider for RocksStorage {
         let block_difficulty = BlockDifficulty {
             covariance,
             difficulty,
-            cumulative_difficulty,
+            cumulative_difficulty: cumulative_difficulty.clone(),
         };
         self.insert_into_disk(Column::BlockDifficulty, hash.as_bytes(), &block_difficulty)?;
 
         self.add_block_hash_at_height(&hash, block.get_height())
             .await?;
 
-        if count_txs > 0 {
-            count_txs += self.count_transactions().await?;
-            self.insert_into_disk(Column::Common, TXS_COUNT, &count_txs)?;
+        // Update cache after all disk writes succeed (prevents stale cache on disk failure)
+        if let Some(objects) = self.cache_mut().objects.as_mut() {
+            let hash = hash.as_ref().clone();
+            objects
+                .blocks_cache
+                .get_mut()
+                .put(hash.clone(), block.clone());
+            objects
+                .cumulative_difficulty_cache
+                .get_mut()
+                .put(hash, cumulative_difficulty);
         }
 
-        let blocks_count = self.count_blocks().await?;
-        self.insert_into_disk(Column::Common, BLOCKS_COUNT, &(blocks_count + 1))
+        // Write disk first, then update cache (prevents stale cache on disk failure)
+        if count_txs > 0 {
+            let next_count = self.cache().counter.transactions_count + count_txs;
+            self.insert_into_disk(Column::Common, TXS_COUNT, &next_count)?;
+            self.cache_mut().counter.transactions_count = next_count;
+        }
+
+        let blocks_count = self.cache().counter.blocks_count + 1;
+        self.insert_into_disk(Column::Common, BLOCKS_COUNT, &blocks_count)?;
+        self.cache_mut().counter.blocks_count = blocks_count;
+        Ok(())
     }
 
-    // Delete a block using its hash
+    // Delete a block using its hash with complete cleanup
     async fn delete_block_with_hash(&mut self, hash: &Hash) -> Result<Block, BlockchainError> {
-        trace!("delete block with hash");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("delete block with hash {}", hash);
+        }
         let block = self.get_block_by_hash(hash).await?;
+
+        // Try to get topoheight for cache eviction (from cache or disk)
+        let topoheight = if let Some(objects) = &self.cache().objects {
+            objects.topo_by_hash_cache.lock().await.get(hash).copied()
+        } else {
+            None
+        }
+        .or_else(|| {
+            match self.load_optional_from_disk::<_, u64>(Column::TopoByHash, hash) {
+                Ok(value) => value,
+                Err(e) => {
+                    if log::log_enabled!(log::Level::Warn) {
+                        log::warn!(
+                            "Failed to load topoheight from disk for cache eviction: {}",
+                            e
+                        );
+                    }
+                    None
+                }
+            }
+        });
+
+        // Remove block header from disk
         self.remove_from_disk(Column::Blocks, hash)?;
+
+        // Remove from height index
+        self.remove_block_hash_at_height(hash, block.get_header().get_height())
+            .await?;
+
+        // Unlink all transactions from this block
+        for tx_hash in block.get_header().get_txs_hashes() {
+            self.unlink_transaction_from_block(tx_hash, hash)?;
+        }
+
+        // Remove block difficulty/metadata
+        self.remove_from_disk(Column::BlockDifficulty, hash)?;
+
+        // Evict from caches
+        if let Some(objects) = self.cache_mut().objects.as_mut() {
+            objects.blocks_cache.get_mut().pop(hash);
+            objects.cumulative_difficulty_cache.get_mut().pop(hash);
+            // Evict from topo caches
+            objects.topo_by_hash_cache.get_mut().pop(hash);
+            if let Some(topo) = topoheight {
+                objects.hash_at_topo_cache.get_mut().pop(&topo);
+            }
+        }
 
         Ok(block)
     }

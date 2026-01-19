@@ -43,8 +43,7 @@ impl StateProvider for RocksStorage {
     // Get the top topoheight of the chain
     async fn get_top_topoheight(&self) -> Result<TopoHeight, BlockchainError> {
         trace!("get top topoheight");
-        self.load_optional_from_disk(Column::Common, TOP_TOPO_HEIGHT)
-            .map(|v| v.unwrap_or(0))
+        Ok(self.cache().chain.topoheight)
     }
 
     // Set the top topoheight of the chain
@@ -52,14 +51,14 @@ impl StateProvider for RocksStorage {
         if log::log_enabled!(log::Level::Trace) {
             trace!("set new top topoheight at {}", topoheight);
         }
+        self.cache_mut().chain.topoheight = topoheight;
         self.insert_into_disk(Column::Common, TOP_TOPO_HEIGHT, &topoheight.to_be_bytes())
     }
 
     // Get the top height of the chain
     async fn get_top_height(&self) -> Result<u64, BlockchainError> {
         trace!("get top height");
-        self.load_optional_from_disk(Column::Common, TOP_HEIGHT)
-            .map(|v| v.unwrap_or(0))
+        Ok(self.cache().chain.height)
     }
 
     // Set the top height of the chain
@@ -67,6 +66,7 @@ impl StateProvider for RocksStorage {
         if log::log_enabled!(log::Level::Trace) {
             trace!("set new top height at {}", height);
         }
+        self.cache_mut().chain.height = height;
         self.insert_into_disk(Column::Common, TOP_HEIGHT, &height.to_be_bytes())
     }
 }

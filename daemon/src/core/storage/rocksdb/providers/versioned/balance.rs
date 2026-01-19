@@ -1,14 +1,15 @@
+use async_trait::async_trait;
+use log::trace;
+use tos_common::{account::BalanceType, block::TopoHeight, serializer::Serializer};
+
 use crate::core::{
     error::BlockchainError,
     storage::{
         rocksdb::{AccountId, AssetId, Column, IteratorMode},
+        snapshot::Direction,
         RocksStorage, VersionedBalanceProvider,
     },
 };
-use async_trait::async_trait;
-use log::trace;
-use rocksdb::Direction;
-use tos_common::{account::BalanceType, block::TopoHeight, serializer::RawBytes};
 
 #[async_trait]
 impl VersionedBalanceProvider for RocksStorage {
@@ -50,13 +51,16 @@ impl VersionedBalanceProvider for RocksStorage {
         }
         let start = topoheight.to_be_bytes();
         if keep_last {
-            for res in Self::iter_owned_internal::<(AccountId, AssetId), TopoHeight>(
+            let snapshot = self.snapshot.clone();
+            for res in Self::iter_raw_internal(
                 &self.db,
-                self.snapshot.as_ref(),
+                snapshot.as_ref(),
                 IteratorMode::Start,
                 Column::Balances,
             )? {
-                let ((account_id, asset_id), pointer) = res?;
+                let (key, value) = res?;
+                let (account_id, asset_id) = <(AccountId, AssetId)>::from_bytes(&key)?;
+                let pointer = TopoHeight::from_bytes(&value)?;
 
                 // We fetch the last version to take its previous topoheight
                 // And we loop on it to delete them all until the end of the chained data
@@ -64,22 +68,23 @@ impl VersionedBalanceProvider for RocksStorage {
                 let mut prev_version = Some(pointer);
                 let mut delete = false;
                 while let Some(prev_topo) = prev_version {
-                    let key =
+                    let versioned_key =
                         Self::get_versioned_account_balance_key(account_id, asset_id, prev_topo);
 
                     // Delete this version from DB if its below the threshold
                     if delete {
-                        prev_version = self.load_from_disk(Column::VersionedBalances, &key)?;
+                        prev_version =
+                            self.load_from_disk(Column::VersionedBalances, &versioned_key)?;
                         Self::remove_from_disk_internal(
                             &self.db,
                             self.snapshot.as_mut(),
                             Column::VersionedBalances,
-                            &key,
+                            &versioned_key,
                         )?;
                     } else {
                         let (prev, ty) = self.load_from_disk::<_, (Option<u64>, BalanceType)>(
                             Column::VersionedBalances,
-                            &key,
+                            &versioned_key,
                         )?;
                         // If this version contains an output, that means we can delete all others below
                         if prev_topo < topoheight {
@@ -91,9 +96,10 @@ impl VersionedBalanceProvider for RocksStorage {
                 }
             }
         } else {
-            for res in Self::iter_owned_internal::<RawBytes, ()>(
+            let snapshot = self.snapshot.clone();
+            for res in Self::iter_raw_internal(
                 &self.db,
-                self.snapshot.as_ref(),
+                snapshot.as_ref(),
                 IteratorMode::From(&start, Direction::Forward),
                 Column::VersionedBalances,
             )? {

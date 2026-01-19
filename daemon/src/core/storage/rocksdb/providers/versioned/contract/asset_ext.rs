@@ -53,7 +53,7 @@ impl VersionedContractAssetExtProvider for RocksStorage {
                 topoheight
             );
         }
-        self.delete_versioned_below_topoheight(
+        self.delete_versioned_below_topoheight_default(
             Column::ContractsAssetExt,
             Column::VersionedContractsAssetExt,
             topoheight,

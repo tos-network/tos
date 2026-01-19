@@ -64,7 +64,9 @@ impl VersionedNftProvider for RocksStorage {
             trace!("delete versioned nft below topoheight {}", topoheight);
         }
         for (pointer, versioned) in NFT_COLUMNS {
-            self.delete_versioned_below_topoheight(*pointer, *versioned, topoheight, keep_last)?;
+            self.delete_versioned_below_topoheight_default(
+                *pointer, *versioned, topoheight, keep_last,
+            )?;
         }
         Ok(())
     }

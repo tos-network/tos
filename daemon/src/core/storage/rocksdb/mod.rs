@@ -1,6 +1,5 @@
 mod column;
 mod providers;
-mod snapshot;
 mod types;
 
 use std::sync::Arc;
@@ -9,8 +8,13 @@ use crate::core::{
     config::RocksDBConfig,
     error::{BlockchainError, DiskContext},
     storage::{
+        constants::{
+            ASSETS_ID, BLOCKS_COUNT, BLOCKS_EXECUTION_ORDER_COUNT, NEXT_ACCOUNT_ID,
+            NEXT_CONTRACT_ID, PRUNED_TOPOHEIGHT, TIPS, TOP_HEIGHT, TOP_TOPO_HEIGHT, TXS_COUNT,
+        },
+        snapshot::{BytesView, Direction, EntryState, IteratorMode, Snapshot as InternalSnapshot},
         BlocksAtHeightProvider, ClientProtocolProvider, ContractOutputsProvider, EscrowProvider,
-        Tips,
+        StorageCache, Tips,
     },
 };
 use anyhow::Context;
@@ -19,7 +23,7 @@ use itertools::Either;
 use log::{debug, info, trace};
 use rocksdb::{
     BlockBasedOptions, Cache, ColumnFamilyDescriptor, DBCompactionStyle, DBCompressionType,
-    DBWithThreadMode, Direction, Env, IteratorMode as InternalIteratorMode, MultiThreaded, Options,
+    DBWithThreadMode, Env, IteratorMode as InternalIteratorMode, MultiThreaded, Options,
     ReadOptions, SliceTransform, WaitForCompactOptions, WriteBatch,
 };
 use serde::{Deserialize, Serialize};
@@ -34,10 +38,12 @@ use tos_common::{
     transaction::{Transaction, TransactionType},
 };
 
+use crate::config::DEFAULT_CACHE_SIZE;
+
 pub use column::*;
 pub use types::*;
 
-pub use snapshot::Snapshot;
+pub type Snapshot = InternalSnapshot<Column>;
 
 use super::Storage;
 
@@ -98,26 +104,29 @@ impl CompressionMode {
     }
 }
 
-#[derive(Copy, Clone)]
-pub enum IteratorMode<'a> {
-    Start,
-    End,
-    // Allow for range start operations
-    From(&'a [u8], Direction),
-    // Strict prefix to all keys
-    WithPrefix(&'a [u8], Direction),
-}
-
 impl<'a> IteratorMode<'a> {
     pub fn convert(self) -> (InternalIteratorMode<'a>, ReadOptions) {
         let mut opts = ReadOptions::default();
         let mode = match self {
             Self::Start => InternalIteratorMode::Start,
             Self::End => InternalIteratorMode::End,
-            Self::From(prefix, direction) => InternalIteratorMode::From(prefix, direction),
+            Self::From(prefix, direction) => InternalIteratorMode::From(prefix, direction.into()),
             Self::WithPrefix(prefix, direction) => {
                 opts.set_prefix_same_as_start(true);
-                InternalIteratorMode::From(prefix, direction)
+                InternalIteratorMode::From(prefix, direction.into())
+            }
+            Self::Range {
+                lower_bound,
+                upper_bound,
+                direction,
+            } => {
+                opts.set_iterate_upper_bound(upper_bound);
+                opts.set_iterate_lower_bound(lower_bound);
+
+                match direction {
+                    Direction::Forward => InternalIteratorMode::Start,
+                    Direction::Reverse => InternalIteratorMode::End,
+                }
             }
         };
 
@@ -129,6 +138,7 @@ pub struct RocksStorage {
     db: Arc<InnerDB>,
     network: Network,
     snapshot: Option<Snapshot>,
+    cache: StorageCache,
 }
 
 impl RocksStorage {
@@ -196,15 +206,83 @@ impl RocksStorage {
         )
         .expect("Failed to open RocksDB");
 
-        Self {
+        let mut storage = Self {
             db: Arc::new(db),
             network,
             snapshot: None,
+            cache: StorageCache::new(Some(DEFAULT_CACHE_SIZE)),
+        };
+
+        storage.load_cache_from_disk();
+        storage
+    }
+
+    #[inline(always)]
+    pub fn cache(&self) -> &StorageCache {
+        match self.snapshot.as_ref() {
+            Some(snapshot) => &snapshot.cache,
+            None => &self.cache,
+        }
+    }
+
+    #[inline(always)]
+    pub fn cache_mut(&mut self) -> &mut StorageCache {
+        match self.snapshot.as_mut() {
+            Some(snapshot) => &mut snapshot.cache,
+            None => &mut self.cache,
         }
     }
 
     pub fn load_cache_from_disk(&mut self) {
         trace!("load cache from disk");
+
+        // Helper macro to load cache values with proper error logging
+        macro_rules! load_cache_value {
+            ($key:expr, $field:expr, $default:expr) => {
+                match self.load_optional_from_disk(Column::Common, $key) {
+                    Ok(value) => $field = value.unwrap_or($default),
+                    Err(e) => {
+                        if log::log_enabled!(log::Level::Warn) {
+                            log::warn!(
+                                "Failed to load {} from disk, using default: {}",
+                                stringify!($key),
+                                e
+                            );
+                        }
+                        $field = $default;
+                    }
+                }
+            };
+        }
+
+        load_cache_value!(TOP_HEIGHT, self.cache.chain.height, 0);
+        load_cache_value!(TOP_TOPO_HEIGHT, self.cache.chain.topoheight, 0);
+        load_cache_value!(TIPS, self.cache.chain.tips, Tips::default());
+
+        // pruned_topoheight is Option<u64>, handle separately
+        match self.load_optional_from_disk::<_, u64>(Column::Common, PRUNED_TOPOHEIGHT) {
+            Ok(value) => self.cache.counter.pruned_topoheight = value,
+            Err(e) => {
+                if log::log_enabled!(log::Level::Warn) {
+                    log::warn!(
+                        "Failed to load PRUNED_TOPOHEIGHT from disk, using default: {}",
+                        e
+                    );
+                }
+                self.cache.counter.pruned_topoheight = None;
+            }
+        }
+
+        load_cache_value!(BLOCKS_COUNT, self.cache.counter.blocks_count, 0);
+        load_cache_value!(TXS_COUNT, self.cache.counter.transactions_count, 0);
+        load_cache_value!(
+            BLOCKS_EXECUTION_ORDER_COUNT,
+            self.cache.counter.blocks_execution_count,
+            0
+        );
+        load_cache_value!(NEXT_ACCOUNT_ID, self.cache.counter.accounts_count, 0);
+        load_cache_value!(ASSETS_ID, self.cache.counter.assets_count, 0);
+        load_cache_value!(NEXT_CONTRACT_ID, self.cache.counter.contracts_count, 0);
     }
 
     pub(super) fn insert_into_disk<K: AsRef<[u8]>, V: Serializer>(
@@ -353,11 +431,14 @@ impl RocksStorage {
         if let Some(v) = self
             .snapshot
             .as_ref()
-            .and_then(|s| s.get_size(column, key.as_ref()))
+            .map(|s| s.get_size(column, key.as_ref()))
         {
             match v {
-                Some(v) => return Ok(v),
-                None => return Err(BlockchainError::NotFoundOnDisk(DiskContext::DataLen)),
+                EntryState::Stored(v) => return Ok(v),
+                EntryState::Deleted => {
+                    return Err(BlockchainError::NotFoundOnDisk(DiskContext::DataLen));
+                }
+                EntryState::Absent => {}
             }
         }
 
@@ -384,10 +465,11 @@ impl RocksStorage {
             trace!("load optional {:?} from disk internal", column);
         }
 
-        if let Some(v) = snapshot.and_then(|s| s.get(column, key.as_ref())) {
+        if let Some(v) = snapshot.map(|s| s.get(column, key.as_ref())) {
             match v {
-                Some(v) => return Ok(Some(V::from_bytes(&v)?)),
-                None => return Ok(None),
+                EntryState::Stored(v) => return Ok(Some(V::from_bytes(&v)?)),
+                EntryState::Deleted => return Ok(None),
+                EntryState::Absent => {}
             }
         }
 
@@ -413,15 +495,17 @@ impl RocksStorage {
         }
 
         match snapshot {
-            Some(snapshot) => snapshot.put(column, key.as_ref().to_vec(), value.to_bytes()),
+            Some(snapshot) => {
+                let _ = snapshot.put(column, key.as_ref().to_vec(), value.to_bytes());
+            }
             None => {
                 let cf = cf_handle!(db, column);
                 db.put_cf(&cf, key.as_ref(), value.to_bytes())
                     .with_context(|| {
                         format!("Error while inserting into disk column {:?}", column)
-                    })?
+                    })?;
             }
-        };
+        }
 
         Ok(())
     }
@@ -438,46 +522,18 @@ impl RocksStorage {
 
         let bytes = key.as_ref();
         match snapshot {
-            Some(snapshot) => snapshot.delete(column, bytes.to_vec()),
+            Some(snapshot) => {
+                let _ = snapshot.delete(column, bytes.to_vec());
+            }
             None => {
                 let cf = cf_handle!(db, column);
                 db.delete_cf(&cf, bytes).with_context(|| {
                     format!("Error while removing from disk column {:?}", column)
                 })?;
             }
-        };
+        }
 
         Ok(())
-    }
-
-    pub fn iter_owned_internal<'a, K, V>(
-        db: &'a InnerDB,
-        snapshot: Option<&Snapshot>,
-        mode: IteratorMode,
-        column: Column,
-    ) -> Result<impl Iterator<Item = Result<(K, V), BlockchainError>> + 'a, BlockchainError>
-    where
-        K: Serializer + 'a,
-        V: Serializer + 'a,
-    {
-        if log::log_enabled!(log::Level::Trace) {
-            trace!("iter owned {:?}", column);
-        }
-
-        let cf = cf_handle!(db, column);
-        let (m, opts) = mode.convert();
-        let iterator = db.iterator_cf_opt(&cf, opts, m);
-
-        match snapshot {
-            Some(snapshot) => Ok(Either::Left(snapshot.iter_owned(column, mode, iterator))),
-            None => Ok(Either::Right(iterator.map(|res| {
-                let (key, value) = res.context("Internal read error in iter")?;
-                let key = K::from_bytes(&key)?;
-                let value = V::from_bytes(&value)?;
-
-                Ok((key, value))
-            }))),
-        }
     }
 
     pub fn iter_internal<'a, K, V>(
@@ -494,18 +550,39 @@ impl RocksStorage {
             trace!("iter {:?}", column);
         }
 
+        Self::iter_raw_internal(db, snapshot, mode, column).map(|iter| {
+            iter.map(|res| {
+                let (key_bytes, value_bytes) = res?;
+                let key = K::from_bytes(&key_bytes)?;
+                let value = V::from_bytes(&value_bytes)?;
+
+                Ok((key, value))
+            })
+        })
+    }
+
+    pub fn iter_raw_internal<'a>(
+        db: &'a InnerDB,
+        snapshot: Option<&'a Snapshot>,
+        mode: IteratorMode,
+        column: Column,
+    ) -> Result<
+        impl Iterator<Item = Result<(BytesView<'a>, BytesView<'a>), BlockchainError>> + 'a,
+        BlockchainError,
+    > {
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("iter raw {:?}", column);
+        }
+
         let cf = cf_handle!(db, column);
         let (m, opts) = mode.convert();
         let iterator = db.iterator_cf_opt(&cf, opts, m);
 
         match snapshot {
-            Some(snapshot) => Ok(Either::Left(snapshot.lazy_iter(column, mode, iterator))),
+            Some(snapshot) => Ok(Either::Left(snapshot.lazy_iter_raw(column, mode, iterator))),
             None => Ok(Either::Right(iterator.map(|res| {
-                let (key, value) = res.context("Internal read error in iter")?;
-                let key = K::from_bytes(&key)?;
-                let value = V::from_bytes(&value)?;
-
-                Ok((key, value))
+                let (key, value) = res.context("Internal read error in iter raw")?;
+                Ok((key.into(), value.into()))
             }))),
         }
     }
@@ -523,21 +600,14 @@ impl RocksStorage {
             trace!("iter keys {:?}", column);
         }
 
-        let cf = cf_handle!(db, column);
-        let (m, opts) = mode.convert();
-        let iterator = db.iterator_cf_opt(&cf, opts, m);
-
-        match snapshot {
-            Some(snapshot) => Ok(Either::Left(
-                snapshot.lazy_iter_keys(column, mode, iterator),
-            )),
-            None => Ok(Either::Right(iterator.map(|res| {
-                let (key, _) = res.context("Internal read error in iter_keys")?;
-                let key = K::from_bytes(&key)?;
+        Self::iter_raw_internal(db, snapshot, mode, column).map(|iter| {
+            iter.map(|res| {
+                let (key_bytes, _value_bytes) = res?;
+                let key = K::from_bytes(&key_bytes)?;
 
                 Ok(key)
-            }))),
-        }
+            })
+        })
     }
 
     #[inline(always)]
@@ -587,6 +657,10 @@ impl Storage for RocksStorage {
         // delete topoheight<->hash pointers
         let hash: Hash = self.load_from_disk(Column::HashAtTopo, &topoheight.to_be_bytes())?;
         self.remove_from_disk(Column::HashAtTopo, &topoheight.to_be_bytes())?;
+        // Evict from cache: hash_at_topo_cache
+        if let Some(objects) = self.cache_mut().objects.as_mut() {
+            objects.hash_at_topo_cache.get_mut().pop(&topoheight);
+        }
 
         trace!("deleting block execution order");
         self.remove_from_disk(Column::BlocksExecutionOrder, hash.as_bytes())?;
@@ -595,12 +669,20 @@ impl Storage for RocksStorage {
             trace!("hash is {hash} at topo {topoheight}");
         }
         self.remove_from_disk(Column::TopoByHash, &hash)?;
+        // Evict from cache: topo_by_hash_cache
+        if let Some(objects) = self.cache_mut().objects.as_mut() {
+            objects.topo_by_hash_cache.get_mut().pop(&hash);
+        }
 
         if log::log_enabled!(log::Level::Trace) {
             trace!("deleting block header {}", hash);
         }
         let block: Immutable<BlockHeader> = self.load_from_disk(Column::Blocks, &hash)?;
         self.remove_from_disk(Column::Blocks, &hash)?;
+        // Evict from cache: blocks_cache
+        if let Some(objects) = self.cache_mut().objects.as_mut() {
+            objects.blocks_cache.get_mut().pop(&hash);
+        }
         trace!("block header deleted successfully");
 
         trace!("deleting topoheight metadata");
@@ -609,6 +691,10 @@ impl Storage for RocksStorage {
 
         trace!("deleting block difficulty");
         self.remove_from_disk(Column::BlockDifficulty, &hash)?;
+        // Evict from cache: cumulative_difficulty_cache
+        if let Some(objects) = self.cache_mut().objects.as_mut() {
+            objects.cumulative_difficulty_cache.get_mut().pop(&hash);
+        }
         trace!("block deleted");
 
         let mut txs = Vec::with_capacity(block.get_txs_count());
@@ -681,6 +767,10 @@ impl Storage for RocksStorage {
                     None => self.load_from_disk(Column::Transactions, tx_hash)?,
                 };
                 self.remove_from_disk(Column::Transactions, tx_hash)?;
+                // Evict from cache: transactions_cache
+                if let Some(objects) = self.cache_mut().objects.as_mut() {
+                    objects.transactions_cache.get_mut().pop(tx_hash);
+                }
 
                 txs.push((tx_hash.clone(), tx));
             }

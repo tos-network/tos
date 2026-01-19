@@ -62,6 +62,7 @@ fn lock_test() -> std::sync::MutexGuard<'static, ()> {
 }
 
 async fn build_blockchain(temp_dir: &TempDir) -> Arc<Blockchain<RocksStorage>> {
+    eprintln!("[debug] build_blockchain: start");
     let mut config: Config = serde_json::from_value(serde_json::json!({
         "rpc": { "getwork": {}, "prometheus": {} },
         "p2p": { "proxy": {} },
@@ -69,6 +70,7 @@ async fn build_blockchain(temp_dir: &TempDir) -> Arc<Blockchain<RocksStorage>> {
         "vrf": {}
     }))
     .expect("build daemon config");
+    eprintln!("[debug] build_blockchain: config built");
     config.rpc.disable = true;
     config.rpc.getwork.disable = true;
     config.p2p.disable = true;
@@ -76,16 +78,20 @@ async fn build_blockchain(temp_dir: &TempDir) -> Arc<Blockchain<RocksStorage>> {
     config.dir_path = Some(format!("{}/", temp_dir.path().to_string_lossy()));
     config.rocksdb = RocksDBConfig::default();
 
+    eprintln!("[debug] build_blockchain: creating storage");
     let storage = RocksStorage::new(
         &temp_dir.path().to_string_lossy(),
         Network::Devnet,
         &config.rocksdb,
     );
+    eprintln!("[debug] build_blockchain: storage created, creating blockchain");
     let blockchain = Blockchain::new(config, Network::Devnet, storage)
         .await
         .expect("create blockchain");
+    eprintln!("[debug] build_blockchain: blockchain created");
 
     {
+        eprintln!("[debug] build_blockchain: registering TOS asset");
         let mut storage = blockchain.get_storage().write().await;
         let asset_data = AssetData::new(
             COIN_DECIMALS,
@@ -99,8 +105,10 @@ async fn build_blockchain(temp_dir: &TempDir) -> Arc<Blockchain<RocksStorage>> {
             .add_asset(&TOS_ASSET, 0, versioned)
             .await
             .expect("register TOS asset");
+        eprintln!("[debug] build_blockchain: TOS asset registered");
     }
 
+    eprintln!("[debug] build_blockchain: done");
     blockchain
 }
 
@@ -696,20 +704,28 @@ async fn arbitration_happy_path_submits_verdict() {
 async fn arbitration_open_rejects_invalid_signature() {
     let _guard = lock_test();
     init_env();
+    eprintln!("[debug] arbitration_open_rejects_invalid_signature: start");
+    eprintln!("[debug] creating temp dir");
     let temp_dir = TempDir::new("a2a_arbitration_open_bad_sig").expect("temp dir");
+    eprintln!("[debug] temp dir created");
     let blockchain = build_blockchain(&temp_dir).await;
+    eprintln!("[debug] built blockchain");
     let network = *blockchain.get_network();
     let fixture = setup_fixture(&blockchain, 2).await;
+    eprintln!("[debug] setup_fixture done");
 
     let opener = KeyPair::new();
     let mut open = build_open(&fixture, network, Hash::new([10u8; 32]), &opener);
     open.signature = COORDINATOR_KEYPAIR.sign(b"wrong");
+    eprintln!("[debug] open built and invalid signature set");
 
     let coordinator_service = CoordinatorService::new();
+    eprintln!("[debug] coordinator service created, calling handle_arbitration_open");
     let err = coordinator_service
         .handle_arbitration_open(&blockchain, open)
         .await
         .expect_err("invalid signature");
+    eprintln!("[debug] handle_arbitration_open returned error");
     assert!(matches!(err, ArbitrationError::InvalidSignature));
 }
 

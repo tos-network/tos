@@ -1,13 +1,13 @@
 use crate::core::{
     error::BlockchainError,
     storage::{
-        constants::TXS_COUNT,
         rocksdb::{Column, IteratorMode},
         ClientProtocolProvider, RocksStorage, TransactionProvider,
     },
 };
 use async_trait::async_trait;
 use log::trace;
+use std::sync::Arc;
 use tos_common::{crypto::Hash, immutable::Immutable, transaction::Transaction};
 
 #[async_trait]
@@ -20,8 +20,33 @@ impl TransactionProvider for RocksStorage {
         if log::log_enabled!(log::Level::Trace) {
             trace!("get transaction {}", hash);
         }
-        let transaction = self.load_from_disk(Column::Transactions, hash)?;
-        Ok(Immutable::Owned(transaction))
+        let use_cache = self
+            .snapshot
+            .as_ref()
+            .and_then(|s| s.contains(Column::Transactions, hash.as_bytes()))
+            .is_none();
+
+        if use_cache {
+            if let Some(objects) = &self.cache().objects {
+                if let Some(transaction) = objects.transactions_cache.lock().await.get(hash) {
+                    return Ok(Immutable::Arc(transaction.clone()));
+                }
+            }
+        }
+
+        let transaction: Arc<Transaction> =
+            Arc::new(self.load_from_disk(Column::Transactions, hash)?);
+        if use_cache {
+            if let Some(objects) = &self.cache().objects {
+                objects
+                    .transactions_cache
+                    .lock()
+                    .await
+                    .put(hash.clone(), transaction.clone());
+            }
+        }
+
+        Ok(Immutable::Arc(transaction))
     }
 
     // Get the transaction size using its hash
@@ -35,8 +60,7 @@ impl TransactionProvider for RocksStorage {
     // Count the number of transactions stored
     async fn count_transactions(&self) -> Result<u64, BlockchainError> {
         trace!("count transactions");
-        self.load_optional_from_disk(Column::Common, TXS_COUNT)
-            .map(|v| v.unwrap_or(0))
+        Ok(self.cache().counter.transactions_count)
     }
 
     // Get all the unexecuted transactions
@@ -76,7 +100,15 @@ impl TransactionProvider for RocksStorage {
         if log::log_enabled!(log::Level::Trace) {
             trace!("add transaction {}", hash);
         }
-        self.insert_into_disk(Column::Transactions, hash, transaction)
+        // Write to disk first, then update cache (prevents stale cache on disk failure)
+        self.insert_into_disk(Column::Transactions, hash, transaction)?;
+        if let Some(objects) = self.cache_mut().objects.as_mut() {
+            objects
+                .transactions_cache
+                .get_mut()
+                .put(hash.clone(), Arc::new(transaction.clone()));
+        }
+        Ok(())
     }
 
     // Delete a transaction from the storage using its hash
@@ -89,6 +121,9 @@ impl TransactionProvider for RocksStorage {
         }
         let transaction = self.get_transaction(hash).await?;
         self.remove_from_disk(Column::Transactions, hash)?;
+        if let Some(objects) = &self.cache().objects {
+            objects.transactions_cache.lock().await.pop(hash);
+        }
         Ok(transaction)
     }
 }

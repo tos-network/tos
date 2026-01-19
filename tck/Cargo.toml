@@ -1,6 +1,6 @@
 [package]
 name = "tos-tck"
-version = "0.1.13"
+version = "0.1.14"
 edition = "2021"
 authors = ["TOS Network Team"]
 description = "TOS Technology Compatibility Kit - Comprehensive Testing Framework"

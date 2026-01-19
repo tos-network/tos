@@ -9,3 +9,6 @@ pub(crate) const PRUNED_TOPOHEIGHT: &[u8; 4] = b"PRUN";
 pub(crate) const TXS_COUNT: &[u8; 4] = b"CTXS";
 pub(crate) const BLOCKS_COUNT: &[u8; 4] = b"CBLK";
 pub(crate) const BLOCKS_EXECUTION_ORDER_COUNT: &[u8; 4] = b"EBLK";
+pub(crate) const NEXT_ACCOUNT_ID: &[u8; 4] = b"NAID";
+pub(crate) const ASSETS_ID: &[u8; 4] = b"ASID";
+pub(crate) const NEXT_CONTRACT_ID: &[u8; 4] = b"NCID";

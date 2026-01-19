@@ -2,12 +2,12 @@ use crate::core::{
     error::BlockchainError,
     storage::{
         rocksdb::{Column, IteratorMode, RocksStorage},
+        snapshot::Direction,
         EscrowHistoryKey, EscrowProvider, PendingReleaseKey,
     },
 };
 use async_trait::async_trait;
 use log::trace;
-use rocksdb::Direction;
 use tos_common::{crypto::Hash, crypto::PublicKey, escrow::EscrowAccount, serializer::Serializer};
 
 #[async_trait]
