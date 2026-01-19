@@ -203,6 +203,8 @@ impl TransactionBuilder {
         let _assets_used = self.data.used_assets().len();
         // Version byte
         let mut size = 1
+        // Chain ID (T1+)
+        + 1
         // Source Public Key
         + self.source.size()
         // Transaction type byte
@@ -217,7 +219,7 @@ impl TransactionBuilder {
         + HASH_SIZE + 8
         // Signature
         + SIGNATURE_SIZE
-        // 1 for optional multisig bool (always included for T0)
+        // 1 for optional multisig bool (always included for T1)
         + 1;
 
         if let Some(threshold) = self.required_thresholds {
@@ -268,7 +270,7 @@ impl TransactionBuilder {
                         + (RISTRETTO_COMPRESSED_SIZE * 3)
                         // CiphertextValidityProof: Y_0, Y_1, z_r, z_x
                         + (RISTRETTO_COMPRESSED_SIZE * 2 + SCALAR_SIZE * 2)
-                        // Y_2 for T0+ (always include)
+                        // Y_2 for T1+ (always include)
                         + RISTRETTO_COMPRESSED_SIZE
                         // Extra data byte flag
                         + 1;
@@ -1256,7 +1258,7 @@ impl TransactionBuilder {
                 transcript.append_hash(b"new_source_commitment_asset", asset);
                 transcript.append_commitment(b"new_source_commitment", &commitment);
 
-                if self.version >= TxVersion::T0 {
+                if self.version >= TxVersion::T1 {
                     transcript.append_ciphertext(b"source_ct", &source_ct_compressed);
                 }
 
@@ -1312,7 +1314,7 @@ impl TransactionBuilder {
                 let extra_data: Option<UnknownExtraDataFormat> =
                     if let Some(extra_data) = transfer.inner.extra_data {
                         let bytes = extra_data.to_bytes();
-                        let cipher: UnknownExtraDataFormat = if self.version >= TxVersion::T0 {
+                        let cipher: UnknownExtraDataFormat = if self.version >= TxVersion::T1 {
                             if transfer.inner.encrypt_extra_data {
                                 ExtraDataType::Private(super::extra_data::ExtraData::new(
                                     PlaintextData(bytes),
@@ -1701,7 +1703,7 @@ impl TransactionBuilder {
         transcript.append_hash(b"new_source_commitment_asset", &UNO_ASSET);
         transcript.append_commitment(b"new_source_commitment", &commitment);
 
-        if self.version >= TxVersion::T0 {
+        if self.version >= TxVersion::T1 {
             transcript.append_ciphertext(b"source_ct", &source_ct_compressed);
         }
 
@@ -1925,7 +1927,7 @@ mod tests {
         let energy_builder = EnergyBuilder::freeze_tos(crate::config::COIN_VALUE, duration);
 
         let builder = TransactionBuilder::new(
-            TxVersion::T0,
+            TxVersion::T1,
             0,
             CompressedPublicKey::new(
                 tos_crypto::curve25519_dalek::ristretto::CompressedRistretto::default(),
@@ -1950,7 +1952,7 @@ mod tests {
 
         // This should not cause an error during construction
         let _ = TransactionBuilder::new(
-            TxVersion::T0,
+            TxVersion::T1,
             0, // chain_id: 0 for tests
             CompressedPublicKey::new(
                 tos_crypto::curve25519_dalek::ristretto::CompressedRistretto::default(),
@@ -1969,7 +1971,7 @@ mod tests {
 
         // This should cause an error when building
         let _builder = TransactionBuilder::new(
-            TxVersion::T0,
+            TxVersion::T1,
             0, // chain_id: 0 for tests
             CompressedPublicKey::new(
                 tos_crypto::curve25519_dalek::ristretto::CompressedRistretto::default(),
@@ -2017,7 +2019,7 @@ mod tests {
 
         // Energy fee with transfers is valid (new address restriction removed)
         let _builder = TransactionBuilder::new(
-            TxVersion::T0,
+            TxVersion::T1,
             0, // chain_id: 0 for tests
             CompressedPublicKey::new(
                 tos_crypto::curve25519_dalek::ristretto::CompressedRistretto::default(),

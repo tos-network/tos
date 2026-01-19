@@ -292,9 +292,21 @@ impl TnsProvider for RocksStorage {
         // MAX_CLEANUP_PER_CYCLE: total limit per cleanup cycle to prevent stalling block processing
         const CLEANUP_BATCH_SIZE: usize = 100;
         const MAX_CLEANUP_PER_CYCLE: u64 = 1000;
+        const MAX_CLEANUP_CYCLES: usize = 100;
         let mut total_deleted = 0u64;
+        let mut cycles = 0usize;
 
         loop {
+            cycles += 1;
+            if cycles > MAX_CLEANUP_CYCLES {
+                if log::log_enabled!(log::Level::Info) {
+                    log::info!(
+                        "Cleanup cycle limit reached, deleted {} messages",
+                        total_deleted
+                    );
+                }
+                break;
+            }
             // Stop if we've hit the per-cycle limit to prevent block processing delays
             if total_deleted >= MAX_CLEANUP_PER_CYCLE {
                 if log::log_enabled!(log::Level::Debug) {

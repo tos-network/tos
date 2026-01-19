@@ -66,6 +66,8 @@ pub enum VerificationError<T> {
     AgentAccountInvalidParameter,
     #[error("overflow during gas calculation")]
     GasOverflow,
+    #[error("overflow during gas refund")]
+    GasRefundOverflow,
     #[error("Deposit decompressed not found")]
     DepositNotFound,
     #[error("Configured max gas is above the network limit")]
@@ -80,12 +82,16 @@ pub enum VerificationError<T> {
     InsufficientFunds { available: u64, required: u64 },
     #[error("Arithmetic overflow during balance calculation")]
     Overflow,
+    #[error("UNO balance overflow during verification")]
+    UnoBalanceOverflow,
     #[error("Invalid transfer amount")]
     InvalidTransferAmount,
     #[error("Shield amount must be at least 100 TOS")]
     ShieldAmountTooLow,
     #[error("Invalid fee: expected {0}, got {1}")]
     InvalidFee(u64, u64),
+    #[error("Too many contract events: {count} (max {max})")]
+    TooManyContractEvents { count: usize, max: usize },
 
     // ===== TNS Name Registration Errors =====
     #[error("Invalid name length: {0} (expected 3-64)")]

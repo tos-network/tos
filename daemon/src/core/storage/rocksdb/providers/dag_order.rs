@@ -91,10 +91,6 @@ impl DagOrderProvider for RocksStorage {
         &self,
         topoheight: TopoHeight,
     ) -> Result<Hash, BlockchainError> {
-        eprintln!(
-            "[debug] get_hash_at_topo_height: start, topoheight={}",
-            topoheight
-        );
         if log::log_enabled!(log::Level::Trace) {
             trace!("get hash at topo height {}", topoheight);
         }
@@ -104,35 +100,26 @@ impl DagOrderProvider for RocksStorage {
             .as_ref()
             .and_then(|s| s.contains(Column::HashAtTopo, &key))
             .is_none();
-        eprintln!("[debug] get_hash_at_topo_height: use_cache={}", use_cache);
 
         if use_cache {
             if let Some(objects) = &self.cache().objects {
-                eprintln!("[debug] get_hash_at_topo_height: about to lock hash_at_topo_cache");
                 if let Some(value) = objects.hash_at_topo_cache.lock().await.get(&topoheight) {
-                    eprintln!("[debug] get_hash_at_topo_height: cache hit");
                     return Ok(value.clone());
                 }
-                eprintln!("[debug] get_hash_at_topo_height: cache miss");
             }
         }
 
-        eprintln!("[debug] get_hash_at_topo_height: loading from disk");
         let hash: Hash = self.load_from_disk(Column::HashAtTopo, &key)?;
-        eprintln!("[debug] get_hash_at_topo_height: loaded from disk");
         if use_cache {
             if let Some(objects) = &self.cache().objects {
-                eprintln!("[debug] get_hash_at_topo_height: about to lock cache for put");
                 objects
                     .hash_at_topo_cache
                     .lock()
                     .await
                     .put(topoheight, hash.clone());
-                eprintln!("[debug] get_hash_at_topo_height: put to cache done");
             }
         }
 
-        eprintln!("[debug] get_hash_at_topo_height: done");
         Ok(hash)
     }
 

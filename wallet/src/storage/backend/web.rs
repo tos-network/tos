@@ -203,7 +203,7 @@ impl Db {
 
     /// Returns the trees names saved in this Db.
     pub fn tree_names(&self) -> Vec<IVec> {
-        let trees = self.trees.lock().expect("Poisoned");
+        let trees = self.trees.lock().unwrap_or_else(|err| err.into_inner());
         trees.keys().cloned().collect()
     }
 
@@ -379,19 +379,19 @@ impl InnerTree {
 
     /// Returns `true` if the `Tree` contains no elements.
     pub fn is_empty(&self) -> bool {
-        let entries = self.entries.lock().expect("Poisoned");
+        let entries = self.entries.lock().unwrap_or_else(|err| err.into_inner());
         entries.is_empty()
     }
 
     /// Returns the number of elements in this tree.
     pub fn len(&self) -> usize {
-        let entries = self.entries.lock().expect("Poisoned");
+        let entries = self.entries.lock().unwrap_or_else(|err| err.into_inner());
         entries.len()
     }
 
     /// Returns the last entry (key/value) (by order) from this tree.
     pub fn last(&self) -> Result<Option<(IVec, IVec)>> {
-        let entries = self.entries.lock().expect("Poisoned");
+        let entries = self.entries.lock().map_err(|_| DbError::Poisoned)?;
         Ok(entries
             .last_key_value()
             .map(|(k, v)| (k.clone(), v.clone())))

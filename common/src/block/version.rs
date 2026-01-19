@@ -37,19 +37,19 @@ pub enum BlockVersion {
 
 impl BlockVersion {
     /// Check if a transaction version is allowed in a block version
-    /// Currently all versions support T0 transactions
+    /// Currently all versions support T1 transactions
     pub const fn is_tx_version_allowed(&self, tx_version: TxVersion) -> bool {
         match self {
-            BlockVersion::Nobunaga => matches!(tx_version, TxVersion::T0),
-            // Future versions will inherit T0 support and may add new tx versions
+            BlockVersion::Nobunaga => matches!(tx_version, TxVersion::T1),
+            // Future versions will inherit T1 support and may add new tx versions
         }
     }
 
     /// Get the transaction version for a given block version
-    /// Currently all versions use T0
+    /// Currently all versions use T1
     pub const fn get_tx_version(&self) -> TxVersion {
         match self {
-            BlockVersion::Nobunaga => TxVersion::T0,
+            BlockVersion::Nobunaga => TxVersion::T1,
             // Future versions may return different tx versions
         }
     }
@@ -141,8 +141,8 @@ mod tests {
 
     #[test]
     fn test_block_version_tx_version() {
-        assert!(BlockVersion::Nobunaga.is_tx_version_allowed(TxVersion::T0));
-        assert_eq!(BlockVersion::Nobunaga.get_tx_version(), TxVersion::T0);
+        assert!(BlockVersion::Nobunaga.is_tx_version_allowed(TxVersion::T1));
+        assert_eq!(BlockVersion::Nobunaga.get_tx_version(), TxVersion::T1);
     }
 
     #[test]

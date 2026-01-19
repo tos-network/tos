@@ -88,7 +88,7 @@ impl UnknownExtraDataFormat {
     }
 
     /// Decrypt the encrypted data by trying to determine which version to use.
-    /// T0 should always be used.
+    /// T1 should always be used.
     pub fn decrypt(
         &self,
         private_key: &PrivateKey,
@@ -96,7 +96,7 @@ impl UnknownExtraDataFormat {
         role: Role,
         _version: TxVersion,
     ) -> Result<PlaintextExtraData, Error> {
-        // Always use T0 version
+        // Always use T1 version
         let res = self.decrypt_typed(private_key, role);
 
         // If we got an error during decoding and the handle is provided, try legacy fallback

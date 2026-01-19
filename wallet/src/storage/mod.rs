@@ -67,7 +67,7 @@ impl EncryptedStorage {
             extra: inner.db.open_tree(cipher.hash_key("extra"))?,
             cipher,
             inner,
-            tx_version: TxVersion::T0,
+            tx_version: TxVersion::T1,
         };
 
         if storage.has_network()? {

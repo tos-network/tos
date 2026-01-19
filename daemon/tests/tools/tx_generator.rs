@@ -401,7 +401,7 @@ impl TransactionGenerator {
 
             // Build transaction
             let tx = TransactionBuilder::new(
-                TxVersion::T0,
+                TxVersion::T1,
                 sender_keypair.get_public_key().compress(),
                 None,
                 TransactionTypeBuilder::Transfers(vec![transfer]),

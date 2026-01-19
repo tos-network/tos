@@ -39,46 +39,32 @@ impl CoordinatorService {
         blockchain: &Blockchain<S>,
         open: ArbitrationOpen,
     ) -> Result<VoteRequest, ArbitrationError> {
-        eprintln!("[debug] handle_arbitration_open: start");
         let keypair = coordinator_keypair()?;
-        eprintln!("[debug] handle_arbitration_open: got keypair");
         ensure_coordinator_key_matches(&open, &keypair)?;
-        eprintln!("[debug] handle_arbitration_open: coordinator key matches");
         validate_timestamps(open.issued_at, open.expires_at)?;
-        eprintln!("[debug] handle_arbitration_open: timestamps valid");
         verify_signed(&open, &open.signature, &open.opener_pubkey)?;
-        eprintln!("[debug] handle_arbitration_open: signature verified");
 
         let mut replay = ReplayCache::load("coordinator")?;
-        eprintln!("[debug] handle_arbitration_open: replay cache loaded");
         let now = get_current_time_in_seconds();
         if replay.check_and_insert(&open.request_id.to_hex(), open.expires_at, now)? {
             return Err(ArbitrationError::Replay);
         }
-        eprintln!("[debug] handle_arbitration_open: replay check passed");
 
-        eprintln!("[debug] handle_arbitration_open: about to acquire storage read lock");
         let storage = blockchain.get_storage().read().await;
-        eprintln!("[debug] handle_arbitration_open: acquired storage read lock");
-        eprintln!("[debug] handle_arbitration_open: calling get_committee");
         let committee = storage
             .get_committee(&open.committee_id)
             .await
             .map_err(|e| ArbitrationError::Storage(e.to_string()))?
             .ok_or(ArbitrationError::CommitteeNotFound)?;
-        eprintln!("[debug] handle_arbitration_open: got committee");
         if committee.status != tos_common::kyc::CommitteeStatus::Active {
             return Err(ArbitrationError::CommitteeInactive);
         }
 
-        eprintln!("[debug] handle_arbitration_open: getting topo_height");
         let selection_block = blockchain.get_topo_height();
-        eprintln!("[debug] handle_arbitration_open: topo_height={}, calling get_block_header_at_topoheight", selection_block);
         let (block_hash, _) = storage
             .get_block_header_at_topoheight(selection_block)
             .await
             .map_err(|e| ArbitrationError::Storage(e.to_string()))?;
-        eprintln!("[debug] handle_arbitration_open: got block_hash");
 
         let min_jurors = committee.threshold.max(1) as usize;
         let mut members = Vec::new();
@@ -543,7 +529,7 @@ async fn submit_verdict_on_chain<S: Storage>(
         let chain_id = u8::try_from(blockchain.get_network().chain_id())
             .map_err(|_| ArbitrationError::Transaction("invalid chain id".to_string()))?;
         let tx = UnsignedTransaction::new_with_fee_type(
-            TxVersion::T0,
+            TxVersion::T1,
             chain_id,
             source,
             TransactionType::SubmitVerdict(payload),

@@ -47,6 +47,14 @@ impl Ciphertext {
             CompressedHandle::new(self.handle.as_point().compress()),
         )
     }
+
+    /// Checked addition for defensive overflow handling.
+    /// Note: Twisted ElGamal group operations do not overflow in the
+    /// arithmetic sense, but this API allows callers to enforce limits
+    /// at higher layers if needed.
+    pub fn checked_add(&self, rhs: &Ciphertext) -> Option<Ciphertext> {
+        Some(self.clone() + rhs)
+    }
 }
 
 // ADD TRAITS

@@ -118,7 +118,6 @@ impl DifficultyProvider for RocksStorage {
         &self,
         hash: &Hash,
     ) -> Result<Immutable<BlockHeader>, BlockchainError> {
-        eprintln!("[debug] get_block_header_by_hash: start, hash={}", hash);
         if log::log_enabled!(log::Level::Trace) {
             trace!("get block header by hash {}", hash);
         }
@@ -127,35 +126,26 @@ impl DifficultyProvider for RocksStorage {
             .as_ref()
             .and_then(|s| s.contains(Column::Blocks, hash.as_bytes()))
             .is_none();
-        eprintln!("[debug] get_block_header_by_hash: use_cache={}", use_cache);
 
         if use_cache {
             if let Some(objects) = &self.cache().objects {
-                eprintln!("[debug] get_block_header_by_hash: about to lock blocks_cache");
                 if let Some(block) = objects.blocks_cache.lock().await.get(hash) {
-                    eprintln!("[debug] get_block_header_by_hash: cache hit");
                     return Ok(Immutable::Arc(block.clone()));
                 }
-                eprintln!("[debug] get_block_header_by_hash: cache miss");
             }
         }
 
-        eprintln!("[debug] get_block_header_by_hash: loading from disk");
         let block: Arc<BlockHeader> = Arc::new(self.load_from_disk(Column::Blocks, hash)?);
-        eprintln!("[debug] get_block_header_by_hash: loaded from disk");
         if use_cache {
             if let Some(objects) = &self.cache().objects {
-                eprintln!("[debug] get_block_header_by_hash: about to lock cache for put");
                 objects
                     .blocks_cache
                     .lock()
                     .await
                     .put(hash.clone(), block.clone());
-                eprintln!("[debug] get_block_header_by_hash: put to cache done");
             }
         }
 
-        eprintln!("[debug] get_block_header_by_hash: done");
         Ok(Immutable::Arc(block))
     }
 

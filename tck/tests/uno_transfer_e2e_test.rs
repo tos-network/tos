@@ -79,7 +79,7 @@ fn test_uno_transfer_payload_serialization() {
     // Test serialization roundtrip
     let bytes = payload.to_bytes();
     let mut context = Context::new();
-    context.store(TxVersion::T0);
+    context.store(TxVersion::T1);
     let mut reader = Reader::with_context(&bytes, context);
     let restored = UnoTransferPayload::read(&mut reader).unwrap();
 
@@ -107,7 +107,7 @@ fn test_uno_transfers_transaction_type() {
 
     // Deserialize with context
     let mut context = Context::new();
-    context.store(TxVersion::T0);
+    context.store(TxVersion::T1);
     let mut reader = Reader::with_context(&bytes, context);
     let restored = TransactionType::read(&mut reader).unwrap();
 
@@ -139,7 +139,7 @@ fn test_multiple_uno_transfers() {
     // Verify serialization
     let bytes = tx_type.to_bytes();
     let mut context = Context::new();
-    context.store(TxVersion::T0);
+    context.store(TxVersion::T1);
     let mut reader = Reader::with_context(&bytes, context);
     let restored = TransactionType::read(&mut reader).unwrap();
 
@@ -184,11 +184,11 @@ fn test_transaction_prepare_transcript() {
 
     // Create transcript using the static method
     let transcript1 =
-        Transaction::prepare_transcript(TxVersion::T0, &source, fee, &FeeType::TOS, nonce);
+        Transaction::prepare_transcript(TxVersion::T1, &source, fee, &FeeType::TOS, nonce);
 
     // Create another transcript with same parameters
     let transcript2 =
-        Transaction::prepare_transcript(TxVersion::T0, &source, fee, &FeeType::TOS, nonce);
+        Transaction::prepare_transcript(TxVersion::T1, &source, fee, &FeeType::TOS, nonce);
 
     // Transcripts should be created without error
     drop(transcript1);
@@ -216,7 +216,7 @@ fn test_transaction_with_uno_transfers_hashable() {
     let signature = Signature::from_bytes(&sig_bytes).unwrap();
 
     let tx = Transaction::new(
-        TxVersion::T0,
+        TxVersion::T1,
         0,
         sender.get_public_key().compress(),
         tx_type,
@@ -292,7 +292,7 @@ fn test_plaintext_transaction_hashable() {
     let signature = Signature::from_bytes(&sig_bytes).unwrap();
 
     let tx = Transaction::new(
-        TxVersion::T0,
+        TxVersion::T1,
         0,
         keypair.get_public_key().compress(),
         TransactionType::Transfers(vec![transfer]),

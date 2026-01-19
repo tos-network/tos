@@ -21,6 +21,8 @@ use tos_common::{
 
 /// Page size for storing direct referrals
 const DIRECT_REFERRALS_PAGE_SIZE: u32 = 1000;
+const MAX_REFERRAL_PAGES: u64 = 1000;
+const MAX_DIRECT_REFERRALS: u32 = 100_000;
 
 #[async_trait]
 impl ReferralProvider for RocksStorage {
@@ -243,13 +245,25 @@ impl ReferralProvider for RocksStorage {
             return Ok(DirectReferralsResult::new(vec![], total_count, offset));
         }
 
+        let effective_limit = limit.min(MAX_DIRECT_REFERRALS);
         let mut referrals = Vec::new();
         let start_page = offset / DIRECT_REFERRALS_PAGE_SIZE;
         let mut collected = 0u32;
         let mut skipped = 0u32;
+        let mut pages_iterated = 0u64;
 
         // Iterate through pages
         for page in start_page.. {
+            pages_iterated += 1;
+            if pages_iterated > MAX_REFERRAL_PAGES {
+                if log::log_enabled!(log::Level::Warn) {
+                    log::warn!(
+                        "Max referral pages reached for user {:?}",
+                        user.as_address(self.is_mainnet())
+                    );
+                }
+                break;
+            }
             let key = Self::get_direct_referrals_page_key(user, page);
             let page_data: Option<Vec<PublicKey>> =
                 self.load_optional_from_disk(Column::ReferralDirects, &key)?;
@@ -265,12 +279,12 @@ impl ReferralProvider for RocksStorage {
                         referrals.push(key);
                         collected += 1;
 
-                        if collected >= limit {
+                        if collected >= effective_limit {
                             break;
                         }
                     }
 
-                    if collected >= limit {
+                    if collected >= effective_limit {
                         break;
                     }
                 }
@@ -278,7 +292,13 @@ impl ReferralProvider for RocksStorage {
             }
         }
 
-        Ok(DirectReferralsResult::new(referrals, total_count, offset))
+        let has_more = (offset + collected) < total_count || pages_iterated >= MAX_REFERRAL_PAGES;
+        Ok(DirectReferralsResult {
+            referrals,
+            total_count,
+            offset,
+            has_more,
+        })
     }
 
     async fn get_direct_referrals_count(&self, user: &PublicKey) -> Result<u32, BlockchainError> {
@@ -646,6 +666,7 @@ impl RocksStorage {
 
         // Also add a maximum iteration limit for safety
         const MAX_TEAM_SIZE_ITERATIONS: u64 = 1_000_000;
+        const MAX_PAGES_PER_MEMBER: u64 = 100;
         let mut iterations = 0u64;
 
         while let Some(current) = stack.pop() {
@@ -670,7 +691,18 @@ impl RocksStorage {
 
             // Get direct referrals for current user
             let mut offset = 0;
+            let mut pages_for_member = 0u64;
             loop {
+                pages_for_member += 1;
+                if pages_for_member > MAX_PAGES_PER_MEMBER {
+                    if log::log_enabled!(log::Level::Warn) {
+                        log::warn!("Max pages per member reached during team size calculation");
+                    }
+                    return Err(BlockchainError::Any(anyhow::anyhow!(
+                        "Team size calculation exceeded max pages per member ({})",
+                        MAX_PAGES_PER_MEMBER
+                    )));
+                }
                 let result = self
                     .get_direct_referrals(&current, offset, DIRECT_REFERRALS_PAGE_SIZE)
                     .await?;

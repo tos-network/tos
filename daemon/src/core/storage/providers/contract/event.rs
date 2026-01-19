@@ -14,6 +14,8 @@ use tos_common::{
 
 /// Maximum number of events to return in a single query (pagination limit)
 pub const MAX_EVENTS_PER_QUERY: usize = 1000;
+/// Maximum number of events that can be associated with a single transaction
+pub const MAX_EVENTS_PER_TX: usize = 1000;
 
 /// Stored contract event structure
 ///

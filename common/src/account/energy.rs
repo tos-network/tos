@@ -1,6 +1,7 @@
 use crate::{
     block::TopoHeight,
     crypto::PublicKey,
+    error::EnergyError,
     serializer::{Reader, ReaderError, Serializer, Writer},
 };
 use serde::{Deserialize, Serialize};
@@ -109,6 +110,25 @@ fn to_atomic_tos(amount_whole: u64) -> Result<u64, &'static str> {
     amount_whole
         .checked_mul(crate::config::COIN_VALUE)
         .ok_or("TOS amount overflow")
+}
+
+fn calculate_energy_for_unfreeze(
+    record: &FreezeRecord,
+    unfreeze_amount: u64,
+) -> Result<u64, EnergyError> {
+    if record.amount == 0 {
+        return Err(EnergyError::InvalidRecordAmount);
+    }
+
+    let numerator = (record.energy_gained as u128)
+        .checked_mul(unfreeze_amount as u128)
+        .ok_or(EnergyError::Overflow)?;
+
+    let result = numerator
+        .checked_div(record.amount as u128)
+        .ok_or(EnergyError::DivisionByZero)?;
+
+    u64::try_from(result).map_err(|_| EnergyError::Overflow)
 }
 
 impl Serializer for FreezeDuration {
@@ -733,9 +753,9 @@ impl EnergyResource {
                 records_to_remove.push(idx);
             } else {
                 // Partial recycle - calculate proportional energy
-                let energy_for_recycled = ((record.energy_gained as u128)
-                    * unfreeze_from_record as u128
-                    / record.amount as u128) as u64;
+                let energy_for_recycled =
+                    calculate_energy_for_unfreeze(record, unfreeze_from_record)
+                        .map_err(|e| e.to_string())?;
                 energy_recycled = energy_recycled
                     .checked_add(energy_for_recycled)
                     .ok_or_else(|| "Recycled energy overflow".to_string())?;
@@ -966,8 +986,8 @@ impl EnergyResource {
                 let energy_to_remove = if whole_tos_amount >= record.amount {
                     record.energy_gained
                 } else {
-                    ((record.energy_gained as u128 * whole_tos_amount as u128)
-                        / record.amount as u128) as u64
+                    calculate_energy_for_unfreeze(record, whole_tos_amount)
+                        .map_err(|e| e.to_string())?
                 };
 
                 total_energy_removed = energy_to_remove;
@@ -997,8 +1017,8 @@ impl EnergyResource {
                     let energy_to_remove = if unfreeze_amount >= record.amount {
                         record.energy_gained
                     } else {
-                        ((record.energy_gained as u128 * unfreeze_amount as u128)
-                            / record.amount as u128) as u64
+                        calculate_energy_for_unfreeze(record, unfreeze_amount)
+                            .map_err(|e| e.to_string())?
                     };
 
                     total_energy_removed = total_energy_removed.saturating_add(energy_to_remove);

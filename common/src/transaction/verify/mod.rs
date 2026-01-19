@@ -108,6 +108,16 @@ impl DecompressedUnshieldTransferCt {
     }
 }
 
+fn add_uno_balance<E>(
+    current_balance: &mut Ciphertext,
+    receiver_ct: &Ciphertext,
+) -> Result<(), VerificationError<E>> {
+    *current_balance = current_balance
+        .checked_add(receiver_ct)
+        .ok_or(VerificationError::UnoBalanceOverflow)?;
+    Ok(())
+}
+
 struct StateArbiterRegistry {
     arbiters: HashMap<crate::crypto::PublicKey, crate::arbitration::ArbiterAccount>,
     min_stake: u64,
@@ -193,9 +203,8 @@ struct AgentPolicyView {
 impl Transaction {
     pub fn has_valid_version_format(&self) -> bool {
         match self.version {
-            TxVersion::T0 | TxVersion::T1 => {
-                // T0 and T1 support all transaction types
-                // T1 adds chain_id for cross-network replay protection
+            TxVersion::T1 => {
+                // T1 includes chain_id for cross-network replay protection
                 match &self.data {
                     TransactionType::Transfers(_)
                     | TransactionType::Burn(_)
@@ -2552,7 +2561,7 @@ impl Transaction {
                 .map_err(VerificationError::State)?;
 
             let receiver_ct = decompressed.get_ciphertext(Role::Receiver);
-            *current_balance += receiver_ct;
+            add_uno_balance(current_balance, &receiver_ct)?;
 
             // Prepare transcript for CiphertextValidityProof
             transcript.transfer_proof_domain_separator();
@@ -2883,8 +2892,8 @@ impl Transaction {
             transcript.append_hash(b"new_source_commitment_asset", commitment.get_asset());
             transcript.append_commitment(b"new_source_commitment", commitment.get_commitment());
 
-            // Only append source_ct for version >= T0 (matches generation)
-            if self.version >= TxVersion::T0 {
+            // Only append source_ct for version >= T1 (matches generation)
+            if self.version >= TxVersion::T1 {
                 transcript.append_ciphertext(b"source_ct", &source_ct_compressed);
             }
 
@@ -7028,7 +7037,7 @@ impl Transaction {
                         .await
                         .map_err(VerificationError::State)?;
 
-                    *current_balance += receiver_ct;
+                    add_uno_balance(current_balance, &receiver_ct)?;
 
                     if log::log_enabled!(log::Level::Debug) {
                         debug!(
@@ -7065,7 +7074,7 @@ impl Transaction {
                         .await
                         .map_err(VerificationError::State)?;
 
-                    *current_balance += receiver_ct;
+                    add_uno_balance(current_balance, &receiver_ct)?;
 
                     if log::log_enabled!(log::Level::Debug) {
                         debug!(

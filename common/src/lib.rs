@@ -13,6 +13,7 @@ pub mod arbitration;
 pub mod block;
 pub mod contract;
 pub mod crypto;
+pub mod error;
 pub mod escrow;
 pub mod serializer;
 pub mod transaction;

@@ -288,7 +288,7 @@ impl Serializer for CiphertextValidityProof {
         let version: TxVersion = reader.context().get_copy()?;
         let Y_0 = CompressedRistretto::read(reader)?;
         let Y_1 = CompressedRistretto::read(reader)?;
-        let Y_2 = if version >= TxVersion::T0 {
+        let Y_2 = if version >= TxVersion::T1 {
             Some(CompressedRistretto::read(reader)?)
         } else {
             None

@@ -9,7 +9,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     block::TopoHeight,
-    crypto::elgamal::{Ciphertext, CompressedCiphertext, DecompressionError},
+    crypto::elgamal::{Ciphertext, CompressedCiphertext},
+    error::BalanceError,
     serializer::{Reader, ReaderError, Serializer, Writer},
 };
 
@@ -123,8 +124,15 @@ impl VersionedUnoBalance {
     pub fn add_ciphertext_to_balance(
         &mut self,
         ciphertext: &Ciphertext,
-    ) -> Result<(), DecompressionError> {
-        *self.final_balance.computable()? += ciphertext;
+    ) -> Result<(), BalanceError> {
+        let current = self
+            .final_balance
+            .computable()
+            .map_err(|_| BalanceError::Decompression)?;
+        let updated = current
+            .checked_add(ciphertext)
+            .ok_or(BalanceError::UnoOverflow)?;
+        *current = updated;
         Ok(())
     }
 
@@ -132,8 +140,12 @@ impl VersionedUnoBalance {
     pub fn sub_ciphertext_from_balance(
         &mut self,
         ciphertext: &Ciphertext,
-    ) -> Result<(), DecompressionError> {
-        *self.final_balance.computable()? -= ciphertext;
+    ) -> Result<(), BalanceError> {
+        let current = self
+            .final_balance
+            .computable()
+            .map_err(|_| BalanceError::Decompression)?;
+        *current -= ciphertext;
         Ok(())
     }
 

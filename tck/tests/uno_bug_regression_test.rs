@@ -678,10 +678,10 @@ fn test_bug4_02_proof_order_ct_before_eq() {
     // If we got here without panic, the order is correct
 }
 
-/// ISSUE4-03: Version-conditional append_ciphertext for T0+
+/// ISSUE4-03: Version-conditional append_ciphertext for T1+
 #[test]
 fn test_bug4_03_version_conditional_append() {
-    // For TxVersion::T0 and later, append_ciphertext("source_ct") must be called
+    // For TxVersion::T1 and later, append_ciphertext("source_ct") must be called
     // This test verifies that the transcript extension trait is available
     let keypair = KeyPair::new();
     let ct = keypair.get_public_key().encrypt(100u64);
@@ -689,7 +689,7 @@ fn test_bug4_03_version_conditional_append() {
 
     let mut transcript = tos_common::crypto::new_proof_transcript(b"version_test");
 
-    // For T0: append_ciphertext should be called (using ProtocolTranscript trait)
+    // For T1: append_ciphertext should be called (using ProtocolTranscript trait)
     transcript.append_ciphertext(b"source_ct", &compressed);
 
     // If we got here without panic, the transcript operations work correctly

@@ -11,6 +11,7 @@ use tos_common::{
         Hash, TosHashError,
     },
     difficulty::DifficultyError,
+    error::BalanceError,
     prompt::PromptError,
     rpc::InternalRpcError,
     serializer::ReaderError,
@@ -540,5 +541,11 @@ impl From<VerificationError<BlockchainError>> for BlockchainError {
             VerificationError::DepositNotFound => BlockchainError::DepositNotFound,
             e => BlockchainError::Any(e.into()),
         }
+    }
+}
+
+impl From<BalanceError> for BlockchainError {
+    fn from(err: BalanceError) -> Self {
+        BlockchainError::Any(err.into())
     }
 }

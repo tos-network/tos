@@ -373,7 +373,7 @@ async fn main() -> Result<()> {
         };
 
         let tx = TransactionBuilder::new(
-            TxVersion::T0,
+            TxVersion::T1,
             keypair_a.get_public_key().compress(),
             None,
             TransactionTypeBuilder::Transfers(vec![transfer]),

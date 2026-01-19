@@ -905,7 +905,7 @@ async fn test_batch_referral_reward_authorization_sender_must_match_from_user() 
     let tx_type = TransactionTypeBuilder::BatchReferralReward(payload);
     let fee_builder = FeeBuilder::Value(0);
     let builder = TransactionBuilder::new(
-        TxVersion::T0,
+        TxVersion::T1,
         0, // chain_id: 0 for tests
         attacker_pk.clone(),
         None,
@@ -949,7 +949,7 @@ async fn test_batch_referral_reward_refunds_remainder_e2e() {
     let tx_type = TransactionTypeBuilder::BatchReferralReward(payload);
     let fee_builder = FeeBuilder::Value(0);
     let builder = TransactionBuilder::new(
-        TxVersion::T0,
+        TxVersion::T1,
         0,
         alice_pk.clone(),
         None,
