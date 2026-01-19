@@ -3,8 +3,8 @@ use crate::core::{
     storage::{
         constants::{BLOCKS_COUNT, TXS_COUNT},
         rocksdb::{BlockDifficulty, Column},
-        BlockProvider, BlocksAtHeightProvider, DifficultyProvider, RocksStorage,
-        TransactionProvider,
+        BlockProvider, BlocksAtHeightProvider, ClientProtocolProvider, DifficultyProvider,
+        RocksStorage, TransactionProvider,
     },
 };
 use async_trait::async_trait;
@@ -39,8 +39,10 @@ impl BlockProvider for RocksStorage {
         }
         let count = self.cache().counter.blocks_count;
         let next_count = count.saturating_sub(minus);
+        // Write disk first, then update cache (prevents stale cache on disk failure)
+        self.insert_into_disk(Column::Common, BLOCKS_COUNT, &next_count)?;
         self.cache_mut().counter.blocks_count = next_count;
-        self.insert_into_disk(Column::Common, BLOCKS_COUNT, &next_count)
+        Ok(())
     }
 
     // Check if the block exists using its hash
@@ -85,49 +87,95 @@ impl BlockProvider for RocksStorage {
         }
 
         self.insert_into_disk(Column::Blocks, hash.as_bytes(), &block)?;
-        if let Some(objects) = &self.cache().objects {
-            let hash = hash.as_ref().clone();
-            objects
-                .blocks_cache
-                .lock()
-                .await
-                .put(hash.clone(), block.clone());
-            objects
-                .cumulative_difficulty_cache
-                .lock()
-                .await
-                .put(hash.clone(), cumulative_difficulty.clone());
-        }
 
         let block_difficulty = BlockDifficulty {
             covariance,
             difficulty,
-            cumulative_difficulty,
+            cumulative_difficulty: cumulative_difficulty.clone(),
         };
         self.insert_into_disk(Column::BlockDifficulty, hash.as_bytes(), &block_difficulty)?;
 
         self.add_block_hash_at_height(&hash, block.get_height())
             .await?;
 
+        // Update cache after all disk writes succeed (prevents stale cache on disk failure)
+        if let Some(objects) = self.cache_mut().objects.as_mut() {
+            let hash = hash.as_ref().clone();
+            objects
+                .blocks_cache
+                .get_mut()
+                .put(hash.clone(), block.clone());
+            objects
+                .cumulative_difficulty_cache
+                .get_mut()
+                .put(hash, cumulative_difficulty);
+        }
+
+        // Write disk first, then update cache (prevents stale cache on disk failure)
         if count_txs > 0 {
             let next_count = self.cache().counter.transactions_count + count_txs;
-            self.cache_mut().counter.transactions_count = next_count;
             self.insert_into_disk(Column::Common, TXS_COUNT, &next_count)?;
+            self.cache_mut().counter.transactions_count = next_count;
         }
 
         let blocks_count = self.cache().counter.blocks_count + 1;
+        self.insert_into_disk(Column::Common, BLOCKS_COUNT, &blocks_count)?;
         self.cache_mut().counter.blocks_count = blocks_count;
-        self.insert_into_disk(Column::Common, BLOCKS_COUNT, &blocks_count)
+        Ok(())
     }
 
-    // Delete a block using its hash
+    // Delete a block using its hash with complete cleanup
     async fn delete_block_with_hash(&mut self, hash: &Hash) -> Result<Block, BlockchainError> {
-        trace!("delete block with hash");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("delete block with hash {}", hash);
+        }
         let block = self.get_block_by_hash(hash).await?;
+
+        // Try to get topoheight for cache eviction (from cache or disk)
+        let topoheight = if let Some(objects) = &self.cache().objects {
+            objects.topo_by_hash_cache.lock().await.get(hash).copied()
+        } else {
+            None
+        }
+        .or_else(|| {
+            match self.load_optional_from_disk::<_, u64>(Column::TopoByHash, hash) {
+                Ok(value) => value,
+                Err(e) => {
+                    if log::log_enabled!(log::Level::Warn) {
+                        log::warn!(
+                            "Failed to load topoheight from disk for cache eviction: {}",
+                            e
+                        );
+                    }
+                    None
+                }
+            }
+        });
+
+        // Remove block header from disk
         self.remove_from_disk(Column::Blocks, hash)?;
-        if let Some(objects) = &self.cache().objects {
-            objects.blocks_cache.lock().await.pop(hash);
-            objects.cumulative_difficulty_cache.lock().await.pop(hash);
+
+        // Remove from height index
+        self.remove_block_hash_at_height(hash, block.get_header().get_height())
+            .await?;
+
+        // Unlink all transactions from this block
+        for tx_hash in block.get_header().get_txs_hashes() {
+            self.unlink_transaction_from_block(tx_hash, hash)?;
+        }
+
+        // Remove block difficulty/metadata
+        self.remove_from_disk(Column::BlockDifficulty, hash)?;
+
+        // Evict from caches
+        if let Some(objects) = self.cache_mut().objects.as_mut() {
+            objects.blocks_cache.get_mut().pop(hash);
+            objects.cumulative_difficulty_cache.get_mut().pop(hash);
+            // Evict from topo caches
+            objects.topo_by_hash_cache.get_mut().pop(hash);
+            if let Some(topo) = topoheight {
+                objects.hash_at_topo_cache.get_mut().pop(&topo);
+            }
         }
 
         Ok(block)

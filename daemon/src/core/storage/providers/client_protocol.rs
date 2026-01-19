@@ -26,6 +26,13 @@ pub trait ClientProtocolProvider {
         block: &Hash,
     ) -> Result<bool, BlockchainError>;
 
+    // Unlink the transaction from the block
+    fn unlink_transaction_from_block(
+        &mut self,
+        tx: &Hash,
+        block: &Hash,
+    ) -> Result<bool, BlockchainError>;
+
     // Get all blocks in which the transaction is included
     fn get_blocks_for_tx(&self, hash: &Hash) -> Result<Tips, BlockchainError>;
 

@@ -100,14 +100,15 @@ impl TransactionProvider for RocksStorage {
         if log::log_enabled!(log::Level::Trace) {
             trace!("add transaction {}", hash);
         }
-        if let Some(objects) = &self.cache().objects {
+        // Write to disk first, then update cache (prevents stale cache on disk failure)
+        self.insert_into_disk(Column::Transactions, hash, transaction)?;
+        if let Some(objects) = self.cache_mut().objects.as_mut() {
             objects
                 .transactions_cache
-                .lock()
-                .await
+                .get_mut()
                 .put(hash.clone(), Arc::new(transaction.clone()));
         }
-        self.insert_into_disk(Column::Transactions, hash, transaction)
+        Ok(())
     }
 
     // Delete a transaction from the storage using its hash

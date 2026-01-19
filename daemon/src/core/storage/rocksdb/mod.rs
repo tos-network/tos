@@ -235,50 +235,54 @@ impl RocksStorage {
 
     pub fn load_cache_from_disk(&mut self) {
         trace!("load cache from disk");
-        if let Ok(top_height) = self.load_optional_from_disk(Column::Common, TOP_HEIGHT) {
-            self.cache.chain.height = top_height.unwrap_or(0);
+
+        // Helper macro to load cache values with proper error logging
+        macro_rules! load_cache_value {
+            ($key:expr, $field:expr, $default:expr) => {
+                match self.load_optional_from_disk(Column::Common, $key) {
+                    Ok(value) => $field = value.unwrap_or($default),
+                    Err(e) => {
+                        if log::log_enabled!(log::Level::Warn) {
+                            log::warn!(
+                                "Failed to load {} from disk, using default: {}",
+                                stringify!($key),
+                                e
+                            );
+                        }
+                        $field = $default;
+                    }
+                }
+            };
         }
 
-        if let Ok(topoheight) = self.load_optional_from_disk(Column::Common, TOP_TOPO_HEIGHT) {
-            self.cache.chain.topoheight = topoheight.unwrap_or(0);
+        load_cache_value!(TOP_HEIGHT, self.cache.chain.height, 0);
+        load_cache_value!(TOP_TOPO_HEIGHT, self.cache.chain.topoheight, 0);
+        load_cache_value!(TIPS, self.cache.chain.tips, Tips::default());
+
+        // pruned_topoheight is Option<u64>, handle separately
+        match self.load_optional_from_disk::<_, u64>(Column::Common, PRUNED_TOPOHEIGHT) {
+            Ok(value) => self.cache.counter.pruned_topoheight = value,
+            Err(e) => {
+                if log::log_enabled!(log::Level::Warn) {
+                    log::warn!(
+                        "Failed to load PRUNED_TOPOHEIGHT from disk, using default: {}",
+                        e
+                    );
+                }
+                self.cache.counter.pruned_topoheight = None;
+            }
         }
 
-        if let Ok(tips) = self.load_optional_from_disk(Column::Common, TIPS) {
-            self.cache.chain.tips = tips.unwrap_or_default();
-        }
-
-        if let Ok(pruned_topoheight) =
-            self.load_optional_from_disk(Column::Common, PRUNED_TOPOHEIGHT)
-        {
-            self.cache.counter.pruned_topoheight = pruned_topoheight;
-        }
-
-        if let Ok(blocks_count) = self.load_optional_from_disk(Column::Common, BLOCKS_COUNT) {
-            self.cache.counter.blocks_count = blocks_count.unwrap_or(0);
-        }
-
-        if let Ok(transactions_count) = self.load_optional_from_disk(Column::Common, TXS_COUNT) {
-            self.cache.counter.transactions_count = transactions_count.unwrap_or(0);
-        }
-
-        if let Ok(blocks_execution_count) =
-            self.load_optional_from_disk(Column::Common, BLOCKS_EXECUTION_ORDER_COUNT)
-        {
-            self.cache.counter.blocks_execution_count = blocks_execution_count.unwrap_or(0);
-        }
-
-        if let Ok(accounts_count) = self.load_optional_from_disk(Column::Common, NEXT_ACCOUNT_ID) {
-            self.cache.counter.accounts_count = accounts_count.unwrap_or(0);
-        }
-
-        if let Ok(assets_count) = self.load_optional_from_disk(Column::Common, ASSETS_ID) {
-            self.cache.counter.assets_count = assets_count.unwrap_or(0);
-        }
-
-        if let Ok(contracts_count) = self.load_optional_from_disk(Column::Common, NEXT_CONTRACT_ID)
-        {
-            self.cache.counter.contracts_count = contracts_count.unwrap_or(0);
-        }
+        load_cache_value!(BLOCKS_COUNT, self.cache.counter.blocks_count, 0);
+        load_cache_value!(TXS_COUNT, self.cache.counter.transactions_count, 0);
+        load_cache_value!(
+            BLOCKS_EXECUTION_ORDER_COUNT,
+            self.cache.counter.blocks_execution_count,
+            0
+        );
+        load_cache_value!(NEXT_ACCOUNT_ID, self.cache.counter.accounts_count, 0);
+        load_cache_value!(ASSETS_ID, self.cache.counter.assets_count, 0);
+        load_cache_value!(NEXT_CONTRACT_ID, self.cache.counter.contracts_count, 0);
     }
 
     pub(super) fn insert_into_disk<K: AsRef<[u8]>, V: Serializer>(
@@ -653,6 +657,10 @@ impl Storage for RocksStorage {
         // delete topoheight<->hash pointers
         let hash: Hash = self.load_from_disk(Column::HashAtTopo, &topoheight.to_be_bytes())?;
         self.remove_from_disk(Column::HashAtTopo, &topoheight.to_be_bytes())?;
+        // Evict from cache: hash_at_topo_cache
+        if let Some(objects) = self.cache_mut().objects.as_mut() {
+            objects.hash_at_topo_cache.get_mut().pop(&topoheight);
+        }
 
         trace!("deleting block execution order");
         self.remove_from_disk(Column::BlocksExecutionOrder, hash.as_bytes())?;
@@ -661,12 +669,20 @@ impl Storage for RocksStorage {
             trace!("hash is {hash} at topo {topoheight}");
         }
         self.remove_from_disk(Column::TopoByHash, &hash)?;
+        // Evict from cache: topo_by_hash_cache
+        if let Some(objects) = self.cache_mut().objects.as_mut() {
+            objects.topo_by_hash_cache.get_mut().pop(&hash);
+        }
 
         if log::log_enabled!(log::Level::Trace) {
             trace!("deleting block header {}", hash);
         }
         let block: Immutable<BlockHeader> = self.load_from_disk(Column::Blocks, &hash)?;
         self.remove_from_disk(Column::Blocks, &hash)?;
+        // Evict from cache: blocks_cache
+        if let Some(objects) = self.cache_mut().objects.as_mut() {
+            objects.blocks_cache.get_mut().pop(&hash);
+        }
         trace!("block header deleted successfully");
 
         trace!("deleting topoheight metadata");
@@ -675,6 +691,10 @@ impl Storage for RocksStorage {
 
         trace!("deleting block difficulty");
         self.remove_from_disk(Column::BlockDifficulty, &hash)?;
+        // Evict from cache: cumulative_difficulty_cache
+        if let Some(objects) = self.cache_mut().objects.as_mut() {
+            objects.cumulative_difficulty_cache.get_mut().pop(&hash);
+        }
         trace!("block deleted");
 
         let mut txs = Vec::with_capacity(block.get_txs_count());
@@ -747,6 +767,10 @@ impl Storage for RocksStorage {
                     None => self.load_from_disk(Column::Transactions, tx_hash)?,
                 };
                 self.remove_from_disk(Column::Transactions, tx_hash)?;
+                // Evict from cache: transactions_cache
+                if let Some(objects) = self.cache_mut().objects.as_mut() {
+                    objects.transactions_cache.get_mut().pop(tx_hash);
+                }
 
                 txs.push((tx_hash.clone(), tx));
             }
