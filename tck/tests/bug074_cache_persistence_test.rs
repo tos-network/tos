@@ -119,7 +119,7 @@ fn test_success_cache_contains_storage_writes() {
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/counter.so");
     let bytecode = std::fs::read(&contract_path).expect("Failed to read counter.so");
 
-    let mut provider = MockProvider;
+    let provider = MockProvider;
     let contract_hash = Hash::zero();
     let block_hash = Hash::zero();
     let tx_hash = Hash::zero();
@@ -130,7 +130,7 @@ fn test_success_cache_contains_storage_writes() {
     // Execute counter contract (writes to storage)
     let result = TakoExecutor::execute(
         &bytecode,
-        &mut provider,
+        &provider,
         100,
         &contract_hash,
         &block_hash,
@@ -408,13 +408,13 @@ fn test_tako_executor_returns_cache() {
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/counter.so");
     let bytecode = std::fs::read(&contract_path).expect("Failed to read counter.so");
 
-    let mut provider = MockProvider;
+    let provider = MockProvider;
     let contract_hash = Hash::zero();
 
     println!("\n=== ISSUE-074 Test: TakoExecutor Returns Cache ===");
 
     // Use execute_simple which also returns ExecutionResult with cache
-    let result = TakoExecutor::execute_simple(&bytecode, &mut provider, 100, &contract_hash);
+    let result = TakoExecutor::execute_simple(&bytecode, &provider, 100, &contract_hash);
 
     match result {
         Ok(exec_result) => {

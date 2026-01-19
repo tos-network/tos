@@ -440,13 +440,13 @@ fn test_referral_execution_no_provider() {
     println!("\n=== Referral Syscalls Execution Test (No Provider) ===");
     println!("Contract size: {} bytes", bytecode.len());
 
-    let mut provider = MockProvider::new();
+    let provider = MockProvider::new();
     let contract_hash = Hash::zero();
     let topoheight = 100;
 
     // Execute entrypoint without referral provider
     // Syscalls should return error codes but not crash
-    let result = TakoExecutor::execute_simple(&bytecode, &mut provider, topoheight, &contract_hash);
+    let result = TakoExecutor::execute_simple(&bytecode, &provider, topoheight, &contract_hash);
 
     match result {
         Ok(exec_result) => {
@@ -489,7 +489,7 @@ fn test_referral_execution_with_provider() {
     println!("\n=== Referral Syscalls Execution Test (With Provider) ===");
     println!("Contract size: {} bytes", bytecode.len());
 
-    let mut provider = MockProvider::new();
+    let provider = MockProvider::new();
     let mut referral_provider = MockReferralProvider::new();
     let contract_hash = Hash::zero();
     let topoheight = 100;
@@ -505,7 +505,7 @@ fn test_referral_execution_with_provider() {
 
     let result = TakoExecutor::execute_with_referral(
         &bytecode,
-        &mut provider,
+        &provider,
         topoheight,
         &contract_hash,
         &block_hash,

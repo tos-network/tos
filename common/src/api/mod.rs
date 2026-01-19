@@ -20,9 +20,10 @@ use crate::{
         extra_data::UnknownExtraDataFormat, multisig::MultiSig, AgentAccountPayload,
         AppealEscrowPayload, AppealKycPayload, BatchReferralRewardPayload, BindReferrerPayload,
         BootstrapCommitteePayload, BurnPayload, CancelArbiterExitPayload, ChallengeEscrowPayload,
-        CreateEscrowPayload, DeployContractPayload, DepositEscrowPayload, DisputeEscrowPayload,
-        EmergencySuspendPayload, EnergyPayload, EphemeralMessagePayload, FeeType,
-        InvokeContractPayload, MultiSigPayload, Reference, RefundEscrowPayload,
+        CommitArbitrationOpenPayload, CommitJurorVotePayload, CommitSelectionCommitmentPayload,
+        CommitVoteRequestPayload, CreateEscrowPayload, DeployContractPayload, DepositEscrowPayload,
+        DisputeEscrowPayload, EmergencySuspendPayload, EnergyPayload, EphemeralMessagePayload,
+        FeeType, InvokeContractPayload, MultiSigPayload, Reference, RefundEscrowPayload,
         RegisterArbiterPayload, RegisterCommitteePayload, RegisterNamePayload,
         ReleaseEscrowPayload, RenewKycPayload, RequestArbiterExitPayload, RevokeKycPayload,
         SetKycPayload, ShieldTransferPayload, SlashArbiterPayload, SubmitVerdictPayload,
@@ -109,6 +110,11 @@ pub enum RPCTransactionType<'a> {
     DisputeEscrow(Cow<'a, DisputeEscrowPayload>),
     AppealEscrow(Cow<'a, AppealEscrowPayload>),
     SubmitVerdict(Cow<'a, SubmitVerdictPayload>),
+    SubmitVerdictByJuror(Cow<'a, SubmitVerdictPayload>),
+    CommitArbitrationOpen(Cow<'a, CommitArbitrationOpenPayload>),
+    CommitVoteRequest(Cow<'a, CommitVoteRequestPayload>),
+    CommitSelectionCommitment(Cow<'a, CommitSelectionCommitmentPayload>),
+    CommitJurorVote(Cow<'a, CommitJurorVotePayload>),
     // Arbitration transaction types
     RegisterArbiter(Cow<'a, RegisterArbiterPayload>),
     UpdateArbiter(Cow<'a, UpdateArbiterPayload>),
@@ -188,6 +194,21 @@ impl<'a> RPCTransactionType<'a> {
             TransactionType::DisputeEscrow(payload) => Self::DisputeEscrow(Cow::Borrowed(payload)),
             TransactionType::AppealEscrow(payload) => Self::AppealEscrow(Cow::Borrowed(payload)),
             TransactionType::SubmitVerdict(payload) => Self::SubmitVerdict(Cow::Borrowed(payload)),
+            TransactionType::SubmitVerdictByJuror(payload) => {
+                Self::SubmitVerdictByJuror(Cow::Borrowed(payload))
+            }
+            TransactionType::CommitArbitrationOpen(payload) => {
+                Self::CommitArbitrationOpen(Cow::Borrowed(payload))
+            }
+            TransactionType::CommitVoteRequest(payload) => {
+                Self::CommitVoteRequest(Cow::Borrowed(payload))
+            }
+            TransactionType::CommitSelectionCommitment(payload) => {
+                Self::CommitSelectionCommitment(Cow::Borrowed(payload))
+            }
+            TransactionType::CommitJurorVote(payload) => {
+                Self::CommitJurorVote(Cow::Borrowed(payload))
+            }
             TransactionType::RegisterArbiter(payload) => {
                 Self::RegisterArbiter(Cow::Borrowed(payload))
             }
@@ -317,6 +338,21 @@ impl From<RPCTransactionType<'_>> for TransactionType {
             }
             RPCTransactionType::SubmitVerdict(payload) => {
                 TransactionType::SubmitVerdict(payload.into_owned())
+            }
+            RPCTransactionType::SubmitVerdictByJuror(payload) => {
+                TransactionType::SubmitVerdictByJuror(payload.into_owned())
+            }
+            RPCTransactionType::CommitArbitrationOpen(payload) => {
+                TransactionType::CommitArbitrationOpen(payload.into_owned())
+            }
+            RPCTransactionType::CommitVoteRequest(payload) => {
+                TransactionType::CommitVoteRequest(payload.into_owned())
+            }
+            RPCTransactionType::CommitSelectionCommitment(payload) => {
+                TransactionType::CommitSelectionCommitment(payload.into_owned())
+            }
+            RPCTransactionType::CommitJurorVote(payload) => {
+                TransactionType::CommitJurorVote(payload.into_owned())
             }
         }
     }

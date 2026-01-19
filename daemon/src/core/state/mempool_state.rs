@@ -7,27 +7,30 @@ use std::{
 };
 use tos_common::{
     account::{AgentAccountMeta, DelegateRecordEntry, EnergyResource, Nonce, SessionKey},
+    arbitration::{ArbitrationJurorVoteKey, ArbitrationRequestKey, ArbitrationRoundKey},
     block::{BlockVersion, TopoHeight},
     config::{COIN_VALUE, TOS_ASSET},
     crypto::{
         elgamal::{Ciphertext, CompressedPublicKey},
         Hash, PublicKey,
     },
+    escrow::EscrowAccount,
     transaction::{
-        verify::BlockchainVerificationState, EnergyPayload, MultiSigPayload, Reference,
-        Transaction, TransactionType,
+        verify::BlockchainVerificationState, CommitArbitrationOpenPayload, CommitJurorVotePayload,
+        CommitSelectionCommitmentPayload, CommitVoteRequestPayload, EnergyPayload, MultiSigPayload,
+        Reference, Transaction, TransactionType,
     },
 };
 use tos_environment::Environment;
 use tos_kernel::Module;
 
-struct Account<'a> {
+struct Account {
     // Account nonce used to verify valid transaction
     nonce: u64,
     // Assets ready as source for any transfer/transaction
-    assets: HashMap<&'a Hash, u64>,
+    assets: HashMap<Hash, u64>,
     // UNO (encrypted) assets for privacy-preserving transactions
-    uno_assets: HashMap<&'a Hash, Ciphertext>,
+    uno_assets: HashMap<Hash, Ciphertext>,
     // Multisig configured
     // This is used to verify the validity of the multisig setup
     multisig: Option<MultiSigPayload>,
@@ -48,13 +51,19 @@ pub struct MempoolState<'a, S: Storage> {
     receiver_uno_balances: HashMap<Cow<'a, PublicKey>, HashMap<Cow<'a, Hash>, Ciphertext>>,
     // Sender accounts
     // This is used to verify ZK Proofs and store/update nonces
-    accounts: HashMap<Cow<'a, PublicKey>, Account<'a>>,
+    accounts: HashMap<Cow<'a, PublicKey>, Account>,
     // Sender energy resources (used for energy fee validation)
     energy_resources: HashMap<&'a PublicKey, EnergyResource>,
     // Agent account metadata updates (None = delete)
     agent_account_meta: HashMap<Cow<'a, PublicKey>, Option<AgentAccountMeta>>,
     // Agent session key updates (None = delete)
     agent_session_keys: HashMap<(PublicKey, u64), Option<SessionKey>>,
+    // Arbitration commit caches (read-your-writes)
+    commit_arbitration_open_by_round: HashMap<ArbitrationRoundKey, CommitArbitrationOpenPayload>,
+    commit_arbitration_open_by_request: HashMap<Hash, CommitArbitrationOpenPayload>,
+    commit_vote_request: HashMap<Hash, CommitVoteRequestPayload>,
+    commit_selection_commitment: HashMap<Hash, CommitSelectionCommitmentPayload>,
+    commit_juror_votes: HashMap<ArbitrationJurorVoteKey, CommitJurorVotePayload>,
     // Contract modules
     contracts: HashMap<Hash, Cow<'a, Module>>,
     // The current stable topoheight of the chain
@@ -86,6 +95,11 @@ impl<'a, S: Storage> MempoolState<'a, S> {
             energy_resources: HashMap::new(),
             agent_account_meta: HashMap::new(),
             agent_session_keys: HashMap::new(),
+            commit_arbitration_open_by_round: HashMap::new(),
+            commit_arbitration_open_by_request: HashMap::new(),
+            commit_vote_request: HashMap::new(),
+            commit_selection_commitment: HashMap::new(),
+            commit_juror_votes: HashMap::new(),
             contracts: HashMap::new(),
             stable_topoheight,
             topoheight,
@@ -98,7 +112,7 @@ impl<'a, S: Storage> MempoolState<'a, S> {
         &mut self,
         key: &PublicKey,
     ) -> Option<(
-        HashMap<&Hash, u64>,
+        HashMap<Hash, u64>,
         Option<MultiSigPayload>,
         Option<EnergyResource>,
         Option<AgentAccountMeta>,
@@ -182,7 +196,7 @@ impl<'a, S: Storage> MempoolState<'a, S> {
         storage: &S,
         key: &PublicKey,
         topoheight: TopoHeight,
-    ) -> Result<Account<'a>, BlockchainError> {
+    ) -> Result<Account, BlockchainError> {
         let (nonce, multisig) = if let Some(cache) = mempool.get_cache_for(key) {
             let nonce = cache.get_next_nonce();
             let multisig = if let Some(multisig) = cache.get_multisig() {
@@ -228,13 +242,13 @@ impl<'a, S: Storage> MempoolState<'a, S> {
     async fn internal_get_sender_balance<'b>(
         &'b mut self,
         key: Cow<'a, PublicKey>,
-        asset: &'a Hash,
+        asset: &Hash,
         reference: &Reference,
     ) -> Result<&'b mut u64, BlockchainError> {
         match self.accounts.entry(key.clone()) {
             Entry::Occupied(o) => {
                 let account = o.into_mut();
-                match account.assets.entry(asset) {
+                match account.assets.entry(asset.clone()) {
                     Entry::Occupied(entry) => Ok(entry.into_mut()),
                     Entry::Vacant(entry) => match self.mempool.get_cache_for(key.as_ref()) {
                         Some(cache) => {
@@ -277,7 +291,7 @@ impl<'a, S: Storage> MempoolState<'a, S> {
                     .await?,
                 );
 
-                match account.assets.entry(asset) {
+                match account.assets.entry(asset.clone()) {
                     Entry::Occupied(entry) => Ok(entry.into_mut()),
                     Entry::Vacant(entry) => {
                         let (version, new) = self
@@ -641,11 +655,8 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Mempoo
         asset: Cow<'a, Hash>,
         reference: &Reference,
     ) -> Result<&'b mut u64, BlockchainError> {
-        let asset = match asset {
-            Cow::Borrowed(asset) => asset,
-            Cow::Owned(_) => return Err(BlockchainError::CorruptedData),
-        };
-        self.internal_get_sender_balance(account, asset, reference)
+        let asset_ref = asset.as_ref();
+        self.internal_get_sender_balance(account, asset_ref, reference)
             .await
     }
 
@@ -722,7 +733,7 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Mempoo
         };
 
         // Check if we already have this UNO asset balance
-        match acc.uno_assets.entry(asset) {
+        match acc.uno_assets.entry(asset.clone()) {
             Entry::Occupied(o) => Ok(o.into_mut()),
             Entry::Vacant(e) => {
                 // Try to get from storage
@@ -777,6 +788,13 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Mempoo
         self.storage
             .is_account_registered_for_topoheight(account, self.topoheight)
             .await
+    }
+
+    async fn get_escrow(
+        &mut self,
+        escrow_id: &Hash,
+    ) -> Result<Option<EscrowAccount>, BlockchainError> {
+        self.storage.get_escrow(escrow_id).await
     }
 
     /// Apply a new nonce to an account
@@ -1087,6 +1105,148 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Mempoo
         arbiter: &'a CompressedPublicKey,
     ) -> Result<Option<tos_common::arbitration::ArbiterAccount>, BlockchainError> {
         self.storage.get_arbiter(arbiter).await
+    }
+
+    async fn get_commit_arbitration_open(
+        &mut self,
+        escrow_id: &Hash,
+        dispute_id: &Hash,
+        round: u32,
+    ) -> Result<Option<CommitArbitrationOpenPayload>, BlockchainError> {
+        let key = ArbitrationRoundKey {
+            escrow_id: escrow_id.clone(),
+            dispute_id: dispute_id.clone(),
+            round,
+        };
+        if let Some(payload) = self.commit_arbitration_open_by_round.get(&key) {
+            return Ok(Some(payload.clone()));
+        }
+        self.storage.get_commit_arbitration_open(&key).await
+    }
+
+    async fn get_commit_arbitration_open_by_request(
+        &mut self,
+        request_id: &Hash,
+    ) -> Result<Option<CommitArbitrationOpenPayload>, BlockchainError> {
+        if let Some(payload) = self.commit_arbitration_open_by_request.get(request_id) {
+            return Ok(Some(payload.clone()));
+        }
+        let key = ArbitrationRequestKey {
+            request_id: request_id.clone(),
+        };
+        self.storage
+            .get_commit_arbitration_open_by_request(&key)
+            .await
+    }
+
+    async fn set_commit_arbitration_open(
+        &mut self,
+        escrow_id: &Hash,
+        dispute_id: &Hash,
+        round: u32,
+        payload: &CommitArbitrationOpenPayload,
+    ) -> Result<(), BlockchainError> {
+        let round_key = ArbitrationRoundKey {
+            escrow_id: escrow_id.clone(),
+            dispute_id: dispute_id.clone(),
+            round,
+        };
+        self.commit_arbitration_open_by_round
+            .insert(round_key, payload.clone());
+        self.commit_arbitration_open_by_request
+            .insert(payload.request_id.clone(), payload.clone());
+        Ok(())
+    }
+
+    async fn get_commit_vote_request(
+        &mut self,
+        request_id: &Hash,
+    ) -> Result<Option<CommitVoteRequestPayload>, BlockchainError> {
+        if let Some(payload) = self.commit_vote_request.get(request_id) {
+            return Ok(Some(payload.clone()));
+        }
+        let key = ArbitrationRequestKey {
+            request_id: request_id.clone(),
+        };
+        self.storage.get_commit_vote_request(&key).await
+    }
+
+    async fn set_commit_vote_request(
+        &mut self,
+        request_id: &Hash,
+        payload: &CommitVoteRequestPayload,
+    ) -> Result<(), BlockchainError> {
+        self.commit_vote_request
+            .insert(request_id.clone(), payload.clone());
+        Ok(())
+    }
+
+    async fn get_commit_selection_commitment(
+        &mut self,
+        request_id: &Hash,
+    ) -> Result<Option<CommitSelectionCommitmentPayload>, BlockchainError> {
+        if let Some(payload) = self.commit_selection_commitment.get(request_id) {
+            return Ok(Some(payload.clone()));
+        }
+        let key = ArbitrationRequestKey {
+            request_id: request_id.clone(),
+        };
+        self.storage.get_commit_selection_commitment(&key).await
+    }
+
+    async fn set_commit_selection_commitment(
+        &mut self,
+        request_id: &Hash,
+        payload: &CommitSelectionCommitmentPayload,
+    ) -> Result<(), BlockchainError> {
+        self.commit_selection_commitment
+            .insert(request_id.clone(), payload.clone());
+        Ok(())
+    }
+
+    async fn get_commit_juror_vote(
+        &mut self,
+        request_id: &Hash,
+        juror_pubkey: &PublicKey,
+    ) -> Result<Option<CommitJurorVotePayload>, BlockchainError> {
+        let key = ArbitrationJurorVoteKey {
+            request_id: request_id.clone(),
+            juror_pubkey: juror_pubkey.clone(),
+        };
+        if let Some(payload) = self.commit_juror_votes.get(&key) {
+            return Ok(Some(payload.clone()));
+        }
+        self.storage.get_commit_juror_vote(&key).await
+    }
+
+    async fn set_commit_juror_vote(
+        &mut self,
+        request_id: &Hash,
+        juror_pubkey: &PublicKey,
+        payload: &CommitJurorVotePayload,
+    ) -> Result<(), BlockchainError> {
+        let key = ArbitrationJurorVoteKey {
+            request_id: request_id.clone(),
+            juror_pubkey: juror_pubkey.clone(),
+        };
+        self.commit_juror_votes.insert(key, payload.clone());
+        Ok(())
+    }
+
+    async fn list_commit_juror_votes(
+        &mut self,
+        request_id: &Hash,
+    ) -> Result<Vec<CommitJurorVotePayload>, BlockchainError> {
+        let mut by_juror: HashMap<PublicKey, CommitJurorVotePayload> = HashMap::new();
+        for payload in self.storage.list_commit_juror_votes(request_id).await? {
+            by_juror.insert(payload.juror_pubkey.clone(), payload);
+        }
+        for (key, payload) in self.commit_juror_votes.iter() {
+            if &key.request_id == request_id {
+                by_juror.insert(key.juror_pubkey.clone(), payload.clone());
+            }
+        }
+        Ok(by_juror.into_values().collect())
     }
 }
 

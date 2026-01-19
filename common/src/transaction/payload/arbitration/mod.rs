@@ -1,4 +1,8 @@
 mod cancel_arbiter_exit;
+mod commit_arbitration_open;
+mod commit_juror_vote;
+mod commit_selection_commitment;
+mod commit_vote_request;
 mod register_arbiter;
 mod request_arbiter_exit;
 mod slash_arbiter;
@@ -6,6 +10,10 @@ mod update_arbiter;
 mod withdraw_arbiter_stake;
 
 pub use cancel_arbiter_exit::CancelArbiterExitPayload;
+pub use commit_arbitration_open::CommitArbitrationOpenPayload;
+pub use commit_juror_vote::CommitJurorVotePayload;
+pub use commit_selection_commitment::CommitSelectionCommitmentPayload;
+pub use commit_vote_request::CommitVoteRequestPayload;
 pub use register_arbiter::RegisterArbiterPayload;
 pub use request_arbiter_exit::RequestArbiterExitPayload;
 pub use slash_arbiter::SlashArbiterPayload;

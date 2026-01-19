@@ -131,7 +131,7 @@ fn test_uniswap_v2_initialize() {
     println!("\n=== Uniswap V2 Factory Initialize Test ===");
     println!("Contract size: {} bytes", bytecode.len());
 
-    let mut provider = MockProvider;
+    let provider = MockProvider;
     let contract_hash = Hash::zero();
     let topoheight = 100;
 
@@ -144,7 +144,7 @@ fn test_uniswap_v2_initialize() {
 
     let result = TakoExecutor::execute(
         &bytecode,
-        &mut provider,
+        &provider,
         topoheight,
         &contract_hash,
         &Hash::zero(),    // block_hash
@@ -188,7 +188,7 @@ fn test_uniswap_v2_create_pair() {
 
     println!("\n=== Uniswap V2 Create Pair Test ===");
 
-    let mut provider = MockProvider;
+    let provider = MockProvider;
     let contract_hash = Hash::zero();
     let topoheight = 100;
 
@@ -208,7 +208,7 @@ fn test_uniswap_v2_create_pair() {
 
     let result = TakoExecutor::execute(
         &bytecode,
-        &mut provider,
+        &provider,
         topoheight,
         &contract_hash,
         &Hash::zero(), // block_hash
@@ -248,7 +248,7 @@ fn test_uniswap_v2_get_pair() {
 
     println!("\n=== Uniswap V2 Get Pair Test ===");
 
-    let mut provider = MockProvider;
+    let provider = MockProvider;
     let contract_hash = Hash::zero();
     let topoheight = 100;
 
@@ -268,7 +268,7 @@ fn test_uniswap_v2_get_pair() {
 
     let result = TakoExecutor::execute(
         &bytecode,
-        &mut provider,
+        &provider,
         topoheight,
         &contract_hash,
         &Hash::zero(), // block_hash

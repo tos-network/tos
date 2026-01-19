@@ -7,11 +7,13 @@ use tos_common::{
         ArbiterWithdrawStatus, EstimateWithdrawableAmountParams, EstimateWithdrawableAmountResult,
         GetArbiterWithdrawStatusParams,
     },
+    arbitration::{ArbitrationOpen, JurorVote},
     async_handler,
     context::Context,
     rpc::{parse_params, InternalRpcError, RPCHandler},
 };
 
+use crate::a2a::arbitration::coordinator::CoordinatorService;
 use crate::core::{blockchain::Blockchain, error::BlockchainError, storage::Storage};
 
 pub fn register_methods<S: Storage>(handler: &mut RPCHandler<Arc<Blockchain<S>>>) {
@@ -23,6 +25,8 @@ pub fn register_methods<S: Storage>(handler: &mut RPCHandler<Arc<Blockchain<S>>>
         "estimate_withdrawable_amount",
         async_handler!(estimate_withdrawable_amount::<S>),
     );
+    handler.register_method("arbitration_open", async_handler!(arbitration_open::<S>));
+    handler.register_method("submit_juror_vote", async_handler!(submit_juror_vote::<S>));
 }
 
 async fn get_arbiter_withdraw_status<S: Storage>(
@@ -112,4 +116,32 @@ async fn estimate_withdrawable_amount<S: Storage>(
     let current_topoheight = blockchain.get_topo_height();
     let available = arbiter.can_withdraw(current_topoheight).unwrap_or(0);
     Ok(json!(EstimateWithdrawableAmountResult { available }))
+}
+
+async fn arbitration_open<S: Storage>(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    let open: ArbitrationOpen = parse_params(body)?;
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let coordinator = CoordinatorService::new();
+    let vote_request = coordinator
+        .handle_arbitration_open(blockchain, open)
+        .await
+        .map_err(|e| InternalRpcError::InvalidParamsAny(e.into()))?;
+    Ok(json!(vote_request))
+}
+
+async fn submit_juror_vote<S: Storage>(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    let vote: JurorVote = parse_params(body)?;
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let coordinator = CoordinatorService::new();
+    let verdict = coordinator
+        .handle_juror_vote(blockchain, vote)
+        .await
+        .map_err(|e| InternalRpcError::InvalidParamsAny(e.into()))?;
+    Ok(json!(verdict))
 }

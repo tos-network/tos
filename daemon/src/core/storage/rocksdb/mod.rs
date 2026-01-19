@@ -657,6 +657,9 @@ impl Storage for RocksStorage {
                     TransactionType::DisputeEscrow(payload) => Some(payload.escrow_id.clone()),
                     TransactionType::AppealEscrow(payload) => Some(payload.escrow_id.clone()),
                     TransactionType::SubmitVerdict(payload) => Some(payload.escrow_id.clone()),
+                    TransactionType::SubmitVerdictByJuror(payload) => {
+                        Some(payload.escrow_id.clone())
+                    }
                     _ => None,
                 };
                 if let Some(escrow_id) = escrow_id {

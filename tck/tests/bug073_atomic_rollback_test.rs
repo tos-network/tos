@@ -308,11 +308,11 @@ fn test_invalid_bytecode_triggers_error() {
     println!("\n=== ISSUE-073 Test: Invalid Bytecode Error ===");
 
     let invalid_bytecode = b"not valid ELF bytecode";
-    let mut provider = MockProvider::new();
+    let provider = MockProvider::new();
     let contract_hash = Hash::zero();
 
     // Try to execute invalid bytecode
-    let result = TakoExecutor::execute_simple(invalid_bytecode, &mut provider, 100, &contract_hash);
+    let result = TakoExecutor::execute_simple(invalid_bytecode, &provider, 100, &contract_hash);
 
     // Should return error
     assert!(result.is_err(), "Invalid bytecode should return Err");

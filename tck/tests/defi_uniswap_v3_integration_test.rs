@@ -130,7 +130,7 @@ fn test_uniswap_v3_initialize() {
     println!("Contract size: {} bytes", bytecode.len());
     println!("⚠️  WARNING: Swap logic is NOT implemented (3-line placeholder)");
 
-    let mut provider = MockProvider;
+    let provider = MockProvider;
     let contract_hash = Hash::zero();
     let topoheight = 100;
 
@@ -156,7 +156,7 @@ fn test_uniswap_v3_initialize() {
 
     let result = TakoExecutor::execute(
         &bytecode,
-        &mut provider,
+        &provider,
         topoheight,
         &contract_hash,
         &Hash::zero(),    // block_hash
@@ -202,7 +202,7 @@ fn test_uniswap_v3_mint() {
     println!("\n=== Uniswap V3 Mint Test (DEMO ONLY) ===");
     println!("⚠️  WARNING: This is a placeholder - liquidity math NOT implemented");
 
-    let mut provider = MockProvider;
+    let provider = MockProvider;
     let contract_hash = Hash::zero();
     let topoheight = 100;
 
@@ -228,7 +228,7 @@ fn test_uniswap_v3_mint() {
 
     let result = TakoExecutor::execute(
         &bytecode,
-        &mut provider,
+        &provider,
         topoheight,
         &contract_hash,
         &Hash::zero(), // block_hash

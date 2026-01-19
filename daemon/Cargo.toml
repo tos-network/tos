@@ -101,6 +101,10 @@ sha3 = "0.10"
 rand = "0.8"
 proptest = "1.4"
 arbitrary = { version = "1.3", features = ["derive"] }
+hyper = { version = "0.14", features = ["server", "http1"] }
+tokio-rustls = "0.26"
+rustls = { workspace = true }
+rcgen = "0.13"
 
 [build-dependencies]
 tonic-build = "0.12"

@@ -134,7 +134,7 @@ fn test_hello_world_executes() {
     println!("Contract size: {} bytes", bytecode.len());
 
     // Create mock provider
-    let mut provider = MockProvider;
+    let provider = MockProvider;
 
     // Contract parameters
     let contract_hash = Hash::zero();
@@ -143,7 +143,7 @@ fn test_hello_world_executes() {
     println!("Executing contract...");
 
     // Execute the contract
-    let result = TakoExecutor::execute_simple(&bytecode, &mut provider, topoheight, &contract_hash);
+    let result = TakoExecutor::execute_simple(&bytecode, &provider, topoheight, &contract_hash);
 
     match result {
         Ok(exec_result) => {
@@ -188,7 +188,7 @@ fn test_hello_world_with_compute_budget() {
     let contract_path = "tests/fixtures/hello_world.so";
     let bytecode = std::fs::read(contract_path).expect("Failed to read hello_world.so");
 
-    let mut provider = MockProvider;
+    let provider = MockProvider;
     let contract_hash = Hash::zero();
     let block_hash = Hash::zero();
     let tx_hash = Hash::zero();
@@ -204,7 +204,7 @@ fn test_hello_world_with_compute_budget() {
 
         let result = TakoExecutor::execute(
             &bytecode,
-            &mut provider,
+            &provider,
             100,
             &contract_hash,
             &block_hash,
@@ -252,18 +252,18 @@ fn test_hello_world_vs_cpi_callee() {
     println!("Hello World: {} bytes", hello_bytecode.len());
     println!("CPI Callee:  {} bytes", callee_bytecode.len());
 
-    let mut provider = MockProvider;
+    let provider = MockProvider;
     let contract_hash = Hash::zero();
 
     // Test hello world
     println!("\nExecuting Hello World...");
     let hello_result =
-        TakoExecutor::execute_simple(&hello_bytecode, &mut provider, 100, &contract_hash);
+        TakoExecutor::execute_simple(&hello_bytecode, &provider, 100, &contract_hash);
 
     // Test CPI callee
     println!("Executing CPI Callee...");
     let callee_result =
-        TakoExecutor::execute_simple(&callee_bytecode, &mut provider, 100, &contract_hash);
+        TakoExecutor::execute_simple(&callee_bytecode, &provider, 100, &contract_hash);
 
     match (hello_result, callee_result) {
         (Ok(hello), Ok(callee)) => {

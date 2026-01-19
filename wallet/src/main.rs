@@ -3846,6 +3846,39 @@ async fn transaction(
                 manager.message(format!("  Payee Amount: {}", payload.payee_amount));
                 manager.message(format!("  Signatures: {}", payload.signatures.len()));
             }
+            TransactionType::SubmitVerdictByJuror(payload) => {
+                manager.message("Type: SubmitVerdictByJuror".to_string());
+                manager.message(format!("  Escrow ID: {}", payload.escrow_id));
+                manager.message(format!("  Dispute ID: {}", payload.dispute_id));
+                manager.message(format!("  Round: {}", payload.round));
+                manager.message(format!("  Payer Amount: {}", payload.payer_amount));
+                manager.message(format!("  Payee Amount: {}", payload.payee_amount));
+                manager.message(format!("  Signatures: {}", payload.signatures.len()));
+            }
+            TransactionType::CommitArbitrationOpen(payload) => {
+                manager.message("Type: CommitArbitrationOpen".to_string());
+                manager.message(format!("  Escrow ID: {}", payload.escrow_id));
+                manager.message(format!("  Dispute ID: {}", payload.dispute_id));
+                manager.message(format!("  Round: {}", payload.round));
+                manager.message(format!("  Request ID: {}", payload.request_id));
+            }
+            TransactionType::CommitVoteRequest(payload) => {
+                manager.message("Type: CommitVoteRequest".to_string());
+                manager.message(format!("  Request ID: {}", payload.request_id));
+            }
+            TransactionType::CommitSelectionCommitment(payload) => {
+                manager.message("Type: CommitSelectionCommitment".to_string());
+                manager.message(format!("  Request ID: {}", payload.request_id));
+                manager.message(format!(
+                    "  Commitment ID: {}",
+                    payload.selection_commitment_id
+                ));
+            }
+            TransactionType::CommitJurorVote(payload) => {
+                manager.message("Type: CommitJurorVote".to_string());
+                manager.message(format!("  Request ID: {}", payload.request_id));
+                manager.message(format!("  Juror: {:?}", payload.juror_pubkey));
+            }
             TransactionType::RegisterArbiter(payload) => {
                 manager.message("Type: RegisterArbiter".to_string());
                 manager.message(format!("  Name: {}", payload.get_name()));

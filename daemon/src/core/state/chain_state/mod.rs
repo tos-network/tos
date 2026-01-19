@@ -1310,4 +1310,129 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for ChainS
     ) -> Result<Option<tos_common::arbitration::ArbiterAccount>, BlockchainError> {
         self.storage.get_arbiter(arbiter).await
     }
+
+    async fn get_commit_arbitration_open(
+        &mut self,
+        escrow_id: &Hash,
+        dispute_id: &Hash,
+        round: u32,
+    ) -> Result<Option<tos_common::transaction::CommitArbitrationOpenPayload>, BlockchainError>
+    {
+        let key = tos_common::arbitration::ArbitrationRoundKey {
+            escrow_id: escrow_id.clone(),
+            dispute_id: dispute_id.clone(),
+            round,
+        };
+        self.storage.get_commit_arbitration_open(&key).await
+    }
+
+    async fn get_commit_arbitration_open_by_request(
+        &mut self,
+        request_id: &Hash,
+    ) -> Result<Option<tos_common::transaction::CommitArbitrationOpenPayload>, BlockchainError>
+    {
+        let key = tos_common::arbitration::ArbitrationRequestKey {
+            request_id: request_id.clone(),
+        };
+        self.storage
+            .get_commit_arbitration_open_by_request(&key)
+            .await
+    }
+
+    async fn set_commit_arbitration_open(
+        &mut self,
+        escrow_id: &Hash,
+        dispute_id: &Hash,
+        round: u32,
+        payload: &tos_common::transaction::CommitArbitrationOpenPayload,
+    ) -> Result<(), BlockchainError> {
+        let round_key = tos_common::arbitration::ArbitrationRoundKey {
+            escrow_id: escrow_id.clone(),
+            dispute_id: dispute_id.clone(),
+            round,
+        };
+        let request_key = tos_common::arbitration::ArbitrationRequestKey {
+            request_id: payload.request_id.clone(),
+        };
+        self.storage
+            .set_commit_arbitration_open(&round_key, &request_key, payload)
+            .await
+    }
+
+    async fn get_commit_vote_request(
+        &mut self,
+        request_id: &Hash,
+    ) -> Result<Option<tos_common::transaction::CommitVoteRequestPayload>, BlockchainError> {
+        let key = tos_common::arbitration::ArbitrationRequestKey {
+            request_id: request_id.clone(),
+        };
+        self.storage.get_commit_vote_request(&key).await
+    }
+
+    async fn set_commit_vote_request(
+        &mut self,
+        request_id: &Hash,
+        payload: &tos_common::transaction::CommitVoteRequestPayload,
+    ) -> Result<(), BlockchainError> {
+        let key = tos_common::arbitration::ArbitrationRequestKey {
+            request_id: request_id.clone(),
+        };
+        self.storage.set_commit_vote_request(&key, payload).await
+    }
+
+    async fn get_commit_selection_commitment(
+        &mut self,
+        request_id: &Hash,
+    ) -> Result<Option<tos_common::transaction::CommitSelectionCommitmentPayload>, BlockchainError>
+    {
+        let key = tos_common::arbitration::ArbitrationRequestKey {
+            request_id: request_id.clone(),
+        };
+        self.storage.get_commit_selection_commitment(&key).await
+    }
+
+    async fn set_commit_selection_commitment(
+        &mut self,
+        request_id: &Hash,
+        payload: &tos_common::transaction::CommitSelectionCommitmentPayload,
+    ) -> Result<(), BlockchainError> {
+        let key = tos_common::arbitration::ArbitrationRequestKey {
+            request_id: request_id.clone(),
+        };
+        self.storage
+            .set_commit_selection_commitment(&key, payload)
+            .await
+    }
+
+    async fn get_commit_juror_vote(
+        &mut self,
+        request_id: &Hash,
+        juror_pubkey: &PublicKey,
+    ) -> Result<Option<tos_common::transaction::CommitJurorVotePayload>, BlockchainError> {
+        let key = tos_common::arbitration::ArbitrationJurorVoteKey {
+            request_id: request_id.clone(),
+            juror_pubkey: juror_pubkey.clone(),
+        };
+        self.storage.get_commit_juror_vote(&key).await
+    }
+
+    async fn set_commit_juror_vote(
+        &mut self,
+        request_id: &Hash,
+        juror_pubkey: &PublicKey,
+        payload: &tos_common::transaction::CommitJurorVotePayload,
+    ) -> Result<(), BlockchainError> {
+        let key = tos_common::arbitration::ArbitrationJurorVoteKey {
+            request_id: request_id.clone(),
+            juror_pubkey: juror_pubkey.clone(),
+        };
+        self.storage.set_commit_juror_vote(&key, payload).await
+    }
+
+    async fn list_commit_juror_votes(
+        &mut self,
+        request_id: &Hash,
+    ) -> Result<Vec<tos_common::transaction::CommitJurorVotePayload>, BlockchainError> {
+        self.storage.list_commit_juror_votes(request_id).await
+    }
 }

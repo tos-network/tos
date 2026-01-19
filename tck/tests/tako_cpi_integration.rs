@@ -202,7 +202,7 @@ async fn test_cpi_basic_invocation() {
     let callee_address = [0xAAu8; 32]; // Must match CALLEE_ADDRESS in caller contract
     let callee_hash = Hash::from_bytes(&callee_address).expect("Valid hash");
 
-    let mut provider = MockCpiProvider::new().with_contract(callee_hash, callee_bytecode.clone());
+    let provider = MockCpiProvider::new().with_contract(callee_hash, callee_bytecode.clone());
 
     // Create TAKO executor
     let executor = TakoContractExecutor::new();
@@ -231,7 +231,7 @@ async fn test_cpi_basic_invocation() {
     let result = executor
         .execute(
             &caller_bytecode,
-            &mut provider,
+            &provider,
             100,           // topoheight
             &Hash::zero(), // contract_hash (caller)
             &Hash::zero(), // block_hash
@@ -338,7 +338,7 @@ async fn test_callee_standalone() {
     let callee_path = format!("{manifest_dir}/tests/fixtures/cpi_callee.so");
     let callee_bytecode = std::fs::read(&callee_path).expect("Failed to load CPI callee contract");
 
-    let mut provider = MockCpiProvider::new();
+    let provider = MockCpiProvider::new();
     let executor = TakoContractExecutor::new();
 
     println!("Executing callee contract standalone...\n");
@@ -347,7 +347,7 @@ async fn test_callee_standalone() {
     let result = executor
         .execute(
             &callee_bytecode,
-            &mut provider,
+            &provider,
             100,
             &Hash::zero(),
             &Hash::zero(),

@@ -93,6 +93,16 @@ pub enum TransactionType {
     AppealEscrow(AppealEscrowPayload),
     /// A2A escrow: submit arbitration verdict
     SubmitVerdict(SubmitVerdictPayload),
+    /// A2A escrow: submit arbitration verdict by juror (fallback)
+    SubmitVerdictByJuror(SubmitVerdictPayload),
+    /// Arbitration: commit ArbitrationOpen payload
+    CommitArbitrationOpen(CommitArbitrationOpenPayload),
+    /// Arbitration: commit VoteRequest payload
+    CommitVoteRequest(CommitVoteRequestPayload),
+    /// Arbitration: commit SelectionCommitment payload
+    CommitSelectionCommitment(CommitSelectionCommitmentPayload),
+    /// Arbitration: commit JurorVote payload
+    CommitJurorVote(CommitJurorVotePayload),
     /// Arbitration: register arbiter
     RegisterArbiter(RegisterArbiterPayload),
     /// Arbitration: update arbiter
@@ -608,6 +618,26 @@ impl Serializer for TransactionType {
                 writer.write_u8(29);
                 payload.write(writer);
             }
+            TransactionType::SubmitVerdictByJuror(payload) => {
+                writer.write_u8(32);
+                payload.write(writer);
+            }
+            TransactionType::CommitArbitrationOpen(payload) => {
+                writer.write_u8(35);
+                payload.write(writer);
+            }
+            TransactionType::CommitVoteRequest(payload) => {
+                writer.write_u8(36);
+                payload.write(writer);
+            }
+            TransactionType::CommitSelectionCommitment(payload) => {
+                writer.write_u8(37);
+                payload.write(writer);
+            }
+            TransactionType::CommitJurorVote(payload) => {
+                writer.write_u8(38);
+                payload.write(writer);
+            }
             TransactionType::DisputeEscrow(payload) => {
                 writer.write_u8(30);
                 payload.write(writer);
@@ -716,6 +746,15 @@ impl Serializer for TransactionType {
             27 => TransactionType::RefundEscrow(RefundEscrowPayload::read(reader)?),
             28 => TransactionType::ChallengeEscrow(ChallengeEscrowPayload::read(reader)?),
             29 => TransactionType::SubmitVerdict(SubmitVerdictPayload::read(reader)?),
+            32 => TransactionType::SubmitVerdictByJuror(SubmitVerdictPayload::read(reader)?),
+            35 => {
+                TransactionType::CommitArbitrationOpen(CommitArbitrationOpenPayload::read(reader)?)
+            }
+            36 => TransactionType::CommitVoteRequest(CommitVoteRequestPayload::read(reader)?),
+            37 => TransactionType::CommitSelectionCommitment(
+                CommitSelectionCommitmentPayload::read(reader)?,
+            ),
+            38 => TransactionType::CommitJurorVote(CommitJurorVotePayload::read(reader)?),
             30 => TransactionType::DisputeEscrow(DisputeEscrowPayload::read(reader)?),
             31 => TransactionType::AppealEscrow(AppealEscrowPayload::read(reader)?),
             33 => TransactionType::RegisterArbiter(RegisterArbiterPayload::read(reader)?),
@@ -800,6 +839,11 @@ impl Serializer for TransactionType {
             TransactionType::RefundEscrow(payload) => payload.size(),
             TransactionType::ChallengeEscrow(payload) => payload.size(),
             TransactionType::SubmitVerdict(payload) => payload.size(),
+            TransactionType::SubmitVerdictByJuror(payload) => payload.size(),
+            TransactionType::CommitArbitrationOpen(payload) => payload.size(),
+            TransactionType::CommitVoteRequest(payload) => payload.size(),
+            TransactionType::CommitSelectionCommitment(payload) => payload.size(),
+            TransactionType::CommitJurorVote(payload) => payload.size(),
             TransactionType::DisputeEscrow(payload) => payload.size(),
             TransactionType::AppealEscrow(payload) => payload.size(),
             TransactionType::RegisterArbiter(payload) => payload.size(),
