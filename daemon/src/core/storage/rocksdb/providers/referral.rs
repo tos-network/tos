@@ -292,7 +292,8 @@ impl ReferralProvider for RocksStorage {
             }
         }
 
-        let has_more = (offset + collected) < total_count || pages_iterated >= MAX_REFERRAL_PAGES;
+        let has_more =
+            offset.saturating_add(collected) < total_count || pages_iterated >= MAX_REFERRAL_PAGES;
         Ok(DirectReferralsResult {
             referrals,
             total_count,
@@ -682,11 +683,9 @@ impl RocksStorage {
                         user
                     );
                 }
-                return Err(BlockchainError::Any(anyhow::anyhow!(
-                    "Team size calculation exceeded maximum iterations ({}), \
-                     possible cyclic referral graph or data corruption",
-                    MAX_TEAM_SIZE_ITERATIONS
-                )));
+                return Err(BlockchainError::Storage(
+                    tos_common::error::StorageError::TeamSizeLimitExceeded,
+                ));
             }
 
             // Get direct referrals for current user
@@ -698,10 +697,9 @@ impl RocksStorage {
                     if log::log_enabled!(log::Level::Warn) {
                         log::warn!("Max pages per member reached during team size calculation");
                     }
-                    return Err(BlockchainError::Any(anyhow::anyhow!(
-                        "Team size calculation exceeded max pages per member ({})",
-                        MAX_PAGES_PER_MEMBER
-                    )));
+                    return Err(BlockchainError::Storage(
+                        tos_common::error::StorageError::MaxReferralPagesExceeded,
+                    ));
                 }
                 let result = self
                     .get_direct_referrals(&current, offset, DIRECT_REFERRALS_PAGE_SIZE)

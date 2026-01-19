@@ -492,6 +492,10 @@ pub enum BlockchainError {
     TnsNameReserved,
     #[error("Invalid compressed public key")]
     InvalidPublicKey,
+
+    // Storage-specific errors
+    #[error(transparent)]
+    Storage(#[from] tos_common::error::StorageError),
 }
 
 impl BlockchainError {
