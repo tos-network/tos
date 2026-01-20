@@ -51,9 +51,14 @@ pub const fn get_pow_algorithm_for_version(_version: BlockVersion) -> Algorithm 
 // This function returns the block time target for a given version
 // TIP-1: Unified block time of 3 seconds for all versions
 //
+// TPS Analysis:
+// - Theoretical max: 3,333 TPS (MAX_TXS_PER_BLOCK=10,000 / 3s)
+// - Realistic with optimizations: 1,000-2,000 TPS
+// - Single-threaded baseline: 100-200 TPS
+//
 // Rationale:
-// - 3 seconds provides optimal balance: 326 TPS, 78.3% mining window
-// - Lower orphan rate (3-5%) vs 2s blocks (8-10%)
+// - 3 seconds balances throughput vs orphan rate (3-5%)
+// - Lower orphan rate vs 2s blocks (8-10%) or 1s blocks (15-20%)
 // - Better global miner participation and decentralization
 // - Block reward automatically adjusts proportionally via get_block_reward()
 pub const fn get_block_time_target_for_version(_version: BlockVersion) -> u64 {
