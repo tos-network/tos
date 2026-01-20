@@ -22,10 +22,13 @@ use serde_json::{json, Value};
 use std::process::ExitCode;
 use std::time::Duration;
 
-/// TOS Admin - Daemon Control Tool
+/// TOS Admin (ta) - Daemon Control Tool
 #[derive(Parser)]
 #[command(name = "ta")]
-#[command(about = "TOS Admin - Daemon Control Tool")]
+#[command(about = "ta - TOS Admin, a daemon control tool for TOS blockchain")]
+#[command(
+    long_about = "ta - TOS Admin\n\nA lightweight CLI tool for TOS daemon management.\nSimilar to bitcoin-cli for Bitcoin Core.\n\nExamples:\n  ta stop              Stop the daemon gracefully\n  ta status            Get daemon status (compact)\n  ta info              Get full blockchain info\n  ta -r HOST:PORT ...  Connect to different RPC server"
+)]
 #[command(version)]
 struct Cli {
     /// RPC server address
