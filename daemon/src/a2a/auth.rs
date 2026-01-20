@@ -326,7 +326,7 @@ impl A2AAuth {
         }
 
         // Check nonce uniqueness without storing (stores after signature verification)
-        self.check_nonce_unique(&nonce, now).await?;
+        self.check_nonce_unique(pubkey_hex, &nonce, now).await?;
 
         let body_hash = hex::encode(Sha256::digest(&meta.body));
         let canonical = format!(
@@ -355,7 +355,7 @@ impl A2AAuth {
 
         if signature.verify(canonical.as_bytes(), &public_key) {
             // Only store nonce after successful signature verification
-            self.store_nonce(&nonce, now).await?;
+            self.store_nonce(pubkey_hex, &nonce, now).await?;
             Ok(())
         } else {
             Err(AuthError::TosSignatureInvalid)
@@ -391,7 +391,7 @@ impl A2AAuth {
         }
 
         // Check nonce uniqueness without storing (stores after signature verification)
-        self.check_nonce_unique(&nonce, now).await?;
+        self.check_nonce_unique(pubkey_hex, &nonce, now).await?;
 
         let body_hash = hex::encode(Sha256::digest(&meta.body));
         let canonical = format!(
@@ -420,7 +420,7 @@ impl A2AAuth {
 
         if signature.verify(canonical.as_bytes(), &decompressed) {
             // Only store nonce after successful signature verification
-            self.store_nonce(&nonce, now).await?;
+            self.store_nonce(pubkey_hex, &nonce, now).await?;
             Ok(compressed_key)
         } else {
             Err(AuthError::TosSignatureInvalid)
@@ -428,7 +428,13 @@ impl A2AAuth {
     }
 
     /// Check if nonce is unique without storing (to prevent memory exhaustion DoS)
-    async fn check_nonce_unique(&self, nonce: &str, now: i64) -> Result<(), AuthError> {
+    async fn check_nonce_unique(
+        &self,
+        pubkey_hex: &str,
+        nonce: &str,
+        now: i64,
+    ) -> Result<(), AuthError> {
+        let nonce_key = format!("{}:{}", pubkey_hex, nonce);
         if let Some(store) = &self.nonce_store {
             let now_u64 = u64::try_from(now).map_err(|_| AuthError::TosNonceInvalid)?;
             let ttl = self.config.tos_nonce_ttl_secs.max(0) as u64;
@@ -440,11 +446,11 @@ impl A2AAuth {
                 let _ = store.prune_expired(cutoff, MAX_PRUNE_SCAN).await;
             }
 
-            if let Some(stored_ts) = store.get_nonce_timestamp(nonce).await? {
+            if let Some(stored_ts) = store.get_nonce_timestamp(&nonce_key).await? {
                 if stored_ts >= cutoff {
                     return Err(AuthError::TosNonceInvalid);
                 }
-                store.remove_nonce(nonce).await?;
+                store.remove_nonce(&nonce_key).await?;
             }
             return Ok(());
         }
@@ -452,17 +458,18 @@ impl A2AAuth {
         let mut guard = self.nonces.lock().map_err(|_| AuthError::TosNonceInvalid)?;
         let ttl = self.config.tos_nonce_ttl_secs;
         guard.retain(|_, ts| now.saturating_sub(*ts) <= ttl);
-        if guard.contains_key(nonce) {
+        if guard.contains_key(&nonce_key) {
             return Err(AuthError::TosNonceInvalid);
         }
         Ok(())
     }
 
     /// Store nonce after successful signature verification
-    async fn store_nonce(&self, nonce: &str, now: i64) -> Result<(), AuthError> {
+    async fn store_nonce(&self, pubkey_hex: &str, nonce: &str, now: i64) -> Result<(), AuthError> {
+        let nonce_key = format!("{}:{}", pubkey_hex, nonce);
         if let Some(store) = &self.nonce_store {
             let now_u64 = u64::try_from(now).map_err(|_| AuthError::TosNonceInvalid)?;
-            store.set_nonce_timestamp(nonce, now_u64).await?;
+            store.set_nonce_timestamp(&nonce_key, now_u64).await?;
             return Ok(());
         }
 
@@ -482,7 +489,7 @@ impl A2AAuth {
                     guard.remove(&k);
                 }
             }
-            guard.insert(nonce.to_string(), now);
+            guard.insert(nonce_key, now);
         }
         Ok(())
     }

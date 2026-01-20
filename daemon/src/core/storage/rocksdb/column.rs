@@ -259,7 +259,7 @@ pub enum Column {
     // {release_at (8 bytes)}{escrow_id (32 bytes)} => {escrow_id}
     EscrowPendingRelease,
     // A2A signature nonces (for replay protection across nodes)
-    // {nonce} => {timestamp_secs}
+    // {pubkey_hex}:{nonce} => {timestamp_secs}
     A2ANonces,
 
     // ===== Arbitration =====

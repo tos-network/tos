@@ -1898,6 +1898,7 @@ async fn get_blocks_at_height<S: Storage>(
     let storage = blockchain.get_storage().read().await;
 
     const MAX_BLOCKS_AT_HEIGHT: usize = 200;
+    const MAX_BLOCKS_AT_HEIGHT_WITH_TXS: usize = 50;
     if params.max.is_some_and(|max| max > MAX_BLOCKS_AT_HEIGHT) {
         return Err(InternalRpcError::InvalidParams(
             "Maximum blocks requested at height cannot exceed 200",
@@ -1908,6 +1909,11 @@ async fn get_blocks_at_height<S: Storage>(
     if max == 0 {
         return Err(InternalRpcError::InvalidParams(
             "Maximum blocks requested must be greater than 0",
+        ));
+    }
+    if params.include_txs && max > MAX_BLOCKS_AT_HEIGHT_WITH_TXS {
+        return Err(InternalRpcError::InvalidParams(
+            "Maximum blocks with transactions cannot exceed 50",
         ));
     }
 
