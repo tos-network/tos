@@ -269,6 +269,14 @@ pub struct RPCConfig {
     #[clap(name = "enable-admin-rpc", long)]
     #[serde(default)]
     pub enable_admin_rpc: bool,
+
+    /// Admin token for privileged RPC operations (e.g., shutdown).
+    /// When set, the shutdown RPC method will require this token in addition to localhost check.
+    /// This provides an extra layer of security for daemon administration.
+    /// Example: --admin-token "my-secret-token-123"
+    #[clap(name = "admin-token", long, env = "TOS_ADMIN_TOKEN")]
+    #[serde(default)]
+    pub admin_token: Option<String>,
     /// Enable the A2A service endpoints (HTTP+JSON and JSON-RPC).
     #[clap(name = "enable-a2a", long)]
     #[serde(default)]
