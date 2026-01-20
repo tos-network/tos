@@ -332,6 +332,12 @@ impl A2AAuth {
             .headers
             .get("tos-signature")
             .ok_or(AuthError::TosSignatureMissing)?;
+        // Validate signature hex length early to prevent DoS via large allocs during decode
+        // Expected: 128 hex chars for 64 byte signature
+        const MAX_SIGNATURE_HEX_LENGTH: usize = 128;
+        if signature_hex.len() > MAX_SIGNATURE_HEX_LENGTH {
+            return Err(AuthError::TosSignatureInvalid);
+        }
 
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -409,6 +415,11 @@ impl A2AAuth {
             .headers
             .get("tos-signature")
             .ok_or(AuthError::TosSignatureMissing)?;
+        // Validate signature hex length early to prevent DoS via large allocs during decode
+        const MAX_SIGNATURE_HEX_LENGTH: usize = 128;
+        if signature_hex.len() > MAX_SIGNATURE_HEX_LENGTH {
+            return Err(AuthError::TosSignatureInvalid);
+        }
 
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
