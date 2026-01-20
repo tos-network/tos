@@ -322,6 +322,12 @@ impl A2AAuth {
             .headers
             .get("tos-public-key")
             .ok_or(AuthError::TosSignatureMissing)?;
+        // Validate pubkey hex length early to prevent DoS via large allocs before nonce check
+        // Expected: 64 hex chars for 32 bytes
+        const MAX_PUBKEY_HEX_LENGTH: usize = 64;
+        if pubkey_hex.len() > MAX_PUBKEY_HEX_LENGTH {
+            return Err(AuthError::TosPublicKeyInvalid);
+        }
         let signature_hex = meta
             .headers
             .get("tos-signature")
@@ -394,6 +400,11 @@ impl A2AAuth {
             .headers
             .get("tos-public-key")
             .ok_or(AuthError::TosSignatureMissing)?;
+        // Validate pubkey hex length early to prevent DoS via large allocs before nonce check
+        const MAX_PUBKEY_HEX_LENGTH: usize = 64;
+        if pubkey_hex.len() > MAX_PUBKEY_HEX_LENGTH {
+            return Err(AuthError::TosPublicKeyInvalid);
+        }
         let signature_hex = meta
             .headers
             .get("tos-signature")
