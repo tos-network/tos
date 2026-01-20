@@ -519,7 +519,10 @@ impl A2AAuth {
                 if stored_ts >= cutoff {
                     return Err(AuthError::TosNonceInvalid);
                 }
-                store.remove_nonce(&nonce_key).await?;
+                // Nonce exists but is expired - don't delete here to avoid race condition.
+                // A concurrent request could have stored a fresh nonce between our read
+                // and delete. Let check_and_store_a2a_nonce overwrite expired entries,
+                // and let the prune task clean up old entries periodically.
             }
             return Ok(());
         }
