@@ -49,20 +49,20 @@ pub const fn get_pow_algorithm_for_version(_version: BlockVersion) -> Algorithm 
 }
 
 // This function returns the block time target for a given version
-// TIP-1: Unified block time of 3 seconds for all versions
+// TIP-1: Unified block time of 1 second for all versions
 //
 // TPS Analysis:
-// - Theoretical max: 3,333 TPS (MAX_TXS_PER_BLOCK=10,000 / 3s)
-// - Realistic with optimizations: 1,000-2,000 TPS
-// - Single-threaded baseline: 100-200 TPS
+// - Theoretical max: 10,000 TPS (MAX_TXS_PER_BLOCK=10,000 / 1s)
+// - Realistic with optimizations: 3,000-6,000 TPS
+// - Single-threaded baseline: 300-600 TPS
 //
 // Rationale:
-// - 3 seconds balances throughput vs orphan rate (3-5%)
-// - Lower orphan rate vs 2s blocks (8-10%) or 1s blocks (15-20%)
-// - Better global miner participation and decentralization
+// - 1 second provides maximum throughput for high-performance applications
+// - Higher orphan rate (~15-20%) mitigated by DAG structure (TIPS_LIMIT=3)
+// - STABLE_LIMIT increased to 24 to maintain 24-second confirmation time
 // - Block reward automatically adjusts proportionally via get_block_reward()
 pub const fn get_block_time_target_for_version(_version: BlockVersion) -> u64 {
-    3 * MILLIS_PER_SECOND
+    1 * MILLIS_PER_SECOND
 }
 
 // This function checks if a version is matching the requirements
@@ -600,10 +600,10 @@ mod tests {
 
     #[test]
     fn test_get_block_time_target_for_version() {
-        // TIP-1: All versions unified to 3 seconds
+        // TIP-1: All versions unified to 1 second
         assert_eq!(
             get_block_time_target_for_version(BlockVersion::Nobunaga),
-            3 * MILLIS_PER_SECOND
+            1 * MILLIS_PER_SECOND
         );
     }
 

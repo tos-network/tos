@@ -19,7 +19,7 @@ pub use tokio::sync::*;
 #[cfg(any(test, feature = "deadlock-detection"))]
 mod rwlock;
 #[cfg(feature = "deadlock-detection")]
-pub use rwlock::RwLock;
+pub use rwlock::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 #[cfg(any(test, feature = "deadlock-detection"))]
 mod mutex;

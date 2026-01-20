@@ -187,6 +187,8 @@ impl<T: ?Sized> RwLock<T> {
                 init_location: self.init_location,
                 inner: Some(guard),
                 active_location: self.active_write_location.clone(),
+                read_locations: self.active_read_locations.clone(),
+                read_guards: self.read_guards.clone(),
             }
         }
     }
@@ -269,6 +271,63 @@ pub struct RwLockWriteGuard<'a, T: ?Sized> {
     init_location: &'static Location<'static>,
     inner: Option<InnerRwLockWriteGuard<'a, T>>,
     active_location: Arc<StdMutex<Option<(&'static Location<'static>, Instant)>>>,
+    read_locations: Arc<StdMutex<Vec<(&'static Location<'static>, Instant)>>>,
+    read_guards: Arc<AtomicU64>,
+}
+
+impl<'a, T: ?Sized> RwLockWriteGuard<'a, T> {
+    /// Atomically downgrades a write lock into a read lock without allowing any
+    /// writers to take exclusive access of the lock in the meantime.
+    #[track_caller]
+    pub fn downgrade(mut this: Self) -> RwLockReadGuard<'a, T> {
+        let location = Location::caller();
+
+        // Take the inner guard and downgrade it
+        let inner_write = this.inner.take().expect("downgrade called after drop");
+        let inner_read = InnerRwLockWriteGuard::downgrade(inner_write);
+
+        // Clear write location tracking
+        if let Ok(mut guard) = this.active_location.lock() {
+            *guard = None;
+        }
+
+        // Add to read location tracking
+        {
+            let mut locations = match this.read_locations.lock() {
+                Ok(guard) => guard,
+                Err(err) => {
+                    if log::log_enabled!(log::Level::Warn) {
+                        error!("RwLock read locations lock poisoned during downgrade");
+                    }
+                    err.into_inner()
+                }
+            };
+            locations.push((location, Instant::now()));
+        }
+
+        this.read_guards.fetch_add(1, Ordering::SeqCst);
+
+        if log::log_enabled!(log::Level::Debug) {
+            debug!(
+                "RwLock {} downgraded write guard to read guard at {}",
+                this.init_location, location
+            );
+        }
+
+        // Create read guard with the downgraded inner
+        let read_guard = RwLockReadGuard {
+            init_location: this.init_location,
+            inner: Some(inner_read),
+            locations: this.read_locations.clone(),
+            location,
+            read_guards: this.read_guards.clone(),
+        };
+
+        // Forget `this` to prevent Drop from running (inner is already taken)
+        std::mem::forget(this);
+
+        read_guard
+    }
 }
 
 impl<'a, T: ?Sized> Drop for RwLockWriteGuard<'a, T> {

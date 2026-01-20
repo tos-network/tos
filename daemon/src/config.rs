@@ -67,25 +67,25 @@ pub const TERA_HASH: u64 = GIGA_HASH * 1000;
 // Formula: MINIMUM_HASHRATE * BLOCK_TIME_TARGET / MILLIS_PER_SECOND
 //
 // Mainnet minimum hashrate: 100 KH/s
-// This provides initial difficulty of 300,000 (100,000 * 3000 / 1000)
+// This provides initial difficulty of 100,000 (100,000 * 1000 / 1000)
 // Prevents block spam at chain launch while allowing difficulty to adjust down if needed
 pub const MAINNET_MINIMUM_HASHRATE: u64 = 100 * KILO_HASH;
 
 // Testnet minimum hashrate: 10 KH/s
-// This provides initial difficulty of 30,000 (10,000 * 3000 / 1000)
+// This provides initial difficulty of 10,000 (10,000 * 1000 / 1000)
 // Balanced for testing with multiple miners
 pub const TESTNET_MINIMUM_HASHRATE: u64 = 10 * KILO_HASH;
 
 // Devnet minimum hashrate: 1 KH/s
-// This provides initial difficulty of 3,000 (1,000 * 3000 / 1000)
+// This provides initial difficulty of 1,000 (1,000 * 1000 / 1000)
 // Low enough for single developer testing
 pub const DEVNET_MINIMUM_HASHRATE: u64 = 1 * KILO_HASH;
 
 // Genesis block difficulty - used for cumulative difficulty initialization
 // Set to mainnet minimum difficulty for consistency
 // Formula: MAINNET_MINIMUM_HASHRATE * BLOCK_TIME_TARGET / MILLIS_PER_SECOND
-// Current: 100 KH/s * 3000ms / 1000 = 300,000
-pub const GENESIS_BLOCK_DIFFICULTY: Difficulty = Difficulty::from_u64(300_000);
+// Current: 100 KH/s * 1000ms / 1000 = 100,000
+pub const GENESIS_BLOCK_DIFFICULTY: Difficulty = Difficulty::from_u64(100_000);
 
 // 2 seconds maximum in future (prevent any attack on reducing difficulty but keep margin for unsynced devices)
 pub const TIMESTAMP_IN_FUTURE_LIMIT: TimestampSeconds = 2 * MILLIS_PER_SECOND;
@@ -96,7 +96,7 @@ pub const PRUNE_SAFETY_LIMIT: u64 = STABLE_LIMIT * 10;
 
 // BlockDAG rules
 // in how many height we consider the block stable
-pub const STABLE_LIMIT: u64 = 8;
+pub const STABLE_LIMIT: u64 = 24;
 
 pub const fn get_stable_limit(version: BlockVersion) -> u64 {
     match version {
@@ -104,11 +104,11 @@ pub const fn get_stable_limit(version: BlockVersion) -> u64 {
     }
 }
 
-// Blocks propagation queue capacity: STABLE_LIMIT * TIPS_LIMIT = 8 * 3 = 24
+// Blocks propagation queue capacity: STABLE_LIMIT * TIPS_LIMIT = 24 * 3 = 72
 pub const BLOCKS_PROPAGATION_CAPACITY: usize =
     STABLE_LIMIT as usize * tos_common::config::TIPS_LIMIT;
 
-// SAFETY: BLOCKS_PROPAGATION_CAPACITY is computed from non-zero constants (8 * 3 = 24)
+// SAFETY: BLOCKS_PROPAGATION_CAPACITY is computed from non-zero constants (24 * 3 = 72)
 pub const BLOCKS_PROPAGATION_CAPACITY_NONZERO: NonZeroUsize =
     unsafe { NonZeroUsize::new_unchecked(BLOCKS_PROPAGATION_CAPACITY) };
 

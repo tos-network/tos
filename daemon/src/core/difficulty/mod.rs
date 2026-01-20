@@ -146,12 +146,12 @@ mod tests {
 
     #[test]
     fn test_difficulty_at_hard_fork() {
-        // Nobunaga uses 3s blocks
+        // Nobunaga uses 1s blocks
         // Hard fork uses testnet hashrate (10 KH/s) for gradual ramp-up
-        // 10 KH/s * 3s = 10,000 * 3,000 / 1000 = 30,000
+        // 10 KH/s * 1s = 10,000 * 1,000 / 1000 = 10,000
         assert_eq!(
             get_difficulty_at_hard_fork(&Network::Mainnet, BlockVersion::Nobunaga).unwrap(),
-            Difficulty::from_u64(3 * TESTNET_MINIMUM_HASHRATE)
+            Difficulty::from_u64(1 * TESTNET_MINIMUM_HASHRATE)
         );
 
         // testnet returns None for all versions
@@ -160,22 +160,22 @@ mod tests {
 
     #[test]
     fn test_minimum_difficulty_per_network() {
-        // Mainnet: 100 KH/s * 3s = 300,000
+        // Mainnet: 100 KH/s * 1s = 100,000
         assert_eq!(
             get_minimum_difficulty(&Network::Mainnet, BlockVersion::Nobunaga),
-            Difficulty::from_u64(300_000)
+            Difficulty::from_u64(100_000)
         );
 
-        // Testnet: 10 KH/s * 3s = 30,000
+        // Testnet: 10 KH/s * 1s = 10,000
         assert_eq!(
             get_minimum_difficulty(&Network::Testnet, BlockVersion::Nobunaga),
-            Difficulty::from_u64(30_000)
+            Difficulty::from_u64(10_000)
         );
 
-        // Devnet: 1 KH/s * 3s = 3,000
+        // Devnet: 1 KH/s * 1s = 1,000
         assert_eq!(
             get_minimum_difficulty(&Network::Devnet, BlockVersion::Nobunaga),
-            Difficulty::from_u64(3_000)
+            Difficulty::from_u64(1_000)
         );
     }
 
