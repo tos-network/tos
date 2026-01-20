@@ -312,6 +312,12 @@ impl A2AAuth {
             .get("tos-nonce")
             .ok_or(AuthError::TosSignatureMissing)?
             .to_string();
+        // Validate nonce size to prevent DoS via large nonce storage keys
+        // Max 128 chars allows UUIDs (36), hex strings (64), and reasonable formats
+        const MAX_NONCE_LENGTH: usize = 128;
+        if nonce.len() > MAX_NONCE_LENGTH {
+            return Err(AuthError::TosNonceInvalid);
+        }
         let pubkey_hex = meta
             .headers
             .get("tos-public-key")
@@ -379,6 +385,11 @@ impl A2AAuth {
             .get("tos-nonce")
             .ok_or(AuthError::TosSignatureMissing)?
             .to_string();
+        // Validate nonce size to prevent DoS via large nonce storage keys
+        const MAX_NONCE_LENGTH: usize = 128;
+        if nonce.len() > MAX_NONCE_LENGTH {
+            return Err(AuthError::TosNonceInvalid);
+        }
         let pubkey_hex = meta
             .headers
             .get("tos-public-key")
