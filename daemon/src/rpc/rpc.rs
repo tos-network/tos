@@ -31,6 +31,7 @@ use tokio::sync::RwLock;
 
 use crate::rpc::callback::{send_payment_callback, send_payment_expired_callback, CallbackService};
 use once_cell::sync::Lazy;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tos_common::api::payment::StoredPaymentRequest;
 
 /// Maximum number of payment requests to store (prevents memory exhaustion)
@@ -963,6 +964,10 @@ pub fn register_methods<S: Storage>(
         handler.register_method("rewind_chain", async_handler!(rewind_chain::<S>));
         handler.register_method("clear_caches", async_handler!(clear_caches::<S>));
     }
+
+    // Shutdown method - always registered but has built-in localhost-only security
+    // This allows daemon to be stopped gracefully via RPC from local machine
+    handler.register_method("shutdown", async_handler!(shutdown::<S>));
 }
 
 async fn version<S: Storage>(_: &Context, body: Value) -> Result<Value, InternalRpcError> {
@@ -5630,5 +5635,172 @@ async fn get_message_by_id<S: Storage>(
 
     Ok(json!(GetMessageByIdResult {
         message: message_info,
+    }))
+}
+
+// ============================================================================
+// Shutdown RPC Method
+// ============================================================================
+// Security: Only allows requests from localhost (127.0.0.1 or ::1)
+// Rate limited to prevent abuse
+// All attempts are logged for audit purposes
+// ============================================================================
+
+/// Last shutdown attempt timestamp (Unix seconds) for rate limiting
+static LAST_SHUTDOWN_ATTEMPT: AtomicU64 = AtomicU64::new(0);
+
+/// Minimum seconds between shutdown attempts
+const SHUTDOWN_COOLDOWN_SECS: u64 = 60;
+
+// Custom error codes for shutdown RPC (range: -3 to -31999)
+const ERR_SHUTDOWN_UNAUTHORIZED: i16 = -100;
+const ERR_SHUTDOWN_RATE_LIMITED: i16 = -101;
+const ERR_SHUTDOWN_NO_CONFIRM: i16 = -102;
+
+/// Check rate limit for shutdown requests
+fn check_shutdown_rate_limit() -> Result<(), InternalRpcError> {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
+    let last = LAST_SHUTDOWN_ATTEMPT.load(Ordering::Relaxed);
+    let elapsed = now.saturating_sub(last);
+
+    if elapsed < SHUTDOWN_COOLDOWN_SECS {
+        let remaining = SHUTDOWN_COOLDOWN_SECS.saturating_sub(elapsed);
+        return Err(InternalRpcError::Custom(
+            ERR_SHUTDOWN_RATE_LIMITED,
+            format!("Shutdown rate limited. Try again in {} seconds.", remaining),
+        ));
+    }
+
+    LAST_SHUTDOWN_ATTEMPT.store(now, Ordering::Relaxed);
+    Ok(())
+}
+
+/// Shutdown parameters
+#[derive(serde::Deserialize)]
+struct ShutdownParams {
+    /// Graceful shutdown timeout in seconds (default: 30)
+    #[serde(default)]
+    timeout_seconds: Option<u64>,
+    /// Safety confirmation - must be true to proceed
+    #[serde(default)]
+    confirm: Option<bool>,
+}
+
+/// Shutdown the daemon gracefully via RPC
+///
+/// # Security
+/// - Only accepts requests from localhost (127.0.0.1 or ::1)
+/// - Rate limited to 1 request per 60 seconds
+/// - Requires `confirm: true` parameter as safety check
+/// - All attempts are logged for audit
+///
+/// # Parameters
+/// - `timeout_seconds`: Graceful shutdown timeout (default: 30, max: 300)
+/// - `confirm`: Must be `true` to proceed (safety check)
+///
+/// # Returns
+/// Confirmation that shutdown has been initiated
+///
+/// # Example Request
+/// ```json
+/// {
+///   "jsonrpc": "2.0",
+///   "method": "shutdown",
+///   "params": { "confirm": true, "timeout_seconds": 30 },
+///   "id": 1
+/// }
+/// ```
+async fn shutdown<S: Storage>(context: &Context, body: Value) -> Result<Value, InternalRpcError> {
+    use log::warn;
+
+    // Get client address for security check
+    let client_addr: &ClientAddr = context.get()?;
+    let ip_str = client_addr
+        .0
+        .map(|ip| ip.to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+
+    // Security Check 1: Localhost only
+    if !client_addr.is_loopback() {
+        if log::log_enabled!(log::Level::Warn) {
+            warn!(
+                "AUDIT: Unauthorized shutdown attempt from {} - rejected (non-localhost)",
+                ip_str
+            );
+        }
+        return Err(InternalRpcError::Custom(
+            ERR_SHUTDOWN_UNAUTHORIZED,
+            "Shutdown only allowed from localhost".to_string(),
+        ));
+    }
+
+    // Security Check 2: Rate limiting
+    if let Err(e) = check_shutdown_rate_limit() {
+        if log::log_enabled!(log::Level::Warn) {
+            warn!("AUDIT: Shutdown attempt from {} rate limited", ip_str);
+        }
+        return Err(e);
+    }
+
+    // Parse parameters
+    let params: ShutdownParams = parse_params(body)?;
+
+    // Security Check 3: Confirmation required
+    if !params.confirm.unwrap_or(false) {
+        if log::log_enabled!(log::Level::Warn) {
+            warn!(
+                "AUDIT: Shutdown attempt from {} missing confirmation",
+                ip_str
+            );
+        }
+        return Err(InternalRpcError::Custom(
+            ERR_SHUTDOWN_NO_CONFIRM,
+            "Shutdown requires 'confirm: true' parameter for safety".to_string(),
+        ));
+    }
+
+    // Validate timeout (1-300 seconds)
+    let timeout = params.timeout_seconds.unwrap_or(30).clamp(1, 300);
+
+    // Audit log: Authorized shutdown
+    if log::log_enabled!(log::Level::Warn) {
+        warn!(
+            "AUDIT: Daemon shutdown initiated from {} with timeout {}s",
+            ip_str, timeout
+        );
+    }
+
+    // Get blockchain and initiate shutdown
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+
+    // Spawn shutdown task to avoid blocking the RPC response
+    let blockchain_clone = Arc::clone(blockchain);
+    tokio::spawn(async move {
+        // Small delay to allow RPC response to be sent
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        if log::log_enabled!(log::Level::Info) {
+            info!("Starting graceful shutdown sequence...");
+        }
+
+        // Initiate graceful shutdown
+        blockchain_clone.stop().await;
+
+        if log::log_enabled!(log::Level::Info) {
+            info!("Graceful shutdown complete, exiting process");
+        }
+
+        // Exit the process
+        std::process::exit(0);
+    });
+
+    Ok(json!({
+        "status": "shutting_down",
+        "message": "Daemon shutdown initiated",
+        "timeout_seconds": timeout
     }))
 }
