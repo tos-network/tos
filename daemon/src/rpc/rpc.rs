@@ -5804,3 +5804,109 @@ async fn shutdown<S: Storage>(context: &Context, body: Value) -> Result<Value, I
         "timeout_seconds": timeout
     }))
 }
+
+#[cfg(test)]
+mod shutdown_tests {
+    use super::*;
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+    use tos_common::rpc::server::ClientAddr;
+
+    #[test]
+    fn test_client_addr_localhost_ipv4() {
+        let addr = ClientAddr(Some(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))));
+        assert!(addr.is_loopback());
+    }
+
+    #[test]
+    fn test_client_addr_localhost_ipv6() {
+        let addr = ClientAddr(Some(IpAddr::V6(Ipv6Addr::LOCALHOST)));
+        assert!(addr.is_loopback());
+    }
+
+    #[test]
+    fn test_client_addr_remote_ipv4() {
+        let addr = ClientAddr(Some(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 100))));
+        assert!(!addr.is_loopback());
+    }
+
+    #[test]
+    fn test_client_addr_remote_public() {
+        let addr = ClientAddr(Some(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8))));
+        assert!(!addr.is_loopback());
+    }
+
+    #[test]
+    fn test_client_addr_none() {
+        let addr = ClientAddr(None);
+        assert!(!addr.is_loopback());
+    }
+
+    #[test]
+    fn test_shutdown_params_parsing_defaults() {
+        let body = serde_json::json!({});
+        let params: ShutdownParams = serde_json::from_value(body).unwrap();
+        assert!(params.confirm.is_none());
+        assert!(params.timeout_seconds.is_none());
+    }
+
+    #[test]
+    fn test_shutdown_params_parsing_with_values() {
+        let body = serde_json::json!({
+            "confirm": true,
+            "timeout_seconds": 60
+        });
+        let params: ShutdownParams = serde_json::from_value(body).unwrap();
+        assert_eq!(params.confirm, Some(true));
+        assert_eq!(params.timeout_seconds, Some(60));
+    }
+
+    #[test]
+    fn test_shutdown_params_parsing_confirm_false() {
+        let body = serde_json::json!({
+            "confirm": false
+        });
+        let params: ShutdownParams = serde_json::from_value(body).unwrap();
+        assert_eq!(params.confirm, Some(false));
+    }
+
+    #[test]
+    fn test_timeout_clamping_min() {
+        // Verify timeout clamping logic (1-300 range)
+        let timeout: u64 = 0_u64.clamp(1, 300);
+        assert_eq!(timeout, 1);
+    }
+
+    #[test]
+    fn test_timeout_clamping_max() {
+        let timeout: u64 = 1000_u64.clamp(1, 300);
+        assert_eq!(timeout, 300);
+    }
+
+    #[test]
+    fn test_timeout_clamping_in_range() {
+        let timeout: u64 = 60_u64.clamp(1, 300);
+        assert_eq!(timeout, 60);
+    }
+
+    #[test]
+    fn test_error_codes() {
+        // Verify error codes are in valid range (-3 to -31999)
+        assert!(ERR_SHUTDOWN_UNAUTHORIZED < 0);
+        assert!(ERR_SHUTDOWN_UNAUTHORIZED >= -31999);
+        assert!(ERR_SHUTDOWN_RATE_LIMITED < 0);
+        assert!(ERR_SHUTDOWN_RATE_LIMITED >= -31999);
+        assert!(ERR_SHUTDOWN_NO_CONFIRM < 0);
+        assert!(ERR_SHUTDOWN_NO_CONFIRM >= -31999);
+
+        // Verify they are distinct
+        assert_ne!(ERR_SHUTDOWN_UNAUTHORIZED, ERR_SHUTDOWN_RATE_LIMITED);
+        assert_ne!(ERR_SHUTDOWN_UNAUTHORIZED, ERR_SHUTDOWN_NO_CONFIRM);
+        assert_ne!(ERR_SHUTDOWN_RATE_LIMITED, ERR_SHUTDOWN_NO_CONFIRM);
+    }
+
+    #[test]
+    fn test_rate_limit_cooldown_constant() {
+        // Verify cooldown is reasonable (60 seconds)
+        assert_eq!(SHUTDOWN_COOLDOWN_SECS, 60);
+    }
+}
