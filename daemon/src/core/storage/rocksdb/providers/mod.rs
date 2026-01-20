@@ -1,3 +1,4 @@
+mod a2a_nonce;
 mod account;
 mod agent_account;
 mod arbiter;

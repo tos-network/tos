@@ -1822,14 +1822,17 @@ mod tests {
 
     fn init_auth() {
         AUTH_INIT.call_once(|| {
-            crate::a2a::auth::set_auth_config(crate::a2a::auth::A2AAuthConfig {
-                api_keys: HashSet::new(),
-                oauth_issuer: None,
-                oauth_jwks_url: None,
-                oauth_audience: None,
-                tos_skew_secs: 0,
-                tos_nonce_ttl_secs: 0,
-            });
+            crate::a2a::auth::set_auth_config(
+                crate::a2a::auth::A2AAuthConfig {
+                    api_keys: HashSet::new(),
+                    oauth_issuer: None,
+                    oauth_jwks_url: None,
+                    oauth_audience: None,
+                    tos_skew_secs: 0,
+                    tos_nonce_ttl_secs: 0,
+                },
+                None,
+            );
         });
     }
 

@@ -31,6 +31,7 @@ pub trait Storage:
     + NonceProvider
     + AccountProvider
     + AgentAccountProvider
+    + A2ANonceProvider
     + ClientProtocolProvider
     + BlockDagProvider
     + MerkleHashProvider

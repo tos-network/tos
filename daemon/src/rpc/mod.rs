@@ -7,6 +7,7 @@ pub mod getwork;
 pub mod rpc;
 pub mod ws_security;
 
+use crate::a2a::nonce_store::{A2ANonceStore, StorageNonceStore};
 use crate::a2a::registry::router::{RouterConfig, RoutingStrategy};
 use crate::a2a::router_executor::AgentRouterExecutor;
 use crate::core::{
@@ -108,9 +109,12 @@ impl<S: Storage> DaemonRpcServer<S> {
         info!("A2A service enabled: {}", config.enable_a2a);
         if config.enable_a2a {
             let _ = crate::a2a::registry::spawn_health_checks();
-            crate::a2a::auth::set_auth_config(crate::a2a::auth::A2AAuthConfig::from_rpc_config(
-                &config,
-            ));
+            let nonce_store: Option<Arc<dyn A2ANonceStore>> =
+                Some(Arc::new(StorageNonceStore::new(Arc::clone(&blockchain))));
+            crate::a2a::auth::set_auth_config(
+                crate::a2a::auth::A2AAuthConfig::from_rpc_config(&config),
+                nonce_store,
+            );
             crate::a2a::set_settlement_validation_config(crate::a2a::SettlementValidationConfig {
                 validate_states: config.a2a_escrow_validate_states,
                 allowed_states: config.a2a_escrow_allowed_states.clone(),

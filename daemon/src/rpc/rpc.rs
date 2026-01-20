@@ -1897,16 +1897,45 @@ async fn get_blocks_at_height<S: Storage>(
     let blockchain: &Arc<Blockchain<S>> = context.get()?;
     let storage = blockchain.get_storage().read().await;
 
+    const MAX_BLOCKS_AT_HEIGHT: usize = 200;
+    const MAX_BLOCKS_AT_HEIGHT_WITH_TXS: usize = 50;
+    if params.max.is_some_and(|max| max > MAX_BLOCKS_AT_HEIGHT) {
+        return Err(InternalRpcError::InvalidParams(
+            "Maximum blocks requested at height cannot exceed 200",
+        ));
+    }
+
+    // Default max depends on whether include_txs is set (50 with txs, 200 without)
+    let default_max = if params.include_txs {
+        MAX_BLOCKS_AT_HEIGHT_WITH_TXS
+    } else {
+        MAX_BLOCKS_AT_HEIGHT
+    };
+    let max = params.max.unwrap_or(default_max);
+    if max == 0 {
+        return Err(InternalRpcError::InvalidParams(
+            "Maximum blocks requested must be greater than 0",
+        ));
+    }
+    if params.include_txs && max > MAX_BLOCKS_AT_HEIGHT_WITH_TXS {
+        return Err(InternalRpcError::InvalidParams(
+            "Maximum blocks with transactions cannot exceed 50",
+        ));
+    }
+
     let mut blocks = Vec::new();
-    for hash in storage
+    let hashes = storage
         .get_blocks_at_height(params.height)
         .await
-        .context("Error while retrieving blocks at height")?
-    {
+        .context("Error while retrieving blocks at height")?;
+    // Truncate to max instead of returning error - prevents DoS from large result sets
+    // Clients can detect truncation by comparing result length to their max parameter
+    for hash in hashes.iter().take(max) {
         blocks.push(
-            get_block_response_for_hash(&blockchain, &storage, &hash, params.include_txs).await?,
+            get_block_response_for_hash(&blockchain, &storage, hash, params.include_txs).await?,
         )
     }
+    // Return array for backward compatibility
     Ok(json!(blocks))
 }
 
@@ -4079,7 +4108,7 @@ fn generate_payment_id() -> String {
         .map(|d| d.as_secs())
         .unwrap_or(0);
 
-    let random: u32 = rand::random();
+    let random: u32 = tos_common::crypto::random::secure_random_u32();
     format!("pr_{:x}_{:08x}", timestamp, random)
 }
 
