@@ -102,7 +102,7 @@ fn main() {
     };
 
     let tx = TransactionBuilder::new(
-        TxVersion::T0,
+        TxVersion::T1,
         sender.get_public_key().compress(),
         None,
         TransactionTypeBuilder::Transfers(vec![transfer]),
@@ -129,7 +129,7 @@ fn main() {
     }
 
     let tx = TransactionBuilder::new(
-        TxVersion::T0,
+        TxVersion::T1,
         sender.get_public_key().compress(),
         None,
         TransactionTypeBuilder::Transfers(transfers),
@@ -154,7 +154,7 @@ fn main() {
     };
 
     let tx = TransactionBuilder::new(
-        TxVersion::T0,
+        TxVersion::T1,
         sender.get_public_key().compress(),
         None,
         TransactionTypeBuilder::Transfers(vec![transfer]),

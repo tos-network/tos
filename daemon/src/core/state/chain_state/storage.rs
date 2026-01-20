@@ -31,9 +31,8 @@ impl<'a, S: Storage> AsMut<S> for StorageReference<'a, S> {
     fn as_mut(&mut self) -> &mut S {
         match self {
             Self::Mutable(s) => *s,
-            #[allow(clippy::panic)]
             Self::Immutable(_) => {
-                eprintln!("fatal: Cannot mutably borrow immutable storage");
+                log::error!("fatal: Cannot mutably borrow immutable storage");
                 std::process::abort()
             }
         }
@@ -52,9 +51,8 @@ impl<'a, S: Storage> DerefMut for StorageReference<'a, S> {
     fn deref_mut(&mut self) -> &mut S {
         match self {
             Self::Mutable(s) => *s,
-            #[allow(clippy::panic)]
             Self::Immutable(_) => {
-                eprintln!("fatal: Cannot mutably borrow immutable storage");
+                log::error!("fatal: Cannot mutably borrow immutable storage");
                 std::process::abort()
             }
         }

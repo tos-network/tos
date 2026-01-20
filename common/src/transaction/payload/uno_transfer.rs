@@ -237,7 +237,7 @@ mod tests {
 
         // Deserialize with context containing TxVersion (required by CiphertextValidityProof)
         let mut context = Context::new();
-        context.store(TxVersion::T0);
+        context.store(TxVersion::T1);
         let mut reader = Reader::with_context(&bytes, context);
         let restored = UnoTransferPayload::read(&mut reader).unwrap();
 

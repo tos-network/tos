@@ -20,7 +20,7 @@ use crate::core::{
 use anyhow::Context;
 use async_trait::async_trait;
 use itertools::Either;
-use log::{debug, info, trace};
+use log::{debug, error, info, trace};
 use rocksdb::{
     BlockBasedOptions, Cache, ColumnFamilyDescriptor, DBCompactionStyle, DBCompressionType,
     DBWithThreadMode, Env, IteratorMode as InternalIteratorMode, MultiThreaded, Options,
@@ -166,10 +166,13 @@ impl RocksStorage {
         opts.set_max_open_files(config.max_open_files);
         opts.set_keep_log_file_num(config.keep_max_log_files);
 
-        // SAFE: Env::new() only fails if RocksDB cannot allocate the environment,
-        // which indicates a severe system resource issue. Panicking is appropriate here.
-        #[allow(clippy::expect_used)]
-        let mut env = Env::new().expect("Creating new env");
+        let mut env = match Env::new() {
+            Ok(env) => env,
+            Err(err) => {
+                error!("Failed to create RocksDB environment: {}", err);
+                std::process::exit(1);
+            }
+        };
         env.set_low_priority_background_threads(config.low_priority_background_threads as _);
         opts.set_env(&env);
         opts.set_compression_type(config.compression_mode.convert());
@@ -196,15 +199,17 @@ impl RocksStorage {
             opts.set_write_buffer_size(config.write_buffer_size as _);
         }
 
-        // SAFE: RocksDB initialization failure is a fatal startup error.
-        // If the database cannot be opened, the node cannot function and should panic.
-        #[allow(clippy::expect_used)]
-        let db = DBWithThreadMode::<MultiThreaded>::open_cf_descriptors(
+        let db = match DBWithThreadMode::<MultiThreaded>::open_cf_descriptors(
             &opts,
             format!("{}{}", dir, network.to_string().to_lowercase()),
             cfs,
-        )
-        .expect("Failed to open RocksDB");
+        ) {
+            Ok(db) => db,
+            Err(err) => {
+                error!("Failed to open RocksDB: {}", err);
+                std::process::exit(1);
+            }
+        };
 
         let mut storage = Self {
             db: Arc::new(db),

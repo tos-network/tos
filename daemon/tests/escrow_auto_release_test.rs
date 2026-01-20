@@ -48,7 +48,7 @@ async fn test_escrow_auto_release_transfers_funds() -> Result<(), TestError> {
     };
 
     let create_tx = UnsignedTransaction::new_with_fee_type(
-        TxVersion::T0,
+        TxVersion::T1,
         0,
         payer_pub.clone(),
         TransactionType::CreateEscrow(create_payload),
@@ -71,7 +71,7 @@ async fn test_escrow_auto_release_transfers_funds() -> Result<(), TestError> {
         completion_proof: None,
     };
     let release_tx = UnsignedTransaction::new_with_fee_type(
-        TxVersion::T0,
+        TxVersion::T1,
         0,
         payer_pub.clone(),
         TransactionType::ReleaseEscrow(release_payload),

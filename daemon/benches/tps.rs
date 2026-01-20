@@ -504,8 +504,8 @@ fn generate_block(tx_count: usize, amount: u64, fee: u64) -> GeneratedBlock {
         };
 
         let tx = TransactionBuilder::new(
-            TxVersion::T0,
-            0, // chain_id: 0 for Mainnet (benchmarks use T0 legacy format)
+            TxVersion::T1,
+            0, // chain_id: 0 for Mainnet (benchmarks use T1 format)
             sender.keypair.get_public_key().compress(),
             None,
             TransactionTypeBuilder::Transfers(vec![transfer]),

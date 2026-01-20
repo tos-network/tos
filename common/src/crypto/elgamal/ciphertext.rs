@@ -47,6 +47,25 @@ impl Ciphertext {
             CompressedHandle::new(self.handle.as_point().compress()),
         )
     }
+
+    /// Addition with Option return type for API consistency.
+    ///
+    /// IMPORTANT: This always returns `Some` because elliptic curve group
+    /// operations are mathematically closed and cannot overflow. The group
+    /// is cyclic with order equal to the curve's prime order, so addition
+    /// of any two valid points always produces another valid point.
+    ///
+    /// If you need to detect when the underlying plaintext value would
+    /// exceed u64::MAX, you must track this at a higher layer (e.g., by
+    /// maintaining plaintext bounds separately). The encrypted ciphertext
+    /// itself has no concept of numeric overflow.
+    ///
+    /// This method exists for API symmetry with checked operations on
+    /// primitive types, but callers should be aware that `None` is never
+    /// returned.
+    pub fn checked_add(&self, rhs: &Ciphertext) -> Option<Ciphertext> {
+        Some(self.clone() + rhs)
+    }
 }
 
 // ADD TRAITS

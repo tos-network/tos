@@ -38,7 +38,7 @@ fn create_test_unshield_payload(
     let sender_handle = sender_keypair.get_public_key().decrypt_handle(&opening);
 
     // Create CiphertextValidityProof (proves commitment encodes the claimed amount)
-    // Note: For serialization compatibility with TxVersion::T0, we provide both pubkeys
+    // Note: For serialization compatibility with TxVersion::T1, we provide both pubkeys
     // so that Y_2 is included in the proof.
     let mut transcript = tos_common::crypto::new_proof_transcript(b"unshield_validity_proof");
     let proof = CiphertextValidityProof::new(
@@ -80,7 +80,7 @@ fn test_unshield_transfer_payload_serialization() {
     // Test serialization roundtrip (with TxVersion context)
     let bytes = payload.to_bytes();
     let mut context = Context::new();
-    context.store(TxVersion::T0);
+    context.store(TxVersion::T1);
     let mut reader = Reader::with_context(&bytes, context);
     let restored = UnshieldTransferPayload::read(&mut reader).unwrap();
 
@@ -108,7 +108,7 @@ fn test_unshield_transfers_transaction_type() {
 
     // Deserialize with context
     let mut context = Context::new();
-    context.store(TxVersion::T0);
+    context.store(TxVersion::T1);
     let mut reader = Reader::with_context(&bytes, context);
     let restored = TransactionType::read(&mut reader).unwrap();
 
@@ -141,7 +141,7 @@ fn test_multiple_unshield_transfers() {
     // Verify serialization
     let bytes = tx_type.to_bytes();
     let mut context = Context::new();
-    context.store(TxVersion::T0);
+    context.store(TxVersion::T1);
     let mut reader = Reader::with_context(&bytes, context);
     let restored = TransactionType::read(&mut reader).unwrap();
 
@@ -177,7 +177,7 @@ fn test_transaction_with_unshield_transfers_hashable() {
     let signature = Signature::from_bytes(&sig_bytes).unwrap();
 
     let tx = Transaction::new(
-        TxVersion::T0,
+        TxVersion::T1,
         0,
         sender.get_public_key().compress(),
         tx_type,
@@ -254,7 +254,7 @@ fn test_unshield_transfer_with_extra_data() {
     // Verify serialization roundtrip with extra data
     let bytes = payload.to_bytes();
     let mut context = Context::new();
-    context.store(TxVersion::T0);
+    context.store(TxVersion::T1);
     let mut reader = Reader::with_context(&bytes, context);
     let restored = UnshieldTransferPayload::read(&mut reader).unwrap();
     assert!(restored.get_extra_data().is_some());
@@ -298,7 +298,7 @@ fn test_unshield_transfer_various_amounts() {
         // Verify serialization roundtrip
         let bytes = payload.to_bytes();
         let mut context = Context::new();
-        context.store(TxVersion::T0);
+        context.store(TxVersion::T1);
         let mut reader = Reader::with_context(&bytes, context);
         let restored = UnshieldTransferPayload::read(&mut reader).unwrap();
         assert_eq!(restored.get_amount(), amount);
@@ -337,7 +337,7 @@ fn test_plaintext_transaction_distinct_from_unshield() {
     let signature = Signature::from_bytes(&sig_bytes).unwrap();
 
     let tx = Transaction::new(
-        TxVersion::T0,
+        TxVersion::T1,
         0,
         keypair.get_public_key().compress(),
         TransactionType::Transfers(vec![transfer]),
@@ -377,7 +377,7 @@ fn test_unshield_full_transaction_serialization() {
     let signature = Signature::from_bytes(&sig_bytes).unwrap();
 
     let tx = Transaction::new(
-        TxVersion::T0,
+        TxVersion::T1,
         0,
         sender.get_public_key().compress(),
         tx_type,

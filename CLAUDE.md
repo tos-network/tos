@@ -537,6 +537,198 @@ Impact: Memory exhaustion, potential node crash
 Co-Authored-By: Claude <noreply@anthropic.com>
 ```
 
+## Runtime Security Rules
+
+### 1. WebSocket Security
+
+**RULE: WebSocket endpoints must enforce frame size limits at the transport layer.**
+
+#### Transport Layer Protection
+
+```rust
+// ✅ CORRECT: Set frame size limit at transport layer
+let security = server.websocket_security().clone();
+let mut msg_stream = msg_stream.max_frame_size(security.max_message_size());
+
+// ❌ INCORRECT: No frame size limit (DoS vulnerable)
+let mut msg_stream = msg_stream;
+
+// ❌ INCORRECT: Hardcoded value ignores configuration
+let mut msg_stream = msg_stream.max_frame_size(MAX_BLOCK_SIZE);
+```
+
+#### Requirements
+
+- [ ] Use `max_frame_size()` with configured value, not hardcoded constants
+- [ ] Apply limit before message processing loop
+- [ ] Combine with application-layer `validate_message_size()` for defense in depth
+- [ ] Log rejected messages with warning level
+
+### 2. Lock Handling Security
+
+**RULE: Lock acquisition must handle poisoning gracefully and avoid tracking corruption.**
+
+#### Mutex Poison Handling
+
+```rust
+// ✅ CORRECT: Handle poison gracefully
+let guard = match self.lock.lock() {
+    Ok(guard) => guard,
+    Err(err) => {
+        if log::log_enabled!(log::Level::Error) {
+            error!("Lock poisoned: {}", err);
+        }
+        err.into_inner() // Recover the data
+    }
+};
+
+// ❌ INCORRECT: Panic on poison
+let guard = self.lock.lock().expect("lock poisoned");
+```
+
+#### RwLock Location Tracking
+
+```rust
+// ✅ CORRECT: Use Option to avoid corrupting tracking
+let lifetime = if let Some(index) = locations.iter().position(|v| *v == self.location) {
+    let (_, lifetime) = locations.remove(index);
+    lifetime
+} else {
+    error!("Location missing, cannot remove from tracking");
+    Instant::now()
+};
+
+// ❌ INCORRECT: Default to index 0 (removes wrong entry!)
+let index = locations.iter().position(...).unwrap_or(0);
+locations.remove(index); // May remove wrong entry!
+```
+
+#### MutexGuard and Await Points
+
+```rust
+// ✅ CORRECT: Drop MutexGuard before await
+{
+    let guard = self.data.lock().unwrap();
+    // Use guard...
+} // Guard dropped here
+self.async_operation().await;
+
+// ❌ INCORRECT: MutexGuard held across await (not Send)
+let guard = self.data.lock().unwrap();
+self.async_operation().await; // Compile error or runtime issue
+```
+
+### 3. Startup Configuration Security
+
+**RULE: Invalid configuration at startup must fail fast with panic, never use silent fallbacks.**
+
+```rust
+// ✅ CORRECT: Panic on invalid compile-time constant
+#[allow(clippy::panic)]
+fn create_dev_public_key() -> PublicKey {
+    match Address::from_string(&DEV_ADDRESS) {
+        Ok(address) => address.to_public_key(),
+        Err(err) => {
+            panic!("FATAL: Invalid DEV_ADDRESS '{}': {} - cannot start", DEV_ADDRESS, err);
+        }
+    }
+}
+
+// ❌ INCORRECT: Silent fallback to zero/default value
+fn create_dev_public_key() -> PublicKey {
+    Address::from_string(&DEV_ADDRESS)
+        .map(|a| a.to_public_key())
+        .unwrap_or_else(|_| PublicKey::zero()) // Silent failure!
+}
+```
+
+#### When to Fail Fast (Startup)
+
+| Scenario | Action |
+|----------|--------|
+| Invalid compile-time constants | `panic!()` with clear message |
+| Missing required config files | `panic!()` or return `Err` |
+| Invalid genesis block data | `panic!()` |
+| Database corruption detected | `panic!()` after logging |
+
+### 4. Loop Boundary Requirements
+
+**RULE: Production code loops must have iteration bounds to prevent DoS.**
+
+```rust
+// ✅ CORRECT: Bounded iteration with safety limit
+const MAX_ITERATIONS: u64 = 10_000;
+let mut iterations = 0;
+while condition && iterations < MAX_ITERATIONS {
+    // Process...
+    iterations += 1;
+}
+if iterations >= MAX_ITERATIONS {
+    warn!("Loop reached maximum iterations, breaking");
+}
+
+// ❌ INCORRECT: Unbounded loop on external data
+while let Some(item) = external_iterator.next() {
+    process(item); // Could run forever!
+}
+```
+
+#### Exceptions (Allowed Unbounded Loops)
+
+- Main daemon event loop (controlled by shutdown signal)
+- Background task loops with sleep intervals
+- Loops bounded by known-finite data structures
+
+### 5. Error Handling Requirements
+
+**RULE: Never silently ignore errors. Log warnings or handle appropriately.**
+
+```rust
+// ✅ CORRECT: Log warning on ignored result
+if let Err(err) = optional_operation() {
+    if log::log_enabled!(log::Level::Warn) {
+        warn!("Optional operation failed: {}", err);
+    }
+}
+
+// ✅ CORRECT: Explicit acknowledgment with reason
+let _ = shutdown_tx.send(()); // Receiver may be dropped, OK to ignore
+
+// ❌ INCORRECT: Silent ignore without reason
+let _ = important_operation(); // What if it fails?
+```
+
+#### When `let _ =` is Acceptable
+
+- Channel send where receiver may be dropped
+- OnceCell::set where already-set is expected
+- Cleanup operations in drop handlers
+
+### 6. Arithmetic Safety
+
+**RULE: Use saturating/checked arithmetic to prevent overflow/underflow.**
+
+```rust
+// ✅ CORRECT: Saturating arithmetic
+let usage = self.total.saturating_sub(self.available);
+let sum = offset.saturating_add(count);
+
+// ✅ CORRECT: Checked with error handling
+let result = a.checked_add(b).ok_or(ArithmeticError::Overflow)?;
+
+// ❌ INCORRECT: Raw arithmetic (can overflow/underflow)
+let usage = self.total - self.available; // Panic if available > total!
+let sum = offset + count; // May wrap on overflow
+```
+
+#### Required for
+
+- Balance calculations
+- Fee computations
+- Index arithmetic (offset + count)
+- Time/duration calculations
+- Any user-input derived values
+
 ## Automated Checks (Future)
 
 These checks should be automated in CI/CD:
@@ -581,8 +773,8 @@ Exceptions to these rules require:
 
 ---
 
-**Last Updated**: 2025-10-14
-**Version**: 1.2
+**Last Updated**: 2026-01-20
+**Version**: 1.3
 **Maintainer**: TOS Development Team
 
 ## Development Environment

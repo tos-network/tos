@@ -36,6 +36,12 @@ struct Account {
     multisig: Option<MultiSigPayload>,
 }
 
+const _: () = assert!(COIN_VALUE > 0);
+
+fn to_whole_coins(amount: u64) -> u64 {
+    amount.saturating_div(COIN_VALUE)
+}
+
 pub struct MempoolState<'a, S: Storage> {
     // If the provider is mainnet or not
     mainnet: bool,
@@ -440,7 +446,7 @@ impl<'a, S: Storage> MempoolState<'a, S> {
                                 "Delegated amount must be a whole TOS"
                             )));
                         }
-                        let amount_whole = d.amount / COIN_VALUE;
+                        let amount_whole = to_whole_coins(d.amount);
                         let energy = amount_whole
                             .checked_mul(duration.reward_multiplier())
                             .ok_or(BlockchainError::Overflow)?;
@@ -458,7 +464,7 @@ impl<'a, S: Storage> MempoolState<'a, S> {
                             "Delegated amount must be a whole TOS"
                         )));
                     }
-                    let amount_whole = entry.amount / COIN_VALUE;
+                    let amount_whole = to_whole_coins(entry.amount);
                     acc.checked_add(amount_whole)
                         .ok_or(BlockchainError::Overflow)
                 })?;
@@ -470,7 +476,7 @@ impl<'a, S: Storage> MempoolState<'a, S> {
                 let mut staged_updates: Vec<(&PublicKey, EnergyResource)> =
                     Vec::with_capacity(delegatees.len());
                 for entry in delegatees.iter() {
-                    let amount_whole = entry.amount / COIN_VALUE;
+                    let amount_whole = to_whole_coins(entry.amount);
                     let energy = amount_whole
                         .checked_mul(duration.reward_multiplier())
                         .ok_or(BlockchainError::Overflow)?;
@@ -1332,7 +1338,7 @@ mod tests {
 
     fn build_energy_tx(sender: &KeyPair, payload: EnergyPayload, nonce: u64) -> Transaction {
         let unsigned = UnsignedTransaction::new_with_fee_type(
-            TxVersion::T0,
+            TxVersion::T1,
             0,
             sender.get_public_key().compress(),
             TransactionType::Energy(payload),

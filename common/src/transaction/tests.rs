@@ -338,7 +338,7 @@ async fn test_agent_account_admin_requires_owner_signature() {
     });
 
     let builder = TransactionBuilder::new(
-        TxVersion::T0,
+        TxVersion::T1,
         0,
         owner_pub,
         None,
@@ -402,7 +402,7 @@ async fn test_agent_account_admin_set_status_requires_owner_signature() {
 
     let data = TransactionTypeBuilder::AgentAccount(AgentAccountPayload::SetStatus { status: 1 });
     let builder = TransactionBuilder::new(
-        TxVersion::T0,
+        TxVersion::T1,
         0,
         owner_pub,
         None,
@@ -469,7 +469,7 @@ async fn test_agent_account_energy_pool_pays_fee() {
     )]);
 
     let unsigned = UnsignedTransaction::new_with_fee_type(
-        TxVersion::T0,
+        TxVersion::T1,
         0,
         owner_pub.clone(),
         data,
@@ -542,7 +542,7 @@ async fn test_agent_account_frozen_blocks_controller_tx() {
     )]);
 
     let unsigned = UnsignedTransaction::new_with_fee_type(
-        TxVersion::T0,
+        TxVersion::T1,
         0,
         owner_pub,
         data,
@@ -613,7 +613,7 @@ async fn test_agent_account_frozen_blocks_session_key_tx() {
     )]);
 
     let unsigned = UnsignedTransaction::new_with_fee_type(
-        TxVersion::T0,
+        TxVersion::T1,
         0,
         owner_pub,
         data,
@@ -683,7 +683,7 @@ async fn test_agent_account_session_key_scope_enforced() {
     )]);
 
     let unsigned = UnsignedTransaction::new_with_fee_type(
-        TxVersion::T0,
+        TxVersion::T1,
         0,
         owner_pub,
         data,
@@ -757,7 +757,7 @@ async fn test_agent_account_session_key_disallows_asset() {
     )]);
 
     let unsigned = UnsignedTransaction::new_with_fee_type(
-        TxVersion::T0,
+        TxVersion::T1,
         0,
         owner_pub,
         data,
@@ -899,13 +899,13 @@ fn create_tx_for(
     }]);
 
     let builder = TransactionBuilder::new(
-        TxVersion::T0,
+        TxVersion::T1,
         0, // chain_id: 0 for tests
         account.keypair.get_public_key().compress(),
         None,
         data,
         FeeBuilder::default(),
-    ); // Use T0 for all operations
+    ); // Use T1 for all operations
     let estimated_size = builder.estimate_size();
     let tx = builder.build(&mut state, &account.keypair).unwrap();
     let actual_size = tx.size();
@@ -980,7 +980,7 @@ fn test_encrypt_decrypt_two_parties() {
                 alice.keypair.get_private_key(),
                 None,
                 Role::Sender,
-                TxVersion::T0,
+                TxVersion::T1,
             )
             .unwrap();
         assert_eq!(decrypted.data(), Some(&payload));
@@ -993,7 +993,7 @@ fn test_encrypt_decrypt_two_parties() {
                 bob.keypair.get_private_key(),
                 None,
                 Role::Receiver,
-                TxVersion::T0,
+                TxVersion::T1,
             )
             .unwrap();
         assert_eq!(decrypted.data(), Some(&payload));
@@ -1006,7 +1006,7 @@ fn test_encrypt_decrypt_two_parties() {
             bob.keypair.get_private_key(),
             None,
             Role::Sender,
-            TxVersion::T0,
+            TxVersion::T1,
         );
         assert!(decrypted.is_ok()); // Changed: plaintext succeeds even with wrong role
         assert_eq!(decrypted.unwrap().data(), Some(&payload));
@@ -1184,7 +1184,7 @@ async fn test_burn_tx_verify() {
             asset: TOS_ASSET,
         });
         let builder = TransactionBuilder::new(
-            TxVersion::T0,
+            TxVersion::T1,
             0, // chain_id: 0 for tests
             alice.keypair.get_public_key().compress(),
             None,
@@ -1261,13 +1261,13 @@ async fn test_tx_invoke_contract() {
             contract_key: None,
         });
         let builder = TransactionBuilder::new(
-            TxVersion::T0,
+            TxVersion::T1,
             0, // chain_id: 0 for tests
             alice.keypair.get_public_key().compress(),
             None,
             data,
             FeeBuilder::default(),
-        ); // Use T0 for InvokeContract
+        ); // Use T1 for InvokeContract
         let estimated_size = builder.estimate_size();
         let tx = builder.build(&mut state, &alice.keypair).unwrap();
         assert!(estimated_size == tx.size());
@@ -1348,7 +1348,7 @@ async fn test_tx_invoke_contract_multiple_deposits() {
             contract_key: None,
         });
         let builder = TransactionBuilder::new(
-            TxVersion::T0,
+            TxVersion::T1,
             0, // chain_id: 0 for tests
             alice.keypair.get_public_key().compress(),
             None,
@@ -1425,13 +1425,13 @@ async fn test_tx_deploy_contract() {
             invoke: None,
         });
         let builder = TransactionBuilder::new(
-            TxVersion::T0,
+            TxVersion::T1,
             0, // chain_id: 0 for tests
             alice.keypair.get_public_key().compress(),
             None,
             data,
             FeeBuilder::default(),
-        ); // Use T0 for DeployContract
+        ); // Use T1 for DeployContract
         let estimated_size = builder.estimate_size();
         let tx = builder.build(&mut state, &alice.keypair).unwrap();
         assert!(
@@ -1508,7 +1508,7 @@ async fn test_max_transfers() {
 
         let data = TransactionTypeBuilder::Transfers(transfers);
         let builder = TransactionBuilder::new(
-            TxVersion::T0,
+            TxVersion::T1,
             0, // chain_id: 0 for tests
             alice.keypair.get_public_key().compress(),
             None,
@@ -1587,13 +1587,13 @@ async fn test_multisig_setup() {
             ]),
         });
         let builder = TransactionBuilder::new(
-            TxVersion::T0,
+            TxVersion::T1,
             0, // chain_id: 0 for tests
             alice.keypair.get_public_key().compress(),
             None,
             data,
             FeeBuilder::default(),
-        ); // Use T0 for MultiSig
+        ); // Use T1 for MultiSig
         let estimated_size = builder.estimate_size();
         let tx = builder.build(&mut state, &alice.keypair).unwrap();
         assert!(estimated_size == tx.size());
@@ -1672,13 +1672,13 @@ async fn test_multisig() {
             extra_data: None,
         }]);
         let builder = TransactionBuilder::new(
-            TxVersion::T0,
+            TxVersion::T1,
             0, // chain_id: 0 for tests
             alice.keypair.get_public_key().compress(),
             Some(2),
             data,
             FeeBuilder::default(),
-        ); // Use T0 for MultiSig
+        ); // Use T1 for MultiSig
         let mut tx = builder.build_unsigned(&mut state, &alice.keypair).unwrap();
 
         tx.sign_multisig(&charlie.keypair, 0);
@@ -1765,7 +1765,7 @@ async fn test_transfer_extra_data_limits() {
         }]);
 
         let builder = TransactionBuilder::new(
-            TxVersion::T0,
+            TxVersion::T1,
             0, // chain_id: 0 for tests
             alice.keypair.get_public_key().compress(),
             None,
@@ -1861,7 +1861,7 @@ async fn test_transfer_extra_data_limits() {
         }]);
 
         let builder = TransactionBuilder::new(
-            TxVersion::T0,
+            TxVersion::T1,
             0, // chain_id: 0 for tests
             alice.keypair.get_public_key().compress(),
             None,
@@ -1909,7 +1909,7 @@ async fn test_transfer_extra_data_limits() {
 
         let data = TransactionTypeBuilder::Transfers(transfers);
         let builder = TransactionBuilder::new(
-            TxVersion::T0,
+            TxVersion::T1,
             0, // chain_id: 0 for tests
             alice.keypair.get_public_key().compress(),
             None,
@@ -1971,7 +1971,7 @@ async fn test_unfreeze_tos_balance_refund() {
         });
 
         let builder = TransactionBuilder::new(
-            TxVersion::T0,
+            TxVersion::T1,
             0, // chain_id: 0 for tests
             alice.keypair.get_public_key().compress(),
             None,
@@ -2066,7 +2066,7 @@ async fn test_unfreeze_rejects_delegatee_address_without_delegation() {
     };
 
     let unsigned = UnsignedTransaction::new_with_fee_type(
-        TxVersion::T0,
+        TxVersion::T1,
         0,
         alice.keypair.get_public_key().compress(),
         TransactionType::Energy(payload),
@@ -2102,7 +2102,7 @@ async fn test_energy_tx_rejects_non_zero_fee() {
     let payload = EnergyPayload::WithdrawUnfrozen;
 
     let unsigned = UnsignedTransaction::new_with_fee_type(
-        TxVersion::T0,
+        TxVersion::T1,
         0,
         alice.keypair.get_public_key().compress(),
         TransactionType::Energy(payload),
@@ -2150,7 +2150,7 @@ async fn test_freeze_delegation_requires_existing_delegatee() {
     };
 
     let unsigned = UnsignedTransaction::new_with_fee_type(
-        TxVersion::T0,
+        TxVersion::T1,
         0,
         alice.keypair.get_public_key().compress(),
         TransactionType::Energy(payload),
@@ -2221,7 +2221,7 @@ async fn test_energy_fee_transfer_allows_new_address() {
         extra_data: None,
     };
     let builder = TransactionBuilder::new(
-        TxVersion::T0,
+        TxVersion::T1,
         0,
         alice.keypair.get_public_key().compress(),
         None,
@@ -2640,7 +2640,7 @@ fn create_transfer_tx(
     }]);
 
     let builder = TransactionBuilder::new(
-        TxVersion::T0,
+        TxVersion::T1,
         0, // chain_id: 0 for tests
         sender.keypair.get_public_key().compress(),
         None,
@@ -2665,7 +2665,7 @@ fn create_burn_tx(sender: &Account, amount: u64, asset: Hash) -> Arc<Transaction
     let data = TransactionTypeBuilder::Burn(BurnPayload { amount, asset });
 
     let builder = TransactionBuilder::new(
-        TxVersion::T0,
+        TxVersion::T1,
         0, // chain_id: 0 for tests
         sender.keypair.get_public_key().compress(),
         None,
@@ -3104,7 +3104,7 @@ async fn test_p04_multiple_transfers() {
     ]);
 
     let builder = TransactionBuilder::new(
-        TxVersion::T0,
+        TxVersion::T1,
         0, // chain_id: 0 for tests
         alice.keypair.get_public_key().compress(),
         None,

@@ -49,7 +49,7 @@ async fn test_escrow_lifecycle_create_deposit_refund() -> Result<(), TestError> 
     };
 
     let create_tx = UnsignedTransaction::new_with_fee_type(
-        TxVersion::T0,
+        TxVersion::T1,
         0,
         payer_pub.clone(),
         TransactionType::CreateEscrow(create_payload),
@@ -71,7 +71,7 @@ async fn test_escrow_lifecycle_create_deposit_refund() -> Result<(), TestError> 
         amount: 50 * COIN_VALUE,
     };
     let deposit_tx = UnsignedTransaction::new_with_fee_type(
-        TxVersion::T0,
+        TxVersion::T1,
         0,
         payer_pub.clone(),
         TransactionType::DepositEscrow(deposit_payload),
@@ -94,7 +94,7 @@ async fn test_escrow_lifecycle_create_deposit_refund() -> Result<(), TestError> 
         reason: Some("client_cancel".to_string()),
     };
     let refund_tx = UnsignedTransaction::new_with_fee_type(
-        TxVersion::T0,
+        TxVersion::T1,
         0,
         payee_pub.clone(),
         TransactionType::RefundEscrow(refund_payload),

@@ -555,9 +555,9 @@ mod tests {
 
     #[test]
     fn test_is_tx_version_allowed_in_block_version() {
-        // Nobunaga supports T0
+        // Nobunaga supports T1
         assert!(is_tx_version_allowed_in_block_version(
-            TxVersion::T0,
+            TxVersion::T1,
             BlockVersion::Nobunaga
         ));
     }

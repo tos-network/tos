@@ -934,12 +934,8 @@ impl Serializer for Transaction {
 
         reader.context_mut().store(version);
 
-        // T1+: read chain_id, T0: default to 0
-        let chain_id = if version >= TxVersion::T1 {
-            reader.read_u8()?
-        } else {
-            0
-        };
+        // T1+: read chain_id for cross-network replay protection
+        let chain_id = reader.read_u8()?;
 
         let source = CompressedPublicKey::read(reader)?;
         let data = TransactionType::read(reader)?;

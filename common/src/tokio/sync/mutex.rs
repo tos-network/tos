@@ -7,9 +7,8 @@ use std::{
     time::Duration,
 };
 use tokio::{
-    pin,
     sync::{Mutex as InnerMutex, MutexGuard},
-    time::interval,
+    time::timeout,
 };
 
 pub struct Mutex<T: ?Sized> {
@@ -39,42 +38,55 @@ impl<T: ?Sized> Mutex<T> {
         }
 
         async move {
-            let mut interval = interval(Duration::from_secs(10));
-            // First tick is instant
-            interval.tick().await;
-
-            let future = self.inner.lock();
-            pin!(future);
-
-            let mut show = true;
-            loop {
-                tokio::select! {
-                    _ = interval.tick() => {
-                        if show {
-                            show = false;
-                            let last = self.last_location.lock().expect("last lock location");
-                            let mut msg = format!("Mutex at {} failed locking at {}.", self.init_location, location);
-                            if let Some(last) = *last {
-                                msg.push_str(&format!("\n- Last successful lock at: {last}"));
+            let guard = match timeout(Duration::from_secs(10), self.inner.lock()).await {
+                Ok(guard) => guard,
+                Err(_) => {
+                    // Build error message in a scope to ensure MutexGuard is dropped before await
+                    {
+                        let last = match self.last_location.lock() {
+                            Ok(guard) => guard,
+                            Err(err) => {
+                                if log::log_enabled!(log::Level::Warn) {
+                                    error!("Mutex last location lock poisoned");
+                                }
+                                err.into_inner()
                             }
-
-                            if log::log_enabled!(log::Level::Error) {
-                                error!("{}", msg);
-                            }
-                        }
-                    }
-                    guard = &mut future => {
-                        let level = if !show {
-                            Level::Warn
-                        } else {
-                            Level::Debug
                         };
-                        log!(level, "Mutex {} write guard acquired at {}", self.init_location, location);
-                        *self.last_location.lock().expect("last lock location") = Some(location);
-                        return guard;
-                    }
+                        let mut msg = format!(
+                            "Mutex at {} failed locking at {}.",
+                            self.init_location, location
+                        );
+                        if let Some(last) = *last {
+                            msg.push_str(&format!("\n- Last successful lock at: {last}"));
+                        }
+
+                        if log::log_enabled!(log::Level::Error) {
+                            error!("{}", msg);
+                        }
+                    } // MutexGuard dropped here before await
+                    self.inner.lock().await
                 }
+            };
+
+            if log::log_enabled!(log::Level::Debug) {
+                log!(
+                    Level::Debug,
+                    "Mutex {} write guard acquired at {}",
+                    self.init_location,
+                    location
+                );
             }
+            let mut last = match self.last_location.lock() {
+                Ok(guard) => guard,
+                Err(err) => {
+                    if log::log_enabled!(log::Level::Warn) {
+                        error!("Mutex last location lock poisoned");
+                    }
+                    err.into_inner()
+                }
+            };
+            *last = Some(location);
+            guard
         }
     }
 }

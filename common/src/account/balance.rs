@@ -1,5 +1,6 @@
 use crate::{
     block::TopoHeight,
+    error::BalanceError,
     serializer::{Reader, ReaderError, Serializer, Writer},
 };
 use serde::{Deserialize, Serialize};
@@ -124,8 +125,12 @@ impl VersionedBalance {
         self.final_balance = value;
     }
 
-    pub fn add_to_balance(&mut self, value: u64) {
-        self.final_balance += value;
+    pub fn add_to_balance(&mut self, value: u64) -> Result<(), BalanceError> {
+        self.final_balance = self
+            .final_balance
+            .checked_add(value)
+            .ok_or(BalanceError::Overflow)?;
+        Ok(())
     }
 
     pub fn get_previous_topoheight(&self) -> Option<TopoHeight> {

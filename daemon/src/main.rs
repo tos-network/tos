@@ -164,8 +164,7 @@ async fn main() -> Result<()> {
     if let Some(path) = config.config_file.as_ref() {
         if config.generate_config_template {
             if Path::new(path).exists() {
-                eprintln!("Config file already exists at {}", path);
-                return Ok(());
+                return Err(anyhow::anyhow!("Config file already exists at {}", path));
             }
 
             let mut file = File::create(path).context("Error while creating config file")?;
@@ -187,10 +186,9 @@ async fn main() -> Result<()> {
         let file = File::open(path).context("Error while opening config file")?;
         config = serde_json::from_reader(file).context("Error while reading config file")?;
     } else if config.generate_config_template {
-        eprintln!(
+        return Err(anyhow::anyhow!(
             "Provided config file path is required to generate the template with --config-file"
-        );
-        return Ok(());
+        ));
     }
 
     let blockchain_config = &config.core;
@@ -1474,6 +1472,16 @@ async fn show_balance<S: Storage>(
     } else {
         1
     };
+    const MAX_HISTORY_STEPS: u64 = 10_000;
+    if history > MAX_HISTORY_STEPS {
+        if log::log_enabled!(log::Level::Warn) {
+            warn!(
+                "History size {} exceeds max {}, capping",
+                history, MAX_HISTORY_STEPS
+            );
+        }
+        history = MAX_HISTORY_STEPS;
+    }
 
     let key = address.to_public_key();
     let blockchain = {
@@ -1495,13 +1503,9 @@ async fn show_balance<S: Storage>(
         .get_last_balance(&key, &asset)
         .await
         .context("Error while retrieving last balance")?;
-    loop {
+    while history > 0 && topo > 0 {
         history -= 1;
         manager.message(format!("Version at topoheight {}: {}", topo, version));
-
-        if history == 0 || topo == 0 {
-            break;
-        }
 
         if let Some(previous) = version.get_previous_topoheight() {
             version = storage

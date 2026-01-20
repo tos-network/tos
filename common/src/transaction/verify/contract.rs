@@ -14,6 +14,8 @@ use crate::{
 
 use super::{BlockchainApplyState, BlockchainVerificationState, VerificationError};
 
+const MAX_EVENTS_PER_TX: usize = 1000;
+
 #[derive(Debug)]
 pub enum InvokeContract {
     Entry(u16),
@@ -236,6 +238,13 @@ impl Transaction {
         let events = execution_result.events;
         let vm_cache = execution_result.cache;
 
+        if events.len() > MAX_EVENTS_PER_TX {
+            return Err(VerificationError::TooManyContractEvents {
+                count: events.len(),
+                max: MAX_EVENTS_PER_TX,
+            });
+        }
+
         if log::log_enabled!(log::Level::Debug) {
             debug!(
                 "Contract {} execution result: gas_used={}, exit_code={:?}, return_data={}, transfers={}, events={}",
@@ -385,7 +394,9 @@ impl Transaction {
                 .await
                 .map_err(VerificationError::State)?;
 
-            *balance += refund_gas;
+            *balance = balance
+                .checked_add(refund_gas)
+                .ok_or(VerificationError::GasRefundOverflow)?;
         }
 
         Ok(refund_gas)

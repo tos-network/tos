@@ -44,7 +44,7 @@ async fn test_arbiter_register_update_and_withdraw() -> Result<(), TestError> {
     );
 
     let register_tx = UnsignedTransaction::new_with_fee_type(
-        TxVersion::T0,
+        TxVersion::T1,
         0,
         arbiter_pub.clone(),
         TransactionType::RegisterArbiter(register_payload),
@@ -73,7 +73,7 @@ async fn test_arbiter_register_update_and_withdraw() -> Result<(), TestError> {
     );
 
     let update_tx = UnsignedTransaction::new_with_fee_type(
-        TxVersion::T0,
+        TxVersion::T1,
         0,
         arbiter_pub.clone(),
         TransactionType::UpdateArbiter(update_payload),
@@ -101,7 +101,7 @@ async fn test_arbiter_register_update_and_withdraw() -> Result<(), TestError> {
 
     let exit_payload = RequestArbiterExitPayload::new();
     let exit_tx = UnsignedTransaction::new_with_fee_type(
-        TxVersion::T0,
+        TxVersion::T1,
         0,
         arbiter_pub.clone(),
         TransactionType::RequestArbiterExit(exit_payload),
@@ -128,7 +128,7 @@ async fn test_arbiter_register_update_and_withdraw() -> Result<(), TestError> {
 
     let withdraw_payload = WithdrawArbiterStakePayload::new(0);
     let withdraw_tx = UnsignedTransaction::new_with_fee_type(
-        TxVersion::T0,
+        TxVersion::T1,
         0,
         arbiter_pub.clone(),
         TransactionType::WithdrawArbiterStake(withdraw_payload),
@@ -204,7 +204,7 @@ async fn test_arbiter_slash() -> Result<(), TestError> {
     );
 
     let register_tx = UnsignedTransaction::new_with_fee_type(
-        TxVersion::T0,
+        TxVersion::T1,
         0,
         arbiter_pub.clone(),
         TransactionType::RegisterArbiter(register_payload),
@@ -243,7 +243,7 @@ async fn test_arbiter_slash() -> Result<(), TestError> {
     );
 
     let slash_tx = UnsignedTransaction::new_with_fee_type(
-        TxVersion::T0,
+        TxVersion::T1,
         0,
         member_pub.clone(),
         TransactionType::SlashArbiter(slash_payload),

@@ -11,6 +11,7 @@ use crate::core::storage::{
     rocksdb::{Column, IteratorMode},
     snapshot::Direction,
     ContractEventProvider, RocksStorage, StoredContractEvent, MAX_EVENTS_PER_QUERY,
+    MAX_EVENTS_PER_TX,
 };
 use async_trait::async_trait;
 use log::trace;
@@ -19,6 +20,8 @@ use tos_common::{
     crypto::Hash,
     serializer::{Reader, ReaderError, Serializer, Writer},
 };
+
+const MAX_SCAN_ITERATIONS: usize = 100_000;
 
 /// Key builder for ContractEvents column
 /// Format: {topoheight:8}{contract_hash:32}{log_index:4}
@@ -134,8 +137,15 @@ impl Serializer for EventRefs {
     }
 
     fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
-        let mut refs = Vec::new();
+        let remaining = reader.total_size() - reader.total_read();
+        let mut refs = Vec::with_capacity((remaining / 44).min(MAX_EVENTS_PER_TX));
         while reader.total_size() - reader.total_read() >= 44 {
+            if refs.len() >= MAX_EVENTS_PER_TX {
+                return Err(ReaderError::TooManyEvents {
+                    count: refs.len(),
+                    max: MAX_EVENTS_PER_TX,
+                });
+            }
             let topoheight = reader.read_u64()?;
             let contract = reader.read_hash()?;
             let log_index = reader.read_u32()?;
@@ -261,11 +271,19 @@ impl ContractEventProvider for RocksStorage {
         // Build start key
         let start_key = build_event_key(from_topo, contract, 0);
 
+        let mut scan_count = 0usize;
         // Iterate through ContractEvents column
         for result in self.iter::<EventKey, StoredContractEvent>(
             Column::ContractEvents,
             IteratorMode::From(&start_key.to_bytes(), Direction::Forward),
         )? {
+            scan_count += 1;
+            if scan_count > MAX_SCAN_ITERATIONS {
+                if log::log_enabled!(log::Level::Warn) {
+                    log::warn!("Max scan iterations reached for contract events");
+                }
+                break;
+            }
             let (key, event) = result?;
 
             // Check if we've exceeded the topoheight range

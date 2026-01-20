@@ -99,7 +99,7 @@ fn test_shield_transfers_transaction_type() {
 
     // Deserialize with context
     let mut context = Context::new();
-    context.store(TxVersion::T0);
+    context.store(TxVersion::T1);
     let mut reader = Reader::with_context(&bytes, context);
     let restored = TransactionType::read(&mut reader).unwrap();
 
@@ -131,7 +131,7 @@ fn test_multiple_shield_transfers() {
     // Verify serialization
     let bytes = tx_type.to_bytes();
     let mut context = Context::new();
-    context.store(TxVersion::T0);
+    context.store(TxVersion::T1);
     let mut reader = Reader::with_context(&bytes, context);
     let restored = TransactionType::read(&mut reader).unwrap();
 
@@ -167,7 +167,7 @@ fn test_transaction_with_shield_transfers_hashable() {
     let signature = Signature::from_bytes(&sig_bytes).unwrap();
 
     let tx = Transaction::new(
-        TxVersion::T0,
+        TxVersion::T1,
         0,
         sender.get_public_key().compress(),
         tx_type,
@@ -341,7 +341,7 @@ fn test_plaintext_transaction_distinct_from_shield() {
     let signature = Signature::from_bytes(&sig_bytes).unwrap();
 
     let tx = Transaction::new(
-        TxVersion::T0,
+        TxVersion::T1,
         0,
         keypair.get_public_key().compress(),
         TransactionType::Transfers(vec![transfer]),
@@ -381,7 +381,7 @@ fn test_shield_full_transaction_serialization() {
     let signature = Signature::from_bytes(&sig_bytes).unwrap();
 
     let tx = Transaction::new(
-        TxVersion::T0,
+        TxVersion::T1,
         0,
         sender.get_public_key().compress(),
         tx_type,
