@@ -414,7 +414,7 @@ fn generate_payment_id() -> String {
         .unwrap_or(0);
 
     // Simple ID: pr_<timestamp>_<random>
-    let random: u32 = rand::random();
+    let random: u32 = crate::crypto::random::secure_random_u32();
     format!("pr_{:x}_{:08x}", timestamp, random)
 }
 

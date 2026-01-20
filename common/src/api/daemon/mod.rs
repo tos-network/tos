@@ -170,6 +170,8 @@ pub struct GetBlocksAtHeightParams {
     pub height: u64,
     #[serde(default)]
     pub include_txs: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max: Option<usize>,
 }
 
 #[derive(Serialize, Deserialize)]

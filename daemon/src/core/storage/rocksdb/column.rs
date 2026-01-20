@@ -258,6 +258,9 @@ pub enum Column {
     // Pending releases index (by release_at)
     // {release_at (8 bytes)}{escrow_id (32 bytes)} => {escrow_id}
     EscrowPendingRelease,
+    // A2A signature nonces (for replay protection across nodes)
+    // {nonce} => {timestamp_secs}
+    A2ANonces,
 
     // ===== Arbitration =====
 

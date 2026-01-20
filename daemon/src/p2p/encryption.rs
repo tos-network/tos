@@ -3,7 +3,7 @@ use chacha20poly1305::{
     ChaCha20Poly1305, KeyInit,
 };
 use log::trace;
-use rand::Rng;
+use rand::{rngs::OsRng, RngCore};
 use thiserror::Error;
 use tos_common::tokio::sync::Mutex;
 
@@ -110,10 +110,7 @@ impl Encryption {
     // Generate a new random key
     pub fn generate_key(&self) -> Result<EncryptionKey, EncryptionError> {
         let mut key = EncryptionKey::default();
-        rand::thread_rng()
-            .try_fill(&mut key)
-            .map_err(|_| EncryptionError::Rng)?;
-
+        OsRng.fill_bytes(&mut key);
         Ok(key)
     }
 

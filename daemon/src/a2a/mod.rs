@@ -2,6 +2,7 @@ pub mod arbitration;
 pub mod auth;
 pub mod executor;
 pub mod grpc;
+pub mod nonce_store;
 mod notify;
 pub mod registry;
 pub mod router_executor;

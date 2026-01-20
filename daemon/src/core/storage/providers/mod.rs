@@ -1,3 +1,4 @@
+mod a2a_nonce;
 mod account;
 mod agent_account;
 mod arbiter;
@@ -33,6 +34,7 @@ mod transaction;
 mod uno_balance;
 mod versioned;
 
+pub use a2a_nonce::*;
 pub use account::*;
 pub use agent_account::*;
 pub use arbiter::*;
