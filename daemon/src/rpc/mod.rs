@@ -168,6 +168,9 @@ impl<S: Storage> DaemonRpcServer<S> {
             None
         };
 
+        // Initialize admin token for shutdown RPC authentication
+        rpc::init_admin_token(config.admin_token.clone());
+
         // create the RPC Handler which will register and contains all available methods
         let mut rpc_handler = RPCHandler::new(Arc::clone(&blockchain));
         rpc::register_methods(

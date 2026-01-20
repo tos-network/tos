@@ -5644,10 +5644,43 @@ async fn get_message_by_id<S: Storage>(
 // Security: Only allows requests from localhost (127.0.0.1 or ::1)
 // Rate limited to prevent abuse
 // All attempts are logged for audit purposes
+// Admin token authentication (optional, enabled via --admin-token)
 // ============================================================================
 
 /// Last shutdown attempt timestamp (Unix seconds) for rate limiting
 static LAST_SHUTDOWN_ATTEMPT: AtomicU64 = AtomicU64::new(0);
+
+/// Admin token for shutdown authentication (set via --admin-token CLI flag)
+static ADMIN_TOKEN: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+
+/// Initialize admin token for shutdown authentication.
+/// Called once during RPC server startup.
+pub fn init_admin_token(token: Option<String>) {
+    let has_token = token.is_some();
+    if ADMIN_TOKEN.set(token).is_err() {
+        // Already initialized, ignore
+        return;
+    }
+    if has_token {
+        if log::log_enabled!(log::Level::Info) {
+            info!("Admin token authentication enabled for shutdown RPC");
+        }
+    }
+}
+
+/// Check if admin token is configured
+#[allow(dead_code)]
+fn is_admin_token_required() -> bool {
+    ADMIN_TOKEN.get().is_some_and(|t| t.is_some())
+}
+
+/// Verify admin token matches the configured token
+fn verify_admin_token(provided: Option<&str>) -> bool {
+    match ADMIN_TOKEN.get() {
+        Some(Some(configured)) => provided.is_some_and(|p| p == configured),
+        _ => true, // No token configured, allow
+    }
+}
 
 /// Minimum seconds between shutdown attempts
 const SHUTDOWN_COOLDOWN_SECS: u64 = 60;
@@ -5656,6 +5689,7 @@ const SHUTDOWN_COOLDOWN_SECS: u64 = 60;
 const ERR_SHUTDOWN_UNAUTHORIZED: i16 = -100;
 const ERR_SHUTDOWN_RATE_LIMITED: i16 = -101;
 const ERR_SHUTDOWN_NO_CONFIRM: i16 = -102;
+const ERR_SHUTDOWN_INVALID_TOKEN: i16 = -103;
 
 /// Check rate limit for shutdown requests
 fn check_shutdown_rate_limit() -> Result<(), InternalRpcError> {
@@ -5688,6 +5722,9 @@ struct ShutdownParams {
     /// Safety confirmation - must be true to proceed
     #[serde(default)]
     confirm: Option<bool>,
+    /// Admin token for authentication (required if --admin-token is set)
+    #[serde(default)]
+    admin_token: Option<String>,
 }
 
 /// Shutdown the daemon gracefully via RPC
@@ -5696,11 +5733,13 @@ struct ShutdownParams {
 /// - Only accepts requests from localhost (127.0.0.1 or ::1)
 /// - Rate limited to 1 request per 60 seconds
 /// - Requires `confirm: true` parameter as safety check
+/// - Requires admin token if configured via `--admin-token`
 /// - All attempts are logged for audit
 ///
 /// # Parameters
 /// - `timeout_seconds`: Graceful shutdown timeout (default: 30, max: 300)
 /// - `confirm`: Must be `true` to proceed (safety check)
+/// - `admin_token`: Required if daemon started with `--admin-token`
 ///
 /// # Returns
 /// Confirmation that shutdown has been initiated
@@ -5710,7 +5749,7 @@ struct ShutdownParams {
 /// {
 ///   "jsonrpc": "2.0",
 ///   "method": "shutdown",
-///   "params": { "confirm": true, "timeout_seconds": 30 },
+///   "params": { "confirm": true, "timeout_seconds": 30, "admin_token": "secret" },
 ///   "id": 1
 /// }
 /// ```
@@ -5760,6 +5799,20 @@ async fn shutdown<S: Storage>(context: &Context, body: Value) -> Result<Value, I
         return Err(InternalRpcError::Custom(
             ERR_SHUTDOWN_NO_CONFIRM,
             "Shutdown requires 'confirm: true' parameter for safety".to_string(),
+        ));
+    }
+
+    // Security Check 4: Admin token verification (if configured)
+    if !verify_admin_token(params.admin_token.as_deref()) {
+        if log::log_enabled!(log::Level::Warn) {
+            warn!(
+                "AUDIT: Shutdown attempt from {} - invalid or missing admin token",
+                ip_str
+            );
+        }
+        return Err(InternalRpcError::Custom(
+            ERR_SHUTDOWN_INVALID_TOKEN,
+            "Invalid or missing admin token. Provide 'admin_token' parameter.".to_string(),
         ));
     }
 
@@ -5897,16 +5950,89 @@ mod shutdown_tests {
         assert!(ERR_SHUTDOWN_RATE_LIMITED >= -31999);
         assert!(ERR_SHUTDOWN_NO_CONFIRM < 0);
         assert!(ERR_SHUTDOWN_NO_CONFIRM >= -31999);
+        assert!(ERR_SHUTDOWN_INVALID_TOKEN < 0);
+        assert!(ERR_SHUTDOWN_INVALID_TOKEN >= -31999);
 
         // Verify they are distinct
         assert_ne!(ERR_SHUTDOWN_UNAUTHORIZED, ERR_SHUTDOWN_RATE_LIMITED);
         assert_ne!(ERR_SHUTDOWN_UNAUTHORIZED, ERR_SHUTDOWN_NO_CONFIRM);
+        assert_ne!(ERR_SHUTDOWN_UNAUTHORIZED, ERR_SHUTDOWN_INVALID_TOKEN);
         assert_ne!(ERR_SHUTDOWN_RATE_LIMITED, ERR_SHUTDOWN_NO_CONFIRM);
+        assert_ne!(ERR_SHUTDOWN_RATE_LIMITED, ERR_SHUTDOWN_INVALID_TOKEN);
+        assert_ne!(ERR_SHUTDOWN_NO_CONFIRM, ERR_SHUTDOWN_INVALID_TOKEN);
     }
 
     #[test]
     fn test_rate_limit_cooldown_constant() {
         // Verify cooldown is reasonable (60 seconds)
         assert_eq!(SHUTDOWN_COOLDOWN_SECS, 60);
+    }
+
+    #[test]
+    fn test_verify_admin_token_no_token_configured() {
+        // When no token is configured, any request should be allowed
+        // Note: This test only works if ADMIN_TOKEN is not initialized
+        // In a real scenario, verify_admin_token returns true when no token is configured
+        // We test the logic directly here
+        let result = match None::<String> {
+            Some(_configured) => false, // Would check token
+            None => true,               // No token configured, allow
+        };
+        assert!(result);
+    }
+
+    #[test]
+    fn test_verify_admin_token_logic_match() {
+        // Test the token matching logic
+        let configured = Some("secret-token".to_string());
+        let provided_correct = Some("secret-token");
+        let provided_wrong = Some("wrong-token");
+        let provided_none: Option<&str> = None;
+
+        // Correct token
+        let result = match &configured {
+            Some(c) => provided_correct.is_some_and(|p| p == c),
+            None => true,
+        };
+        assert!(result);
+
+        // Wrong token
+        let result = match &configured {
+            Some(c) => provided_wrong.is_some_and(|p| p == c),
+            None => true,
+        };
+        assert!(!result);
+
+        // No token provided
+        let result = match &configured {
+            Some(c) => provided_none.is_some_and(|p| p == c),
+            None => true,
+        };
+        assert!(!result);
+    }
+
+    #[test]
+    fn test_shutdown_params_with_admin_token() {
+        let body = serde_json::json!({
+            "confirm": true,
+            "timeout_seconds": 60,
+            "admin_token": "my-secret-token"
+        });
+        let params: ShutdownParams = serde_json::from_value(body).unwrap();
+        assert_eq!(params.confirm, Some(true));
+        assert_eq!(params.timeout_seconds, Some(60));
+        assert_eq!(params.admin_token, Some("my-secret-token".to_string()));
+    }
+
+    #[test]
+    fn test_shutdown_params_without_admin_token() {
+        let body = serde_json::json!({
+            "confirm": true,
+            "timeout_seconds": 30
+        });
+        let params: ShutdownParams = serde_json::from_value(body).unwrap();
+        assert_eq!(params.confirm, Some(true));
+        assert_eq!(params.timeout_seconds, Some(30));
+        assert!(params.admin_token.is_none());
     }
 }

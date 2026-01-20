@@ -50,6 +50,10 @@ enum Commands {
         /// Shutdown timeout in seconds
         #[arg(short = 's', long, default_value = "30")]
         timeout: u64,
+
+        /// Admin token for authentication (required if daemon has --admin-token set)
+        #[arg(short = 'a', long, env = "TOS_ADMIN_TOKEN")]
+        admin_token: Option<String>,
     },
     /// Get daemon status (compact)
     Status,
@@ -135,17 +139,23 @@ async fn call_rpc(
 }
 
 /// Execute the stop command
-async fn execute_stop(client: &Client, address: &str, timeout: u64) -> Result<Value, AppError> {
-    call_rpc(
-        client,
-        address,
-        "shutdown",
-        json!({
-            "confirm": true,
-            "timeout_seconds": timeout
-        }),
-    )
-    .await
+async fn execute_stop(
+    client: &Client,
+    address: &str,
+    timeout: u64,
+    admin_token: Option<String>,
+) -> Result<Value, AppError> {
+    let mut params = json!({
+        "confirm": true,
+        "timeout_seconds": timeout
+    });
+
+    // Add admin token if provided
+    if let Some(token) = admin_token {
+        params["admin_token"] = json!(token);
+    }
+
+    call_rpc(client, address, "shutdown", params).await
 }
 
 /// Execute the status command
@@ -176,7 +186,10 @@ async fn run() -> Result<(), AppError> {
         .map_err(|e| AppError::Network(format!("Failed to create HTTP client: {}", e)))?;
 
     let result = match cli.command {
-        Commands::Stop { timeout } => execute_stop(&client, &cli.rpc_address, timeout).await?,
+        Commands::Stop {
+            timeout,
+            admin_token,
+        } => execute_stop(&client, &cli.rpc_address, timeout, admin_token).await?,
         Commands::Status => execute_status(&client, &cli.rpc_address).await?,
         Commands::Info => execute_info(&client, &cli.rpc_address).await?,
     };
