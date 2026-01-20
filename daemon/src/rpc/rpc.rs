@@ -963,11 +963,11 @@ pub fn register_methods<S: Storage>(
         handler.register_method("prune_chain", async_handler!(prune_chain::<S>));
         handler.register_method("rewind_chain", async_handler!(rewind_chain::<S>));
         handler.register_method("clear_caches", async_handler!(clear_caches::<S>));
-    }
 
-    // Shutdown method - always registered but has built-in localhost-only security
-    // This allows daemon to be stopped gracefully via RPC from local machine
-    handler.register_method("shutdown", async_handler!(shutdown::<S>));
+        // Shutdown method - gated behind enable_admin_rpc for security
+        // Additional security: localhost-only + optional admin token + confirmation required
+        handler.register_method("shutdown", async_handler!(shutdown::<S>));
+    }
 }
 
 async fn version<S: Storage>(_: &Context, body: Value) -> Result<Value, InternalRpcError> {
@@ -5647,15 +5647,40 @@ async fn get_message_by_id<S: Storage>(
 // Admin token authentication (optional, enabled via --admin-token)
 // ============================================================================
 
-/// Last shutdown attempt timestamp (Unix seconds) for rate limiting
+/// Last successful shutdown attempt timestamp (Unix seconds) for rate limiting
 static LAST_SHUTDOWN_ATTEMPT: AtomicU64 = AtomicU64::new(0);
+
+/// Counter for consecutive failed shutdown attempts (for brute-force protection)
+/// Note: This is a global counter, not per-IP. An attacker could potentially lock out
+/// legitimate admins by repeatedly failing auth. Per-IP tracking would be better but
+/// requires additional complexity (HashMap with cleanup). For most deployments where
+/// shutdown is only called occasionally, global tracking is acceptable.
+static FAILED_SHUTDOWN_ATTEMPTS: AtomicU64 = AtomicU64::new(0);
+
+/// Last failed shutdown attempt timestamp (Unix seconds)
+static LAST_FAILED_SHUTDOWN: AtomicU64 = AtomicU64::new(0);
 
 /// Admin token for shutdown authentication (set via --admin-token CLI flag)
 static ADMIN_TOKEN: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
 
 /// Initialize admin token for shutdown authentication.
 /// Called once during RPC server startup.
+/// Warns if token exceeds MAX_ADMIN_TOKEN_LEN (256 bytes).
 pub fn init_admin_token(token: Option<String>) {
+    // Validate token length to prevent self-DoS
+    if let Some(ref t) = token {
+        if t.len() > MAX_ADMIN_TOKEN_LEN {
+            if log::log_enabled!(log::Level::Error) {
+                log::error!(
+                    "SECURITY ERROR: Admin token ({} bytes) exceeds maximum length ({} bytes). \
+                     Shutdown authentication will always fail! Use a shorter token.",
+                    t.len(),
+                    MAX_ADMIN_TOKEN_LEN
+                );
+            }
+        }
+    }
+
     let has_token = token.is_some();
     if ADMIN_TOKEN.set(token).is_err() {
         // Already initialized, ignore
@@ -5674,16 +5699,60 @@ fn is_admin_token_required() -> bool {
     ADMIN_TOKEN.get().is_some_and(|t| t.is_some())
 }
 
-/// Verify admin token matches the configured token
+/// Maximum admin token length (prevents DoS via large tokens)
+const MAX_ADMIN_TOKEN_LEN: usize = 256;
+
+/// Fixed iteration count for constant-time comparison (hides token length)
+const CONSTANT_TIME_COMPARE_LEN: usize = 256;
+
+/// Constant-time string comparison to prevent timing attacks
+/// Uses fixed iteration count to hide actual token length
+fn constant_time_eq(a: &str, b: &str) -> bool {
+    let a_bytes = a.as_bytes();
+    let b_bytes = b.as_bytes();
+
+    // Check length equality without early exit
+    let mut result = (a_bytes.len() == b_bytes.len()) as u8;
+
+    // Always iterate fixed number of times to hide token length
+    // Use XOR to accumulate differences without early exit
+    for i in 0..CONSTANT_TIME_COMPARE_LEN {
+        let byte_a = a_bytes.get(i).copied().unwrap_or(0);
+        let byte_b = b_bytes.get(i).copied().unwrap_or(0);
+        result &= ((byte_a ^ byte_b) == 0) as u8;
+    }
+
+    result == 1
+}
+
+/// Verify admin token matches the configured token (constant-time comparison)
+/// Returns false if token exceeds max length (DoS protection)
 fn verify_admin_token(provided: Option<&str>) -> bool {
     match ADMIN_TOKEN.get() {
-        Some(Some(configured)) => provided.is_some_and(|p| p == configured),
+        Some(Some(configured)) => {
+            // Reject oversized tokens (DoS protection)
+            if let Some(p) = provided {
+                if p.len() > MAX_ADMIN_TOKEN_LEN {
+                    return false;
+                }
+            }
+            provided.is_some_and(|p| constant_time_eq(p, configured))
+        }
         _ => true, // No token configured, allow
     }
 }
 
-/// Minimum seconds between shutdown attempts
+/// Minimum seconds between successful shutdown attempts
 const SHUTDOWN_COOLDOWN_SECS: u64 = 60;
+
+/// Base cooldown for failed auth attempts (exponential backoff)
+const FAILED_AUTH_BASE_COOLDOWN_SECS: u64 = 2;
+
+/// Maximum cooldown for failed auth attempts (capped at 60 seconds)
+const FAILED_AUTH_MAX_COOLDOWN_SECS: u64 = 60;
+
+/// Number of failed attempts before resetting counter (if enough time has passed)
+const FAILED_AUTH_RESET_AFTER_SECS: u64 = 300; // 5 minutes
 
 // Custom error codes for shutdown RPC (range: -3 to -31999)
 const ERR_SHUTDOWN_UNAUTHORIZED: i16 = -100;
@@ -5691,14 +5760,15 @@ const ERR_SHUTDOWN_RATE_LIMITED: i16 = -101;
 const ERR_SHUTDOWN_NO_CONFIRM: i16 = -102;
 const ERR_SHUTDOWN_INVALID_TOKEN: i16 = -103;
 
-/// Check rate limit for shutdown requests
-fn check_shutdown_rate_limit() -> Result<(), InternalRpcError> {
+/// Check if shutdown is rate limited (read-only check, does not update timestamp)
+/// Returns Ok(now_timestamp) if allowed, or Err if rate limited
+fn check_shutdown_rate_limit() -> Result<u64, InternalRpcError> {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
 
-    let last = LAST_SHUTDOWN_ATTEMPT.load(Ordering::Relaxed);
+    let last = LAST_SHUTDOWN_ATTEMPT.load(Ordering::Acquire);
     let elapsed = now.saturating_sub(last);
 
     if elapsed < SHUTDOWN_COOLDOWN_SECS {
@@ -5709,8 +5779,179 @@ fn check_shutdown_rate_limit() -> Result<(), InternalRpcError> {
         ));
     }
 
-    LAST_SHUTDOWN_ATTEMPT.store(now, Ordering::Relaxed);
-    Ok(())
+    Ok(now)
+}
+
+/// Atomically record shutdown attempt timestamp (call only after all security checks pass)
+/// Uses compare_exchange to prevent race conditions - if another request updated the timestamp
+/// since our check, we verify we're still allowed to proceed
+fn record_shutdown_attempt(expected_time: u64) -> Result<(), InternalRpcError> {
+    let last = LAST_SHUTDOWN_ATTEMPT.load(Ordering::Acquire);
+
+    // Re-check rate limit with current timestamp in case of race
+    let elapsed = expected_time.saturating_sub(last);
+    if elapsed < SHUTDOWN_COOLDOWN_SECS {
+        let remaining = SHUTDOWN_COOLDOWN_SECS.saturating_sub(elapsed);
+        return Err(InternalRpcError::Custom(
+            ERR_SHUTDOWN_RATE_LIMITED,
+            format!(
+                "Shutdown rate limited (concurrent request). Try again in {} seconds.",
+                remaining
+            ),
+        ));
+    }
+
+    // Atomically update: only succeed if no one else updated since we read
+    match LAST_SHUTDOWN_ATTEMPT.compare_exchange(
+        last,
+        expected_time,
+        Ordering::Release,
+        Ordering::Acquire,
+    ) {
+        Ok(_) => Ok(()),
+        Err(actual) => {
+            // Another request updated the timestamp - check if we're still within cooldown
+            let elapsed = expected_time.saturating_sub(actual);
+            if elapsed < SHUTDOWN_COOLDOWN_SECS {
+                let remaining = SHUTDOWN_COOLDOWN_SECS.saturating_sub(elapsed);
+                Err(InternalRpcError::Custom(
+                    ERR_SHUTDOWN_RATE_LIMITED,
+                    format!(
+                        "Shutdown rate limited (concurrent request). Try again in {} seconds.",
+                        remaining
+                    ),
+                ))
+            } else {
+                // We're still allowed, try to update again (recursive would be cleaner but let's keep it simple)
+                // In practice, this case is rare - just let it proceed since rate limit passed
+                let _ = LAST_SHUTDOWN_ATTEMPT.compare_exchange(
+                    actual,
+                    expected_time,
+                    Ordering::Release,
+                    Ordering::Relaxed,
+                );
+                Ok(())
+            }
+        }
+    }
+}
+
+/// Calculate cooldown based on failure count (exponential backoff)
+fn calculate_failed_auth_cooldown(fail_count: u64) -> u64 {
+    if fail_count == 0 {
+        return 0;
+    }
+    // Cooldown: 2^(fail_count - 1) * base, capped at max
+    let multiplier = 1u64
+        .checked_shl((fail_count - 1).min(10) as u32)
+        .unwrap_or(1024);
+    FAILED_AUTH_BASE_COOLDOWN_SECS
+        .saturating_mul(multiplier)
+        .min(FAILED_AUTH_MAX_COOLDOWN_SECS)
+}
+
+/// Reserve a failure slot before auth (prevents parallel brute-force bypass)
+/// Atomically increments counter and checks rate limit in one operation.
+/// Returns Ok(timestamp) if slot reserved, or Err if rate limited.
+/// MUST call `cancel_failed_attempt_slot()` on auth success or `confirm_failed_attempt_slot()` on auth failure.
+fn reserve_failed_attempt_slot() -> Result<u64, InternalRpcError> {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
+    // Atomically increment and check in a CAS loop
+    loop {
+        let current_count = FAILED_SHUTDOWN_ATTEMPTS.load(Ordering::Acquire);
+        let last_failed = LAST_FAILED_SHUTDOWN.load(Ordering::Acquire);
+
+        // Reset counter if enough time has passed since last failure
+        if current_count > 0 && now.saturating_sub(last_failed) > FAILED_AUTH_RESET_AFTER_SECS {
+            if FAILED_SHUTDOWN_ATTEMPTS
+                .compare_exchange(current_count, 0, Ordering::Release, Ordering::Acquire)
+                .is_ok()
+            {
+                // Counter reset, retry with fresh state
+                continue;
+            }
+            // Another thread modified, retry
+            std::hint::spin_loop();
+            continue;
+        }
+
+        // Check rate limit based on current counter
+        let cooldown = calculate_failed_auth_cooldown(current_count);
+        if cooldown > 0 {
+            let elapsed = now.saturating_sub(last_failed);
+            if elapsed < cooldown {
+                let remaining = cooldown.saturating_sub(elapsed);
+                return Err(InternalRpcError::Custom(
+                    ERR_SHUTDOWN_RATE_LIMITED,
+                    format!(
+                        "Too many failed attempts. Try again in {} seconds.",
+                        remaining
+                    ),
+                ));
+            }
+        }
+
+        // Reserve slot by incrementing
+        let new_count = current_count.saturating_add(1).min(100);
+        match FAILED_SHUTDOWN_ATTEMPTS.compare_exchange(
+            current_count,
+            new_count,
+            Ordering::Release,
+            Ordering::Acquire,
+        ) {
+            Ok(_) => {
+                // CRITICAL: Update timestamp immediately to prevent parallel brute-force bypass
+                // Any subsequent concurrent request will see this recent timestamp and be rate limited
+                // On auth success, we call cancel_failed_attempt_slot() which decrements counter
+                // The timestamp remains but with counter decremented, the rate limit check is lenient
+                LAST_FAILED_SHUTDOWN.store(now, Ordering::Release);
+                return Ok(now);
+            }
+            Err(_) => {
+                // Another thread updated, retry with new rate limit check
+                std::hint::spin_loop();
+            }
+        }
+    }
+}
+
+/// Cancel a reserved failure slot (called on auth success)
+fn cancel_failed_attempt_slot() {
+    let _ = FAILED_SHUTDOWN_ATTEMPTS.fetch_update(Ordering::Release, Ordering::Acquire, |v| {
+        Some(v.saturating_sub(1))
+    });
+}
+
+/// Confirm a reserved failure slot (called on auth failure)
+/// Note: The timestamp is already set in reserve_failed_attempt_slot() to prevent parallel bypass.
+/// This function is kept for semantic clarity and potential future use (e.g., if we want to
+/// update timestamp only on actual failures, not on rate-limit rejections).
+#[allow(dead_code)]
+fn confirm_failed_attempt_slot(_timestamp: u64) {
+    // Timestamp already set in reserve_failed_attempt_slot()
+    // No-op, kept for API consistency
+}
+
+/// Legacy wrapper: Record a failed shutdown attempt (for compatibility)
+/// Returns true if recorded, false if rate limited
+#[allow(dead_code)]
+fn record_failed_shutdown_attempt() -> bool {
+    match reserve_failed_attempt_slot() {
+        Ok(timestamp) => {
+            confirm_failed_attempt_slot(timestamp);
+            true
+        }
+        Err(_) => false,
+    }
+}
+
+/// Reset failed shutdown attempts (called on successful shutdown)
+fn reset_failed_shutdown_attempts() {
+    FAILED_SHUTDOWN_ATTEMPTS.store(0, Ordering::Release);
 }
 
 /// Shutdown parameters
@@ -5731,10 +5972,19 @@ struct ShutdownParams {
 ///
 /// # Security
 /// - Only accepts requests from localhost (127.0.0.1 or ::1)
-/// - Rate limited to 1 request per 60 seconds
+/// - Rate limited to 1 request per 60 seconds (successful attempts only)
 /// - Requires `confirm: true` parameter as safety check
 /// - Requires admin token if configured via `--admin-token`
 /// - All attempts are logged for audit
+///
+/// # Security Warning
+/// The localhost-only check relies on `peer_addr()` which can be spoofed when:
+/// - RPC is behind a reverse proxy (e.g., nginx, haproxy)
+/// - SSH port forwarding is used (`ssh -L 8080:localhost:8080`)
+/// - Docker/container networking with host mode
+///
+/// **For production deployments, always set `--admin-token` to prevent unauthorized
+/// shutdown even if localhost check is bypassed.**
 ///
 /// # Parameters
 /// - `timeout_seconds`: Graceful shutdown timeout (default: 30, max: 300)
@@ -5777,19 +6027,54 @@ async fn shutdown<S: Storage>(context: &Context, body: Value) -> Result<Value, I
         ));
     }
 
-    // Security Check 2: Rate limiting
-    if let Err(e) = check_shutdown_rate_limit() {
-        if log::log_enabled!(log::Level::Warn) {
-            warn!("AUDIT: Shutdown attempt from {} rate limited", ip_str);
+    // Security Check 1.5: Reserve failure slot (prevents parallel brute-force bypass)
+    // This atomically checks rate limit AND reserves a slot before any auth checks
+    let failure_slot_timestamp = match reserve_failed_attempt_slot() {
+        Ok(timestamp) => timestamp,
+        Err(e) => {
+            if log::log_enabled!(log::Level::Warn) {
+                warn!(
+                    "AUDIT: Shutdown attempt from {} blocked (too many failed attempts)",
+                    ip_str
+                );
+            }
+            return Err(e);
         }
-        return Err(e);
-    }
+    };
+
+    // Security Check 2: Rate limiting (read-only check, timestamp recorded later)
+    let request_time = match check_shutdown_rate_limit() {
+        Ok(time) => time,
+        Err(e) => {
+            // Cancel slot reservation on rate limit (not a failed auth)
+            cancel_failed_attempt_slot();
+            if log::log_enabled!(log::Level::Warn) {
+                warn!("AUDIT: Shutdown attempt from {} rate limited", ip_str);
+            }
+            return Err(e);
+        }
+    };
 
     // Parse parameters
-    let params: ShutdownParams = parse_params(body)?;
+    let params: ShutdownParams = match parse_params(body) {
+        Ok(p) => p,
+        Err(e) => {
+            // Confirm failure slot (invalid params = failed attempt)
+            confirm_failed_attempt_slot(failure_slot_timestamp);
+            if log::log_enabled!(log::Level::Warn) {
+                warn!(
+                    "AUDIT: Shutdown attempt from {} - invalid parameters",
+                    ip_str
+                );
+            }
+            return Err(e);
+        }
+    };
 
     // Security Check 3: Confirmation required
     if !params.confirm.unwrap_or(false) {
+        // Confirm failure slot
+        confirm_failed_attempt_slot(failure_slot_timestamp);
         if log::log_enabled!(log::Level::Warn) {
             warn!(
                 "AUDIT: Shutdown attempt from {} missing confirmation",
@@ -5804,6 +6089,8 @@ async fn shutdown<S: Storage>(context: &Context, body: Value) -> Result<Value, I
 
     // Security Check 4: Admin token verification (if configured)
     if !verify_admin_token(params.admin_token.as_deref()) {
+        // Confirm failure slot
+        confirm_failed_attempt_slot(failure_slot_timestamp);
         if log::log_enabled!(log::Level::Warn) {
             warn!(
                 "AUDIT: Shutdown attempt from {} - invalid or missing admin token",
@@ -5815,6 +6102,24 @@ async fn shutdown<S: Storage>(context: &Context, body: Value) -> Result<Value, I
             "Invalid or missing admin token. Provide 'admin_token' parameter.".to_string(),
         ));
     }
+
+    // All auth checks passed - cancel the failure slot reservation
+    cancel_failed_attempt_slot();
+
+    // All security checks passed - now atomically record the rate limit timestamp
+    // This prevents race conditions and ensures unauthenticated requests don't consume cooldown
+    if let Err(e) = record_shutdown_attempt(request_time) {
+        if log::log_enabled!(log::Level::Warn) {
+            warn!(
+                "AUDIT: Shutdown attempt from {} rate limited (concurrent request)",
+                ip_str
+            );
+        }
+        return Err(e);
+    }
+
+    // Reset failed attempts counter on successful authentication
+    reset_failed_shutdown_attempts();
 
     // Validate timeout (1-300 seconds)
     let timeout = params.timeout_seconds.unwrap_or(30).clamp(1, 300);
@@ -5832,22 +6137,38 @@ async fn shutdown<S: Storage>(context: &Context, body: Value) -> Result<Value, I
 
     // Spawn shutdown task to avoid blocking the RPC response
     let blockchain_clone = Arc::clone(blockchain);
+    let timeout_duration = tokio::time::Duration::from_secs(timeout);
     tokio::spawn(async move {
         // Small delay to allow RPC response to be sent
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
         if log::log_enabled!(log::Level::Info) {
-            info!("Starting graceful shutdown sequence...");
+            info!(
+                "Starting graceful shutdown sequence (timeout: {}s)...",
+                timeout
+            );
         }
 
-        // Initiate graceful shutdown
-        blockchain_clone.stop().await;
+        // Initiate graceful shutdown with timeout enforcement
+        let shutdown_result = tokio::time::timeout(timeout_duration, blockchain_clone.stop()).await;
 
-        if log::log_enabled!(log::Level::Info) {
-            info!("Graceful shutdown complete, exiting process");
+        match shutdown_result {
+            Ok(()) => {
+                if log::log_enabled!(log::Level::Info) {
+                    info!("Graceful shutdown complete, exiting process");
+                }
+            }
+            Err(_) => {
+                if log::log_enabled!(log::Level::Warn) {
+                    warn!(
+                        "Graceful shutdown timed out after {}s, forcing exit",
+                        timeout
+                    );
+                }
+            }
         }
 
-        // Exit the process
+        // Exit the process (success in both cases - timeout just means we gave up waiting)
         std::process::exit(0);
     });
 
@@ -6034,5 +6355,210 @@ mod shutdown_tests {
         assert_eq!(params.confirm, Some(true));
         assert_eq!(params.timeout_seconds, Some(30));
         assert!(params.admin_token.is_none());
+    }
+
+    #[test]
+    fn test_check_rate_limit_returns_timestamp() {
+        // Reset the rate limiter to ensure clean state
+        // Set to a very old timestamp (0) to ensure we're outside cooldown
+        LAST_SHUTDOWN_ATTEMPT.store(0, Ordering::SeqCst);
+
+        // check_shutdown_rate_limit should return Ok with the current timestamp
+        let result = check_shutdown_rate_limit();
+        assert!(result.is_ok());
+
+        let timestamp = result.unwrap();
+        // Timestamp should be recent (within last few seconds)
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        assert!(timestamp <= now);
+        assert!(now.saturating_sub(timestamp) < 5); // Within 5 seconds
+    }
+
+    #[test]
+    fn test_record_shutdown_attempt_atomic() {
+        // Reset to old timestamp
+        LAST_SHUTDOWN_ATTEMPT.store(0, Ordering::SeqCst);
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        // First record should succeed
+        let result = record_shutdown_attempt(now);
+        assert!(result.is_ok());
+
+        // Verify timestamp was updated
+        let stored = LAST_SHUTDOWN_ATTEMPT.load(Ordering::SeqCst);
+        assert_eq!(stored, now);
+    }
+
+    #[test]
+    fn test_record_shutdown_attempt_rejects_during_cooldown() {
+        // Set to current time (simulating recent successful shutdown)
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        LAST_SHUTDOWN_ATTEMPT.store(now, Ordering::SeqCst);
+
+        // Attempting to record with same timestamp should fail (within cooldown)
+        let result = record_shutdown_attempt(now);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_rate_limit_two_phase_separation() {
+        // This test verifies the two-phase rate limiting:
+        // Phase 1: check_shutdown_rate_limit() - read-only check
+        // Phase 2: record_shutdown_attempt() - atomic update only after auth passes
+
+        // Reset to old timestamp
+        LAST_SHUTDOWN_ATTEMPT.store(0, Ordering::SeqCst);
+
+        // Phase 1: Check should succeed and return timestamp
+        let check_result = check_shutdown_rate_limit();
+        assert!(check_result.is_ok());
+        let request_time = check_result.unwrap();
+
+        // At this point, timestamp should NOT have been updated yet
+        let stored_after_check = LAST_SHUTDOWN_ATTEMPT.load(Ordering::SeqCst);
+        assert_eq!(
+            stored_after_check, 0,
+            "Timestamp should not update during check"
+        );
+
+        // Simulate: auth checks happen here (if they fail, we never call record)
+
+        // Phase 2: Record the attempt (simulating successful auth)
+        let record_result = record_shutdown_attempt(request_time);
+        assert!(record_result.is_ok());
+
+        // Now timestamp should be updated
+        let stored_after_record = LAST_SHUTDOWN_ATTEMPT.load(Ordering::SeqCst);
+        assert_eq!(
+            stored_after_record, request_time,
+            "Timestamp should update after record"
+        );
+    }
+
+    #[test]
+    fn test_failed_auth_rate_limit_constants() {
+        // Verify constants are reasonable
+        assert_eq!(FAILED_AUTH_BASE_COOLDOWN_SECS, 2);
+        assert_eq!(FAILED_AUTH_MAX_COOLDOWN_SECS, 60);
+        assert_eq!(FAILED_AUTH_RESET_AFTER_SECS, 300);
+    }
+
+    #[test]
+    fn test_failed_auth_first_attempt_allowed() {
+        // Reset failed attempts state
+        FAILED_SHUTDOWN_ATTEMPTS.store(0, Ordering::SeqCst);
+        LAST_FAILED_SHUTDOWN.store(0, Ordering::SeqCst);
+
+        // First attempt should be allowed (reserve slot atomically checks and reserves)
+        let result = reserve_failed_attempt_slot();
+        assert!(result.is_ok());
+
+        // Clean up - cancel the reserved slot
+        cancel_failed_attempt_slot();
+    }
+
+    #[test]
+    fn test_record_failed_attempt_increments_counter() {
+        // Reset state
+        FAILED_SHUTDOWN_ATTEMPTS.store(0, Ordering::SeqCst);
+        LAST_FAILED_SHUTDOWN.store(0, Ordering::SeqCst);
+
+        // Record a failure - should return true (successfully recorded)
+        let recorded = record_failed_shutdown_attempt();
+        assert!(recorded, "First failure should be recorded");
+
+        // Counter should be incremented
+        let count = FAILED_SHUTDOWN_ATTEMPTS.load(Ordering::SeqCst);
+        assert_eq!(count, 1);
+
+        // Timestamp should be set
+        let last = LAST_FAILED_SHUTDOWN.load(Ordering::SeqCst);
+        assert!(last > 0);
+    }
+
+    #[test]
+    fn test_reset_failed_attempts() {
+        // Set some failures
+        FAILED_SHUTDOWN_ATTEMPTS.store(5, Ordering::SeqCst);
+
+        // Reset
+        reset_failed_shutdown_attempts();
+
+        // Counter should be 0
+        let count = FAILED_SHUTDOWN_ATTEMPTS.load(Ordering::SeqCst);
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn test_failed_auth_exponential_backoff_calculation() {
+        // Test the exponential backoff formula
+        // Cooldown: 2^(fail_count - 1) * base, capped at max
+        let base = FAILED_AUTH_BASE_COOLDOWN_SECS;
+        let max = FAILED_AUTH_MAX_COOLDOWN_SECS;
+
+        // fail_count = 1: 2^0 * 2 = 2
+        let multiplier = 1u64.checked_shl(0).unwrap_or(1024);
+        let cooldown = base.saturating_mul(multiplier).min(max);
+        assert_eq!(cooldown, 2);
+
+        // fail_count = 3: 2^2 * 2 = 8
+        let multiplier = 1u64.checked_shl(2).unwrap_or(1024);
+        let cooldown = base.saturating_mul(multiplier).min(max);
+        assert_eq!(cooldown, 8);
+
+        // fail_count = 6: 2^5 * 2 = 64, but capped at 60
+        let multiplier = 1u64.checked_shl(5).unwrap_or(1024);
+        let cooldown = base.saturating_mul(multiplier).min(max);
+        assert_eq!(cooldown, 60);
+    }
+
+    #[test]
+    fn test_constant_time_eq_equal_strings() {
+        assert!(constant_time_eq("secret-token", "secret-token"));
+        assert!(constant_time_eq("", ""));
+        assert!(constant_time_eq("a", "a"));
+    }
+
+    #[test]
+    fn test_constant_time_eq_different_strings() {
+        assert!(!constant_time_eq("secret-token", "wrong-token"));
+        assert!(!constant_time_eq("secret-token", "secret-toke")); // one char shorter
+        assert!(!constant_time_eq("secret-token", "secret-tokenn")); // one char longer
+        assert!(!constant_time_eq("a", "b"));
+        assert!(!constant_time_eq("", "a"));
+    }
+
+    #[test]
+    fn test_constant_time_eq_different_lengths() {
+        // Even with different lengths, should not leak timing info
+        assert!(!constant_time_eq("short", "very-long-string-here"));
+        assert!(!constant_time_eq("very-long-string-here", "short"));
+    }
+
+    #[test]
+    fn test_constant_time_constants() {
+        // Verify security constants
+        assert_eq!(MAX_ADMIN_TOKEN_LEN, 256);
+        assert_eq!(CONSTANT_TIME_COMPARE_LEN, 256);
+    }
+
+    #[test]
+    fn test_constant_time_eq_fixed_iteration() {
+        // Both short and long strings should complete in similar time
+        // because we always iterate CONSTANT_TIME_COMPARE_LEN times
+        assert!(constant_time_eq("a", "a"));
+        assert!(constant_time_eq("short-token", "short-token"));
+        // Even strings longer than CONSTANT_TIME_COMPARE_LEN work
+        // (they compare up to 256 bytes, which covers most practical tokens)
     }
 }

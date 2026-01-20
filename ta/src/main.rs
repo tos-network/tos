@@ -138,6 +138,22 @@ async fn call_rpc(
         .ok_or_else(|| AppError::Json("Missing result field in response".to_string()))
 }
 
+/// Check if admin token was provided via command line (security warning)
+fn warn_if_token_from_cli(admin_token: &Option<String>) {
+    // If token is provided but TOS_ADMIN_TOKEN env var is not set,
+    // it means the token was passed via command line (visible in `ps` output)
+    if admin_token.is_some() && std::env::var("TOS_ADMIN_TOKEN").is_err() {
+        eprintln!(
+            "Warning: Admin token passed via command line is visible in process listings (`ps`)."
+        );
+        eprintln!(
+            "         For better security, use the TOS_ADMIN_TOKEN environment variable instead:"
+        );
+        eprintln!("         export TOS_ADMIN_TOKEN=your-token && ta stop");
+        eprintln!();
+    }
+}
+
 /// Execute the stop command
 async fn execute_stop(
     client: &Client,
@@ -145,6 +161,9 @@ async fn execute_stop(
     timeout: u64,
     admin_token: Option<String>,
 ) -> Result<Value, AppError> {
+    // Warn if token was provided via command line
+    warn_if_token_from_cli(&admin_token);
+
     let mut params = json!({
         "confirm": true,
         "timeout_seconds": timeout

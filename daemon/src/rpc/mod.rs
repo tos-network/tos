@@ -171,6 +171,18 @@ impl<S: Storage> DaemonRpcServer<S> {
         // Initialize admin token for shutdown RPC authentication
         rpc::init_admin_token(config.admin_token.clone());
 
+        // Security warning: admin methods without token authentication
+        if config.enable_admin_rpc && config.admin_token.is_none() {
+            if log::log_enabled!(log::Level::Warn) {
+                log::warn!(
+                    "SECURITY WARNING: Admin RPC methods (shutdown, prune_chain, etc.) are enabled \
+                     without --admin-token authentication. The localhost-only check can be bypassed \
+                     by proxies or port forwarding. Strongly recommend setting --admin-token for \
+                     production deployments."
+                );
+            }
+        }
+
         // create the RPC Handler which will register and contains all available methods
         let mut rpc_handler = RPCHandler::new(Arc::clone(&blockchain));
         rpc::register_methods(

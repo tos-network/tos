@@ -389,6 +389,10 @@ where
     std::env::set_var("TOS_ARBITRATION_CA_BUNDLE", &cert_path);
     std::env::set_var("TOS_ARBITRATION_TEST_ALLOW_LOCAL", "1");
 
+    // Install the default crypto provider (required for rustls 0.23+)
+    // Ignore error if already installed by another test
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
     let key = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(key_der));
     let config = rustls::ServerConfig::builder()
         .with_no_client_auth()
