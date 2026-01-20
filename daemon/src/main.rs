@@ -1472,6 +1472,16 @@ async fn show_balance<S: Storage>(
     } else {
         1
     };
+    const MAX_HISTORY_STEPS: u64 = 10_000;
+    if history > MAX_HISTORY_STEPS {
+        if log::log_enabled!(log::Level::Warn) {
+            warn!(
+                "History size {} exceeds max {}, capping",
+                history, MAX_HISTORY_STEPS
+            );
+        }
+        history = MAX_HISTORY_STEPS;
+    }
 
     let key = address.to_public_key();
     let blockchain = {
@@ -1493,13 +1503,9 @@ async fn show_balance<S: Storage>(
         .get_last_balance(&key, &asset)
         .await
         .context("Error while retrieving last balance")?;
-    loop {
+    while history > 0 && topo > 0 {
         history -= 1;
         manager.message(format!("Version at topoheight {}: {}", topo, version));
-
-        if history == 0 || topo == 0 {
-            break;
-        }
 
         if let Some(previous) = version.get_previous_topoheight() {
             version = storage

@@ -362,6 +362,14 @@ impl WebSocketSecurity {
         }
     }
 
+    /// Get the configured maximum message size for transport-layer limits
+    ///
+    /// This should be used to configure max_frame_size at the WebSocket transport
+    /// layer to ensure consistency between transport and application limits.
+    pub fn max_message_size(&self) -> usize {
+        self.config.max_message_size
+    }
+
     /// Check subscription quota
     ///
     /// # Security

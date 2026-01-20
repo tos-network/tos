@@ -377,11 +377,18 @@ pub fn get_hex_genesis_block(network: &Network) -> Option<&str> {
 
 // Developer public key is lazily converted from address to support any network
 // SAFE: DEV_ADDRESS is a compile-time constant with a known valid format
-#[allow(clippy::expect_used)]
+// Panic on invalid address is intentional - daemon cannot start with invalid dev address
+#[allow(clippy::expect_used, clippy::panic)]
 fn create_dev_public_key() -> PublicKey {
-    Address::from_string(&DEV_ADDRESS)
-        .expect("valid dev address")
-        .to_public_key()
+    match Address::from_string(&DEV_ADDRESS) {
+        Ok(address) => address.to_public_key(),
+        Err(err) => {
+            panic!(
+                "FATAL: Invalid DEV_ADDRESS '{}': {} - daemon cannot start with invalid developer address",
+                DEV_ADDRESS, err
+            );
+        }
+    }
 }
 
 lazy_static! {

@@ -157,7 +157,8 @@ impl EnergyStatus {
         if self.energy == 0 {
             0.0
         } else {
-            ((self.energy - self.available_energy) as f64 / self.energy as f64) * 100.0
+            let used = self.energy.saturating_sub(self.available_energy);
+            (used as f64 / self.energy as f64) * 100.0
         }
     }
 

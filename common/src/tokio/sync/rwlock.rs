@@ -10,12 +10,11 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::{
-    pin,
     sync::{
         RwLock as InnerRwLock, RwLockReadGuard as InnerRwLockReadGuard,
         RwLockWriteGuard as InnerRwLockWriteGuard,
     },
-    time::interval,
+    time::timeout,
 };
 
 // Simple wrapper around RwLock
@@ -46,10 +45,15 @@ impl<T: ?Sized> RwLock<T> {
     fn show_locations(&self, location: &Location, write: bool) {
         let mut msg = String::new();
         {
-            let location = self
-                .active_write_location
-                .lock()
-                .expect("last write location");
+            let location = match self.active_write_location.lock() {
+                Ok(guard) => guard,
+                Err(err) => {
+                    if log::log_enabled!(log::Level::Warn) {
+                        error!("RwLock active write location lock poisoned");
+                    }
+                    err.into_inner()
+                }
+            };
             if let Some((location, start)) = location.as_ref() {
                 msg.push_str(&format!(
                     "\n- write guard at: {} since {:?}",
@@ -62,10 +66,15 @@ impl<T: ?Sized> RwLock<T> {
         }
 
         {
-            let locations = self
-                .active_read_locations
-                .lock()
-                .expect("last read locations");
+            let locations = match self.active_read_locations.lock() {
+                Ok(guard) => guard,
+                Err(err) => {
+                    if log::log_enabled!(log::Level::Warn) {
+                        error!("RwLock active read locations lock poisoned");
+                    }
+                    err.into_inner()
+                }
+            };
             for (i, (location, start)) in locations.iter().enumerate() {
                 msg.push_str(&format!(
                     "\n- read guard #{} at: {} since {:?}",
@@ -96,46 +105,42 @@ impl<T: ?Sized> RwLock<T> {
         }
 
         async move {
-            let mut interval = interval(Duration::from_secs(10));
-            // First tick is instant
-            interval.tick().await;
-
-            let future = self.inner.read();
-            pin!(future);
-
-            let mut show = true;
-            loop {
-                tokio::select! {
-                    _ = interval.tick() => {
-                        if show {
-                            self.show_locations(location, false);
-                            show = false;
-                        }
-                    }
-                    guard = &mut future => {
-                        let level = if !show {
-                            Level::Warn
-                        } else {
-                            Level::Debug
-                        };
-                        if log::log_enabled!(level) {
-                            log!(level, "RwLock {} read guard acquired at {}", self.init_location, location);
-                        }
-
-                        let mut locations = self.active_read_locations.lock().expect("active read locations");
-                        locations.push((location, Instant::now()));
-
-                        self.read_guards.fetch_add(1, Ordering::SeqCst);
-
-                        return RwLockReadGuard {
-                            init_location: self.init_location,
-                            inner: Some(guard),
-                            locations: self.active_read_locations.clone(),
-                            location,
-                            read_guards: self.read_guards.clone(),
-                        };
-                    }
+            let guard = match timeout(Duration::from_secs(10), self.inner.read()).await {
+                Ok(guard) => guard,
+                Err(_) => {
+                    self.show_locations(location, false);
+                    self.inner.read().await
                 }
+            };
+
+            if log::log_enabled!(log::Level::Debug) {
+                log!(
+                    Level::Debug,
+                    "RwLock {} read guard acquired at {}",
+                    self.init_location,
+                    location
+                );
+            }
+
+            let mut locations = match self.active_read_locations.lock() {
+                Ok(guard) => guard,
+                Err(err) => {
+                    if log::log_enabled!(log::Level::Warn) {
+                        error!("RwLock active read locations lock poisoned");
+                    }
+                    err.into_inner()
+                }
+            };
+            locations.push((location, Instant::now()));
+
+            self.read_guards.fetch_add(1, Ordering::SeqCst);
+
+            RwLockReadGuard {
+                init_location: self.init_location,
+                inner: Some(guard),
+                locations: self.active_read_locations.clone(),
+                location,
+                read_guards: self.read_guards.clone(),
             }
         }
     }
@@ -151,40 +156,37 @@ impl<T: ?Sized> RwLock<T> {
         }
 
         async move {
-            let mut interval = interval(Duration::from_secs(10));
-            // First tick is instant
-            interval.tick().await;
-
-            let future = self.inner.write();
-            pin!(future);
-
-            let mut show = true;
-            loop {
-                tokio::select! {
-                    _ = interval.tick() => {
-                        if !show {
-                            self.show_locations(location, true);
-                            show = false;
-                        }
-                    }
-                    guard = &mut future => {
-                        // It was maybe deadlocked, show it in warn
-                        let level = if !show {
-                            Level::Warn
-                        } else {
-                            Level::Debug
-                        };
-                        if log::log_enabled!(level) {
-                            log!(level, "RwLock {} write guard acquired at {}", self.init_location, location);
-                        }
-                        *self.active_write_location.lock().expect("last write location") = Some((location, Instant::now()));
-                        return RwLockWriteGuard {
-                            init_location: self.init_location,
-                            inner: Some(guard),
-                            active_location: self.active_write_location.clone(),
-                        };
-                    }
+            let guard = match timeout(Duration::from_secs(10), self.inner.write()).await {
+                Ok(guard) => guard,
+                Err(_) => {
+                    self.show_locations(location, true);
+                    self.inner.write().await
                 }
+            };
+
+            if log::log_enabled!(log::Level::Debug) {
+                log!(
+                    Level::Debug,
+                    "RwLock {} write guard acquired at {}",
+                    self.init_location,
+                    location
+                );
+            }
+
+            let mut active_location = match self.active_write_location.lock() {
+                Ok(guard) => guard,
+                Err(err) => {
+                    if log::log_enabled!(log::Level::Warn) {
+                        error!("RwLock active write location lock poisoned");
+                    }
+                    err.into_inner()
+                }
+            };
+            *active_location = Some((location, Instant::now()));
+            RwLockWriteGuard {
+                init_location: self.init_location,
+                inner: Some(guard),
+                active_location: self.active_write_location.clone(),
             }
         }
     }
@@ -201,20 +203,38 @@ pub struct RwLockReadGuard<'a, T: ?Sized> {
 
 impl<'a, T: ?Sized> Drop for RwLockReadGuard<'a, T> {
     fn drop(&mut self) {
-        {
-            let guard = self.inner.take().expect("drop");
+        if let Some(guard) = self.inner.take() {
             drop(guard);
+        } else if log::log_enabled!(log::Level::Warn) {
+            error!("RwLock read guard dropped without inner guard");
         }
 
         // We don't use a HashSet in case of multi threading where we would lock at same location
-        let mut locations = self.locations.lock().expect("locations");
+        let mut locations = match self.locations.lock() {
+            Ok(guard) => guard,
+            Err(err) => {
+                if log::log_enabled!(log::Level::Warn) {
+                    error!("RwLock read locations lock poisoned");
+                }
+                err.into_inner()
+            }
+        };
 
-        let index = locations
-            .iter()
-            .position(|(v, _)| *v == self.location)
-            .expect("location position");
-
-        let (_, lifetime) = locations.remove(index);
+        // Only remove if we find the location - don't remove index 0 as fallback
+        // which would corrupt tracking by removing the wrong entry
+        let lifetime = if let Some(index) = locations.iter().position(|(v, _)| *v == self.location)
+        {
+            let (_, lifetime) = locations.remove(index);
+            lifetime
+        } else {
+            if log::log_enabled!(log::Level::Error) {
+                error!(
+                    "RwLock read guard location missing at {}, cannot remove from tracking",
+                    self.location
+                );
+            }
+            Instant::now()
+        };
         let guards = self.read_guards.fetch_sub(1, Ordering::SeqCst);
         if log::log_enabled!(log::Level::Debug) {
             debug!(
@@ -232,7 +252,15 @@ impl<'a, T: ?Sized> Deref for RwLockReadGuard<'a, T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
-        self.inner.as_ref().expect("not dropped")
+        match self.inner.as_ref() {
+            Some(inner) => inner,
+            None => {
+                if log::log_enabled!(log::Level::Error) {
+                    error!("RwLock read guard used after drop");
+                }
+                panic!("RwLock read guard used after drop")
+            }
+        }
     }
 }
 
@@ -245,17 +273,23 @@ pub struct RwLockWriteGuard<'a, T: ?Sized> {
 
 impl<'a, T: ?Sized> Drop for RwLockWriteGuard<'a, T> {
     fn drop(&mut self) {
-        {
-            let guard = self.inner.take().expect("drop");
+        if let Some(guard) = self.inner.take() {
             drop(guard);
+        } else if log::log_enabled!(log::Level::Warn) {
+            error!("RwLock write guard dropped without inner guard");
         }
 
-        let (active_location, lifetime) = self
-            .active_location
-            .lock()
-            .expect("active write location")
-            .take()
-            .expect("active write location should be set");
+        let (active_location, lifetime) = match self.active_location.lock() {
+            Ok(mut guard) => guard.take().unwrap_or((self.init_location, Instant::now())),
+            Err(err) => {
+                if log::log_enabled!(log::Level::Warn) {
+                    error!("RwLock write location lock poisoned");
+                }
+                err.into_inner()
+                    .take()
+                    .unwrap_or((self.init_location, Instant::now()))
+            }
+        };
 
         if log::log_enabled!(log::Level::Debug) {
             debug!(
@@ -272,13 +306,29 @@ impl<'a, T: ?Sized> Deref for RwLockWriteGuard<'a, T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
-        self.inner.as_ref().expect("not dropped")
+        match self.inner.as_ref() {
+            Some(inner) => inner,
+            None => {
+                if log::log_enabled!(log::Level::Error) {
+                    error!("RwLock write guard used after drop");
+                }
+                panic!("RwLock write guard used after drop")
+            }
+        }
     }
 }
 
 impl<'a, T: ?Sized> DerefMut for RwLockWriteGuard<'a, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        self.inner.as_mut().expect("not dropped")
+        match self.inner.as_mut() {
+            Some(inner) => inner,
+            None => {
+                if log::log_enabled!(log::Level::Error) {
+                    error!("RwLock write guard used after drop");
+                }
+                panic!("RwLock write guard used after drop")
+            }
+        }
     }
 }
 

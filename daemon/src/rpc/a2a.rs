@@ -8,6 +8,7 @@ use actix_web::{
 use actix_ws::Message;
 use bytes::Bytes;
 use futures::StreamExt;
+use log::warn;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::borrow::Cow;
@@ -585,32 +586,71 @@ pub async fn a2a_websocket<S: Storage>(
     body: Payload,
 ) -> Result<HttpResponse, Error> {
     require_a2a_auth_http(&request, &[]).await?;
-    let (response, mut session, mut msg_stream) = actix_ws::handle(&request, body)?;
+    let (response, mut session, msg_stream) = actix_ws::handle(&request, body)?;
     let server = server.clone();
+    let security = server.websocket_security().clone();
+    // Apply frame size limit at transport layer to prevent DoS via large frames
+    // This rejects oversized frames before they are fully buffered into memory
+    // Use the configured max_message_size to ensure transport and application limits match
+    let mut msg_stream = msg_stream.max_frame_size(security.max_message_size());
 
     actix_web::rt::spawn(async move {
         while let Some(message) = msg_stream.next().await {
             let message = match message {
                 Ok(message) => message,
-                Err(_) => break,
+                Err(err) => {
+                    if log::log_enabled!(log::Level::Warn) {
+                        warn!("A2A websocket receive error: {}", err);
+                    }
+                    break;
+                }
             };
 
             match message {
                 Message::Text(text) => {
+                    if let Err(err) = security.validate_message_size(text.len()) {
+                        if log::log_enabled!(log::Level::Warn) {
+                            warn!("A2A websocket message rejected: {}", err);
+                        }
+                        let _ = session.close(None).await;
+                        break;
+                    }
                     if let Err(err) =
                         handle_a2a_ws_message(&server, &mut session, text.as_bytes()).await
                     {
-                        let _ = session.text(err.to_json().to_string()).await;
+                        if let Err(send_err) = session.text(err.to_json().to_string()).await {
+                            if log::log_enabled!(log::Level::Warn) {
+                                warn!("A2A websocket send error: {}", send_err);
+                            }
+                            break;
+                        }
                     }
                 }
                 Message::Binary(bytes) => {
+                    if let Err(err) = security.validate_message_size(bytes.len()) {
+                        if log::log_enabled!(log::Level::Warn) {
+                            warn!("A2A websocket message rejected: {}", err);
+                        }
+                        let _ = session.close(None).await;
+                        break;
+                    }
                     if let Err(err) = handle_a2a_ws_message(&server, &mut session, &bytes).await {
-                        let _ = session.text(err.to_json().to_string()).await;
+                        if let Err(send_err) = session.text(err.to_json().to_string()).await {
+                            if log::log_enabled!(log::Level::Warn) {
+                                warn!("A2A websocket send error: {}", send_err);
+                            }
+                            break;
+                        }
                     }
                 }
                 Message::Close(_) => break,
                 Message::Ping(bytes) => {
-                    let _ = session.pong(&bytes).await;
+                    if let Err(err) = session.pong(&bytes).await {
+                        if log::log_enabled!(log::Level::Warn) {
+                            warn!("A2A websocket pong error: {}", err);
+                        }
+                        break;
+                    }
                 }
                 Message::Pong(_) => {}
                 _ => {}

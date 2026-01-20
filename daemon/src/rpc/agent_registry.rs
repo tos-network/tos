@@ -10,6 +10,7 @@ use actix_web::{
     },
     web, Error as ActixError, HttpRequest, HttpResponse,
 };
+use log::warn;
 use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -128,9 +129,27 @@ static REGISTRY_RATE_LIMITER: OnceCell<RegistrationRateLimiter> = OnceCell::new(
 static SIGNATURE_NONCE_TRACKER: OnceCell<SignatureNonceTracker> = OnceCell::new();
 
 pub fn set_registration_rate_limit_config(config: RegistrationRateLimitConfig) {
-    let _ = REGISTRY_RATE_LIMIT_CONFIG.set(config);
-    let _ = REGISTRY_RATE_LIMITER.set(RegistrationRateLimiter::new(config));
-    let _ = SIGNATURE_NONCE_TRACKER.set(SignatureNonceTracker::new());
+    if REGISTRY_RATE_LIMIT_CONFIG.set(config).is_err() {
+        if log::log_enabled!(log::Level::Warn) {
+            warn!("Registration rate limit config already set");
+        }
+    }
+    if REGISTRY_RATE_LIMITER
+        .set(RegistrationRateLimiter::new(config))
+        .is_err()
+    {
+        if log::log_enabled!(log::Level::Warn) {
+            warn!("Registration rate limiter already set");
+        }
+    }
+    if SIGNATURE_NONCE_TRACKER
+        .set(SignatureNonceTracker::new())
+        .is_err()
+    {
+        if log::log_enabled!(log::Level::Warn) {
+            warn!("Signature nonce tracker already set");
+        }
+    }
 }
 
 /// Tracks used signature nonces per account to prevent replay attacks.

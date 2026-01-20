@@ -414,7 +414,7 @@ impl<S: Storage> P2pServer<S> {
         );
 
         let mut exit_receiver = self.exit_sender.subscribe();
-        loop {
+        while self.is_running() {
             select! {
                 biased;
                 _ = exit_receiver.recv() => {
