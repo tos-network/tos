@@ -89,6 +89,9 @@ pub struct A2AAuth {
     jwks_cache: RwLock<Option<JwksCache>>,
     nonces: Mutex<HashMap<String, i64>>,
     nonce_store: Option<Arc<dyn A2ANonceStore>>,
+    last_prune_time: std::sync::atomic::AtomicU64,
+    /// Continuation key for round-robin nonce pruning (ensures all keys are eventually scanned)
+    last_scan_key: RwLock<Option<Vec<u8>>>,
 }
 
 static AUTH: OnceCell<A2AAuth> = OnceCell::new();
@@ -137,6 +140,8 @@ impl A2AAuth {
             jwks_cache: RwLock::new(None),
             nonces: Mutex::new(HashMap::new()),
             nonce_store,
+            last_prune_time: std::sync::atomic::AtomicU64::new(0),
+            last_scan_key: RwLock::new(None),
         }
     }
 
@@ -325,7 +330,8 @@ impl A2AAuth {
             return Err(AuthError::TosSignatureExpired);
         }
 
-        // Check nonce uniqueness without storing (stores after signature verification)
+        // Early check for nonce uniqueness (non-atomic, for quick rejection)
+        // This also triggers periodic pruning of expired nonces
         self.check_nonce_unique(pubkey_hex, &nonce, now).await?;
 
         let body_hash = hex::encode(Sha256::digest(&meta.body));
@@ -354,8 +360,9 @@ impl A2AAuth {
             .map_err(|_| AuthError::TosPublicKeyInvalid)?;
 
         if signature.verify(canonical.as_bytes(), &public_key) {
-            // Only store nonce after successful signature verification
-            self.store_nonce(pubkey_hex, &nonce, now).await?;
+            // Atomically check-and-store nonce after successful signature verification
+            // This prevents TOCTOU race conditions where another thread could slip in
+            self.atomic_store_nonce(pubkey_hex, &nonce, now).await?;
             Ok(())
         } else {
             Err(AuthError::TosSignatureInvalid)
@@ -390,7 +397,8 @@ impl A2AAuth {
             return Err(AuthError::TosSignatureExpired);
         }
 
-        // Check nonce uniqueness without storing (stores after signature verification)
+        // Early check for nonce uniqueness (non-atomic, for quick rejection)
+        // This also triggers periodic pruning of expired nonces
         self.check_nonce_unique(pubkey_hex, &nonce, now).await?;
 
         let body_hash = hex::encode(Sha256::digest(&meta.body));
@@ -419,8 +427,9 @@ impl A2AAuth {
             .map_err(|_| AuthError::TosPublicKeyInvalid)?;
 
         if signature.verify(canonical.as_bytes(), &decompressed) {
-            // Only store nonce after successful signature verification
-            self.store_nonce(pubkey_hex, &nonce, now).await?;
+            // Atomically check-and-store nonce after successful signature verification
+            // This prevents TOCTOU race conditions where another thread could slip in
+            self.atomic_store_nonce(pubkey_hex, &nonce, now).await?;
             Ok(compressed_key)
         } else {
             Err(AuthError::TosSignatureInvalid)
@@ -434,16 +443,43 @@ impl A2AAuth {
         nonce: &str,
         now: i64,
     ) -> Result<(), AuthError> {
-        let nonce_key = format!("{}:{}", pubkey_hex, nonce);
+        // Canonicalize pubkey hex to lowercase to prevent replay bypass via case variation
+        // (hex decode is case-insensitive, so "ABC123" and "abc123" verify the same key)
+        let pubkey_canonical = pubkey_hex.to_ascii_lowercase();
+        let nonce_key = format!("{}:{}", pubkey_canonical, nonce);
         if let Some(store) = &self.nonce_store {
             let now_u64 = u64::try_from(now).map_err(|_| AuthError::TosNonceInvalid)?;
             let ttl = self.config.tos_nonce_ttl_secs.max(0) as u64;
             let cutoff = now_u64.saturating_sub(ttl);
 
+            // Time-based pruning: run if PRUNE_INTERVAL_SECS has passed since last prune
             const PRUNE_INTERVAL_SECS: u64 = 60;
             const MAX_PRUNE_SCAN: usize = 2000;
-            if now_u64 % PRUNE_INTERVAL_SECS == 0 {
-                let _ = store.prune_expired(cutoff, MAX_PRUNE_SCAN).await;
+            let last_prune = self
+                .last_prune_time
+                .load(std::sync::atomic::Ordering::Relaxed);
+            if now_u64.saturating_sub(last_prune) >= PRUNE_INTERVAL_SECS {
+                // Try to update last_prune_time atomically to avoid multiple concurrent prunes
+                if self
+                    .last_prune_time
+                    .compare_exchange(
+                        last_prune,
+                        now_u64,
+                        std::sync::atomic::Ordering::SeqCst,
+                        std::sync::atomic::Ordering::Relaxed,
+                    )
+                    .is_ok()
+                {
+                    // Use continuation-based scanning for round-robin fairness
+                    let start_key = self.last_scan_key.read().await.clone();
+                    let result = store
+                        .prune_expired(cutoff, MAX_PRUNE_SCAN, start_key.as_deref())
+                        .await;
+                    if let Ok((_, next_key)) = result {
+                        // Update the continuation key for next prune cycle
+                        *self.last_scan_key.write().await = next_key;
+                    }
+                }
             }
 
             if let Some(stored_ts) = store.get_nonce_timestamp(&nonce_key).await? {
@@ -464,33 +500,60 @@ impl A2AAuth {
         Ok(())
     }
 
-    /// Store nonce after successful signature verification
-    async fn store_nonce(&self, pubkey_hex: &str, nonce: &str, now: i64) -> Result<(), AuthError> {
-        let nonce_key = format!("{}:{}", pubkey_hex, nonce);
+    /// Atomically check and store nonce after successful signature verification.
+    /// This prevents TOCTOU race conditions between check_nonce_unique and store.
+    async fn atomic_store_nonce(
+        &self,
+        pubkey_hex: &str,
+        nonce: &str,
+        now: i64,
+    ) -> Result<(), AuthError> {
+        // Canonicalize pubkey hex to lowercase to prevent replay bypass via case variation
+        let pubkey_canonical = pubkey_hex.to_ascii_lowercase();
+        let nonce_key = format!("{}:{}", pubkey_canonical, nonce);
+        let now_u64 = u64::try_from(now).map_err(|_| AuthError::TosNonceInvalid)?;
+        let ttl = self.config.tos_nonce_ttl_secs.max(0) as u64;
+        let cutoff = now_u64.saturating_sub(ttl);
+
         if let Some(store) = &self.nonce_store {
-            let now_u64 = u64::try_from(now).map_err(|_| AuthError::TosNonceInvalid)?;
-            store.set_nonce_timestamp(&nonce_key, now_u64).await?;
+            // Use atomic check-and-store to prevent TOCTOU race conditions
+            let stored = store
+                .check_and_store_nonce(&nonce_key, now_u64, cutoff)
+                .await?;
+            if !stored {
+                // Another thread already stored this nonce - replay detected
+                return Err(AuthError::TosNonceInvalid);
+            }
             return Ok(());
         }
 
+        // In-memory fallback: mutex provides atomicity
         const MAX_NONCES: usize = 10000;
-        if let Ok(mut guard) = self.nonces.lock() {
-            // Enforce max cache size to prevent memory growth
-            if guard.len() >= MAX_NONCES {
-                // Remove oldest entries
-                let mut entries: Vec<_> = guard.iter().map(|(k, v)| (k.clone(), *v)).collect();
-                entries.sort_by_key(|(_, ts)| *ts);
-                let to_remove: Vec<_> = entries
-                    .iter()
-                    .take(entries.len().saturating_sub(MAX_NONCES / 2))
-                    .map(|(k, _)| k.clone())
-                    .collect();
-                for k in to_remove {
-                    guard.remove(&k);
-                }
+        let mut guard = self.nonces.lock().map_err(|_| AuthError::TosNonceInvalid)?;
+
+        // Check again under lock (for atomicity with in-memory store)
+        if let Some(stored_ts) = guard.get(&nonce_key) {
+            if now.saturating_sub(*stored_ts) <= self.config.tos_nonce_ttl_secs {
+                // Nonce exists and is not expired - replay detected
+                return Err(AuthError::TosNonceInvalid);
             }
-            guard.insert(nonce_key, now);
         }
+
+        // Enforce max cache size to prevent memory growth
+        if guard.len() >= MAX_NONCES {
+            // Remove oldest entries
+            let mut entries: Vec<_> = guard.iter().map(|(k, v)| (k.clone(), *v)).collect();
+            entries.sort_by_key(|(_, ts)| *ts);
+            let to_remove: Vec<_> = entries
+                .iter()
+                .take(entries.len().saturating_sub(MAX_NONCES / 2))
+                .map(|(k, _)| k.clone())
+                .collect();
+            for k in to_remove {
+                guard.remove(&k);
+            }
+        }
+        guard.insert(nonce_key, now);
         Ok(())
     }
 }

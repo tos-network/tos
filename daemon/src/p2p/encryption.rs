@@ -110,7 +110,9 @@ impl Encryption {
     // Generate a new random key
     pub fn generate_key(&self) -> Result<EncryptionKey, EncryptionError> {
         let mut key = EncryptionKey::default();
-        OsRng.fill_bytes(&mut key);
+        OsRng
+            .try_fill_bytes(&mut key)
+            .map_err(|_| EncryptionError::Rng)?;
         Ok(key)
     }
 
