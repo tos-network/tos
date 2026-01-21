@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::{Semaphore, Mutex};
+use tokio::sync::{Mutex, Semaphore};
 use tokio::task::JoinSet;
 
 /// Stress Test 1: High concurrent transaction submissions (1000+ concurrent)
@@ -67,7 +67,10 @@ async fn stress_concurrent_transaction_submissions() {
         log::info!("Transaction stress test completed in {:?}", elapsed);
         log::info!("Successful transactions: {}", final_success);
         log::info!("Failed transactions: {}", final_errors);
-        log::info!("Throughput: {:.2} tx/sec", TOTAL_TRANSACTIONS as f64 / elapsed.as_secs_f64());
+        log::info!(
+            "Throughput: {:.2} tx/sec",
+            TOTAL_TRANSACTIONS as f64 / elapsed.as_secs_f64()
+        );
     }
 
     // Expected Results:
@@ -78,9 +81,15 @@ async fn stress_concurrent_transaction_submissions() {
 
     assert_eq!(final_success + final_errors, TOTAL_TRANSACTIONS);
 
-    println!("Processed {} transactions in {:?}", TOTAL_TRANSACTIONS, elapsed);
+    println!(
+        "Processed {} transactions in {:?}",
+        TOTAL_TRANSACTIONS, elapsed
+    );
     println!("Success: {}, Errors: {}", final_success, final_errors);
-    println!("Throughput: {:.2} tx/sec", TOTAL_TRANSACTIONS as f64 / elapsed.as_secs_f64());
+    println!(
+        "Throughput: {:.2} tx/sec",
+        TOTAL_TRANSACTIONS as f64 / elapsed.as_secs_f64()
+    );
 }
 
 /// Stress Test 2: Transaction validation under pressure
@@ -104,9 +113,7 @@ async fn stress_transaction_validation_pressure() {
         // Validate all transactions concurrently
         let mut tasks = Vec::new();
         for tx in transactions {
-            tasks.push(tokio::spawn(async move {
-                validate_transaction(tx).await
-            }));
+            tasks.push(tokio::spawn(async move { validate_transaction(tx).await }));
         }
 
         // Wait for validation to complete
@@ -124,8 +131,14 @@ async fn stress_transaction_validation_pressure() {
         validation_times.push(round_elapsed);
 
         if log::log_enabled!(log::Level::Debug) {
-            log::debug!("Round {}: validated {} txs in {:?} ({} valid, {} invalid)",
-                       round, TXS_PER_ROUND, round_elapsed, valid_count, invalid_count);
+            log::debug!(
+                "Round {}: validated {} txs in {:?} ({} valid, {} invalid)",
+                round,
+                TXS_PER_ROUND,
+                round_elapsed,
+                valid_count,
+                invalid_count
+            );
         }
     }
 
@@ -142,10 +155,18 @@ async fn stress_transaction_validation_pressure() {
     if log::log_enabled!(log::Level::Info) {
         log::info!("Validation stress test completed in {:?}", elapsed);
         log::info!("Average round time: {:?}", avg_time);
-        log::info!("Min: {:?}, Max: {:?}, P95: {:?}", min_time, max_time, p95_time);
+        log::info!(
+            "Min: {:?}, Max: {:?}, P95: {:?}",
+            min_time,
+            max_time,
+            p95_time
+        );
     }
 
-    println!("Validated {} rounds of {} transactions each", VALIDATION_ROUNDS, TXS_PER_ROUND);
+    println!(
+        "Validated {} rounds of {} transactions each",
+        VALIDATION_ROUNDS, TXS_PER_ROUND
+    );
     println!("Average time per round: {:?}", avg_time);
     println!("P95 latency: {:?}", p95_time);
 
@@ -167,16 +188,13 @@ async fn stress_mempool_saturation() {
 
     let mempool = MockMempool::new(MAX_MEMPOOL_SIZE);
     let start = Instant::now();
-    let mut total_submitted = 0;
-    let mut total_accepted = 0;
-    let mut total_rejected = 0;
 
     // Spawn transaction submitter
     let mempool_clone = mempool.clone();
     let submitter = tokio::spawn(async move {
         let mut tx_id = 0;
         let interval = Duration::from_millis(1000 / SUBMISSION_RATE as u64);
-        let mut last_submit = Instant::now();
+        let last_submit = Instant::now();
 
         loop {
             if last_submit.elapsed() >= Duration::from_secs(TEST_DURATION_SECS) {
@@ -217,17 +235,21 @@ async fn stress_mempool_saturation() {
         processed
     });
 
-    total_submitted = submitter.await.unwrap();
-    total_accepted = processor.await.unwrap();
-    total_rejected = total_submitted - total_accepted;
+    let total_submitted = submitter.await.unwrap();
+    let total_accepted = processor.await.unwrap();
+    let total_rejected = total_submitted - total_accepted;
 
     let elapsed = start.elapsed();
     let current_size = mempool.size().await;
 
     if log::log_enabled!(log::Level::Info) {
         log::info!("Mempool saturation test completed in {:?}", elapsed);
-        log::info!("Submitted: {}, Accepted: {}, Rejected: {}",
-                  total_submitted, total_accepted, total_rejected);
+        log::info!(
+            "Submitted: {}, Accepted: {}, Rejected: {}",
+            total_submitted,
+            total_accepted,
+            total_rejected
+        );
         log::info!("Final mempool size: {}", current_size);
     }
 
@@ -294,14 +316,20 @@ async fn stress_double_spend_detection() {
 
     if log::log_enabled!(log::Level::Info) {
         log::info!("Double-spend detection test completed in {:?}", elapsed);
-        log::info!("Accepted: {}, Rejected (double-spend): {}, Rejected (other): {}",
-                  final_results.accepted, final_results.rejected_double_spend,
-                  final_results.rejected_other);
+        log::info!(
+            "Accepted: {}, Rejected (double-spend): {}, Rejected (other): {}",
+            final_results.accepted,
+            final_results.rejected_double_spend,
+            final_results.rejected_other
+        );
     }
 
     println!("Double-spend detection results:");
     println!("  Accepted: {}", final_results.accepted);
-    println!("  Rejected (double-spend): {}", final_results.rejected_double_spend);
+    println!(
+        "  Rejected (double-spend): {}",
+        final_results.rejected_double_spend
+    );
     println!("  Rejected (other): {}", final_results.rejected_other);
     println!("  Total attempts: {}", NUM_ACCOUNTS * ATTEMPTS_PER_ACCOUNT);
 
@@ -399,6 +427,7 @@ fn create_conflicting_transaction(account_id: usize, nonce: usize) -> MockTransa
 // ============================================================================
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct MockTransaction {
     id: usize,
     sender: String,

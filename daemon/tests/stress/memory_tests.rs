@@ -1,8 +1,6 @@
 // Memory Stress Tests
 // Tests memory usage and leak detection under various conditions
 
-use std::time::Instant;
-
 /// Memory Stress Test 1: Memory pressure with large DAG
 #[tokio::test]
 #[ignore = "Requires full storage and blockchain implementation"]

@@ -3,6 +3,7 @@
 
 pub mod high_load;
 pub mod memory_tests;
-pub mod transaction_stress;
-pub mod storage_stress;
 pub mod network_stress;
+pub mod storage_semaphore_stress;
+pub mod storage_stress;
+pub mod transaction_stress;

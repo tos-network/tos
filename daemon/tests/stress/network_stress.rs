@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::{Semaphore, Mutex, RwLock};
+use tokio::sync::{Mutex, RwLock, Semaphore};
 use tokio::task::JoinSet;
 
 /// Stress Test 1: High peer count simulation (100+ concurrent peers)
@@ -70,7 +70,11 @@ async fn stress_high_peer_count() {
 
     if log::log_enabled!(log::Level::Info) {
         log::info!("High peer count test completed in {:?}", elapsed);
-        log::info!("Total messages sent: {}, received: {}", total_sent, total_received);
+        log::info!(
+            "Total messages sent: {}, received: {}",
+            total_sent,
+            total_received
+        );
         log::info!("Network stats: {:?}", network_stats);
     }
 
@@ -79,7 +83,10 @@ async fn stress_high_peer_count() {
     println!("  Messages sent: {}", total_sent);
     println!("  Messages received: {}", total_received);
     println!("  Duration: {:?}", elapsed);
-    println!("  Message rate: {:.2} msgs/sec", total_sent as f64 / elapsed.as_secs_f64());
+    println!(
+        "  Message rate: {:.2} msgs/sec",
+        total_sent as f64 / elapsed.as_secs_f64()
+    );
     println!("  Dropped messages: {}", network_stats.dropped_messages);
     println!("  Average latency: {:?}", network_stats.average_latency);
 
@@ -106,8 +113,11 @@ async fn stress_high_message_volume() {
     let message_count = Arc::new(Mutex::new(0usize));
 
     if log::log_enabled!(log::Level::Info) {
-        log::info!("Starting high message volume test: {} msgs/sec for {}s",
-                  MESSAGES_PER_SECOND, TEST_DURATION_SECS);
+        log::info!(
+            "Starting high message volume test: {} msgs/sec for {}s",
+            MESSAGES_PER_SECOND,
+            TEST_DURATION_SECS
+        );
     }
 
     // Message sender
@@ -163,15 +173,25 @@ async fn stress_high_message_volume() {
 
     if log::log_enabled!(log::Level::Info) {
         log::info!("High message volume test completed in {:?}", elapsed);
-        log::info!("Messages sent: {}, processed: {}", total_sent, total_processed);
+        log::info!(
+            "Messages sent: {}, processed: {}",
+            total_sent,
+            total_processed
+        );
     }
 
     println!("High message volume stress test results:");
     println!("  Messages sent: {}", total_sent);
     println!("  Messages processed: {}", total_processed);
     println!("  Duration: {:?}", elapsed);
-    println!("  Send rate: {:.2} msgs/sec", total_sent as f64 / elapsed.as_secs_f64());
-    println!("  Process rate: {:.2} msgs/sec", total_processed as f64 / elapsed.as_secs_f64());
+    println!(
+        "  Send rate: {:.2} msgs/sec",
+        total_sent as f64 / elapsed.as_secs_f64()
+    );
+    println!(
+        "  Process rate: {:.2} msgs/sec",
+        total_processed as f64 / elapsed.as_secs_f64()
+    );
     println!("  Queue depth (peak): {}", network_stats.peak_queue_depth);
 
     // Expected Results:
@@ -194,7 +214,10 @@ async fn stress_network_partition_recovery() {
     let network = Arc::new(MockNetwork::new(NUM_PEERS));
 
     if log::log_enabled!(log::Level::Info) {
-        log::info!("Starting network partition test with {} partitions", NUM_PARTITIONS);
+        log::info!(
+            "Starting network partition test with {} partitions",
+            NUM_PARTITIONS
+        );
     }
 
     for partition_num in 0..NUM_PARTITIONS {
@@ -231,8 +254,12 @@ async fn stress_network_partition_recovery() {
         let stats_after = network.get_stats().await;
 
         if log::log_enabled!(log::Level::Debug) {
-            log::debug!("Partition {} stats - During: {:?}, After: {:?}",
-                       partition_num, stats_during, stats_after);
+            log::debug!(
+                "Partition {} stats - During: {:?}, After: {:?}",
+                partition_num,
+                stats_during,
+                stats_after
+            );
         }
 
         // Verify network recovered
@@ -271,8 +298,11 @@ async fn stress_block_propagation() {
     let propagation_times = Arc::new(Mutex::new(Vec::new()));
 
     if log::log_enabled!(log::Level::Info) {
-        log::info!("Starting block propagation test: {} blocks to {} peers",
-                  NUM_BLOCKS, NUM_PEERS);
+        log::info!(
+            "Starting block propagation test: {} blocks to {} peers",
+            NUM_BLOCKS,
+            NUM_PEERS
+        );
     }
 
     let semaphore = Arc::new(Semaphore::new(CONCURRENT_PROPAGATIONS));
@@ -330,8 +360,12 @@ async fn stress_block_propagation() {
     if log::log_enabled!(log::Level::Info) {
         log::info!("Block propagation test completed in {:?}", elapsed);
         log::info!("Successful: {}, Failed: {}", successful, failed);
-        log::info!("Average propagation: {:?}, P95: {:?}, Max: {:?}",
-                  avg_time, p95_time, max_time);
+        log::info!(
+            "Average propagation: {:?}, P95: {:?}, Max: {:?}",
+            avg_time,
+            p95_time,
+            max_time
+        );
     }
 
     println!("Block propagation stress test results:");
@@ -340,7 +374,10 @@ async fn stress_block_propagation() {
     println!("  Average propagation time: {:?}", avg_time);
     println!("  P95 propagation time: {:?}", p95_time);
     println!("  Max propagation time: {:?}", max_time);
-    println!("  Throughput: {:.2} blocks/sec", successful as f64 / elapsed.as_secs_f64());
+    println!(
+        "  Throughput: {:.2} blocks/sec",
+        successful as f64 / elapsed.as_secs_f64()
+    );
 
     // Expected Results:
     // - All blocks propagate successfully
@@ -366,7 +403,10 @@ async fn stress_connection_churn() {
     let mut peer_id_counter = INITIAL_PEERS;
 
     if log::log_enabled!(log::Level::Info) {
-        log::info!("Starting connection churn test with {} events", CHURN_EVENTS);
+        log::info!(
+            "Starting connection churn test with {} events",
+            CHURN_EVENTS
+        );
     }
 
     for event in 0..CHURN_EVENTS {
@@ -392,8 +432,12 @@ async fn stress_connection_churn() {
 
         if event % 50 == 0 {
             if log::log_enabled!(log::Level::Debug) {
-                log::debug!("Churn event {}/{}, current peers: {}",
-                           event, CHURN_EVENTS, current_peers);
+                log::debug!(
+                    "Churn event {}/{}, current peers: {}",
+                    event,
+                    CHURN_EVENTS,
+                    current_peers
+                );
             }
         }
 
@@ -406,13 +450,20 @@ async fn stress_connection_churn() {
 
     if log::log_enabled!(log::Level::Info) {
         log::info!("Connection churn test completed in {:?}", elapsed);
-        log::info!("Initial peers: {}, Final peers: {}", INITIAL_PEERS, final_peers);
+        log::info!(
+            "Initial peers: {}, Final peers: {}",
+            INITIAL_PEERS,
+            final_peers
+        );
         log::info!("Network stats: {:?}", network_stats);
     }
 
     println!("Connection churn stress test results:");
     println!("  Churn events: {}", CHURN_EVENTS);
-    println!("  Initial peers: {}, Final peers: {}", INITIAL_PEERS, final_peers);
+    println!(
+        "  Initial peers: {}, Final peers: {}",
+        INITIAL_PEERS, final_peers
+    );
     println!("  Duration: {:?}", elapsed);
     println!("  Messages sent: {}", network_stats.total_messages_sent);
     println!("  Connection errors: {}", network_stats.connection_errors);
@@ -429,6 +480,7 @@ async fn stress_connection_churn() {
 // ============================================================================
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct NetworkMessage {
     sender_id: usize,
     message_id: usize,
@@ -446,6 +498,7 @@ impl NetworkMessage {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct MockBlock {
     id: usize,
     data: Vec<u8>,
@@ -468,6 +521,7 @@ impl MockBlock {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct PeerStats {
     peer_id: usize,
     messages_sent: usize,
