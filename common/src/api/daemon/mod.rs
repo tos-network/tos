@@ -1787,9 +1787,6 @@ pub struct GetAssetSupplyAtTopoHeightParams {
     pub topoheight: TopoHeight,
 }
 
-// Note: get_estimated_fee_per_kb is not implemented in TOS
-// TOS uses get_estimated_fee_rates for fee estimation.
-
 /// Registered contract execution info
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegisteredExecution {
