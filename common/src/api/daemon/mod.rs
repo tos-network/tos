@@ -2478,3 +2478,26 @@ pub struct ArbiterWithdrawStatus {
 pub struct EstimateWithdrawableAmountResult {
     pub available: u64,
 }
+
+// ============================================================================
+// Additional RPC Structs
+// ============================================================================
+
+/// Parameters for get_contract_logs RPC method
+/// This is an alias for get_contract_events with tx_hash parameter
+#[derive(Serialize, Deserialize)]
+pub struct GetContractLogsParams<'a> {
+    /// The transaction hash (caller) to get contract logs for
+    pub caller: Cow<'a, Hash>,
+}
+
+/// Result for get_estimated_fee_per_kb RPC method
+/// Returns the default FEE_PER_KB for both fields
+/// since TOS uses a static fee model
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PredicatedBaseFeeResult {
+    /// Current fee per KB based on the blockchain state
+    pub fee_per_kb: u64,
+    /// Predicated fee per KB based on the mempool state
+    pub predicated_fee_per_kb: u64,
+}

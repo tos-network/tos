@@ -5649,7 +5649,7 @@ dependencies = [
 
 [[package]]
 name = "tos-tck"
-version = "0.1.14"
+version = "0.1.15"
 dependencies = [
  "anyhow",
  "arbitrary",
@@ -5703,7 +5703,7 @@ dependencies = [
 
 [[package]]
 name = "tos_common"
-version = "0.1.14"
+version = "0.1.15"
 dependencies = [
  "actix-rt",
  "actix-web",
@@ -5763,7 +5763,7 @@ dependencies = [
 
 [[package]]
 name = "tos_daemon"
-version = "0.1.14"
+version = "0.1.15"
 dependencies = [
  "actix-web",
  "actix-ws",
@@ -5840,7 +5840,7 @@ dependencies = [
 
 [[package]]
 name = "tos_genesis"
-version = "0.1.14"
+version = "0.1.15"
 dependencies = [
  "hex",
  "indexmap 2.13.0",
@@ -5849,7 +5849,7 @@ dependencies = [
 
 [[package]]
 name = "tos_miner"
-version = "0.1.14"
+version = "0.1.15"
 dependencies = [
  "anyhow",
  "clap",
@@ -5866,7 +5866,7 @@ dependencies = [
 
 [[package]]
 name = "tos_wallet"
-version = "0.1.14"
+version = "0.1.15"
 dependencies = [
  "actix-web",
  "actix-web-httpauth",
