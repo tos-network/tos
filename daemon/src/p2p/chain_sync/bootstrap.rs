@@ -454,6 +454,7 @@ impl<S: Storage> P2pServer<S> {
                 StepResponse::ChainInfo(common_point, topoheight, height, hash) => {
                     // first, check the common point in case we deviated from the chain
                     if let Some(common_point) = common_point {
+                        let _permit = self.blockchain.storage_semaphore().acquire().await?;
                         let mut storage = self.blockchain.get_storage().write().await;
                         if log::log_enabled!(log::Level::Debug) {
                             debug!(
@@ -528,6 +529,7 @@ impl<S: Storage> P2pServer<S> {
                 // fetch all assets from peer
                 StepResponse::Assets(assets, next_page) => {
                     {
+                        let _permit = self.blockchain.storage_semaphore().acquire().await?;
                         let mut storage = self.blockchain.get_storage().write().await;
                         for (asset, data) in assets {
                             if log::log_enabled!(log::Level::Info) {
@@ -742,6 +744,7 @@ impl<S: Storage> P2pServer<S> {
                                 }
 
                                 // link its TX to the block
+                                let _permit = self.blockchain.storage_semaphore().acquire().await?;
                                 let mut storage = self.blockchain.get_storage().write().await;
                                 for tx_hash in header.get_txs_hashes() {
                                     storage
@@ -786,6 +789,7 @@ impl<S: Storage> P2pServer<S> {
                         )
                         .await?;
 
+                    let _permit = self.blockchain.storage_semaphore().acquire().await?;
                     let mut storage = self.blockchain.get_storage().write().await;
 
                     if !is_fresh_sync {
@@ -875,6 +879,7 @@ impl<S: Storage> P2pServer<S> {
             return Err(P2pError::InvalidPacket.into());
         };
 
+        let _permit = self.blockchain.storage_semaphore().acquire().await?;
         let mut storage = self.blockchain.get_storage().write().await;
         // save all nonces
         for (key, (nonce, multisig)) in keys.iter().zip(nonces) {
@@ -1012,6 +1017,7 @@ impl<S: Storage> P2pServer<S> {
 
                         let mut highest_topoheight = None;
                         let mut total_versions = 0;
+                        let mut pending_writes: Vec<(u64, VersionedBalance)> = Vec::new();
                         // Go through all balance history
                         while let Some(max) = max_topoheight {
                             if log::log_enabled!(log::Level::Debug) {
@@ -1035,9 +1041,7 @@ impl<S: Storage> P2pServer<S> {
 
                                 if let Some((prev_topo, mut prev)) = previous_version {
                                     prev.set_previous_topoheight(Some(topo));
-
-                                    let mut storage = blockchain.get_storage().write().await;
-                                    storage.set_balance_at_topoheight(&asset, prev_topo, &key, &prev).await?;
+                                    pending_writes.push((prev_topo, prev));
                                 }
 
                                 previous_version = Some((topo, version));
@@ -1048,14 +1052,20 @@ impl<S: Storage> P2pServer<S> {
 
                         // Store the oldest balance version
                         if let Some((topo, prev)) = previous_version {
-                            let mut storage = blockchain.get_storage().write().await;
-                            storage.set_balance_at_topoheight(&asset, topo, &key, &prev).await?;
+                            pending_writes.push((topo, prev));
                         }
 
-                        // Store the highest topoheight as the last topoheight for this asset balance
-                        if let Some(highest_topoheight) = highest_topoheight {
+                        if !pending_writes.is_empty() || highest_topoheight.is_some() {
+                            let _permit = blockchain.storage_semaphore().acquire().await?;
                             let mut storage = blockchain.get_storage().write().await;
-                            storage.set_last_topoheight_for_balance(&key, &asset, highest_topoheight)?;
+                            for (topo, prev) in pending_writes {
+                                storage.set_balance_at_topoheight(&asset, topo, &key, &prev).await?;
+                            }
+
+                            // Store the highest topoheight as the last topoheight for this asset balance
+                            if let Some(highest_topoheight) = highest_topoheight {
+                                storage.set_last_topoheight_for_balance(&key, &asset, highest_topoheight)?;
+                            }
                         }
 
                         if log::log_enabled!(log::Level::Info) {
@@ -1164,6 +1174,7 @@ impl<S: Storage> P2pServer<S> {
             return Err(P2pError::InvalidPacket.into());
         };
 
+        let _permit = self.blockchain.storage_semaphore().acquire().await?;
         let mut storage = self.blockchain.get_storage().write().await;
         match metadata {
             // It wasn't found on their side or was deleted
@@ -1232,6 +1243,7 @@ impl<S: Storage> P2pServer<S> {
                 return Err(P2pError::InvalidPacket.into());
             };
 
+            let _permit = self.blockchain.storage_semaphore().acquire().await?;
             let mut storage = self.blockchain.get_storage().write().await;
             for (asset, balance) in balances {
                 storage
@@ -1279,6 +1291,7 @@ impl<S: Storage> P2pServer<S> {
                 return Err(P2pError::InvalidPacket.into());
             };
 
+            let _permit = self.blockchain.storage_semaphore().acquire().await?;
             let mut storage = self.blockchain.get_storage().write().await;
             for (key, value) in entries {
                 storage
