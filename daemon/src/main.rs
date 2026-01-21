@@ -260,7 +260,11 @@ async fn start_chain<S: Storage>(
         }
     }
 
-    blockchain.stop().await;
+    if let Err(e) = blockchain.stop().await {
+        if log::log_enabled!(log::Level::Error) {
+            error!("Error while stopping blockchain: {}", e);
+        }
+    }
     Ok(())
 }
 

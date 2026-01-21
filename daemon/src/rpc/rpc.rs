@@ -6204,9 +6204,14 @@ async fn shutdown<S: Storage>(context: &Context, body: Value) -> Result<Value, I
         let shutdown_result = tokio::time::timeout(timeout_duration, blockchain_clone.stop()).await;
 
         match shutdown_result {
-            Ok(()) => {
+            Ok(Ok(())) => {
                 if log::log_enabled!(log::Level::Info) {
                     info!("Graceful shutdown complete, exiting process");
+                }
+            }
+            Ok(Err(e)) => {
+                if log::log_enabled!(log::Level::Error) {
+                    log::error!("Graceful shutdown failed: {}", e);
                 }
             }
             Err(_) => {
