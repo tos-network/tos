@@ -31,7 +31,7 @@ use std::{
     fmt::{self, Display, Formatter},
     fs::{self, create_dir_all},
     future::Future,
-    io::{self, Write},
+    io::{self},
     path::Path,
     pin::Pin,
     str::FromStr,
@@ -678,13 +678,13 @@ impl Prompt {
         let file = fs::File::create(zip_file_path)?;
         let mut zip = zip::ZipWriter::new(file);
 
-        let log_file_data = fs::read(log_file_path)?;
         let options = zip::write::SimpleFileOptions::default()
             .compression_method(zip::CompressionMethod::Zstd)
             .large_file(true);
 
         zip.start_file(log_file_path, options)?;
-        zip.write_all(&log_file_data)?;
+        let mut input = fs::File::open(log_file_path)?;
+        io::copy(&mut input, &mut zip)?;
         zip.finish()?;
 
         // Delete the original log file

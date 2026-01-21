@@ -1,6 +1,6 @@
 [package]
 name = "tos_daemon"
-version = "0.1.14"
+version = "0.1.15"
 edition = "2021"
 authors = ["TOS Network Team <info@tos.network>"]
 license = "BSD-3-Clause"

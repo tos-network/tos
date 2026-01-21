@@ -5267,7 +5267,7 @@ impl<S: Storage> Blockchain<S> {
         let count_hash = provider.get_hash_at_topo_height(topoheight - count).await?;
         let count_timestamp = provider.get_timestamp_for_block_hash(&count_hash).await?;
 
-        let diff = now_timestamp - count_timestamp;
+        let diff = now_timestamp.saturating_sub(count_timestamp);
         Ok(diff / count)
     }
 }

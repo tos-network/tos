@@ -75,7 +75,7 @@ pub fn calculate_difficulty(
     minimum_difficulty: Difficulty,
     version: BlockVersion,
 ) -> (Difficulty, VarUint) {
-    let solve_time = (timestamp - parent_timestamp).max(1);
+    let solve_time = timestamp.saturating_sub(parent_timestamp).max(1);
 
     let block_time_target = get_block_time_target_for_version(version);
     // All versions use V2 algorithm
