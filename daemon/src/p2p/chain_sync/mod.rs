@@ -994,6 +994,9 @@ impl<S: Storage> P2pServer<S> {
     }
 
     // Try to re-execute the block requested if its not included in DAG order (it has no topoheight assigned)
+    // NOTE: Check and delete must be done atomically within the same write lock
+    // to prevent race conditions where another thread orders the block between
+    // the check and the delete operation.
     async fn try_re_execution_block_with_storage(
         &self,
         hash: Immutable<Hash>,
@@ -1008,21 +1011,19 @@ impl<S: Storage> P2pServer<S> {
             return Ok(());
         }
 
-        {
-            let storage = holder.read().await?;
+        if log::log_enabled!(log::Level::Warn) {
+            warn!("Forcing block {} re-execution", hash);
+        }
+        let block = {
+            let mut storage = holder.write().await?;
+            // Check inside write lock to prevent race condition
             if storage.is_block_topological_ordered(&hash).await? {
                 if log::log_enabled!(log::Level::Trace) {
                     trace!("block {} is already ordered", hash);
                 }
                 return Ok(());
             }
-        }
 
-        if log::log_enabled!(log::Level::Warn) {
-            warn!("Forcing block {} re-execution", hash);
-        }
-        let block = {
-            let mut storage = holder.write().await?;
             debug!("storage write acquired for block forced re-execution");
 
             let block = storage.delete_block_with_hash(&hash).await?;
