@@ -233,7 +233,7 @@ use tos_common::{
     asset::RPCAssetData,
     async_handler,
     block::{Block, BlockHeader, MinerWork, TopoHeight},
-    config::{MAXIMUM_SUPPLY, MAX_TRANSACTION_SIZE, TOS_ASSET, UNO_ASSET, VERSION},
+    config::{FEE_PER_KB, MAXIMUM_SUPPLY, MAX_TRANSACTION_SIZE, TOS_ASSET, UNO_ASSET, VERSION},
     context::Context,
     contract::ScheduledExecution,
     crypto::{elgamal::CompressedPublicKey, Address, AddressType, Hash},
@@ -704,6 +704,11 @@ pub fn register_methods<S: Storage>(
         "get_estimated_fee_rates",
         async_handler!(get_estimated_fee_rates::<S>),
     );
+    // Returns FEE_PER_KB as base fee (TOS uses static fee model)
+    handler.register_method(
+        "get_estimated_fee_per_kb",
+        async_handler!(get_estimated_fee_per_kb::<S>),
+    );
 
     handler.register_method("get_dag_order", async_handler!(get_dag_order::<S>));
     handler.register_method(
@@ -808,6 +813,8 @@ pub fn register_methods<S: Storage>(
         "get_contract_events",
         async_handler!(get_contract_events::<S>),
     );
+    // Alias for get_contract_events with tx_hash parameter
+    handler.register_method("get_contract_logs", async_handler!(get_contract_logs::<S>));
     handler.register_method(
         "get_contract_scheduled_executions_at_topoheight",
         async_handler!(get_contract_scheduled_executions_at_topoheight::<S>),
@@ -1892,6 +1899,24 @@ async fn get_estimated_fee_rates<S: Storage>(
     let mempool = blockchain.get_mempool().read().await;
     let estimated = mempool.estimate_fee_rates()?;
     Ok(json!(estimated))
+}
+
+/// Get estimated fee per KB
+///
+/// Returns the base fee per KB for transaction fee calculation.
+/// TOS uses a static FEE_PER_KB (no dynamic block-size-based fee adjustment).
+///
+/// Both `fee_per_kb` and `predicated_fee_per_kb` return the same value (FEE_PER_KB).
+async fn get_estimated_fee_per_kb<S: Storage>(
+    _context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    require_no_params(body)?;
+
+    Ok(json!(PredicatedBaseFeeResult {
+        fee_per_kb: FEE_PER_KB,
+        predicated_fee_per_kb: FEE_PER_KB,
+    }))
 }
 
 async fn get_blocks_at_height<S: Storage>(
@@ -3622,6 +3647,36 @@ async fn get_contract_events<S: Storage>(
     Ok(json!(events))
 }
 
+/// Get contract logs by transaction hash
+///
+/// This is an alias for get_contract_events with tx_hash parameter.
+/// Returns contract events (LOG0-LOG4) emitted by the specified transaction.
+async fn get_contract_logs<S: Storage>(
+    context: &Context,
+    body: Value,
+) -> Result<Value, InternalRpcError> {
+    let params: GetContractLogsParams = parse_params(body)?;
+    let blockchain: &Arc<Blockchain<S>> = context.get()?;
+    let storage = blockchain.get_storage().read().await;
+
+    let mut events = Vec::new();
+    let tx_events = storage.get_events_by_tx(&params.caller).await?;
+
+    for event in tx_events {
+        events.push(RPCContractEvent {
+            contract: event.contract,
+            tx_hash: event.tx_hash,
+            block_hash: event.block_hash,
+            topoheight: event.topoheight,
+            log_index: event.log_index,
+            topics: event.topics.iter().map(hex::encode).collect(),
+            data: hex::encode(&event.data),
+        });
+    }
+
+    Ok(json!(events))
+}
+
 // ============================================================================
 // QR Code Payment RPC Methods
 // ============================================================================
@@ -4536,10 +4591,6 @@ async fn get_asset_supply_at_topoheight<S: Storage>(
         version: version.1,
     }))
 }
-
-// Note: get_estimated_fee_per_kb is not implemented in TOS
-// TOS uses get_estimated_fee_rates which provides fee rate percentiles from mempool.
-// For fee estimation, use get_estimated_fee_rates.
 
 /// Get contract registered executions at a specific topoheight
 ///
