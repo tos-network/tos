@@ -414,14 +414,43 @@ impl<S: Storage> Blockchain<S> {
 
             // also do some clean up in case of DB corruption
             if config.check_db_integrity {
+                // Search backwards to find the last valid topoheight
+                // A valid topoheight must have both: hash mapping AND the actual block
+                let mut valid_topoheight = topoheight;
+                while valid_topoheight > 0 {
+                    if storage.has_hash_at_topoheight(valid_topoheight).await? {
+                        let hash = storage.get_hash_at_topo_height(valid_topoheight).await?;
+                        if storage.has_block_with_hash(&hash).await? {
+                            if log::log_enabled!(log::Level::Info) {
+                                info!("Last valid topoheight found at {}", valid_topoheight);
+                            }
+                            break;
+                        }
+                    }
+                    valid_topoheight -= 1;
+                }
+
+                // Update chain cache if the valid topoheight differs from stored
+                if valid_topoheight != topoheight {
+                    if log::log_enabled!(log::Level::Warn) {
+                        warn!(
+                            "Topoheight mismatch detected: stored={}, valid={}. Updating.",
+                            topoheight, valid_topoheight
+                        );
+                    }
+                    let chain_cache = storage.chain_cache_mut().await?;
+                    chain_cache.topoheight = valid_topoheight;
+                    storage.set_top_topoheight(valid_topoheight).await?;
+                }
+
                 if log::log_enabled!(log::Level::Info) {
                     info!(
                         "Cleaning data above topoheight {} in case of potential DB corruption",
-                        topoheight
+                        valid_topoheight
                     );
                 }
                 storage
-                    .delete_versioned_data_above_topoheight(topoheight)
+                    .delete_versioned_data_above_topoheight(valid_topoheight)
                     .await?;
             }
         } else {
