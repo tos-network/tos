@@ -129,9 +129,8 @@ pub struct Blockchain<S: Storage> {
     mempool: RwLock<Mempool>,
     // storage to retrieve/add blocks
     storage: RwLock<S>,
-    // Current semaphore used to prevent
-    // verifying more than one block at a time
-    add_block_semaphore: Semaphore,
+    // Current semaphore used to serialize storage operations
+    storage_semaphore: Semaphore,
     // Contract environment stdlib
     environment: Environment,
     // P2p module
@@ -363,7 +362,7 @@ impl<S: Storage> Blockchain<S> {
             stable_topoheight: AtomicU64::new(0),
             mempool: RwLock::new(Mempool::new(network, config.disable_zkp_cache)),
             storage: RwLock::new(storage),
-            add_block_semaphore: Semaphore::new(1),
+            storage_semaphore: Semaphore::new(1),
             environment,
             p2p: RwLock::new(None),
             rpc: RwLock::new(None),
@@ -721,10 +720,18 @@ impl<S: Storage> Blockchain<S> {
     }
 
     // Stop all blockchain modules
-    // Each module is stopped in its own context
-    // So no deadlock occurs in case they are linked
-    pub async fn stop(&self) {
+    // Acquires storage_semaphore first to wait for ongoing storage operations,
+    // then stops each module in its own scope to avoid holding multiple locks.
+    // Lock ordering: storage_semaphore -> p2p -> rpc -> storage -> mempool
+    pub async fn stop(&self) -> Result<(), BlockchainError> {
         info!("Stopping modules...");
+
+        // Acquire storage semaphore FIRST to:
+        // 1. Wait for any ongoing storage operations to complete
+        // 2. Ensure consistent lock ordering (prevents deadlock with in-flight tasks)
+        debug!("acquiring storage semaphore for shutdown");
+        let _permit = self.storage_semaphore.acquire().await?;
+
         {
             debug!("stopping p2p module");
             let mut p2p = self.p2p.write().await;
@@ -758,14 +765,18 @@ impl<S: Storage> Blockchain<S> {
         }
 
         info!("All modules are now stopped!");
+        Ok(())
     }
 
     // Clear all caches
-    pub async fn clear_caches(&self) {
+    // Acquires storage semaphore for write path consistency
+    pub async fn clear_caches(&self) -> Result<(), BlockchainError> {
         debug!("Clearing caches...");
+        let _permit = self.storage_semaphore.acquire().await?;
         let mut storage = self.storage.write().await;
         self.clear_chain_caches_with_storage(&mut *storage).await;
         debug!("Caches are now cleared!");
+        Ok(())
     }
 
     async fn clear_chain_caches_with_storage(&self, storage: &mut S) {
@@ -793,6 +804,7 @@ impl<S: Storage> Blockchain<S> {
     // Clear the mempool also in case of not being up-to-date
     pub async fn reload_from_disk(&self) -> Result<(), BlockchainError> {
         debug!("Reloading chain from disk");
+        let _permit = self.storage_semaphore.acquire().await?;
         let mut storage = self.storage.write().await;
         debug!("storage lock acquired for reload from disk");
         self.reload_from_disk_with_storage(&mut *storage).await
@@ -1012,6 +1024,7 @@ impl<S: Storage> Blockchain<S> {
         if log::log_enabled!(log::Level::Debug) {
             debug!("prune until topoheight {}", topoheight);
         }
+        let _permit = self.storage_semaphore.acquire().await?;
         let mut storage = self.storage.write().await;
         debug!("storage write acquired for pruning");
         self.prune_until_topoheight_for_storage(topoheight, &mut *storage)
@@ -2323,6 +2336,11 @@ impl<S: Storage> Blockchain<S> {
         &self.storage
     }
 
+    // Returns the storage semaphore used to serialize storage operations
+    pub fn storage_semaphore(&self) -> &Semaphore {
+        &self.storage_semaphore
+    }
+
     // Returns the blockchain mempool used
     pub fn get_mempool(&self) -> &RwLock<Mempool> {
         &self.mempool
@@ -3099,9 +3117,9 @@ impl<S: Storage> Blockchain<S> {
         };
 
         // Semaphore is required to ensure sequential verification of blocks
-        debug!("acquiring add block semaphore");
-        let _permit = self.add_block_semaphore.acquire().await?;
-        debug!("add block semaphore acquired, locking storage for block verification");
+        debug!("acquiring storage semaphore");
+        let _permit = self.storage_semaphore.acquire().await?;
+        debug!("storage semaphore acquired, locking storage for block verification");
         let storage = holder.read().await?;
 
         if log::log_enabled!(log::Level::Debug) {
@@ -5079,6 +5097,7 @@ impl<S: Storage> Blockchain<S> {
                 count, until_stable_height
             );
         }
+        let _permit = self.storage_semaphore.acquire().await?;
         let mut storage = self.storage.write().await;
         self.rewind_chain_for_storage(&mut storage, count, until_stable_height)
             .await

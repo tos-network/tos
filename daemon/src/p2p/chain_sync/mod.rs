@@ -417,6 +417,7 @@ impl<S: Storage> P2pServer<S> {
             );
         }
         let (topoheight, txs) = {
+            let _permit = self.blockchain.storage_semaphore().acquire().await?;
             let mut snapshot = snapshot.lock().await?;
             self.blockchain
                 .rewind_chain_for_storage(&mut snapshot, pop_count, false)
@@ -730,7 +731,8 @@ impl<S: Storage> P2pServer<S> {
                         blocks,
                     )
                     .await;
-                {
+                let apply = {
+                    let _permit = self.blockchain.storage_semaphore().acquire().await?;
                     info!("Ending commit point for chain validator");
                     let apply = match res.as_ref() {
                         // In case we got a partially good chain only, and that its still better than ours
@@ -763,51 +765,49 @@ impl<S: Storage> P2pServer<S> {
                         }
                     }
 
-                    if !apply {
-                        debug!(
-                            "Reloading chain caches from disk due to invalidation of commit point"
-                        );
-                        self.blockchain.reload_from_disk().await?;
+                    apply
+                };
 
-                        // Try to apply any orphaned TX back to our chain
-                        // We want to prevent any loss
-                        if let Ok((ref mut txs, _)) = res.as_mut() {
+                if !apply {
+                    debug!("Reloading chain caches from disk due to invalidation of commit point");
+                    self.blockchain.reload_from_disk().await?;
+
+                    // Try to apply any orphaned TX back to our chain
+                    // We want to prevent any loss
+                    if let Ok((ref mut txs, _)) = res.as_mut() {
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("Applying back orphaned {} TXs", txs.len());
+                        }
+                        for (hash, tx) in txs.drain(..) {
                             if log::log_enabled!(log::Level::Debug) {
-                                debug!("Applying back orphaned {} TXs", txs.len());
+                                debug!("Trying to apply orphaned TX {}", hash);
                             }
-                            for (hash, tx) in txs.drain(..) {
+                            if !self.blockchain.is_tx_included(&hash).await? {
                                 if log::log_enabled!(log::Level::Debug) {
-                                    debug!("Trying to apply orphaned TX {}", hash);
+                                    debug!("TX {} is not in chain, adding it to mempool", hash);
                                 }
-                                if !self.blockchain.is_tx_included(&hash).await? {
+                                if let Err(e) = self
+                                    .blockchain
+                                    .add_tx_to_mempool_with_hash(
+                                        tx.into_arc(),
+                                        Immutable::Owned(hash),
+                                        false,
+                                    )
+                                    .await
+                                {
                                     if log::log_enabled!(log::Level::Debug) {
-                                        debug!("TX {} is not in chain, adding it to mempool", hash);
-                                    }
-                                    if let Err(e) = self
-                                        .blockchain
-                                        .add_tx_to_mempool_with_hash(
-                                            tx.into_arc(),
-                                            Immutable::Owned(hash),
-                                            false,
-                                        )
-                                        .await
-                                    {
-                                        if log::log_enabled!(log::Level::Debug) {
-                                            debug!("Couldn't add back to mempool after commit point rollbacked: {}", e);
-                                        }
-                                    }
-                                } else {
-                                    if log::log_enabled!(log::Level::Debug) {
-                                        debug!("TX {} is already in chain, skipping", hash);
+                                        debug!("Couldn't add back to mempool after commit point rollbacked: {}", e);
                                     }
                                 }
+                            } else if log::log_enabled!(log::Level::Debug) {
+                                debug!("TX {} is already in chain, skipping", hash);
                             }
                         }
                     }
-
-                    // Return errors if any
-                    res?.1?;
                 }
+
+                // Return errors if any
+                res?.1?;
             }
         } else {
             // no rewind are needed, process normally
@@ -1015,6 +1015,7 @@ impl<S: Storage> P2pServer<S> {
             warn!("Forcing block {} re-execution", hash);
         }
         let block = {
+            let _permit = self.blockchain.storage_semaphore().acquire().await?;
             let mut storage = holder.write().await?;
             // Check inside write lock to prevent race condition
             if storage.is_block_topological_ordered(&hash).await? {

@@ -4715,6 +4715,14 @@ async fn clear_caches<S: Storage>(
 
     require_no_params(body)?;
     let blockchain: &Arc<Blockchain<S>> = context.get()?;
+
+    // Acquire storage semaphore for write path consistency
+    let _permit = blockchain
+        .storage_semaphore()
+        .acquire()
+        .await
+        .context("Failed to acquire storage semaphore")?;
+
     let mut storage = blockchain.get_storage().write().await;
 
     storage
@@ -6204,9 +6212,14 @@ async fn shutdown<S: Storage>(context: &Context, body: Value) -> Result<Value, I
         let shutdown_result = tokio::time::timeout(timeout_duration, blockchain_clone.stop()).await;
 
         match shutdown_result {
-            Ok(()) => {
+            Ok(Ok(())) => {
                 if log::log_enabled!(log::Level::Info) {
                     info!("Graceful shutdown complete, exiting process");
+                }
+            }
+            Ok(Err(e)) => {
+                if log::log_enabled!(log::Level::Error) {
+                    log::error!("Graceful shutdown failed: {}", e);
                 }
             }
             Err(_) => {
