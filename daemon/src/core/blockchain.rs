@@ -720,10 +720,18 @@ impl<S: Storage> Blockchain<S> {
     }
 
     // Stop all blockchain modules
-    // Each module is stopped in its own context
-    // So no deadlock occurs in case they are linked
+    // Acquires storage_semaphore first to wait for ongoing storage operations,
+    // then stops each module in its own scope to avoid holding multiple locks.
+    // Lock ordering: storage_semaphore -> p2p -> rpc -> storage -> mempool
     pub async fn stop(&self) -> Result<(), BlockchainError> {
         info!("Stopping modules...");
+
+        // Acquire storage semaphore FIRST to:
+        // 1. Wait for any ongoing storage operations to complete
+        // 2. Ensure consistent lock ordering (prevents deadlock with in-flight tasks)
+        debug!("acquiring storage semaphore for shutdown");
+        let _permit = self.storage_semaphore.acquire().await?;
+
         {
             debug!("stopping p2p module");
             let mut p2p = self.p2p.write().await;
@@ -742,7 +750,6 @@ impl<S: Storage> Blockchain<S> {
 
         {
             debug!("stopping storage module");
-            let _permit = self.storage_semaphore.acquire().await?;
             let mut storage = self.storage.write().await;
             if let Err(e) = storage.stop().await {
                 if log::log_enabled!(log::Level::Error) {
@@ -762,11 +769,14 @@ impl<S: Storage> Blockchain<S> {
     }
 
     // Clear all caches
-    pub async fn clear_caches(&self) {
+    // Acquires storage semaphore for write path consistency
+    pub async fn clear_caches(&self) -> Result<(), BlockchainError> {
         debug!("Clearing caches...");
+        let _permit = self.storage_semaphore.acquire().await?;
         let mut storage = self.storage.write().await;
         self.clear_chain_caches_with_storage(&mut *storage).await;
         debug!("Caches are now cleared!");
+        Ok(())
     }
 
     async fn clear_chain_caches_with_storage(&self, storage: &mut S) {

@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::{Semaphore, Mutex, RwLock};
+use tokio::sync::{Mutex, RwLock, Semaphore};
 use tokio::task::JoinSet;
 
 /// Stress Test 1: Rapid concurrent writes (storage I/O stress)
@@ -54,9 +54,12 @@ async fn stress_rapid_concurrent_writes() {
         if batch_id % 10 == 0 {
             if log::log_enabled!(log::Level::Debug) {
                 let progress = batch_id * BATCH_SIZE;
-                log::debug!("Write progress: {}/{} ({:.1}%)",
-                           progress, TOTAL_WRITES,
-                           (progress as f64 / TOTAL_WRITES as f64) * 100.0);
+                log::debug!(
+                    "Write progress: {}/{} ({:.1}%)",
+                    progress,
+                    TOTAL_WRITES,
+                    (progress as f64 / TOTAL_WRITES as f64) * 100.0
+                );
             }
         }
     }
@@ -73,8 +76,15 @@ async fn stress_rapid_concurrent_writes() {
 
     if log::log_enabled!(log::Level::Info) {
         log::info!("Storage write stress test completed in {:?}", elapsed);
-        log::info!("Successful writes: {}, Failed writes: {}", final_success, final_errors);
-        log::info!("Write throughput: {:.2} writes/sec", final_success as f64 / elapsed.as_secs_f64());
+        log::info!(
+            "Successful writes: {}, Failed writes: {}",
+            final_success,
+            final_errors
+        );
+        log::info!(
+            "Write throughput: {:.2} writes/sec",
+            final_success as f64 / elapsed.as_secs_f64()
+        );
         log::info!("Final storage size: {} items", storage_size);
     }
 
@@ -83,7 +93,10 @@ async fn stress_rapid_concurrent_writes() {
     println!("  Successful: {}", final_success);
     println!("  Failed: {}", final_errors);
     println!("  Duration: {:?}", elapsed);
-    println!("  Throughput: {:.2} writes/sec", final_success as f64 / elapsed.as_secs_f64());
+    println!(
+        "  Throughput: {:.2} writes/sec",
+        final_success as f64 / elapsed.as_secs_f64()
+    );
     println!("  Storage size: {} items", storage_size);
 
     // Expected Results:
@@ -188,8 +201,13 @@ async fn stress_mixed_read_write_workload() {
 
     if log::log_enabled!(log::Level::Info) {
         log::info!("Mixed workload test completed in {:?}", elapsed);
-        log::info!("Reads: {} ({} errors), Writes: {} ({} errors)",
-                  final_reads, final_read_errors, final_writes, final_write_errors);
+        log::info!(
+            "Reads: {} ({} errors), Writes: {} ({} errors)",
+            final_reads,
+            final_read_errors,
+            final_writes,
+            final_write_errors
+        );
         log::info!("Total throughput: {:.2} ops/sec", throughput);
     }
 
@@ -221,8 +239,11 @@ async fn stress_large_dataset_storage() {
     let mut memory_samples = Vec::new();
 
     if log::log_enabled!(log::Level::Info) {
-        log::info!("Starting large dataset test: {} items of {} bytes each",
-                  NUM_LARGE_ITEMS, LARGE_ITEM_SIZE);
+        log::info!(
+            "Starting large dataset test: {} items of {} bytes each",
+            NUM_LARGE_ITEMS,
+            LARGE_ITEM_SIZE
+        );
     }
 
     for batch in 0..(NUM_LARGE_ITEMS / BATCH_SIZE) {
@@ -239,9 +260,12 @@ async fn stress_large_dataset_storage() {
             memory_samples.push(current_size);
 
             if log::log_enabled!(log::Level::Debug) {
-                log::debug!("Progress: {}/{} items, storage size: {} MB",
-                           batch * BATCH_SIZE, NUM_LARGE_ITEMS,
-                           current_size / (1024 * 1024));
+                log::debug!(
+                    "Progress: {}/{} items, storage size: {} MB",
+                    batch * BATCH_SIZE,
+                    NUM_LARGE_ITEMS,
+                    current_size / (1024 * 1024)
+                );
             }
         }
     }
@@ -252,7 +276,11 @@ async fn stress_large_dataset_storage() {
 
     if log::log_enabled!(log::Level::Info) {
         log::info!("Large dataset test completed in {:?}", elapsed);
-        log::info!("Stored {} items ({} MB)", final_items, final_size / (1024 * 1024));
+        log::info!(
+            "Stored {} items ({} MB)",
+            final_items,
+            final_size / (1024 * 1024)
+        );
     }
 
     println!("Large dataset storage results:");
@@ -279,7 +307,11 @@ async fn stress_large_dataset_storage() {
         }
     }
 
-    println!("  Data integrity check: {}/{} samples valid", sample_size - integrity_errors, sample_size);
+    println!(
+        "  Data integrity check: {}/{} samples valid",
+        sample_size - integrity_errors,
+        sample_size
+    );
 
     // Expected Results:
     // - All items stored successfully
@@ -331,9 +363,14 @@ async fn stress_delete_and_compact() {
         let current_items = storage.size().await;
 
         if log::log_enabled!(log::Level::Debug) {
-            log::debug!("Round {}: deleted {} items in {:?}, {} items remaining ({} MB)",
-                       round, ITEMS_PER_ROUND, round_elapsed,
-                       current_items, current_size / (1024 * 1024));
+            log::debug!(
+                "Round {}: deleted {} items in {:?}, {} items remaining ({} MB)",
+                round,
+                ITEMS_PER_ROUND,
+                round_elapsed,
+                current_items,
+                current_size / (1024 * 1024)
+            );
         }
     }
 
@@ -343,24 +380,34 @@ async fn stress_delete_and_compact() {
 
     if log::log_enabled!(log::Level::Info) {
         log::info!("Delete/compact stress test completed in {:?}", elapsed);
-        log::info!("Initial: {} items ({} MB), Final: {} items ({} MB)",
-                  INITIAL_ITEMS, initial_size / (1024 * 1024),
-                  final_items, final_size / (1024 * 1024));
+        log::info!(
+            "Initial: {} items ({} MB), Final: {} items ({} MB)",
+            INITIAL_ITEMS,
+            initial_size / (1024 * 1024),
+            final_items,
+            final_size / (1024 * 1024)
+        );
     }
 
     println!("Delete and compact results:");
     println!("  Initial items: {}", INITIAL_ITEMS);
     println!("  Deleted items: {}", DELETE_ROUNDS * ITEMS_PER_ROUND);
     println!("  Remaining items: {}", final_items);
-    println!("  Size reduction: {} MB -> {} MB",
-             initial_size / (1024 * 1024), final_size / (1024 * 1024));
+    println!(
+        "  Size reduction: {} MB -> {} MB",
+        initial_size / (1024 * 1024),
+        final_size / (1024 * 1024)
+    );
     println!("  Duration: {:?}", elapsed);
 
     // Expected Results:
     // - Correct number of items deleted
     // - Storage size reduced appropriately
     // - No data corruption in remaining items
-    assert_eq!(final_items, INITIAL_ITEMS - (DELETE_ROUNDS * ITEMS_PER_ROUND));
+    assert_eq!(
+        final_items,
+        INITIAL_ITEMS - (DELETE_ROUNDS * ITEMS_PER_ROUND)
+    );
 }
 
 /// Stress Test 5: Storage recovery after simulated crashes
@@ -377,7 +424,10 @@ async fn stress_storage_recovery() {
     let crash_interval = TOTAL_OPERATIONS / CRASH_POINTS;
 
     if log::log_enabled!(log::Level::Info) {
-        log::info!("Testing storage recovery with {} crash points", CRASH_POINTS);
+        log::info!(
+            "Testing storage recovery with {} crash points",
+            CRASH_POINTS
+        );
     }
 
     for crash_point in 0..CRASH_POINTS {
@@ -402,7 +452,10 @@ async fn stress_storage_recovery() {
         let recovered_state = storage.simulate_crash_recovery().await.unwrap();
 
         if log::log_enabled!(log::Level::Debug) {
-            log::debug!("Recovery complete: {} items recovered", recovered_state.items_recovered);
+            log::debug!(
+                "Recovery complete: {} items recovered",
+                recovered_state.items_recovered
+            );
         }
 
         // Verify data integrity after recovery

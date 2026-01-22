@@ -31,6 +31,7 @@ struct MockChainState {
 
 /// Verifies that semaphore(1) ensures only one task holds the critical section at a time
 #[tokio::test]
+#[ignore = "Stress test - run with --ignored"]
 async fn test_semaphore_serializes_writes() {
     const TASKS: usize = 200;
     const HOLD_MS: u64 = 5;
@@ -81,6 +82,7 @@ async fn test_semaphore_serializes_writes() {
 /// Without semaphore: prune can delete data that add_block is reading
 /// With semaphore: operations are serialized, no data corruption
 #[tokio::test]
+#[ignore = "Stress test - run with --ignored"]
 async fn test_concurrent_add_block_and_prune() {
     const ADD_BLOCK_TASKS: usize = 50;
     const PRUNE_TASKS: usize = 10;
@@ -170,6 +172,7 @@ async fn test_concurrent_add_block_and_prune() {
 /// Simulates the race between add_block and rewind_chain
 /// Rewind modifies tips while add_block references them
 #[tokio::test]
+#[ignore = "Stress test - run with --ignored"]
 async fn test_concurrent_add_block_and_rewind() {
     const ADD_BLOCK_TASKS: usize = 30;
     const REWIND_TASKS: usize = 5;
@@ -256,6 +259,7 @@ async fn test_concurrent_add_block_and_rewind() {
 /// Simulates multiple peer sync tasks racing during chain reorganization
 /// Each task: rewind -> add blocks -> commit
 #[tokio::test]
+#[ignore = "Stress test - run with --ignored"]
 async fn test_concurrent_chain_sync_operations() {
     const SYNC_TASKS: usize = 10;
     const BLOCKS_PER_SYNC: usize = 5;
@@ -341,7 +345,12 @@ async fn test_concurrent_chain_sync_operations() {
 
 /// Demonstrates the vulnerability when semaphore is NOT used
 /// The read-then-write pattern can lead to lost updates
+///
+/// NOTE: This is a DEMONSTRATION test, not a validation test.
+/// It documents the race condition pattern but does not assert failure
+/// because race conditions are non-deterministic.
 #[tokio::test]
+#[ignore = "Demonstration test - non-deterministic, run with --ignored"]
 async fn test_read_then_write_race_without_semaphore() {
     const TASKS: usize = 100;
 
@@ -401,6 +410,7 @@ async fn test_read_then_write_race_without_semaphore() {
 
 /// Demonstrates that semaphore prevents the read-then-write race
 #[tokio::test]
+#[ignore = "Stress test - run with --ignored"]
 async fn test_read_then_write_safe_with_semaphore() {
     const TASKS: usize = 100;
 
@@ -449,6 +459,7 @@ async fn test_read_then_write_safe_with_semaphore() {
 
 /// Simulates stop() racing with ongoing storage operations
 #[tokio::test]
+#[ignore = "Stress test - run with --ignored"]
 async fn test_shutdown_waits_for_operations() {
     let semaphore = Arc::new(Semaphore::new(1));
     let operation_complete = Arc::new(AtomicBool::new(false));

@@ -4715,6 +4715,14 @@ async fn clear_caches<S: Storage>(
 
     require_no_params(body)?;
     let blockchain: &Arc<Blockchain<S>> = context.get()?;
+
+    // Acquire storage semaphore for write path consistency
+    let _permit = blockchain
+        .storage_semaphore()
+        .acquire()
+        .await
+        .context("Failed to acquire storage semaphore")?;
+
     let mut storage = blockchain.get_storage().write().await;
 
     storage
