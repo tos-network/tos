@@ -7,6 +7,7 @@ use tokio::try_join;
 use tos_common::{
     account::{VersionedBalance, VersionedNonce},
     asset::VersionedAssetData,
+    contract::{ScheduledExecution, ScheduledExecutionKind},
     crypto::{Hash, PublicKey},
     immutable::Immutable,
     versioned_type::State,
@@ -18,7 +19,7 @@ use crate::{
         error::BlockchainError,
         storage::{
             Storage, VersionedContract, VersionedContractBalance, VersionedContractData,
-            VersionedMultiSig,
+            VersionedMultiSig, VersionedSupply,
         },
     },
     p2p::{
@@ -123,6 +124,17 @@ impl<S: Storage> P2pServer<S> {
                     None
                 };
                 StepResponse::Assets(assets, page)
+            }
+            StepRequest::AssetsSupply(topoheight, assets) => {
+                let mut supplies = IndexMap::new();
+                for asset in assets {
+                    let supply = storage
+                        .get_asset_supply_at_maximum_topoheight(&asset, topoheight)
+                        .await?
+                        .map(|(_, v)| v.take());
+                    supplies.insert(asset, supply);
+                }
+                StepResponse::AssetsSupply(supplies)
             }
             StepRequest::KeyBalances(key, min, max, page) => {
                 if min > max {
@@ -350,6 +362,29 @@ impl<S: Storage> P2pServer<S> {
 
                 StepResponse::ContractStores(entries, page)
             }
+            StepRequest::ContractsExecutions(min, max, page) => {
+                if min > max {
+                    warn!("Invalid range for contract executions");
+                    return Err(P2pError::InvalidPacket.into());
+                }
+
+                let page = page.unwrap_or(0);
+                let stream = storage
+                    .get_registered_contract_scheduled_executions_in_range(min, max)
+                    .await?
+                    .skip(page as usize * MAX_ITEMS_PER_PAGE)
+                    .take(MAX_ITEMS_PER_PAGE)
+                    .map(|res| res.map(|(_, _, execution)| execution));
+
+                let executions: Vec<ScheduledExecution> = stream.boxed().try_collect().await?;
+
+                let page = if executions.len() == MAX_ITEMS_PER_PAGE {
+                    Some(page + 1)
+                } else {
+                    None
+                };
+                StepResponse::ContractsExecutions(executions, page)
+            }
             StepRequest::BlocksMetadata(topoheight) => {
                 // go from the lowest available point until the requested stable topoheight
                 let lower = if topoheight - PRUNE_SAFETY_LIMIT <= pruned_topoheight {
@@ -524,10 +559,84 @@ impl<S: Storage> P2pServer<S> {
                     top_block_hash = Some(hash);
                     stable_topoheight = topoheight;
 
+                    // Sync supply for local assets
+                    {
+                        let mut skip = 0;
+                        loop {
+                            let assets: IndexSet<Hash> = {
+                                let storage = self.blockchain.get_storage().read().await;
+                                let result = storage
+                                    .get_assets()
+                                    .await?
+                                    .skip(skip)
+                                    .take(MAX_ITEMS_PER_PAGE)
+                                    .collect::<Result<_, _>>()?;
+                                result
+                            };
+
+                            if assets.is_empty() {
+                                break;
+                            }
+
+                            skip += assets.len();
+
+                            let StepResponse::AssetsSupply(supplies) = peer
+                                .request_boostrap_chain(StepRequest::AssetsSupply(
+                                    stable_topoheight,
+                                    assets,
+                                ))
+                                .await?
+                            else {
+                                if log::log_enabled!(log::Level::Error) {
+                                    error!(
+                                        "Received an invalid StepResponse while fetching local assets supply"
+                                    );
+                                }
+                                return Err(P2pError::InvalidPacket.into());
+                            };
+
+                            let _permit = self.blockchain.storage_semaphore().acquire().await?;
+                            let mut storage = self.blockchain.get_storage().write().await;
+                            for (asset, supply) in supplies {
+                                if let Some(supply) = supply {
+                                    storage
+                                        .set_last_supply_for_asset(
+                                            &asset,
+                                            stable_topoheight,
+                                            &VersionedSupply::new(supply, None),
+                                        )
+                                        .await?;
+                                }
+                            }
+                        }
+                    }
+
                     Some(StepRequest::Assets(our_topoheight, topoheight, None))
                 }
                 // fetch all assets from peer
                 StepResponse::Assets(assets, next_page) => {
+                    // Also fetch supply for these assets
+                    let supplies = if !assets.is_empty() {
+                        let asset_hashes: IndexSet<Hash> = assets.keys().cloned().collect();
+                        let StepResponse::AssetsSupply(supplies) = peer
+                            .request_boostrap_chain(StepRequest::AssetsSupply(
+                                stable_topoheight,
+                                asset_hashes,
+                            ))
+                            .await?
+                        else {
+                            if log::log_enabled!(log::Level::Error) {
+                                error!(
+                                    "Received an invalid StepResponse while fetching assets supply"
+                                );
+                            }
+                            return Err(P2pError::InvalidPacket.into());
+                        };
+                        Some(supplies)
+                    } else {
+                        None
+                    };
+
                     {
                         let _permit = self.blockchain.storage_semaphore().acquire().await?;
                         let mut storage = self.blockchain.get_storage().write().await;
@@ -542,6 +651,19 @@ impl<S: Storage> P2pServer<S> {
                                     VersionedAssetData::new(data, None),
                                 )
                                 .await?;
+
+                            // Save supply if available
+                            if let Some(ref supplies) = supplies {
+                                if let Some(supply) = supplies.get(&asset).copied().flatten() {
+                                    storage
+                                        .set_last_supply_for_asset(
+                                            &asset,
+                                            stable_topoheight,
+                                            &VersionedSupply::new(supply, None),
+                                        )
+                                        .await?;
+                                }
+                            }
                         }
                     }
 
@@ -661,6 +783,14 @@ impl<S: Storage> P2pServer<S> {
                             page,
                         ))
                     } else {
+                        // Sync scheduled contract executions before blocks
+                        self.sync_contract_scheduled_executions(
+                            peer,
+                            our_topoheight,
+                            stable_topoheight,
+                        )
+                        .await?;
+
                         // Go to next step
                         Some(StepRequest::BlocksMetadata(stable_topoheight))
                     }
@@ -1342,6 +1472,58 @@ impl<S: Storage> P2pServer<S> {
                 .map(|_| ())
             })
             .await?;
+
+        Ok(())
+    }
+
+    // Sync scheduled contract executions from peer
+    async fn sync_contract_scheduled_executions(
+        &self,
+        peer: &Arc<Peer>,
+        our_topoheight: u64,
+        stable_topoheight: u64,
+    ) -> Result<(), BlockchainError> {
+        let mut next_page = None;
+        loop {
+            let StepResponse::ContractsExecutions(executions, page) = peer
+                .request_boostrap_chain(StepRequest::ContractsExecutions(
+                    our_topoheight,
+                    stable_topoheight,
+                    next_page,
+                ))
+                .await?
+            else {
+                if log::log_enabled!(log::Level::Error) {
+                    error!("Received an invalid StepResponse while fetching scheduled executions");
+                }
+                return Err(P2pError::InvalidPacket.into());
+            };
+
+            if !executions.is_empty() {
+                let _permit = self.blockchain.storage_semaphore().acquire().await?;
+                let mut storage = self.blockchain.get_storage().write().await;
+                for execution in executions {
+                    let execution_topoheight = match execution.kind {
+                        ScheduledExecutionKind::TopoHeight(topoheight) => topoheight,
+                        ScheduledExecutionKind::BlockEnd => execution.registration_topoheight,
+                    };
+
+                    storage
+                        .set_contract_scheduled_execution_at_topoheight(
+                            &execution.contract,
+                            execution.registration_topoheight,
+                            &execution,
+                            execution_topoheight,
+                        )
+                        .await?;
+                }
+            }
+
+            next_page = page;
+            if next_page.is_none() {
+                break;
+            }
+        }
 
         Ok(())
     }
