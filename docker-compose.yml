@@ -27,6 +27,7 @@ services:
       - A2A_ESCROW_VALIDATE_TIMEOUT=${A2A_ESCROW_VALIDATE_TIMEOUT:-true}
       - A2A_ESCROW_VALIDATE_AMOUNTS=${A2A_ESCROW_VALIDATE_AMOUNTS:-false}
       - TOS_RPC_BIND_ADDRESS=${TOS_RPC_BIND_ADDRESS:-0.0.0.0:8080}
+      - TOS_RPC_STOP_TIMEOUT_SECS=${TOS_RPC_STOP_TIMEOUT_SECS:-5}
       - TOS_P2P_BIND_ADDRESS=${TOS_P2P_BIND_ADDRESS:-0.0.0.0:2125}
       - TOS_PRIORITY_NODES=${TOS_PRIORITY_NODES:-157.7.65.157:2125,157.7.78.65:2125,157.7.192.216:2125}
       - TOS_EXCLUSIVE_NODES=${TOS_EXCLUSIVE_NODES:-}
@@ -37,6 +38,7 @@ services:
         tos_daemon --network ${TOS_NETWORK:-testnet} \
           --dir-path ${TOS_DATA_DIR:-/var/run/tos/data} \
           --rpc-bind-address ${TOS_RPC_BIND_ADDRESS:-0.0.0.0:8080} \
+          --rpc-stop-timeout-secs ${TOS_RPC_STOP_TIMEOUT_SECS:-5} \
           --p2p-bind-address ${TOS_P2P_BIND_ADDRESS:-0.0.0.0:2125} \
           ${TOS_PRIORITY_NODES:+--priority-nodes ${TOS_PRIORITY_NODES}} \
           ${TOS_EXCLUSIVE_NODES:+--exclusive-nodes ${TOS_EXCLUSIVE_NODES}} \

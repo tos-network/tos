@@ -110,6 +110,7 @@ Key variables:
 - `TOS_MINER_ADDRESS` - Your mining wallet address
 - `RUST_LOG` - Logging level (debug/info/warn/error)
 - `TOS_RPC_BIND_ADDRESS` - RPC bind address (default `0.0.0.0:8080`)
+- `TOS_RPC_STOP_TIMEOUT_SECS` - RPC stop timeout in seconds (default `5`)
 - `TOS_P2P_BIND_ADDRESS` - P2P bind address (default `0.0.0.0:2125`)
 - `TOS_PRIORITY_NODES` - Comma-separated seed/priority nodes
 - `TOS_EXCLUSIVE_NODES` - Comma-separated exclusive nodes (connect only to these)

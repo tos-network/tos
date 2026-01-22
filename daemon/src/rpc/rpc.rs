@@ -6194,12 +6194,24 @@ async fn shutdown<S: Storage>(context: &Context, body: Value) -> Result<Value, I
     // Get blockchain and initiate shutdown
     let blockchain: &Arc<Blockchain<S>> = context.get()?;
 
-    // Spawn shutdown task to avoid blocking the RPC response
+    // Spawn shutdown in a completely independent thread with its own tokio runtime.
+    // This avoids any interference from actix-web's runtime management.
     let blockchain_clone = Arc::clone(blockchain);
-    let timeout_duration = tokio::time::Duration::from_secs(timeout);
-    tokio::spawn(async move {
+    std::thread::spawn(move || {
         // Small delay to allow RPC response to be sent
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        std::thread::sleep(std::time::Duration::from_millis(100));
+
+        // Create a completely independent tokio runtime for shutdown
+        let rt = match tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+        {
+            Ok(rt) => rt,
+            Err(e) => {
+                log::error!("Failed to create shutdown runtime: {}", e);
+                std::process::exit(1);
+            }
+        };
 
         if log::log_enabled!(log::Level::Info) {
             info!(
@@ -6208,8 +6220,14 @@ async fn shutdown<S: Storage>(context: &Context, body: Value) -> Result<Value, I
             );
         }
 
-        // Initiate graceful shutdown with timeout enforcement
-        let shutdown_result = tokio::time::timeout(timeout_duration, blockchain_clone.stop()).await;
+        // Run shutdown with timeout in the independent runtime
+        let shutdown_result = rt.block_on(async {
+            tokio::time::timeout(
+                tokio::time::Duration::from_secs(timeout),
+                blockchain_clone.stop(),
+            )
+            .await
+        });
 
         match shutdown_result {
             Ok(Ok(())) => {

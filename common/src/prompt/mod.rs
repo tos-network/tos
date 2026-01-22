@@ -281,6 +281,18 @@ impl Prompt {
         });
 
         let mut interval = interval(update_every);
+
+        // Set up SIGTERM handler (Unix only, used by systemctl stop)
+        // Like reth, we fail early if handler creation fails
+        #[cfg(unix)]
+        let mut sigterm =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+        #[cfg(unix)]
+        let sigterm_recv = sigterm.recv();
+        #[cfg(not(unix))]
+        let sigterm_recv = std::future::pending::<Option<()>>();
+        tokio::pin!(sigterm_recv);
+
         loop {
             tokio::select! {
                 _ = &mut exit_receiver => {
@@ -296,6 +308,13 @@ impl Prompt {
                         }
                     } else if log::log_enabled!(log::Level::Info) {
                         info!("CTRL+C received, exiting...");
+                    }
+                    break;
+                },
+                // Handle SIGTERM (systemctl stop, kill -15)
+                _ = &mut sigterm_recv => {
+                    if log::log_enabled!(log::Level::Info) {
+                        info!("SIGTERM received, exiting...");
                     }
                     break;
                 },

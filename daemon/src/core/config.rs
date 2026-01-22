@@ -34,6 +34,10 @@ fn default_prometheus_route() -> String {
     "/metrics".to_owned()
 }
 
+const fn default_rpc_stop_timeout_secs() -> u64 {
+    5
+}
+
 const fn default_p2p_concurrency_task_count_limit() -> usize {
     P2P_DEFAULT_CONCURRENCY_TASK_COUNT_LIMIT
 }
@@ -224,6 +228,11 @@ pub struct RPCConfig {
     #[clap(name = "rpc-notify-events-concurrency", long, default_value_t = detect_available_parallelism())]
     #[serde(default = "detect_available_parallelism")]
     pub notify_events_concurrency: usize,
+    /// Timeout in seconds for stopping the RPC HTTP server.
+    /// This is a best-effort timeout to avoid blocking shutdown.
+    #[clap(name = "rpc-stop-timeout-secs", long, default_value_t = default_rpc_stop_timeout_secs())]
+    #[serde(default = "default_rpc_stop_timeout_secs")]
+    pub stop_timeout_secs: u64,
 
     // WebSocket Security Configuration
     /// Allowed origins for WebSocket connections (CORS protection).

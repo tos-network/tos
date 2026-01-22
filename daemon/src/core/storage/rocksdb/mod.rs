@@ -840,7 +840,7 @@ impl Storage for RocksStorage {
         // To prevent starving the current async worker,
         // We execute the following on a blocking thread
         // and simply await its result
-        tokio::task::spawn_blocking(move || {
+        let join_result = tokio::task::spawn_blocking(move || {
             for column in Column::iter() {
                 if log::log_enabled!(log::Level::Info) {
                     info!("compacting {:?}", column);
@@ -859,8 +859,23 @@ impl Storage for RocksStorage {
 
             Ok::<_, BlockchainError>(())
         })
-        .await
-        .context("Flushing DB")?
+        .await;
+
+        // Handle join error (task panic/cancellation) vs flush error separately
+        match join_result {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(flush_err)) => {
+                // Flush operation failed (RocksDB error)
+                Err(flush_err)
+            }
+            Err(join_err) => {
+                // spawn_blocking task panicked or was cancelled
+                Err(BlockchainError::Any(anyhow::anyhow!(
+                    "Storage flush task failed: {}",
+                    join_err
+                )))
+            }
+        }
     }
 }
 

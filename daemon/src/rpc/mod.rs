@@ -54,6 +54,7 @@ pub struct DaemonRpcServer<S: Storage> {
     getwork: Option<WebSocketServerShared<GetWorkServer<S>>>,
     websocket_security: Arc<WebSocketSecurity>,
     a2a_grpc_shutdown: Mutex<Option<oneshot::Sender<()>>>,
+    rpc_stop_timeout_secs: u64,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -204,6 +205,7 @@ impl<S: Storage> DaemonRpcServer<S> {
             getwork,
             websocket_security: Arc::clone(&websocket_security),
             a2a_grpc_shutdown: Mutex::new(None),
+            rpc_stop_timeout_secs: config.stop_timeout_secs,
         });
 
         // Spawn a background task to periodically clean up rate limiter entries
@@ -546,20 +548,72 @@ impl<S: Storage> DaemonRpcServer<S> {
         if log::log_enabled!(log::Level::Info) {
             info!("Stopping RPC Server...");
         }
-        let mut grpc = self.a2a_grpc_shutdown.lock().await;
-        if let Some(shutdown) = grpc.take() {
+
+        // Stop A2A gRPC server if running
+        // Take the sender first to release lock quickly
+        let grpc_shutdown = {
+            let mut grpc = self.a2a_grpc_shutdown.lock().await;
+            grpc.take()
+        };
+        if let Some(shutdown) = grpc_shutdown {
             let _ = shutdown.send(());
         }
-        let mut handle = self.handle.lock().await;
-        if let Some(handle) = handle.take() {
-            handle.stop(false).await;
-            if log::log_enabled!(log::Level::Info) {
-                info!("RPC Server is now stopped!");
-            }
-        } else {
-            if log::log_enabled!(log::Level::Warn) {
-                warn!("RPC Server is not running!");
-            }
+
+        // Stop HTTP server
+        // Take handle first to release lock, then spawn stop in background.
+        // We don't await the spawn result to avoid blocking the main shutdown flow.
+        let handle_opt = {
+            let mut handle_lock = self.handle.lock().await;
+            handle_lock.take()
+        };
+
+        if let Some(handle) = handle_opt {
+            // Run stop in a completely separate thread with its own runtime.
+            // This is necessary because actix-web's ServerHandle::stop() can block
+            // the entire tokio runtime, preventing other tasks from making progress.
+            // Using a separate runtime isolates this blocking behavior.
+            let rpc_stop_timeout_secs = self.rpc_stop_timeout_secs;
+            std::thread::spawn(move || {
+                // Create a dedicated single-threaded runtime for RPC stop
+                let rt = match tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                {
+                    Ok(rt) => rt,
+                    Err(e) => {
+                        log::error!("Failed to create RPC stop runtime: {}", e);
+                        return;
+                    }
+                };
+
+                let result = rt.block_on(async {
+                    tokio::time::timeout(
+                        Duration::from_secs(rpc_stop_timeout_secs),
+                        handle.stop(false),
+                    )
+                    .await
+                });
+
+                match result {
+                    Ok(()) => {
+                        if log::log_enabled!(log::Level::Info) {
+                            info!("HTTP server stopped gracefully");
+                        }
+                    }
+                    Err(_) => {
+                        if log::log_enabled!(log::Level::Warn) {
+                            warn!(
+                                "HTTP server stop timed out after {}s, server may still be running",
+                                rpc_stop_timeout_secs
+                            );
+                        }
+                    }
+                }
+            });
+        }
+
+        if log::log_enabled!(log::Level::Info) {
+            info!("RPC Server stop initiated");
         }
     }
 
