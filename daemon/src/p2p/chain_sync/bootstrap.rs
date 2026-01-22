@@ -126,15 +126,21 @@ impl<S: Storage> P2pServer<S> {
                 StepResponse::Assets(assets, page)
             }
             StepRequest::AssetsSupply(topoheight, assets) => {
-                let mut supplies = IndexMap::new();
-                for asset in assets {
-                    let supply = storage
-                        .get_asset_supply_at_maximum_topoheight(&asset, topoheight)
-                        .await?
-                        .map(|(_, v)| v.take());
-                    supplies.insert(asset, supply);
-                }
-                StepResponse::AssetsSupply(supplies)
+                let storage = &storage;
+
+                let assets_supply: Vec<Option<u64>> = stream::iter(assets.into_owned().into_iter())
+                    .map(|asset| async move {
+                        let supply = storage
+                            .get_asset_supply_at_maximum_topoheight(&asset, topoheight)
+                            .await?
+                            .map(|(_, v)| v.take());
+                        Ok::<_, BlockchainError>(supply)
+                    })
+                    .buffered(self.stream_concurrency)
+                    .try_collect()
+                    .await?;
+
+                StepResponse::AssetsSupply(assets_supply)
             }
             StepRequest::KeyBalances(key, min, max, page) => {
                 if min > max {
@@ -580,10 +586,10 @@ impl<S: Storage> P2pServer<S> {
 
                             skip += assets.len();
 
-                            let StepResponse::AssetsSupply(supplies) = peer
+                            let StepResponse::AssetsSupply(supply) = peer
                                 .request_boostrap_chain(StepRequest::AssetsSupply(
                                     stable_topoheight,
-                                    assets,
+                                    Cow::Borrowed(&assets),
                                 ))
                                 .await?
                             else {
@@ -597,7 +603,7 @@ impl<S: Storage> P2pServer<S> {
 
                             let _permit = self.blockchain.storage_semaphore().acquire().await?;
                             let mut storage = self.blockchain.get_storage().write().await;
-                            for (asset, supply) in supplies {
+                            for (asset, supply) in assets.into_iter().zip(supply) {
                                 if let Some(supply) = supply {
                                     storage
                                         .set_last_supply_for_asset(
@@ -615,13 +621,12 @@ impl<S: Storage> P2pServer<S> {
                 }
                 // fetch all assets from peer
                 StepResponse::Assets(assets, next_page) => {
-                    // Also fetch supply for these assets
-                    let supplies = if !assets.is_empty() {
+                    if !assets.is_empty() {
                         let asset_hashes: IndexSet<Hash> = assets.keys().cloned().collect();
-                        let StepResponse::AssetsSupply(supplies) = peer
+                        let StepResponse::AssetsSupply(supply) = peer
                             .request_boostrap_chain(StepRequest::AssetsSupply(
                                 stable_topoheight,
-                                asset_hashes,
+                                Cow::Owned(asset_hashes),
                             ))
                             .await?
                         else {
@@ -632,15 +637,10 @@ impl<S: Storage> P2pServer<S> {
                             }
                             return Err(P2pError::InvalidPacket.into());
                         };
-                        Some(supplies)
-                    } else {
-                        None
-                    };
 
-                    {
                         let _permit = self.blockchain.storage_semaphore().acquire().await?;
                         let mut storage = self.blockchain.get_storage().write().await;
-                        for (asset, data) in assets {
+                        for ((asset, data), supply) in assets.into_iter().zip(supply) {
                             if log::log_enabled!(log::Level::Info) {
                                 info!("Saving asset {} at topoheight {}", asset, stable_topoheight);
                             }
@@ -652,17 +652,14 @@ impl<S: Storage> P2pServer<S> {
                                 )
                                 .await?;
 
-                            // Save supply if available
-                            if let Some(ref supplies) = supplies {
-                                if let Some(supply) = supplies.get(&asset).copied().flatten() {
-                                    storage
-                                        .set_last_supply_for_asset(
-                                            &asset,
-                                            stable_topoheight,
-                                            &VersionedSupply::new(supply, None),
-                                        )
-                                        .await?;
-                                }
+                            if let Some(supply) = supply {
+                                storage
+                                    .set_last_supply_for_asset(
+                                        &asset,
+                                        stable_topoheight,
+                                        &VersionedSupply::new(supply, None),
+                                    )
+                                    .await?;
                             }
                         }
                     }
