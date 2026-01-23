@@ -534,10 +534,12 @@ impl<S: Storage> P2pServer<S> {
                 let map: IndexMap<Hash, PublicKey> = entries.into_iter().collect();
                 StepResponse::TnsNames(map, next_page)
             }
-            StepRequest::EnergyData(keys, _topoheight) => {
+            StepRequest::EnergyData(keys, topoheight) => {
                 let mut results = Vec::with_capacity(keys.len());
                 for key in keys.iter() {
-                    let energy = storage.get_energy_resource(key).await?;
+                    let energy = storage
+                        .get_energy_resource_at_maximum_topoheight(key, topoheight)
+                        .await?;
                     results.push(energy);
                 }
                 StepResponse::EnergyData(results)
@@ -828,6 +830,17 @@ impl<S: Storage> P2pServer<S> {
                                 return Err(P2pError::InvalidPacket.into());
                             };
 
+                            if supply.len() != assets.len() {
+                                if log::log_enabled!(log::Level::Error) {
+                                    error!(
+                                        "Assets supply response length mismatch: expected {}, got {}",
+                                        assets.len(),
+                                        supply.len()
+                                    );
+                                }
+                                return Err(P2pError::InvalidPacket.into());
+                            }
+
                             let _permit = self.blockchain.storage_semaphore().acquire().await?;
                             let mut storage = self.blockchain.get_storage().write().await;
                             for (asset, supply) in assets.into_iter().zip(supply) {
@@ -864,6 +877,17 @@ impl<S: Storage> P2pServer<S> {
                             }
                             return Err(P2pError::InvalidPacket.into());
                         };
+
+                        if supply.len() != assets.len() {
+                            if log::log_enabled!(log::Level::Error) {
+                                error!(
+                                    "Assets supply response length mismatch: expected {}, got {}",
+                                    assets.len(),
+                                    supply.len()
+                                );
+                            }
+                            return Err(P2pError::InvalidPacket.into());
+                        }
 
                         let _permit = self.blockchain.storage_semaphore().acquire().await?;
                         let mut storage = self.blockchain.get_storage().write().await;
@@ -2185,9 +2209,14 @@ impl<S: Storage> P2pServer<S> {
                 let _permit = self.blockchain.storage_semaphore().acquire().await?;
                 let mut storage = self.blockchain.get_storage().write().await;
                 for (nonce_bytes, timestamp) in &entries {
-                    let nonce_str = String::from_utf8_lossy(nonce_bytes);
+                    let nonce_str = std::str::from_utf8(nonce_bytes).map_err(|_| {
+                        if log::log_enabled!(log::Level::Error) {
+                            error!("Received invalid UTF-8 A2A nonce bytes from peer");
+                        }
+                        P2pError::InvalidPacket
+                    })?;
                     storage
-                        .set_a2a_nonce_timestamp(&nonce_str, *timestamp)
+                        .set_a2a_nonce_timestamp(nonce_str, *timestamp)
                         .await?;
                 }
             }
