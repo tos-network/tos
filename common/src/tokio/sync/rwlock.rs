@@ -271,7 +271,9 @@ pub struct RwLockWriteGuard<'a, T: ?Sized> {
     init_location: &'static Location<'static>,
     inner: Option<InnerRwLockWriteGuard<'a, T>>,
     active_location: Arc<StdMutex<Option<(&'static Location<'static>, Instant)>>>,
+    #[allow(dead_code)]
     read_locations: Arc<StdMutex<Vec<(&'static Location<'static>, Instant)>>>,
+    #[allow(dead_code)]
     read_guards: Arc<AtomicU64>,
 }
 
@@ -279,6 +281,7 @@ impl<'a, T: ?Sized> RwLockWriteGuard<'a, T> {
     /// Atomically downgrades a write lock into a read lock without allowing any
     /// writers to take exclusive access of the lock in the meantime.
     #[track_caller]
+    #[allow(dead_code)]
     pub fn downgrade(mut this: Self) -> RwLockReadGuard<'a, T> {
         let location = Location::caller();
 
