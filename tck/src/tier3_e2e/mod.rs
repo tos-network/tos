@@ -44,15 +44,26 @@ pub use clone::{CloneConfig, ClonedAccount, ClonedContract, ClonedState};
 pub use confirmation::TxConfirmation;
 pub use restart::{PreStopState, RestartMode};
 
-pub use cluster_config::{ClusterConfig, MiningConfig, NodeConfig, NodeRole};
+pub use clone::mock_cloned_state;
+pub use cluster_config::{ClusterConfig, MiningConfig, NodeConfig, NodeRole, NodeState, SyncMode};
+pub use network::NetworkTopology;
 pub use operations::{
     create_transfer_tx, mine_and_propagate, run_transaction_sequence, send_and_verify_transfer,
     verify_cluster_consistency,
 };
 pub use partition::{
-    run_partition_test, AsyncFn, Partition, PartitionController, PartitionTestResult,
+    run_partition_test, AsyncFn, Partition, PartitionController, PartitionTestConfig,
+    PartitionTestResult,
 };
 pub use transport::{
     InterceptRule, LocalhostTransport, MessageType, TransportAction, TransportMessage,
     TransportStats,
+};
+pub use verification::{
+    verify_balance_conservation, verify_comprehensive, verify_energy_consistency,
+    verify_nonce_monotonicity,
+};
+pub use waiters::{
+    wait_all_tips_equal_with_config, wait_for_new_blocks, wait_for_sync_complete,
+    wait_for_tx_confirmed, WaitConfig,
 };

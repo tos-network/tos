@@ -71,6 +71,12 @@ pub enum NetworkTopology {
     /// Nodes form a ring (0→1→2→...→N→0)
     Ring,
 
+    /// Star topology: all nodes connect through a central hub node
+    Star {
+        /// Index of the center node that connects to all others
+        center: usize,
+    },
+
     /// Custom topology defined by adjacency list
     /// Map: node_id → list of connected peer node_ids
     Custom(HashMap<usize, Vec<usize>>),
@@ -690,6 +696,20 @@ impl LocalTosNetworkBuilder {
                 map
             }
 
+            NetworkTopology::Star { center } => {
+                // Center node connects to all others, others connect only to center
+                let mut map = HashMap::new();
+                let center_peers: Vec<usize> =
+                    (0..self.node_count).filter(|&j| j != *center).collect();
+                map.insert(*center, center_peers);
+                for i in 0..self.node_count {
+                    if i != *center {
+                        map.insert(i, vec![*center]);
+                    }
+                }
+                map
+            }
+
             NetworkTopology::Custom(custom_map) => custom_map.clone(),
         }
     }
@@ -848,6 +868,35 @@ mod tests {
         // Node 2 should connect to 1 and 3
         assert!(network.node(2).is_connected_to(1));
         assert!(network.node(2).is_connected_to(3));
+    }
+
+    #[tokio::test]
+    async fn test_star_topology() {
+        let network = LocalTosNetworkBuilder::new()
+            .with_nodes(5)
+            .with_topology(NetworkTopology::Star { center: 0 })
+            .build()
+            .await
+            .unwrap();
+
+        // Center node (0) should connect to all other nodes
+        assert_eq!(network.node(0).peers().len(), 4);
+        assert!(network.node(0).is_connected_to(1));
+        assert!(network.node(0).is_connected_to(2));
+        assert!(network.node(0).is_connected_to(3));
+        assert!(network.node(0).is_connected_to(4));
+
+        // Non-center nodes should only connect to center
+        for i in 1..5 {
+            assert_eq!(network.node(i).peers().len(), 1);
+            assert!(network.node(i).is_connected_to(0));
+            // Non-center nodes should NOT directly connect to each other
+            for j in 1..5 {
+                if i != j {
+                    assert!(!network.node(i).is_connected_to(j));
+                }
+            }
+        }
     }
 
     #[tokio::test]

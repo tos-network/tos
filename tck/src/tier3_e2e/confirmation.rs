@@ -130,6 +130,90 @@ impl LocalTosNetwork {
         let height = self.node(node).get_tip_height().await?;
         Ok(height >= ConfirmationDepth::STABILITY_THRESHOLD)
     }
+
+    /// Send a batch of transactions and verify all are confirmed on ALL nodes.
+    ///
+    /// This is a convenience method for testing multiple transactions in sequence.
+    /// Each transaction is submitted and propagated, then blocks are mined until
+    /// all transactions reach the required confirmation depth.
+    ///
+    /// # Arguments
+    ///
+    /// * `txs` - The batch of transactions to send
+    /// * `via_node` - The node to submit transactions through
+    /// * `depth` - Required confirmation depth for all transactions
+    /// * `timeout` - Maximum time to wait for confirmations
+    ///
+    /// # Returns
+    ///
+    /// A vector of `TxConfirmation` for each successfully confirmed transaction
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any transaction fails to confirm on all nodes
+    pub async fn send_batch_and_verify_all_nodes(
+        &self,
+        txs: Vec<crate::tier1_component::TestTransaction>,
+        via_node: usize,
+        depth: ConfirmationDepth,
+        timeout: Duration,
+    ) -> Result<Vec<TxConfirmation>> {
+        if txs.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut tx_hashes = Vec::with_capacity(txs.len());
+
+        // Submit and propagate all transactions
+        for tx in &txs {
+            let tx_hash = tx.hash.clone();
+            self.submit_and_propagate(via_node, tx.clone()).await?;
+            tx_hashes.push(tx_hash);
+        }
+
+        // Mine blocks to reach required depth
+        let blocks_needed = depth.min_confirmations();
+        // Mine enough blocks to include all transactions plus confirmation depth
+        let total_blocks = blocks_needed
+            .saturating_add(txs.len().try_into().unwrap_or(u64::MAX))
+            .min(blocks_needed.saturating_add(100));
+
+        for _ in 0..total_blocks {
+            self.mine_and_propagate(0).await?;
+        }
+
+        // Wait for convergence
+        self.wait_for_convergence(timeout).await?;
+
+        // Verify all transactions on all nodes
+        let mut confirmations = Vec::with_capacity(tx_hashes.len());
+        for tx_hash in tx_hashes {
+            let mut confirmed_on = Vec::new();
+            for node_idx in 0..self.node_count() {
+                let height = self.node(node_idx).get_tip_height().await?;
+                if height >= blocks_needed {
+                    confirmed_on.push(node_idx);
+                }
+            }
+
+            if confirmed_on.len() != self.node_count() {
+                return Err(anyhow!(
+                    "Transaction {} not confirmed on all nodes: {}/{} confirmed",
+                    tx_hash,
+                    confirmed_on.len(),
+                    self.node_count()
+                ));
+            }
+
+            confirmations.push(TxConfirmation {
+                tx_hash,
+                confirmed_on,
+                depth,
+            });
+        }
+
+        Ok(confirmations)
+    }
 }
 
 #[cfg(test)]

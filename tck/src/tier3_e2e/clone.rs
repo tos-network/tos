@@ -114,8 +114,35 @@ impl ClonedState {
 ///
 /// # Note
 /// Tests using this function should be marked `#[ignore]` as they
-/// require network access.
+/// require network access. In the test framework, this function creates
+/// placeholder state entries that can be populated by mock RPC responses.
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - The RPC URL is empty
+/// - No accounts or contracts are specified to clone
 pub async fn clone_state_from_network(config: &CloneConfig) -> Result<ClonedState> {
+    if config.rpc_url.is_empty() {
+        return Err(anyhow::anyhow!("RPC URL cannot be empty"));
+    }
+
+    if config.accounts.is_empty() && config.contracts.is_empty() {
+        return Err(anyhow::anyhow!(
+            "At least one account or contract must be specified for cloning"
+        ));
+    }
+
+    if log::log_enabled!(log::Level::Info) {
+        log::info!(
+            "Cloning state from {} ({} accounts, {} contracts, at topoheight {:?})",
+            config.rpc_url,
+            config.accounts.len(),
+            config.contracts.len(),
+            config.at_topoheight,
+        );
+    }
+
     let mut state = ClonedState {
         source_rpc: config.rpc_url.clone(),
         source_topoheight: config.at_topoheight.unwrap_or(0),
@@ -130,6 +157,10 @@ pub async fn clone_state_from_network(config: &CloneConfig) -> Result<ClonedStat
             balance: 0,
             nonce: 0,
         });
+
+        if log::log_enabled!(log::Level::Debug) {
+            log::debug!("Prepared clone entry for account {}", address);
+        }
     }
 
     for address in &config.contracts {
@@ -142,9 +173,37 @@ pub async fn clone_state_from_network(config: &CloneConfig) -> Result<ClonedStat
                 None
             },
         });
+
+        if log::log_enabled!(log::Level::Debug) {
+            log::debug!("Prepared clone entry for contract {}", address);
+        }
+    }
+
+    if log::log_enabled!(log::Level::Info) {
+        log::info!(
+            "Clone complete: {} entities from {}",
+            state.total_entities(),
+            config.rpc_url
+        );
     }
 
     Ok(state)
+}
+
+/// Create a `ClonedState` from pre-populated mock data.
+///
+/// This is a test helper that creates a `ClonedState` without network access,
+/// useful for unit testing code that consumes `ClonedState`.
+pub fn mock_cloned_state(
+    accounts: Vec<ClonedAccount>,
+    contracts: Vec<ClonedContract>,
+) -> ClonedState {
+    ClonedState {
+        accounts,
+        contracts,
+        source_topoheight: 0,
+        source_rpc: "mock://localhost".to_string(),
+    }
 }
 
 #[cfg(test)]
@@ -203,5 +262,47 @@ mod tests {
         assert_eq!(state.accounts.len(), 1);
         assert_eq!(state.contracts.len(), 1);
         assert!(state.contracts[0].storage.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_clone_empty_url_error() {
+        let config = CloneConfig::new("").with_accounts(vec![sample_hash(1)]);
+        let result = clone_state_from_network(&config).await;
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("RPC URL cannot be empty"));
+    }
+
+    #[tokio::test]
+    async fn test_clone_empty_targets_error() {
+        let config = CloneConfig::new("https://rpc.example.com");
+        let result = clone_state_from_network(&config).await;
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("At least one account"));
+    }
+
+    #[test]
+    fn test_mock_cloned_state() {
+        let state = mock_cloned_state(
+            vec![ClonedAccount {
+                address: sample_hash(1),
+                balance: 500_000,
+                nonce: 3,
+            }],
+            vec![ClonedContract {
+                address: sample_hash(10),
+                bytecode: vec![0x00, 0x61, 0x73, 0x6d],
+                storage: Some(HashMap::new()),
+            }],
+        );
+        assert_eq!(state.accounts.len(), 1);
+        assert_eq!(state.accounts[0].balance, 500_000);
+        assert_eq!(state.contracts.len(), 1);
+        assert_eq!(state.source_rpc, "mock://localhost");
     }
 }

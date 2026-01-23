@@ -9,6 +9,32 @@ use std::time::Duration;
 
 use tos_common::crypto::Hash;
 
+use super::network::NetworkTopology;
+
+/// Sync mode for a node.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum SyncMode {
+    /// Normal sync: download blocks sequentially from peers
+    #[default]
+    Normal,
+    /// Bootstrap fast sync: download state snapshot, then catch up
+    BootstrapFast,
+}
+
+/// Lifecycle state of a node in the cluster.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum NodeState {
+    /// Node is in the process of starting up
+    #[default]
+    Starting,
+    /// Node is fully running and participating in the network
+    Running,
+    /// Node has been stopped gracefully
+    Stopped,
+    /// Node encountered a fatal error and is no longer operational
+    Failed(String),
+}
+
 /// Role of a node in the cluster.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum NodeRole {
@@ -30,6 +56,8 @@ pub struct MiningConfig {
     pub interval: Option<Duration>,
     /// Maximum transactions per block
     pub max_txs_per_block: usize,
+    /// Whether to auto-mine a block on every transaction submission
+    pub auto_mine: bool,
 }
 
 impl Default for MiningConfig {
@@ -38,6 +66,7 @@ impl Default for MiningConfig {
             miners: vec![0], // Only first node mines by default
             interval: None,
             max_txs_per_block: 100,
+            auto_mine: false,
         }
     }
 }
@@ -57,6 +86,8 @@ pub struct NodeConfig {
     pub start_delay: Option<Duration>,
     /// Whether this node uses bootstrap sync
     pub bootstrap_sync: bool,
+    /// Sync mode for this node
+    pub sync_mode: SyncMode,
     /// Custom P2P port (None = auto-assigned)
     pub p2p_port: Option<u16>,
     /// Custom RPC port (None = auto-assigned)
@@ -72,6 +103,7 @@ impl Default for NodeConfig {
             storage_path: None,
             start_delay: None,
             bootstrap_sync: false,
+            sync_mode: SyncMode::default(),
             p2p_port: None,
             rpc_port: None,
         }
@@ -103,6 +135,7 @@ impl NodeConfig {
             role: NodeRole::FullNode,
             mining_enabled: false,
             bootstrap_sync: true,
+            sync_mode: SyncMode::BootstrapFast,
             ..Default::default()
         }
     }
@@ -118,6 +151,12 @@ impl NodeConfig {
         self.max_peers = max_peers;
         self
     }
+
+    /// Set the sync mode for this node.
+    pub fn with_sync_mode(mut self, sync_mode: SyncMode) -> Self {
+        self.sync_mode = sync_mode;
+        self
+    }
 }
 
 /// Complete cluster configuration.
@@ -131,6 +170,8 @@ pub struct ClusterConfig {
     pub genesis_accounts: Vec<(Hash, u64)>,
     /// Mining configuration
     pub mining: MiningConfig,
+    /// Network topology for the cluster
+    pub topology: NetworkTopology,
     /// Whether to enable bootstrap sync for non-miner nodes
     pub bootstrap_sync: bool,
     /// P2P base port (incremented per node)
@@ -148,6 +189,7 @@ impl Default for ClusterConfig {
             node_configs: HashMap::new(),
             genesis_accounts: Vec::new(),
             mining: MiningConfig::default(),
+            topology: NetworkTopology::default(),
             bootstrap_sync: false,
             p2p_base_port: 18000,
             rpc_base_port: 19000,
@@ -172,6 +214,12 @@ impl ClusterConfig {
     /// Set the mining configuration.
     pub fn with_mining(mut self, mining: MiningConfig) -> Self {
         self.mining = mining;
+        self
+    }
+
+    /// Set the network topology.
+    pub fn with_topology(mut self, topology: NetworkTopology) -> Self {
+        self.topology = topology;
         self
     }
 
@@ -244,6 +292,7 @@ mod tests {
             miners: vec![0, 2],
             interval: Some(Duration::from_secs(1)),
             max_txs_per_block: 50,
+            auto_mine: false,
         };
         assert_eq!(mining.miners.len(), 2);
     }
@@ -262,7 +311,41 @@ mod tests {
             .with_start_delay(Duration::from_secs(5))
             .with_max_peers(16);
         assert!(bootstrap.bootstrap_sync);
+        assert_eq!(bootstrap.sync_mode, SyncMode::BootstrapFast);
         assert_eq!(bootstrap.max_peers, 16);
         assert_eq!(bootstrap.start_delay, Some(Duration::from_secs(5)));
+    }
+
+    #[test]
+    fn test_sync_mode() {
+        assert_eq!(SyncMode::default(), SyncMode::Normal);
+
+        let node = NodeConfig::full_node().with_sync_mode(SyncMode::BootstrapFast);
+        assert_eq!(node.sync_mode, SyncMode::BootstrapFast);
+    }
+
+    #[test]
+    fn test_node_state() {
+        assert_eq!(NodeState::default(), NodeState::Starting);
+
+        let failed = NodeState::Failed("connection refused".to_string());
+        assert!(matches!(failed, NodeState::Failed(_)));
+    }
+
+    #[test]
+    fn test_mining_config_auto_mine() {
+        let mining = MiningConfig {
+            miners: vec![0, 1],
+            interval: None,
+            max_txs_per_block: 200,
+            auto_mine: true,
+        };
+        assert!(mining.auto_mine);
+    }
+
+    #[test]
+    fn test_cluster_config_topology() {
+        let config = ClusterConfig::default().with_topology(NetworkTopology::Ring);
+        assert!(matches!(config.topology, NetworkTopology::Ring));
     }
 }

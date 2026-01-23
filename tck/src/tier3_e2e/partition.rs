@@ -137,6 +137,75 @@ impl PartitionController {
     }
 }
 
+/// Configuration for partition tests.
+///
+/// Defines how a partition test is structured, including the partition
+/// topology, duration, and convergence timeout.
+///
+/// # Example
+///
+/// ```ignore
+/// let config = PartitionTestConfig::new(
+///     Partition::two_way(vec![0, 1], vec![2, 3]),
+///     Duration::from_secs(5),
+/// )
+/// .with_convergence_timeout(Duration::from_secs(30))
+/// .with_heal_delay(Duration::from_millis(500));
+/// ```
+#[derive(Debug, Clone)]
+pub struct PartitionTestConfig {
+    /// The partition topology to apply
+    pub partition: Partition,
+    /// How long to maintain the partition before healing
+    pub partition_duration: Duration,
+    /// Timeout for waiting for convergence after healing
+    pub convergence_timeout: Duration,
+    /// Delay after healing before checking convergence
+    pub heal_delay: Duration,
+    /// Whether to verify height consistency after healing
+    pub verify_height_after_heal: bool,
+    /// Whether to verify tip consistency after healing
+    pub verify_tips_after_heal: bool,
+}
+
+impl PartitionTestConfig {
+    /// Create a new partition test config.
+    pub fn new(partition: Partition, partition_duration: Duration) -> Self {
+        Self {
+            partition,
+            partition_duration,
+            convergence_timeout: Duration::from_secs(30),
+            heal_delay: Duration::from_millis(100),
+            verify_height_after_heal: true,
+            verify_tips_after_heal: true,
+        }
+    }
+
+    /// Set the convergence timeout after healing.
+    pub fn with_convergence_timeout(mut self, timeout: Duration) -> Self {
+        self.convergence_timeout = timeout;
+        self
+    }
+
+    /// Set the delay after healing before checking convergence.
+    pub fn with_heal_delay(mut self, delay: Duration) -> Self {
+        self.heal_delay = delay;
+        self
+    }
+
+    /// Disable height verification after healing.
+    pub fn without_height_verification(mut self) -> Self {
+        self.verify_height_after_heal = false;
+        self
+    }
+
+    /// Disable tip verification after healing.
+    pub fn without_tip_verification(mut self) -> Self {
+        self.verify_tips_after_heal = false;
+        self
+    }
+}
+
 /// Result of a partition test run.
 #[derive(Debug)]
 pub struct PartitionTestResult {
@@ -310,5 +379,32 @@ mod tests {
 
         controller.heal().await;
         assert!(!controller.is_partitioned());
+    }
+
+    #[test]
+    fn test_partition_test_config() {
+        let config = PartitionTestConfig::new(
+            Partition::two_way(vec![0, 1], vec![2, 3]),
+            Duration::from_secs(5),
+        )
+        .with_convergence_timeout(Duration::from_secs(60))
+        .with_heal_delay(Duration::from_millis(500))
+        .without_tip_verification();
+
+        assert_eq!(config.partition_duration, Duration::from_secs(5));
+        assert_eq!(config.convergence_timeout, Duration::from_secs(60));
+        assert_eq!(config.heal_delay, Duration::from_millis(500));
+        assert!(config.verify_height_after_heal);
+        assert!(!config.verify_tips_after_heal);
+    }
+
+    #[test]
+    fn test_partition_test_config_defaults() {
+        let config =
+            PartitionTestConfig::new(Partition::isolate_node(0, 5), Duration::from_secs(1));
+        assert_eq!(config.convergence_timeout, Duration::from_secs(30));
+        assert_eq!(config.heal_delay, Duration::from_millis(100));
+        assert!(config.verify_height_after_heal);
+        assert!(config.verify_tips_after_heal);
     }
 }
