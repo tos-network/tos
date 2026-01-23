@@ -4,6 +4,7 @@
 //! genesis accounts, deployed contracts, clock mode, feature gates, and
 //! auto-mine behavior.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -33,6 +34,8 @@ pub struct GenesisAccount {
     pub balance: u64,
     /// Initial nonce (usually 0)
     pub nonce: u64,
+    /// Optional keypair bytes for signing transactions in tests
+    pub keypair: Option<Vec<u8>>,
 }
 
 impl GenesisAccount {
@@ -42,7 +45,14 @@ impl GenesisAccount {
             address,
             balance,
             nonce: 0,
+            keypair: None,
         }
+    }
+
+    /// Set the keypair bytes for transaction signing.
+    pub fn with_keypair(mut self, keypair: Vec<u8>) -> Self {
+        self.keypair = Some(keypair);
+        self
     }
 
     /// Set the initial nonce.
@@ -73,6 +83,8 @@ pub enum StorageBackend {
     Memory,
     /// Temporary directory-backed storage (realistic but ephemeral)
     TempDir,
+    /// RocksDB storage at a specified path (most realistic, persistent)
+    RocksDB(PathBuf),
 }
 
 /// Fee configuration for the test environment.
@@ -129,6 +141,8 @@ pub struct ChainClientConfig {
     pub storage: StorageBackend,
     /// Fee model configuration
     pub fee_config: FeeConfig,
+    /// Block time target in milliseconds (used for auto-mine interval timing)
+    pub block_time_ms: u64,
 }
 
 impl Default for ChainClientConfig {
@@ -145,6 +159,7 @@ impl Default for ChainClientConfig {
             mainnet: false,
             storage: StorageBackend::default(),
             fee_config: FeeConfig::default(),
+            block_time_ms: 500,
         }
     }
 }
@@ -232,6 +247,12 @@ impl ChainClientConfig {
         self.fee_config.enforce_fees = false;
         self
     }
+
+    /// Set the block time target in milliseconds.
+    pub fn with_block_time_ms(mut self, ms: u64) -> Self {
+        self.block_time_ms = ms;
+        self
+    }
 }
 
 impl std::fmt::Debug for ChainClientConfig {
@@ -247,6 +268,7 @@ impl std::fmt::Debug for ChainClientConfig {
             .field("mainnet", &self.mainnet)
             .field("storage", &self.storage)
             .field("fee_config", &self.fee_config)
+            .field("block_time_ms", &self.block_time_ms)
             .finish()
     }
 }

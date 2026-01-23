@@ -225,10 +225,11 @@ impl ContractTestContext {
         entry_id: u16,
         data: Vec<u8>,
     ) -> Result<&TxResult, WarpError> {
-        let result = self
+        let call_result = self
             .client
-            .call_contract(self.contract_address.clone(), entry_id, data)
+            .call_contract(&self.contract_address, entry_id, data, vec![], 100_000)
             .await?;
+        let result = call_result.tx_result;
         self.all_results.push(result.clone());
         self.last_result = Some(result);
         // SAFETY: We just set last_result on the line above
@@ -244,9 +245,16 @@ impl ContractTestContext {
         data: Vec<u8>,
         deposits: Vec<CallDeposit>,
     ) -> Result<&TxResult, WarpError> {
-        // deposits are part of the call context in full implementation
-        let _ = deposits;
-        self.call(entry_id, data).await
+        let call_result = self
+            .client
+            .call_contract(&self.contract_address, entry_id, data, deposits, 100_000)
+            .await?;
+        let result = call_result.tx_result;
+        self.all_results.push(result.clone());
+        self.last_result = Some(result);
+        self.last_result
+            .as_ref()
+            .ok_or_else(|| WarpError::StateTransition("result not stored".to_string()))
     }
 
     /// Simulate a contract call without committing state.
@@ -561,7 +569,9 @@ mod tests {
         assert!(ctx.last_events().is_empty());
         assert!(ctx.last_return_data().is_empty());
         assert!(ctx.last_log_messages().is_empty());
-        assert!(ctx.last_inner_calls().is_empty());
-        assert_eq!(ctx.last_gas_used(), 0);
+        // call_contract now produces an InnerCall tracing the contract invocation
+        assert_eq!(ctx.last_inner_calls().len(), 1);
+        assert_eq!(ctx.last_inner_calls()[0].entry_id, 0x01);
+        assert!(ctx.last_gas_used() > 0);
     }
 }

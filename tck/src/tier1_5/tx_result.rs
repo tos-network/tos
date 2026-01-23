@@ -206,6 +206,10 @@ pub struct TxResult {
     pub error: Option<TransactionError>,
     /// Gas consumed by execution
     pub gas_used: u64,
+    /// Gas refunded after execution
+    pub gas_refunded: u64,
+    /// Exit code from contract execution (None for non-contract transactions)
+    pub exit_code: Option<u32>,
     /// Events emitted during execution
     pub events: Vec<ContractEvent>,
     /// Log messages produced during execution
@@ -325,6 +329,30 @@ impl SimulationResult {
     }
 }
 
+/// Result of a contract call with gas breakdown.
+#[derive(Debug, Clone)]
+pub struct ContractCallResult {
+    /// The underlying transaction result
+    pub tx_result: TxResult,
+    /// Parsed return data (if available)
+    pub decoded_return: Option<Vec<u8>>,
+    /// Gas usage breakdown
+    pub gas_breakdown: GasBreakdown,
+}
+
+/// Breakdown of gas usage in a contract call.
+#[derive(Debug, Clone, Default)]
+pub struct GasBreakdown {
+    /// Total gas used
+    pub total_used: u64,
+    /// Gas burned (removed from supply)
+    pub burned: u64,
+    /// Gas paid to block miner
+    pub miner_fee: u64,
+    /// Gas refunded to caller
+    pub refunded: u64,
+}
+
 /// Diff of state changes from a transaction or simulation.
 #[derive(Debug, Clone, Default)]
 pub struct StateDiff {
@@ -392,6 +420,8 @@ mod tests {
             topoheight: Some(100),
             error: None,
             gas_used: 5000,
+            gas_refunded: 0,
+            exit_code: None,
             events: vec![],
             log_messages: vec![],
             inner_calls: vec![],
@@ -415,6 +445,8 @@ mod tests {
                 asset: Hash::zero(),
             }),
             gas_used: 0,
+            gas_refunded: 0,
+            exit_code: None,
             events: vec![],
             log_messages: vec![],
             inner_calls: vec![],
@@ -438,6 +470,8 @@ mod tests {
             topoheight: None,
             error: Some(error.clone()),
             gas_used: 0,
+            gas_refunded: 0,
+            exit_code: None,
             events: vec![],
             log_messages: vec![],
             inner_calls: vec![],
@@ -458,6 +492,8 @@ mod tests {
             topoheight: Some(50),
             error: None,
             gas_used: 10000,
+            gas_refunded: 0,
+            exit_code: None,
             events: vec![],
             log_messages: vec![],
             inner_calls: vec![
@@ -503,6 +539,8 @@ mod tests {
             topoheight: Some(50),
             error: None,
             gas_used: 5000,
+            gas_refunded: 0,
+            exit_code: None,
             events: vec![
                 ContractEvent {
                     contract: sample_hash(10),

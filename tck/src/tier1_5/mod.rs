@@ -43,12 +43,14 @@ pub mod tx_result;
 
 // Re-export primary types for convenience
 pub use block_warp::{BlockWarp, WarpError, BLOCK_TIME_MS, MAX_WARP_BLOCKS};
-pub use chain_client::{ChainClient, TransactionType};
-pub use chain_client_config::{AutoMineConfig, ChainClientConfig, GenesisAccount, GenesisContract};
+pub use chain_client::{BlockInfo, ChainClient, ChainClientError, TransactionType};
+pub use chain_client_config::{
+    AutoMineConfig, ChainClientConfig, GenesisAccount, GenesisContract, StorageBackend,
+};
 pub use confirmation::ConfirmationDepth;
 pub use contract_test::{ContractTest, ContractTestContext};
 pub use features::{Feature, FeatureBase, FeatureRegistry, FeatureSet};
 pub use tx_result::{
-    CallDeposit, ContractEvent, InnerCall, SimulationResult, StateChange, StateDiff,
-    TransactionError, TxResult,
+    CallDeposit, ContractCallResult, ContractEvent, GasBreakdown, InnerCall, SimulationResult,
+    StateChange, StateDiff, TransactionError, TxResult,
 };

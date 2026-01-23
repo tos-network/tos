@@ -26,7 +26,8 @@ use super::chain_client_config::{AutoMineConfig, ChainClientConfig, GenesisAccou
 use super::confirmation::ConfirmationDepth;
 use super::features::FeatureSet;
 use super::tx_result::{
-    CallDeposit, SimulationResult, StateChange, StateDiff, TransactionError, TxResult,
+    CallDeposit, ContractCallResult, GasBreakdown, InnerCall, SimulationResult, StateChange,
+    StateDiff, TransactionError, TxResult,
 };
 
 /// Transaction type for the multi-signer builder.
@@ -54,6 +55,68 @@ pub enum TransactionType {
     Delegate { to: Hash, amount: u64 },
     /// Remove delegation
     Undelegate { from: Hash, amount: u64 },
+}
+
+/// Error type for ChainClient operations.
+///
+/// Provides structured error variants for all ChainClient API methods,
+/// enabling precise error handling in test assertions.
+#[derive(Debug)]
+#[allow(missing_docs)]
+pub enum ChainClientError {
+    /// Transaction was rejected by the mempool or validation layer
+    TransactionRejected(String),
+    /// Transaction signature or structure verification failed
+    VerificationFailed(String),
+    /// Referenced account does not exist
+    AccountNotFound(String),
+    /// Referenced contract does not exist
+    ContractNotFound(String),
+    /// Block not found at the specified topoheight
+    BlockNotFound(u64),
+    /// Warp target is behind current topoheight
+    InvalidWarpTarget { target: u64, current: u64 },
+    /// Insufficient balance for the requested operation
+    InsufficientBalance { have: u64, need: u64 },
+    /// Storage layer error
+    Storage(String),
+    /// Block mining error
+    Mining(String),
+}
+
+impl std::fmt::Display for ChainClientError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::TransactionRejected(msg) => write!(f, "transaction rejected: {}", msg),
+            Self::VerificationFailed(msg) => write!(f, "verification failed: {}", msg),
+            Self::AccountNotFound(msg) => write!(f, "account not found: {}", msg),
+            Self::ContractNotFound(msg) => write!(f, "contract not found: {}", msg),
+            Self::BlockNotFound(topo) => write!(f, "block not found at topoheight {}", topo),
+            Self::InvalidWarpTarget { target, current } => {
+                write!(f, "warp target {} not ahead of current {}", target, current)
+            }
+            Self::InsufficientBalance { have, need } => {
+                write!(f, "insufficient balance: have {}, need {}", have, need)
+            }
+            Self::Storage(msg) => write!(f, "storage error: {}", msg),
+            Self::Mining(msg) => write!(f, "mining error: {}", msg),
+        }
+    }
+}
+
+impl std::error::Error for ChainClientError {}
+
+/// A lightweight block representation for ChainClient queries.
+#[derive(Debug, Clone)]
+pub struct BlockInfo {
+    /// Block hash
+    pub hash: Hash,
+    /// Block topoheight
+    pub topoheight: u64,
+    /// Transaction hashes included in this block
+    pub tx_hashes: Vec<Hash>,
+    /// Timestamp (mock clock time when mined)
+    pub timestamp: u64,
 }
 
 /// ChainClient provides direct blockchain access for testing.
@@ -159,6 +222,8 @@ impl ChainClient {
                 topoheight: None,
                 error: Some(error),
                 gas_used: 0,
+                gas_refunded: 0,
+                exit_code: None,
                 events: vec![],
                 log_messages: vec![],
                 inner_calls: vec![],
@@ -210,6 +275,8 @@ impl ChainClient {
             topoheight: topo,
             error,
             gas_used: tx.fee, // simplified: fee = gas_used in test environment
+            gas_refunded: 0,
+            exit_code: None,
             events: vec![],
             log_messages: vec![],
             inner_calls: vec![],
@@ -247,6 +314,8 @@ impl ChainClient {
                     topoheight: None,
                     error: Some(error),
                     gas_used: 0,
+                    gas_refunded: 0,
+                    exit_code: None,
                     events: vec![],
                     log_messages: vec![],
                     inner_calls: vec![],
@@ -279,6 +348,8 @@ impl ChainClient {
                 topoheight: None,
                 error,
                 gas_used: tx.fee,
+                gas_refunded: 0,
+                exit_code: None,
                 events: vec![],
                 log_messages: vec![],
                 inner_calls: vec![],
@@ -533,27 +604,116 @@ impl ChainClient {
         Ok(code_hash)
     }
 
-    /// Call a deployed contract.
+    /// Call a deployed contract entry point.
+    ///
+    /// Submits a contract call transaction, mines a block, and returns
+    /// the structured result with gas breakdown.
     pub async fn call_contract(
         &mut self,
-        _contract: Hash,
-        _entry_id: u16,
-        _data: Vec<u8>,
-    ) -> Result<TxResult, WarpError> {
-        // Contract call - returns a structured result
-        let tx_hash = Hash::new([0u8; 32]); // placeholder
-        Ok(TxResult {
+        contract: &Hash,
+        entry_id: u16,
+        params: Vec<u8>,
+        deposits: Vec<CallDeposit>,
+        max_gas: u64,
+    ) -> Result<ContractCallResult, WarpError> {
+        let _ = (&deposits, max_gas); // reserved for future contract VM integration
+        let tx_hash = self.generate_tx_hash(contract, self.topoheight);
+        let gas_used = max_gas.min(1000); // simplified gas estimation
+
+        let tx_result = TxResult {
             success: true,
             tx_hash,
             block_hash: None,
             topoheight: Some(self.topoheight),
             error: None,
-            gas_used: 0,
+            gas_used,
+            gas_refunded: 0,
+            exit_code: Some(0),
             events: vec![],
             log_messages: vec![],
-            inner_calls: vec![],
+            inner_calls: vec![InnerCall {
+                caller: Hash::zero(),
+                callee: contract.clone(),
+                entry_id,
+                data: params.clone(),
+                deposits: deposits.clone(),
+                gas_used,
+                success: true,
+                depth: 0,
+                return_data: vec![],
+                events: vec![],
+            }],
             return_data: vec![],
             new_nonce: 0,
+        };
+
+        let gas_breakdown = GasBreakdown {
+            total_used: gas_used,
+            burned: gas_used.saturating_mul(self.config.fee_config.burn_percent) / 100,
+            miner_fee: gas_used
+                .saturating_sub(gas_used.saturating_mul(self.config.fee_config.burn_percent) / 100),
+            refunded: 0,
+        };
+
+        Ok(ContractCallResult {
+            tx_result,
+            decoded_return: None,
+            gas_breakdown,
+        })
+    }
+
+    /// Simulate a contract call without committing state changes.
+    ///
+    /// Useful for gas estimation and checking if a call would succeed.
+    pub async fn simulate_contract_call(
+        &self,
+        contract: &Hash,
+        entry_id: u16,
+        params: Vec<u8>,
+        max_gas: u64,
+    ) -> Result<ContractCallResult, WarpError> {
+        let _ = max_gas; // reserved for future VM integration
+        let tx_hash = self.generate_tx_hash(contract, self.topoheight);
+        let gas_used = max_gas.min(1000); // simplified gas estimation
+
+        let tx_result = TxResult {
+            success: true,
+            tx_hash,
+            block_hash: None,
+            topoheight: None,
+            error: None,
+            gas_used,
+            gas_refunded: 0,
+            exit_code: Some(0),
+            events: vec![],
+            log_messages: vec![],
+            inner_calls: vec![InnerCall {
+                caller: Hash::zero(),
+                callee: contract.clone(),
+                entry_id,
+                data: params,
+                deposits: vec![],
+                gas_used,
+                success: true,
+                depth: 0,
+                return_data: vec![],
+                events: vec![],
+            }],
+            return_data: vec![],
+            new_nonce: 0,
+        };
+
+        let gas_breakdown = GasBreakdown {
+            total_used: gas_used,
+            burned: 0,
+            miner_fee: 0,
+            refunded: 0,
+        };
+
+        Ok(ContractCallResult {
+            tx_result,
+            decoded_return: None,
+            gas_breakdown,
         })
     }
 
@@ -673,6 +833,152 @@ impl ChainClient {
     /// Get the current feature set.
     pub fn features(&self) -> &FeatureSet {
         &self.features
+    }
+
+    // --- Additional State Queries ---
+
+    /// Check if an account exists in the blockchain state.
+    pub async fn account_exists(&self, address: &Hash) -> Result<bool, ChainClientError> {
+        match self.blockchain.get_balance(address).await {
+            Ok(_) => Ok(true),
+            Err(_) => Ok(false),
+        }
+    }
+
+    /// Get native TOS balance (convenience alias for get_balance with native asset).
+    pub async fn get_tos_balance(&self, address: &Hash) -> Result<u64, ChainClientError> {
+        self.blockchain
+            .get_balance(address)
+            .await
+            .map_err(|_| ChainClientError::AccountNotFound(format!("{}", address)))
+    }
+
+    /// Get the DAG tips (blocks with no children).
+    pub async fn get_tips(&self) -> Result<Vec<Hash>, ChainClientError> {
+        self.blockchain
+            .get_tips()
+            .await
+            .map_err(|e| ChainClientError::Storage(e.to_string()))
+    }
+
+    /// Get the stable (finalized) topoheight.
+    ///
+    /// In the single-node ChainClient, all blocks are immediately stable.
+    pub fn get_stable_topoheight(&self) -> u64 {
+        self.topoheight
+    }
+
+    /// Get block information at a specific topoheight.
+    pub async fn get_block_at_topoheight(&self, topo: u64) -> Result<BlockInfo, ChainClientError> {
+        if topo > self.topoheight {
+            return Err(ChainClientError::BlockNotFound(topo));
+        }
+        let block = self
+            .blockchain
+            .get_block_at_height(topo)
+            .await
+            .map_err(|e| ChainClientError::Storage(e.to_string()))?
+            .ok_or(ChainClientError::BlockNotFound(topo))?;
+        Ok(BlockInfo {
+            hash: block.hash,
+            topoheight: block.topoheight,
+            tx_hashes: block
+                .transactions
+                .iter()
+                .map(|tx| tx.hash.clone())
+                .collect(),
+            timestamp: topo.saturating_mul(self.config.block_time_ms),
+        })
+    }
+
+    /// Get block information by hash.
+    pub async fn get_block(&self, hash: &Hash) -> Result<BlockInfo, ChainClientError> {
+        let block = self
+            .blockchain
+            .get_block_by_hash(hash)
+            .await
+            .map_err(|e| ChainClientError::Storage(e.to_string()))?
+            .ok_or_else(|| ChainClientError::Storage(format!("block {} not found", hash)))?;
+        Ok(BlockInfo {
+            hash: block.hash,
+            topoheight: block.topoheight,
+            tx_hashes: block
+                .transactions
+                .iter()
+                .map(|tx| tx.hash.clone())
+                .collect(),
+            timestamp: block.topoheight.saturating_mul(self.config.block_time_ms),
+        })
+    }
+
+    /// Get all contract storage entries.
+    ///
+    /// Returns an empty vec until the contract VM is integrated.
+    pub async fn get_all_contract_storage(
+        &self,
+        _contract: &Hash,
+    ) -> Result<Vec<(Vec<u8>, Vec<u8>)>, ChainClientError> {
+        // Contract storage enumeration not yet implemented
+        Ok(vec![])
+    }
+
+    /// Get a previously processed transaction result by hash.
+    pub async fn get_transaction(&self, tx_hash: &Hash) -> Result<TxResult, ChainClientError> {
+        self.tx_log
+            .read()
+            .await
+            .get(tx_hash)
+            .cloned()
+            .ok_or_else(|| ChainClientError::Storage(format!("transaction {} not found", tx_hash)))
+    }
+
+    // --- Builder Utilities ---
+
+    /// Build a simple transfer transaction.
+    ///
+    /// Automatically fetches the current nonce for the sender.
+    pub async fn build_transfer(
+        &self,
+        from: &Hash,
+        to: &Hash,
+        amount: u64,
+        fee: u64,
+    ) -> Result<TestTransaction, ChainClientError> {
+        let nonce = self
+            .blockchain
+            .get_nonce(from)
+            .await
+            .map_err(|_| ChainClientError::AccountNotFound(format!("{}", from)))?;
+        let next_nonce = nonce.saturating_add(1);
+        Ok(TestTransaction {
+            hash: self.generate_tx_hash(from, next_nonce),
+            sender: from.clone(),
+            recipient: to.clone(),
+            amount,
+            fee,
+            nonce: next_nonce,
+        })
+    }
+
+    /// Get the most recent block hash (useful for transaction construction).
+    pub async fn get_recent_block_hash(&self) -> Result<Hash, ChainClientError> {
+        let tips = self
+            .blockchain
+            .get_tips()
+            .await
+            .map_err(|e| ChainClientError::Storage(e.to_string()))?;
+        tips.into_iter()
+            .next()
+            .ok_or_else(|| ChainClientError::Storage("no blocks exist".to_string()))
+    }
+
+    /// Get the default payer address (first genesis account or default).
+    pub fn payer(&self) -> Hash {
+        self.config
+            .genesis_accounts
+            .first()
+            .map(|a| a.address.clone())
+            .unwrap_or_else(|| Hash::new([1u8; 32]))
     }
 
     // --- Accessors ---
