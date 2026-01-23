@@ -2039,6 +2039,7 @@ impl<S: Storage> P2pServer<S> {
         stable_topoheight: u64,
     ) -> Result<(), BlockchainError> {
         let mut owner_counts: HashMap<PublicKey, u64> = HashMap::new();
+        let mut seen_tokens: HashSet<u64> = HashSet::new();
         let mut next_page = None;
         loop {
             let StepResponse::NftOwnership(resp_collection_id, entries, page) = peer
@@ -2065,7 +2066,10 @@ impl<S: Storage> P2pServer<S> {
                 return Err(P2pError::InvalidPacket.into());
             }
 
-            for (_token_id, owner) in &entries {
+            for (token_id, owner) in &entries {
+                if !seen_tokens.insert(*token_id) {
+                    continue;
+                }
                 let count = owner_counts.entry(owner.clone()).or_insert(0);
                 *count = count.saturating_add(1);
             }
