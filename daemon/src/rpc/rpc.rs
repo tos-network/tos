@@ -6265,7 +6265,12 @@ async fn shutdown<S: Storage>(context: &Context, body: Value) -> Result<Value, I
 mod shutdown_tests {
     use super::*;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+    use std::sync::Mutex;
     use tos_common::rpc::server::ClientAddr;
+
+    // Guards to serialize tests that mutate global atomics
+    static RATE_LIMIT_TEST_GUARD: Mutex<()> = Mutex::new(());
+    static FAILED_AUTH_TEST_GUARD: Mutex<()> = Mutex::new(());
 
     #[test]
     fn test_client_addr_localhost_ipv4() {
@@ -6441,6 +6446,7 @@ mod shutdown_tests {
 
     #[test]
     fn test_check_rate_limit_returns_timestamp() {
+        let _guard = RATE_LIMIT_TEST_GUARD.lock().unwrap();
         // Reset the rate limiter to ensure clean state
         // Set to a very old timestamp (0) to ensure we're outside cooldown
         LAST_SHUTDOWN_ATTEMPT.store(0, Ordering::SeqCst);
@@ -6461,6 +6467,7 @@ mod shutdown_tests {
 
     #[test]
     fn test_record_shutdown_attempt_atomic() {
+        let _guard = RATE_LIMIT_TEST_GUARD.lock().unwrap();
         // Reset to old timestamp
         LAST_SHUTDOWN_ATTEMPT.store(0, Ordering::SeqCst);
 
@@ -6480,6 +6487,7 @@ mod shutdown_tests {
 
     #[test]
     fn test_record_shutdown_attempt_rejects_during_cooldown() {
+        let _guard = RATE_LIMIT_TEST_GUARD.lock().unwrap();
         // Set to current time (simulating recent successful shutdown)
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -6494,6 +6502,7 @@ mod shutdown_tests {
 
     #[test]
     fn test_rate_limit_two_phase_separation() {
+        let _guard = RATE_LIMIT_TEST_GUARD.lock().unwrap();
         // This test verifies the two-phase rate limiting:
         // Phase 1: check_shutdown_rate_limit() - read-only check
         // Phase 2: record_shutdown_attempt() - atomic update only after auth passes
@@ -6537,6 +6546,7 @@ mod shutdown_tests {
 
     #[test]
     fn test_failed_auth_first_attempt_allowed() {
+        let _guard = FAILED_AUTH_TEST_GUARD.lock().unwrap();
         // Reset failed attempts state
         FAILED_SHUTDOWN_ATTEMPTS.store(0, Ordering::SeqCst);
         LAST_FAILED_SHUTDOWN.store(0, Ordering::SeqCst);
@@ -6551,6 +6561,7 @@ mod shutdown_tests {
 
     #[test]
     fn test_record_failed_attempt_increments_counter() {
+        let _guard = FAILED_AUTH_TEST_GUARD.lock().unwrap();
         // Reset state
         FAILED_SHUTDOWN_ATTEMPTS.store(0, Ordering::SeqCst);
         LAST_FAILED_SHUTDOWN.store(0, Ordering::SeqCst);
@@ -6570,6 +6581,7 @@ mod shutdown_tests {
 
     #[test]
     fn test_reset_failed_attempts() {
+        let _guard = FAILED_AUTH_TEST_GUARD.lock().unwrap();
         // Set some failures
         FAILED_SHUTDOWN_ATTEMPTS.store(5, Ordering::SeqCst);
 
