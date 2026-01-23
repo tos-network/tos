@@ -15,7 +15,9 @@ use tos_common::{block::TopoHeight, crypto::PublicKey, serializer::Skip};
 impl AccountProvider for RocksStorage {
     // Get the number of accounts with nonces available on chain
     async fn count_accounts(&self) -> Result<u64, BlockchainError> {
-        trace!("count accounts");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("count accounts");
+        }
         self.get_last_account_id()
     }
 
@@ -264,12 +266,16 @@ impl AccountProvider for RocksStorage {
 
 impl RocksStorage {
     fn get_last_account_id(&self) -> Result<AccountId, BlockchainError> {
-        trace!("get current account id");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get current account id");
+        }
         Ok(self.cache().counter.accounts_count)
     }
 
     fn get_next_account_id(&mut self) -> Result<u64, BlockchainError> {
-        trace!("get next account id");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get next account id");
+        }
         let id = self.get_last_account_id()?;
         if log::log_enabled!(log::Level::Trace) {
             trace!("next account id is {}", id);

@@ -68,7 +68,9 @@ impl TransactionProvider for RocksStorage {
     async fn get_unexecuted_transactions<'a>(
         &'a self,
     ) -> Result<impl Iterator<Item = Result<Hash, BlockchainError>> + 'a, BlockchainError> {
-        trace!("get unexecuted transactions");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get unexecuted transactions");
+        }
         let iter = self.iter_keys(Column::Transactions, IteratorMode::Start)?;
         Ok(iter
             .map(|res| {

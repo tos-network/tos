@@ -101,9 +101,13 @@ where
     }
 
     pub async fn stop(&self) {
-        info!("Stopping XSWD...");
+        if log::log_enabled!(log::Level::Info) {
+            info!("Stopping XSWD...");
+        }
         self.handle.stop(false).await;
-        info!("XSWD has been stopped !");
+        if log::log_enabled!(log::Level::Info) {
+            info!("XSWD has been stopped !");
+        }
     }
 }
 

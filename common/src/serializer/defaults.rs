@@ -199,7 +199,9 @@ impl<T: Serializer + std::hash::Hash + Ord> Serializer for BTreeSet<T> {
         for _ in 0..count {
             let value = T::read(reader)?;
             if !set.insert(value) {
-                error!("Value is duplicated in BTreeSet");
+                if log::log_enabled!(log::Level::Error) {
+                    error!("Value is duplicated in BTreeSet");
+                }
                 return Err(ReaderError::InvalidSize);
             }
         }
@@ -239,7 +241,9 @@ impl<T: Serializer + std::hash::Hash + Eq> Serializer for IndexSet<T> {
         for _ in 0..count {
             let value = T::read(reader)?;
             if !set.insert(value) {
-                error!("Value is duplicated in IndexSet");
+                if log::log_enabled!(log::Level::Error) {
+                    error!("Value is duplicated in IndexSet");
+                }
                 return Err(ReaderError::InvalidSize);
             }
         }

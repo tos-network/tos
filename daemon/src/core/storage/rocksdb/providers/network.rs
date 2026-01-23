@@ -7,7 +7,9 @@ use tos_common::network::Network;
 
 impl NetworkProvider for RocksStorage {
     fn get_network(&self) -> Result<Network, BlockchainError> {
-        trace!("get network");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get network");
+        }
         Ok(self.network)
     }
 

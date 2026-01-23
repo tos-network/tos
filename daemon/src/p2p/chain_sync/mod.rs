@@ -73,7 +73,9 @@ impl<S: Storage> P2pServer<S> {
         let packet = {
             debug!("locking storage for sync chain request");
             let storage = self.blockchain.get_storage().read().await;
-            debug!("locked storage for sync chain request");
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("locked storage for sync chain request");
+            }
             let request = ChainRequest::new(
                 self.build_list_of_blocks_id(&*storage).await?,
                 requested_max_size as u16,
@@ -156,7 +158,9 @@ impl<S: Storage> P2pServer<S> {
             let should_search_alt_tips =
                 top_topoheight - topoheight < accepted_response_size as u64;
             if should_search_alt_tips {
-                debug!("Peer is near to be synced, will send him alt tips blocks");
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Peer is near to be synced, will send him alt tips blocks");
+                }
                 // Note: Use storage.chain_cache() directly instead of self.blockchain.get_stable_height().await
                 // to avoid deadlock - we're already holding storage.read()
                 unstable_height = Some(storage.chain_cache().await.stable_height + 1);
@@ -269,7 +273,9 @@ impl<S: Storage> P2pServer<S> {
         // now retrieve all txs from all blocks header and add block in chain
 
         let capacity = if self.allow_boost_sync() {
-            debug!("Requesting needed blocks in boost sync mode");
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Requesting needed blocks in boost sync mode");
+            }
             Some(PEER_OBJECTS_CONCURRENCY)
         } else {
             Some(1)
@@ -687,12 +693,16 @@ impl<S: Storage> P2pServer<S> {
                 'main: loop {
                     select! {
                         _ = exit_signal.recv() => {
-                            debug!("Stopping chain validator due to exit signal");
+                            if log::log_enabled!(log::Level::Debug) {
+                                debug!("Stopping chain validator due to exit signal");
+                            }
                             break 'main;
                         },
                         next = futures.next() => {
                             let Some(res) = next else {
-                                debug!("No more items in futures for chain validator");
+                                if log::log_enabled!(log::Level::Debug) {
+                                    debug!("No more items in futures for chain validator");
+                                }
                                 break 'main;
                             };
 
@@ -733,7 +743,9 @@ impl<S: Storage> P2pServer<S> {
                     .await;
                 let apply = {
                     let _permit = self.blockchain.storage_semaphore().acquire().await?;
-                    info!("Ending commit point for chain validator");
+                    if log::log_enabled!(log::Level::Info) {
+                        info!("Ending commit point for chain validator");
+                    }
                     let apply = match res.as_ref() {
                         // In case we got a partially good chain only, and that its still better than ours
                         // we can partially switch to it if the topoheight AND the cumulative difficulty is bigger
@@ -756,9 +768,13 @@ impl<S: Storage> P2pServer<S> {
                     };
 
                     {
-                        debug!("locking storage write mode for commit point");
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("locking storage write mode for commit point");
+                        }
                         let mut storage = storage.lock().await?;
-                        debug!("locked storage write mode for commit point");
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("locked storage write mode for commit point");
+                        }
                         storage.end_snapshot(apply)?;
                         if log::log_enabled!(log::Level::Info) {
                             info!("Commit point ended for chain validator, apply: {}", apply);
@@ -816,7 +832,9 @@ impl<S: Storage> P2pServer<S> {
             let start = Instant::now();
 
             let capacity = if self.allow_boost_sync() {
-                debug!("Requesting needed blocks in boost sync mode");
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Requesting needed blocks in boost sync mode");
+                }
                 Some(PEER_OBJECTS_CONCURRENCY)
             } else {
                 Some(1)
@@ -866,7 +884,9 @@ impl<S: Storage> P2pServer<S> {
                 select! {
                     biased;
                     _ = exit_signal.recv() => {
-                        debug!("Stopping chain sync due to exit signal");
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("Stopping chain sync due to exit signal");
+                        }
                         break 'main;
                     },
                     _ = internal_bps.tick() => {

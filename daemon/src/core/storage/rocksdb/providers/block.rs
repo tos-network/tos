@@ -23,13 +23,17 @@ use tos_common::{
 impl BlockProvider for RocksStorage {
     // Check if the storage has blocks
     async fn has_blocks(&self) -> Result<bool, BlockchainError> {
-        trace!("has blocks");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("has blocks");
+        }
         self.is_empty(Column::Blocks).map(|v| !v)
     }
 
     // Count the number of blocks stored
     async fn count_blocks(&self) -> Result<u64, BlockchainError> {
-        trace!("count blocks");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("count blocks");
+        }
         Ok(self.cache().counter.blocks_count)
     }
 
@@ -47,13 +51,17 @@ impl BlockProvider for RocksStorage {
 
     // Check if the block exists using its hash
     async fn has_block_with_hash(&self, hash: &Hash) -> Result<bool, BlockchainError> {
-        trace!("has block with hash");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("has block with hash");
+        }
         self.contains_data(Column::Blocks, hash)
     }
 
     // Get a block with transactions using its hash
     async fn get_block_by_hash(&self, hash: &Hash) -> Result<Block, BlockchainError> {
-        trace!("get block by hash");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get block by hash");
+        }
         let header = self.get_block_header_by_hash(hash).await?;
         let mut transactions = Vec::with_capacity(header.get_txs_count());
         for hash in header.get_txs_hashes() {
@@ -76,7 +84,9 @@ impl BlockProvider for RocksStorage {
         covariance: VarUint,
         hash: Immutable<Hash>,
     ) -> Result<(), BlockchainError> {
-        trace!("save block");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("save block");
+        }
 
         let mut count_txs: u64 = 0;
         for (hash, transaction) in block.get_transactions().iter().zip(txs.iter()) {

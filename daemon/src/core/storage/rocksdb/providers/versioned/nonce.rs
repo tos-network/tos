@@ -18,7 +18,9 @@ impl VersionedNonceProvider for RocksStorage {
         &mut self,
         topoheight: TopoHeight,
     ) -> Result<(), BlockchainError> {
-        trace!("delete versioned nonces at {}", topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("delete versioned nonces at {}", topoheight);
+        }
         let prefix = topoheight.to_be_bytes();
 
         let snapshot = self.snapshot.clone();
@@ -49,11 +51,13 @@ impl VersionedNonceProvider for RocksStorage {
                 let prev_topo = Option::from_bytes(&value)?;
                 account.nonce_pointer = prev_topo;
 
-                trace!(
-                    "updating account {} with nonce set to {:?}",
-                    account_key.as_address(self.is_mainnet()),
-                    account.nonce_pointer
-                );
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!(
+                        "updating account {} with nonce set to {:?}",
+                        account_key.as_address(self.is_mainnet()),
+                        account.nonce_pointer
+                    );
+                }
                 Self::insert_into_disk_internal(
                     &self.db,
                     self.snapshot.as_mut(),
@@ -72,7 +76,9 @@ impl VersionedNonceProvider for RocksStorage {
         &mut self,
         topoheight: TopoHeight,
     ) -> Result<(), BlockchainError> {
-        trace!("delete versioned nonces above topoheight {}", topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("delete versioned nonces above topoheight {}", topoheight);
+        }
         let start = (topoheight + 1).to_be_bytes();
 
         let snapshot = self.snapshot.clone();
@@ -128,7 +134,9 @@ impl VersionedNonceProvider for RocksStorage {
         topoheight: TopoHeight,
         keep_last: bool,
     ) -> Result<(), BlockchainError> {
-        trace!("delete versioned nonces below topoheight {}", topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("delete versioned nonces below topoheight {}", topoheight);
+        }
         self.delete_versioned_below_topoheight::<AccountId, Account>(
             Column::Account,
             Column::VersionedNonces,

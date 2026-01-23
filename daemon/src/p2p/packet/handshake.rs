@@ -240,7 +240,9 @@ impl Serializer for Handshake<'_> {
         let pruned_topoheight = Option::read(reader)?;
         if let Some(pruned_topoheight) = &pruned_topoheight {
             if *pruned_topoheight == 0 {
-                debug!("Invalid pruned topoheight (0) in handshake packet");
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Invalid pruned topoheight (0) in handshake packet");
+                }
                 return Err(ReaderError::InvalidValue);
             }
         }

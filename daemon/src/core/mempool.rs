@@ -413,7 +413,9 @@ impl Mempool {
         block_version: BlockVersion,
         full: bool,
     ) -> Vec<(Arc<Hash>, SortedTx)> {
-        trace!("Cleaning up mempool...");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Cleaning up mempool...");
+        }
 
         // All deleted sorted txs with their hashes
         let mut deleted_transactions: Vec<(Arc<Hash>, SortedTx)> = Vec::new();
@@ -656,7 +658,9 @@ impl Mempool {
     }
 
     pub async fn stop(&mut self) {
-        info!("Stopping mempool...");
+        if log::log_enabled!(log::Level::Info) {
+            info!("Stopping mempool...");
+        }
         self.clear();
     }
 }

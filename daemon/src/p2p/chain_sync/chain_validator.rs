@@ -103,7 +103,9 @@ impl<'a, S: Storage> ChainValidator<'a, S> {
     // Retrieve the cumulative difficulty of the chain validator
     // It is the cumulative difficulty of the last block added
     pub fn get_expected_chain_cumulative_difficulty(&self) -> Option<&CumulativeDifficulty> {
-        debug!("retrieving expected chain cumulative difficulty");
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("retrieving expected chain cumulative difficulty");
+        }
         let (_, hash) = self.hash_at_topo.last()?;
 
         if log::log_enabled!(log::Level::Debug) {
@@ -498,7 +500,9 @@ impl<S: Storage> DagOrderProvider for ChainValidatorProvider<'_, S> {
     async fn get_orphaned_blocks<'a>(
         &'a self,
     ) -> Result<impl Iterator<Item = Result<Hash, BlockchainError>> + 'a, BlockchainError> {
-        trace!("get orphaned blocks");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get orphaned blocks");
+        }
         let iter = self.storage.get_orphaned_blocks().await?;
         Ok(iter)
     }
@@ -558,7 +562,9 @@ impl<S: Storage> BlocksAtHeightProvider for ChainValidatorProvider<'_, S> {
 #[async_trait]
 impl<S: Storage> PrunedTopoheightProvider for ChainValidatorProvider<'_, S> {
     async fn get_pruned_topoheight(&self) -> Result<Option<TopoHeight>, BlockchainError> {
-        trace!("fallback on storage for get_pruned_topoheight");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("fallback on storage for get_pruned_topoheight");
+        }
         self.storage.get_pruned_topoheight().await
     }
 
@@ -576,7 +582,9 @@ impl<S: Storage> MerkleHashProvider for ChainValidatorProvider<'_, S> {
         &self,
         topoheight: TopoHeight,
     ) -> Result<Hash, BlockchainError> {
-        trace!("fallback on storage for get_balances_merkle_hash_at_topoheight");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("fallback on storage for get_balances_merkle_hash_at_topoheight");
+        }
         self.storage
             .get_balances_merkle_hash_at_topoheight(topoheight)
             .await

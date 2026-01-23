@@ -15,12 +15,16 @@ impl SnapshotProvider for RocksStorage {
 
     // Check if we have a commit point already set
     async fn has_snapshot(&self) -> Result<bool, BlockchainError> {
-        trace!("has snapshot");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("has snapshot");
+        }
         Ok(self.snapshot.is_some())
     }
 
     async fn start_snapshot(&mut self) -> Result<(), BlockchainError> {
-        trace!("start snapshot");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("start snapshot");
+        }
         if self.snapshot.is_some() {
             return Err(BlockchainError::CommitPointAlreadyStarted);
         }
@@ -30,14 +34,18 @@ impl SnapshotProvider for RocksStorage {
     }
 
     fn end_snapshot(&mut self, apply: bool) -> Result<(), BlockchainError> {
-        trace!("end snapshot");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("end snapshot");
+        }
         let snapshot = self
             .snapshot
             .take()
             .ok_or(BlockchainError::CommitPointNotStarted)?;
 
         if apply {
-            trace!("applying snapshot");
+            if log::log_enabled!(log::Level::Trace) {
+                trace!("applying snapshot");
+            }
             for (column, batch) in snapshot.trees {
                 for (key, value) in batch {
                     if let Some(value) = value {
@@ -60,7 +68,9 @@ impl SnapshotProvider for RocksStorage {
         &mut self,
         other: Option<Snapshot>,
     ) -> Result<Option<Snapshot>, BlockchainError> {
-        trace!("swap snapshot");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("swap snapshot");
+        }
         Ok(std::mem::replace(&mut self.snapshot, other))
     }
 }

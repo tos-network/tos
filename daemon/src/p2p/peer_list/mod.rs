@@ -103,7 +103,9 @@ impl PeerList {
 
     // Clear the peerlist, this will overwrite the file on disk also
     pub async fn clear_peerlist(&self) -> Result<(), P2pError> {
-        trace!("clear peerlist");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("clear peerlist");
+        }
         self.cache.clear_peerlist().await?;
         Ok(())
     }
@@ -320,7 +322,9 @@ impl PeerList {
     }
 
     pub async fn close_all(&self) {
-        trace!("closing all peers");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("closing all peers");
+        }
         let peers = {
             let mut peers = self.peers.write().await;
             peers.drain().collect::<Vec<(u64, Arc<Peer>)>>()
@@ -577,7 +581,9 @@ impl PeerList {
         }
 
         if close_peer {
-            trace!("Closing peer if present in peerlist");
+            if log::log_enabled!(log::Level::Trace) {
+                trace!("Closing peer if present in peerlist");
+            }
             let peers = self.peers.read().await;
             for peer in peers.values() {
                 if peer.get_connection().get_address().ip() == *ip {

@@ -296,14 +296,18 @@ impl Serializer for BlockHeader {
 
         let tips_count = reader.read_u8()?;
         if tips_count as usize > TIPS_LIMIT {
-            debug!("Error, too many tips in block header");
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Error, too many tips in block header");
+            }
             return Err(ReaderError::InvalidValue);
         }
 
         let mut tips = IndexSet::with_capacity(tips_count as usize);
         for _ in 0..tips_count {
             if !tips.insert(reader.read_hash()?) {
-                debug!("Error, duplicate tip found in block header");
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Error, duplicate tip found in block header");
+                }
                 return Err(ReaderError::InvalidValue);
             }
         }
@@ -312,16 +316,20 @@ impl Serializer for BlockHeader {
         // Validate txs_count before allocation to prevent memory exhaustion DoS
         // Uses centralized constant from config.rs (derived from MAX_BLOCK_SIZE)
         if txs_count > MAX_TXS_PER_BLOCK {
-            debug!(
-                "Error, too many transactions in block header: {} > {}",
-                txs_count, MAX_TXS_PER_BLOCK
-            );
+            if log::log_enabled!(log::Level::Debug) {
+                debug!(
+                    "Error, too many transactions in block header: {} > {}",
+                    txs_count, MAX_TXS_PER_BLOCK
+                );
+            }
             return Err(ReaderError::InvalidValue);
         }
         let mut txs_hashes = IndexSet::with_capacity(txs_count as usize);
         for _ in 0..txs_count {
             if !txs_hashes.insert(reader.read_hash()?) {
-                debug!("Error, duplicate tx hash found in block header");
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Error, duplicate tx hash found in block header");
+                }
                 return Err(ReaderError::InvalidValue);
             }
         }
@@ -351,7 +359,9 @@ impl Serializer for BlockHeader {
                 ))
             }
             _ => {
-                debug!("Error, invalid VRF flag in block header: {}", vrf_flag);
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Error, invalid VRF flag in block header: {}", vrf_flag);
+                }
                 return Err(ReaderError::InvalidValue);
             }
         };

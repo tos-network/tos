@@ -98,7 +98,9 @@ impl VersionedState {
             }
             Self::Updated(_) => {}
             Self::New => {
-                debug!("Cannot mark as updated a new version");
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Cannot mark as updated a new version");
+                }
             }
         };
     }

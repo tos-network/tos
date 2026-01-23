@@ -18,7 +18,9 @@ impl VersionedMultiSigProvider for RocksStorage {
         &mut self,
         topoheight: TopoHeight,
     ) -> Result<(), BlockchainError> {
-        trace!("delete versioned multisigs at topoheight {}", topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("delete versioned multisigs at topoheight {}", topoheight);
+        }
         let prefix = topoheight.to_be_bytes();
 
         let snapshot = self.snapshot.clone();
@@ -65,7 +67,9 @@ impl VersionedMultiSigProvider for RocksStorage {
         &mut self,
         topoheight: TopoHeight,
     ) -> Result<(), BlockchainError> {
-        trace!("delete versioned multisigs above topoheight {}", topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("delete versioned multisigs above topoheight {}", topoheight);
+        }
         let start = (topoheight + 1).to_be_bytes();
         let snapshot = self.snapshot.clone();
         for res in Self::iter_raw_internal(
@@ -120,7 +124,9 @@ impl VersionedMultiSigProvider for RocksStorage {
         topoheight: TopoHeight,
         keep_last: bool,
     ) -> Result<(), BlockchainError> {
-        trace!("delete versioned multisigs below topoheight {}", topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("delete versioned multisigs below topoheight {}", topoheight);
+        }
         self.delete_versioned_below_topoheight::<AccountId, Account>(
             Column::Account,
             Column::VersionedMultisig,

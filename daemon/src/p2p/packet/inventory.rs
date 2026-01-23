@@ -73,7 +73,9 @@ impl<'a> Serializer for NotifyInventoryResponse<'a> {
         let mut txs = IndexSet::with_capacity(count as usize);
         for _ in 0..count {
             if !txs.insert(Cow::Owned(reader.read_hash()?)) {
-                debug!("Duplicate transaction in NotifyInventoryResponse");
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Duplicate transaction in NotifyInventoryResponse");
+                }
                 return Err(ReaderError::InvalidValue);
             }
         }

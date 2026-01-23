@@ -173,7 +173,9 @@ impl AssetProvider for RocksStorage {
     async fn get_assets<'a>(
         &'a self,
     ) -> Result<impl Iterator<Item = Result<Hash, BlockchainError>> + 'a, BlockchainError> {
-        trace!("get assets");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get assets");
+        }
         self.iter_keys(Column::Assets, IteratorMode::Start)
     }
 
@@ -243,7 +245,9 @@ impl AssetProvider for RocksStorage {
 
     // Count the number of assets stored
     async fn count_assets(&self) -> Result<u64, BlockchainError> {
-        trace!("count assets");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("count assets");
+        }
         Ok(self.cache().counter.assets_count)
     }
 
@@ -292,7 +296,9 @@ impl AssetProvider for RocksStorage {
 
 impl RocksStorage {
     fn get_next_asset_id(&mut self) -> Result<AssetId, BlockchainError> {
-        trace!("get next asset id");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get next asset id");
+        }
         let id = self.cache().counter.assets_count;
 
         if log::log_enabled!(log::Level::Trace) {

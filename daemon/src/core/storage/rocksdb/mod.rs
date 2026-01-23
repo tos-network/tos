@@ -169,7 +169,9 @@ impl RocksStorage {
         let mut env = match Env::new() {
             Ok(env) => env,
             Err(err) => {
-                error!("Failed to create RocksDB environment: {}", err);
+                if log::log_enabled!(log::Level::Error) {
+                    error!("Failed to create RocksDB environment: {}", err);
+                }
                 std::process::exit(1);
             }
         };
@@ -206,7 +208,9 @@ impl RocksStorage {
         ) {
             Ok(db) => db,
             Err(err) => {
-                error!("Failed to open RocksDB: {}", err);
+                if log::log_enabled!(log::Level::Error) {
+                    error!("Failed to open RocksDB: {}", err);
+                }
                 std::process::exit(1);
             }
         };
@@ -239,7 +243,9 @@ impl RocksStorage {
     }
 
     pub fn load_cache_from_disk(&mut self) {
-        trace!("load cache from disk");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("load cache from disk");
+        }
 
         // Helper macro to load cache values with proper error logging
         macro_rules! load_cache_value {
@@ -667,7 +673,9 @@ impl Storage for RocksStorage {
             objects.hash_at_topo_cache.get_mut().pop(&topoheight);
         }
 
-        trace!("deleting block execution order");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("deleting block execution order");
+        }
         self.remove_from_disk(Column::BlocksExecutionOrder, hash.as_bytes())?;
 
         if log::log_enabled!(log::Level::Trace) {
@@ -690,17 +698,25 @@ impl Storage for RocksStorage {
         }
         trace!("block header deleted successfully");
 
-        trace!("deleting topoheight metadata");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("deleting topoheight metadata");
+        }
         self.remove_from_disk(Column::TopoHeightMetadata, &topoheight.to_be_bytes())?;
-        trace!("topoheight metadata deleted");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("topoheight metadata deleted");
+        }
 
-        trace!("deleting block difficulty");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("deleting block difficulty");
+        }
         self.remove_from_disk(Column::BlockDifficulty, &hash)?;
         // Evict from cache: cumulative_difficulty_cache
         if let Some(objects) = self.cache_mut().objects.as_mut() {
             objects.cumulative_difficulty_cache.get_mut().pop(&hash);
         }
-        trace!("block deleted");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("block deleted");
+        }
 
         let mut txs = Vec::with_capacity(block.get_txs_count());
         for tx_hash in block.get_transactions() {
@@ -834,7 +850,9 @@ impl Storage for RocksStorage {
 
     // Flush the inner DB after a block being written
     async fn flush(&mut self) -> Result<(), BlockchainError> {
-        trace!("flush DB");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("flush DB");
+        }
 
         let db = Arc::clone(&self.db);
         // To prevent starving the current async worker,
@@ -854,7 +872,9 @@ impl Storage for RocksStorage {
             db.wait_for_compact(&options)
                 .context("Error while waiting on compact")?;
 
-            info!("flushing DB");
+            if log::log_enabled!(log::Level::Info) {
+                info!("flushing DB");
+            }
             db.flush().context("Error while flushing DB")?;
 
             Ok::<_, BlockchainError>(())

@@ -101,7 +101,9 @@ impl UnknownExtraDataFormat {
 
         // If we got an error during decoding and the handle is provided, try legacy fallback
         if let Some(handle) = handle.filter(|_| res.is_err()) {
-            debug!("try decrypt v1 fallback");
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("try decrypt v1 fallback");
+            }
             let data = self.decrypt_v1(private_key, handle)?;
             return Ok(PlaintextExtraData::new(
                 None,

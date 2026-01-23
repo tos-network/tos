@@ -13,7 +13,9 @@ use tos_common::block::TopoHeight;
 impl PrunedTopoheightProvider for RocksStorage {
     // get the pruned topoheight
     async fn get_pruned_topoheight(&self) -> Result<Option<TopoHeight>, BlockchainError> {
-        trace!("get pruned topoheight");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get pruned topoheight");
+        }
         Ok(self.cache().counter.pruned_topoheight)
     }
 

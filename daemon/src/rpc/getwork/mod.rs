@@ -121,7 +121,9 @@ impl<S: Storage> GetWorkServer<S> {
     pub async fn notify_new_job_rate_limited(&self) -> Result<(), InternalRpcError> {
         let rate_limit_reached = self.is_rate_limited();
         if rate_limit_reached {
-            debug!("Rate limit reached, no need to notify miners");
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Rate limit reached, no need to notify miners");
+            }
             self.is_job_dirty.store(true, Ordering::SeqCst);
             return Ok(());
         }
@@ -136,7 +138,9 @@ impl<S: Storage> GetWorkServer<S> {
         loop {
             sleep(Duration::from_millis(self.notify_rate_limit_ms)).await;
             if self.is_job_dirty.load(Ordering::SeqCst) {
-                debug!("job is dirty, resending job to all miners");
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("job is dirty, resending job to all miners");
+                }
                 if let Err(e) = self.notify_new_job().await {
                     if log::log_enabled!(log::Level::Error) {
                         error!("Error while notifying new job to miners: {}", e);
@@ -154,7 +158,9 @@ impl<S: Storage> GetWorkServer<S> {
 
     // Returns the list of miners connected to the getwork server
     pub fn get_miners(&self) -> &Mutex<HashMap<WebSocketSessionShared<Self>, Miner>> {
-        trace!("get miners");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get miners");
+        }
         &self.miners
     }
 
@@ -165,17 +171,25 @@ impl<S: Storage> GetWorkServer<S> {
         session: &WebSocketSessionShared<Self>,
         key: &PublicKey,
     ) -> Result<(), anyhow::Error> {
-        debug!("Sending new job to miner");
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("Sending new job to miner");
+        }
         let (version, mut job, height, difficulty) = {
-            debug!("locking last header hashfor new job");
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("locking last header hashfor new job");
+            }
             let mut hash = self.last_header_hash.lock().await;
 
             // if we have a job in cache, and we are rate limited, we can send it
             // otherwise, we generate a new job
             if let Some(hash) = hash.as_ref().filter(|_| self.is_rate_limited()) {
-                debug!("job found in cache, sending it");
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("job found in cache, sending it");
+                }
                 let mining_jobs = self.mining_jobs.lock().await;
-                debug!("mining jobs locked for new job");
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("mining jobs locked for new job");
+                }
 
                 let (header, diff) = mining_jobs
                     .peek(hash)
@@ -186,9 +200,13 @@ impl<S: Storage> GetWorkServer<S> {
             } else {
                 // generate a mining job
                 let (header, difficulty) = {
-                    debug!("locking storage for mining job generation");
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("locking storage for mining job generation");
+                    }
                     let storage = self.blockchain.get_storage().read().await;
-                    debug!("storage read acquired for mining job generation");
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("storage read acquired for mining job generation");
+                    }
 
                     let header = self
                         .blockchain
@@ -212,9 +230,13 @@ impl<S: Storage> GetWorkServer<S> {
                 let header_work_hash = job.get_header_work_hash();
                 *hash = Some(header_work_hash.clone());
                 {
-                    debug!("job found in cache, sending it");
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("job found in cache, sending it");
+                    }
                     let mut mining_jobs = self.mining_jobs.lock().await;
-                    debug!("mining jobs locked for new job");
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("mining jobs locked for new job");
+                    }
                     mining_jobs.put(header_work_hash.clone(), (header, difficulty));
                 }
 
@@ -230,7 +252,9 @@ impl<S: Storage> GetWorkServer<S> {
         let algorithm = get_pow_algorithm_for_version(version);
         let topoheight = self.blockchain.get_topo_height();
 
-        debug!("Sending job to new miner");
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("Sending job to new miner");
+        }
         session
             .send_json(Response::NewJob(GetMinerWorkResult {
                 algorithm,
@@ -241,7 +265,9 @@ impl<S: Storage> GetWorkServer<S> {
             }))
             .await
             .context("error while sending block template")?;
-        debug!("Job sent to miner");
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("Job sent to miner");
+        }
 
         Ok(())
     }
@@ -249,7 +275,9 @@ impl<S: Storage> GetWorkServer<S> {
     // notify every miners connected to the getwork server
     // each miner have his own task so nobody wait on other
     pub async fn notify_new_job(&self) -> Result<(), InternalRpcError> {
-        trace!("notify new job");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("notify new job");
+        }
         // Check that there is at least one miner connected
         // otherwise, no need to build a new job
         let is_event_tracked = {
@@ -266,7 +294,9 @@ impl<S: Storage> GetWorkServer<S> {
             let miners = self.miners.lock().await;
             let empty = miners.is_empty();
             if empty && !is_event_tracked {
-                debug!("No miners connected, no need to notify them");
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("No miners connected, no need to notify them");
+                }
                 return Ok(());
             }
             empty
@@ -275,11 +305,17 @@ impl<S: Storage> GetWorkServer<S> {
         self.last_notify
             .store(get_current_time_in_millis(), Ordering::SeqCst);
         self.is_job_dirty.store(false, Ordering::SeqCst);
-        debug!("Notify all miners for a new job");
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("Notify all miners for a new job");
+        }
         let (header, difficulty) = {
-            debug!("locking storage for new job");
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("locking storage for new job");
+            }
             let storage = self.blockchain.get_storage().read().await;
-            debug!("storage read acquired for new job");
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("storage read acquired for new job");
+            }
 
             let header = self
                 .blockchain
@@ -305,7 +341,9 @@ impl<S: Storage> GetWorkServer<S> {
         let topoheight = self.blockchain.get_topo_height();
 
         if is_event_tracked {
-            debug!("Notifying RPC clients for new block template");
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Notifying RPC clients for new block template");
+            }
             let rpc = self.blockchain.get_rpc().read().await;
             if let Some(rpc) = rpc.as_ref() {
                 let value = GetBlockTemplateResult {
@@ -324,16 +362,24 @@ impl<S: Storage> GetWorkServer<S> {
         // save the header used for job in cache
         let header_work_hash = job.get_header_work_hash();
         {
-            debug!("locking last header hash for notify new job");
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("locking last header hash for notify new job");
+            }
             let mut last_header_hash = self.last_header_hash.lock().await;
-            debug!("last header hash locked for notify new job");
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("last header hash locked for notify new job");
+            }
             *last_header_hash = Some(header_work_hash.clone());
         }
 
         {
-            debug!("locking mining jobs for notify new job");
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("locking mining jobs for notify new job");
+            }
             let mut mining_jobs = self.mining_jobs.lock().await;
-            debug!("mining jobs locked for notify new job");
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("mining jobs locked for notify new job");
+            }
             mining_jobs.put(header_work_hash.clone(), (header, difficulty));
         }
 
@@ -386,7 +432,9 @@ impl<S: Storage> GetWorkServer<S> {
     // its used to check that the job come from our server
     // when it's found, we merge the miner job inside the block header
     async fn accept_miner_job(&self, job: MinerWork<'_>) -> Result<BlockResult, InternalRpcError> {
-        trace!("accept miner job");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("accept miner job");
+        }
         if job.get_miner().is_none() {
             return Err(InternalRpcError::InvalidJSONRequest);
         }
@@ -447,7 +495,9 @@ impl<S: Storage> GetWorkServer<S> {
         session: &WebSocketSessionShared<Self>,
         submitted_work: SubmitMinerWorkParams,
     ) -> Result<(), anyhow::Error> {
-        trace!("handle block for");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("handle block for");
+        }
         let result = match MinerWork::from_hex(&submitted_work.miner_work) {
             Ok(job) => match self.accept_miner_job(job).await {
                 Ok(result) => result,
@@ -558,9 +608,13 @@ impl<S: Storage> WebSocketHandler for GetWorkServer<S> {
         let key = address.to_public_key();
 
         // We can directly send it here as it's buffered by the channel
-        debug!("trying to send initial job to new miner");
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("trying to send initial job to new miner");
+        }
         self.send_new_job(session, &key).await?;
-        debug!("initial job has been sent");
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("initial job has been sent");
+        }
 
         {
             let mut miners = self.miners.lock().await;
@@ -570,7 +624,9 @@ impl<S: Storage> WebSocketHandler for GetWorkServer<S> {
             );
         }
 
-        debug!("miner has been added in miners list");
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("miner has been added in miners list");
+        }
 
         Ok(None)
     }

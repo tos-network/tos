@@ -157,7 +157,9 @@ impl<S: Storage> Drop for SnapshotGuard<'_, S> {
     fn drop(&mut self) {
         // SAFETY: Because we are holding the RwLockWriteGuard, no other thread can access the snapshot at this time
         let Ok(mut snapshot_guard) = self.snapshot.try_lock() else {
-            error!("Failed to lock snapshot mutex on drop");
+            if log::log_enabled!(log::Level::Error) {
+                error!("Failed to lock snapshot mutex on drop");
+            }
             return;
         };
         match self.guard.swap_snapshot(snapshot_guard.take()) {
@@ -165,7 +167,9 @@ impl<S: Storage> Drop for SnapshotGuard<'_, S> {
                 *snapshot_guard = snapshot;
             }
             Err(err) => {
-                error!("Failed to swap snapshot on drop: {}", err);
+                if log::log_enabled!(log::Level::Error) {
+                    error!("Failed to swap snapshot on drop: {}", err);
+                }
             }
         }
     }

@@ -139,7 +139,9 @@ impl A2AExecutor for AgentRouterExecutor {
             Ok(result) => Ok(result),
             Err(err) => {
                 if self.config.fallback_to_local {
-                    warn!("routing failed, falling back to local executor: {}", err);
+                    if log::log_enabled!(log::Level::Warn) {
+                        warn!("routing failed, falling back to local executor: {}", err);
+                    }
                     self.local.execute(task, message).await
                 } else {
                     Err(err)

@@ -264,7 +264,9 @@ impl Wallet {
 
         // generate random keypair or recover it from seed
         let keypair = if let Some(seed) = seed {
-            debug!("Retrieving keypair from seed...");
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Retrieving keypair from seed...");
+            }
             let key = match seed {
                 RecoverOption::PrivateKey(hex) => {
                     PrivateKey::from_hex(hex).context("Invalid private key provided")?
@@ -276,7 +278,9 @@ impl Wallet {
             };
             KeyPair::from_private_key(key)
         } else {
-            debug!("Generating a new keypair...");
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Generating a new keypair...");
+            }
             KeyPair::new()
         };
 
@@ -285,7 +289,9 @@ impl Wallet {
         OsRng.fill_bytes(&mut salt);
 
         // generate hashed password which will be used as key to encrypt master_key
-        debug!("hashing provided password");
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("hashing provided password");
+        }
         let hashed_password = hash_password(password, &salt)?;
 
         if log::log_enabled!(log::Level::Debug) {
@@ -304,7 +310,9 @@ impl Wallet {
         let mut master_key: [u8; 32] = [0; 32];
         OsRng.fill_bytes(&mut master_key);
         let encrypted_master_key = cipher.encrypt_value(&master_key)?;
-        debug!("Save encrypted master key in public storage");
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("Save encrypted master key in public storage");
+        }
         inner.set_encrypted_master_key(&encrypted_master_key)?;
 
         // generate the storage salt and save it in encrypted form
@@ -313,7 +321,9 @@ impl Wallet {
         let encrypted_storage_salt = cipher.encrypt_value(&storage_salt)?;
         inner.set_encrypted_storage_salt(&encrypted_storage_salt)?;
 
-        debug!("Creating encrypted storage");
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("Creating encrypted storage");
+        }
         let mut storage = EncryptedStorage::new(inner, &master_key, storage_salt, network)?;
 
         // Store the private key
@@ -321,7 +331,9 @@ impl Wallet {
 
         // Auto-track TOS asset for convenience
         // This allows users to immediately use "TOS" or the asset hash without manual tracking
-        debug!("Auto-tracking TOS asset");
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("Auto-tracking TOS asset");
+        }
         storage
             .add_asset(
                 &TOS_ASSET,
@@ -403,9 +415,13 @@ impl Wallet {
         let mut salt: [u8; SALT_SIZE] = [0; SALT_SIZE];
         salt.copy_from_slice(&storage_salt);
 
-        debug!("Creating encrypted storage");
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("Creating encrypted storage");
+        }
         let storage = EncryptedStorage::new(storage, &master_key, salt, network)?;
-        debug!("Retrieving private key from encrypted storage");
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("Retrieving private key from encrypted storage");
+        }
         let private_key = storage.get_private_key()?;
         let keypair = KeyPair::from_private_key(private_key);
 
@@ -423,7 +439,9 @@ impl Wallet {
     // this will stop the network handler and the API Server if it's running
     // Because wallet is behind Arc, we need to close differents modules that has a copy of it
     pub async fn close(&self) {
-        trace!("Closing wallet");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Closing wallet");
+        }
 
         #[cfg(feature = "api_server")]
         {
@@ -611,7 +629,9 @@ impl Wallet {
     // Close events channel
     // This will disconnect all subscribers
     pub async fn close_events_channel(&self) -> bool {
-        trace!("Closing events channel");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Closing events channel");
+        }
         let mut broadcaster = self.event_broadcaster.lock().await;
         broadcaster.take().is_some()
     }
@@ -791,7 +811,9 @@ impl Wallet {
         role: Role,
         version: TxVersion,
     ) -> Result<PlaintextExtraData, WalletError> {
-        trace!("decrypt extra data");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("decrypt extra data");
+        }
         let res = cipher.decrypt(
             self.account.inner.keypair.get_private_key(),
             handle,
@@ -808,7 +830,9 @@ impl Wallet {
         transaction_type: TransactionTypeBuilder,
         fee: FeeBuilder,
     ) -> Result<Transaction, WalletError> {
-        trace!("create transaction");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("create transaction");
+        }
         let mut storage = self.storage.write().await;
         let (tx, mut state) = self
             .create_transaction_with_storage(&storage, transaction_type, fee)
@@ -847,7 +871,9 @@ impl Wallet {
         transaction_type: TransactionTypeBuilder,
         fee: FeeBuilder,
     ) -> Result<(Transaction, TransactionBuilderState), WalletError> {
-        trace!("create transaction with storage");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("create transaction with storage");
+        }
         let mut state = self
             .create_transaction_state_with_storage(&storage, &transaction_type, &fee, None)
             .await?;
@@ -875,7 +901,9 @@ impl Wallet {
         fee: &FeeBuilder,
         nonce_override: Option<u64>,
     ) -> Result<TransactionBuilderState, WalletError> {
-        trace!("create transaction with storage (stateless)");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("create transaction with storage (stateless)");
+        }
 
         // Stateless wallet: Query nonce and reference on-demand from daemon
         let light_api = self.get_light_api().await?;
@@ -1023,12 +1051,14 @@ impl Wallet {
             .map_err(|e| WalletError::Any(e.into()))?;
 
         let tx_hash = transaction.hash();
-        debug!(
-            "Transaction created: {} with nonce {} and reference {}",
-            tx_hash,
-            transaction.get_nonce(),
-            transaction.get_reference()
-        );
+        if log::log_enabled!(log::Level::Debug) {
+            debug!(
+                "Transaction created: {} with nonce {} and reference {}",
+                tx_hash,
+                transaction.get_nonce(),
+                transaction.get_reference()
+            );
+        }
         state.set_tx_hash_built(tx_hash);
 
         Ok(transaction)
@@ -1043,7 +1073,9 @@ impl Wallet {
         fee: FeeBuilder,
         tx_version: TxVersion,
     ) -> Result<UnsignedTransaction, WalletError> {
-        trace!("create unsigned transaction");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("create unsigned transaction");
+        }
         let builder = TransactionBuilder::new(
             tx_version,
             self.network.chain_id() as u8,
@@ -1084,7 +1116,9 @@ impl Wallet {
         fee: &FeeBuilder,
         transaction_type: &TransactionTypeBuilder,
     ) -> Result<(), WalletError> {
-        trace!("add registered keys for fees estimation");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("add registered keys for fees estimation");
+        }
         if matches!(fee, FeeBuilder::Value(_)) {
             return Ok(());
         }
@@ -1092,10 +1126,14 @@ impl Wallet {
         // To pay exact fees needed, we must verify that we don't have to pay more than needed
         let used_keys = transaction_type.used_keys();
         if !used_keys.is_empty() {
-            trace!("Checking if destination keys are registered");
+            if log::log_enabled!(log::Level::Trace) {
+                trace!("Checking if destination keys are registered");
+            }
             if let Some(network_handler) = self.network_handler.lock().await.as_ref() {
                 if network_handler.is_running().await {
-                    trace!("Network handler is running, checking if keys are registered");
+                    if log::log_enabled!(log::Level::Trace) {
+                        trace!("Network handler is running, checking if keys are registered");
+                    }
                     for key in used_keys {
                         let addr = key.as_address(self.network.is_mainnet());
                         if log::log_enabled!(log::Level::Trace) {
@@ -1126,7 +1164,9 @@ impl Wallet {
         tx_type: TransactionTypeBuilder,
         fee: FeeBuilder,
     ) -> Result<u64, WalletError> {
-        trace!("estimate fees");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("estimate fees");
+        }
         let mut state = EstimateFeesState::new();
 
         self.add_registered_keys_for_fees_estimation(&mut state, &fee, &tx_type)
@@ -1162,7 +1202,9 @@ impl Wallet {
         mut transactions: Vec<InnerTransactionEntry>,
         w: &mut W,
     ) -> Result<(), WalletError> {
-        trace!("export transactions in csv");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("export transactions in csv");
+        }
 
         // Sort transactions by topoheight
         transactions.sort_by_key(|a| a.get_topoheight());

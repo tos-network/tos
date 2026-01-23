@@ -199,7 +199,9 @@ impl Connection {
         )
         .await??
         else {
-            error!("Expected KeyExchange packet");
+            if log::log_enabled!(log::Level::Error) {
+                error!("Expected KeyExchange packet");
+            }
             return Err(P2pError::InvalidPacket);
         };
 

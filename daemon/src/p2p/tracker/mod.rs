@@ -145,19 +145,25 @@ impl ObjectTracker {
 
     // Task loop to handle all responses in order
     async fn handler_loop(&self, mut server_exit: broadcast::Receiver<()>) {
-        debug!("Starting handler loop...");
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("Starting handler loop...");
+        }
         // Interval timer is necessary in case we don't receive any response from peer but we don't want to block the queue
         let mut interval = tokio::time::interval(Duration::from_secs(5));
         loop {
             select! {
                 biased;
                 _ = server_exit.recv() => {
-                    debug!("Exiting handler task due to server exit");
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("Exiting handler task due to server exit");
+                    }
                     break;
                 },
                 _ = interval.tick() => {
                     // Check if we have timed out requests
-                    trace!("Checking for timed out requests...");
+                    if log::log_enabled!(log::Level::Trace) {
+                        trace!("Checking for timed out requests...");
+                    }
 
                     // Loop through the queue in a ordered way to handle correctly the responses
                     // For this, we need to check if the first element has a response and so on
@@ -200,19 +206,25 @@ impl ObjectTracker {
         mut request_receiver: Receiver<Hash>,
         mut server_exit: broadcast::Receiver<()>,
     ) {
-        debug!("Starting requester loop...");
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("Starting requester loop...");
+        }
         loop {
             select! {
                 biased;
                 _ = server_exit.recv() => {
-                    debug!("Exiting requester task due to server exit");
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("Exiting requester task due to server exit");
+                    }
                     break;
                 },
                 hash = request_receiver.recv() => {
                     if let Some(hash) = hash {
                         self.request_object_from_peer_internal(hash).await;
                     } else {
-                        warn!("Request channel seems to be closed, exiting requester task");
+                        if log::log_enabled!(log::Level::Warn) {
+                            warn!("Request channel seems to be closed, exiting requester task");
+                        }
                         // channel closed
                         break;
                     }
@@ -222,7 +234,9 @@ impl ObjectTracker {
     }
 
     pub async fn mark_group_as_fail(&self, group_id: u64) {
-        trace!("mark group as fail");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("mark group as fail");
+        }
         let mut queue = self.queue.lock().await;
         self.clean_queue(&mut queue, None, Some(group_id)).await;
     }
@@ -289,7 +303,9 @@ impl ObjectTracker {
         peer_id: Option<u64>,
         group: Option<u64>,
     ) {
-        trace!("clean queue");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("clean queue");
+        }
         let iter = queue.extract_if(|_, request| {
             if let (Some(failed_group), Some(request_group)) =
                 (group.as_ref(), request.get_group_id())
@@ -379,10 +395,14 @@ impl ObjectTracker {
         }
 
         if let Some((peer_id, group)) = fail {
-            warn!("cleaning queue because of failure");
+            if log::log_enabled!(log::Level::Warn) {
+                warn!("cleaning queue because of failure");
+            }
             self.clean_queue(&mut queue, Some(peer_id), group).await;
         }
 
-        debug!("end peer internal");
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("end peer internal");
+        }
     }
 }

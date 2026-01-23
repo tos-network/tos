@@ -17,7 +17,9 @@ pub fn sort_descending_by_cumulative_difficulty<T>(scores: &mut Vec<(T, Cumulati
 where
     T: AsRef<Hash>,
 {
-    trace!("sort descending by cumulative difficulty");
+    if log::log_enabled!(log::Level::Trace) {
+        trace!("sort descending by cumulative difficulty");
+    }
     scores.sort_by(|(a_hash, a), (b_hash, b)| {
         if a != b {
             b.cmp(a)
@@ -36,7 +38,9 @@ pub fn sort_ascending_by_cumulative_difficulty<T>(scores: &mut Vec<(T, Cumulativ
 where
     T: AsRef<Hash>,
 {
-    trace!("sort ascending by cumulative difficulty");
+    if log::log_enabled!(log::Level::Trace) {
+        trace!("sort ascending by cumulative difficulty");
+    }
     scores.sort_by(|(a_hash, a), (b_hash, b)| {
         if a != b {
             a.cmp(b)
@@ -61,7 +65,9 @@ where
     S: Storage,
     I: Iterator<Item = Hash> + ExactSizeIterator,
 {
-    trace!("sort tips");
+    if log::log_enabled!(log::Level::Trace) {
+        trace!("sort tips");
+    }
     let tips_len = tips.len();
     match tips_len {
         0 => Err(BlockchainError::ExpectedTips),
@@ -90,7 +96,9 @@ where
     D: DifficultyProvider,
     I: Iterator<Item = &'a Hash> + ExactSizeIterator,
 {
-    trace!("calculate height at tips");
+    if log::log_enabled!(log::Level::Trace) {
+        trace!("calculate height at tips");
+    }
     let mut height = 0;
     let tips_len = tips.len();
     for hash in tips {
@@ -115,7 +123,9 @@ where
     D: DifficultyProvider,
     I: Iterator<Item = &'a Hash> + ExactSizeIterator,
 {
-    trace!("find best tip by cumulative difficulty");
+    if log::log_enabled!(log::Level::Trace) {
+        trace!("find best tip by cumulative difficulty");
+    }
     let tips_len = tips.len();
     match tips_len {
         0 => Err(BlockchainError::ExpectedTips),
@@ -148,7 +158,9 @@ where
     D: DifficultyProvider,
     I: Iterator<Item = &'a Hash> + ExactSizeIterator,
 {
-    trace!("find newest tip by timestamp");
+    if log::log_enabled!(log::Level::Trace) {
+        trace!("find newest tip by timestamp");
+    }
     let tips_len = tips.len();
     match tips_len {
         0 => Err(BlockchainError::ExpectedTips),
@@ -189,10 +201,14 @@ pub async fn build_reachability<P: DifficultyProvider>(
     let stable_limit = get_stable_limit(block_version);
     while let Some((current_hash, current_level)) = stack.pop_back() {
         if current_level >= 2 * stable_limit {
-            trace!("Level limit reached, adding {}", current_hash);
+            if log::log_enabled!(log::Level::Trace) {
+                trace!("Level limit reached, adding {}", current_hash);
+            }
             set.insert(current_hash);
         } else {
-            trace!("Level {} reached with hash {}", current_level, current_hash);
+            if log::log_enabled!(log::Level::Trace) {
+                trace!("Level {} reached with hash {}", current_level, current_hash);
+            }
             let tips = provider
                 .get_past_blocks_for_block_hash(&current_hash)
                 .await?;
@@ -214,7 +230,9 @@ pub async fn verify_non_reachability<P: DifficultyProvider>(
     tips: &IndexSet<Hash>,
     block_version: BlockVersion,
 ) -> Result<bool, BlockchainError> {
-    trace!("Verifying non reachability for block");
+    if log::log_enabled!(log::Level::Trace) {
+        trace!("Verifying non reachability for block");
+    }
     let tips_count = tips.len();
     let mut reach = Vec::with_capacity(tips_count);
     for hash in tips {
@@ -226,18 +244,22 @@ pub async fn verify_non_reachability<P: DifficultyProvider>(
         for j in 0..tips_count {
             // if a tip can be referenced as another's past block, its not a tip
             if i != j && reach[j].contains(&tips[i]) {
-                debug!(
-                    "Tip {} (index {}) is reachable from tip {} (index {})",
-                    tips[i], i, tips[j], j
-                );
-                trace!(
-                    "reach: {}",
-                    reach[j]
-                        .iter()
-                        .map(|x| x.to_string())
-                        .collect::<Vec<String>>()
-                        .join(", ")
-                );
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "Tip {} (index {}) is reachable from tip {} (index {})",
+                        tips[i], i, tips[j], j
+                    );
+                }
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!(
+                        "reach: {}",
+                        reach[j]
+                            .iter()
+                            .map(|x| x.to_string())
+                            .collect::<Vec<String>>()
+                            .join(", ")
+                    );
+                }
                 return Ok(false);
             }
         }

@@ -109,7 +109,7 @@ impl State {
         let mut exit = self.exit_channel.lock()?;
         let sender = exit.take().ok_or(PromptError::NotRunning)?;
 
-        if sender.send(()).is_err() {
+        if sender.send(()).is_err() && log::log_enabled!(log::Level::Error) {
             error!("Error while sending exit signal");
         }
 
@@ -121,7 +121,9 @@ impl State {
     }
 
     pub fn ioloop(self: &Arc<Self>, sender: UnboundedSender<String>) -> Result<(), PromptError> {
-        debug!("ioloop started");
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("ioloop started");
+        }
 
         // all the history of commands
         let mut history: VecDeque<String> = VecDeque::new();

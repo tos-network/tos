@@ -538,7 +538,9 @@ impl Transaction {
 
         let Some(meta) = meta else {
             if !self.signature.verify(signing_bytes, source_decompressed) {
-                debug!("transaction signature is invalid");
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("transaction signature is invalid");
+                }
                 return Err(VerificationError::InvalidSignature);
             }
             return Ok(None);
@@ -593,7 +595,9 @@ impl Transaction {
             }
         }
 
-        debug!("transaction signature is invalid");
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("transaction signature is invalid");
+        }
         Err(VerificationError::InvalidSignature)
     }
 
@@ -796,7 +800,9 @@ impl Transaction {
     ) -> Result<(), VerificationError<E>> {
         // Stub implementation - proof verification removed
         // In production, implement plaintext deposit verification here
-        trace!("Skipping contract deposit proof verification (plaintext balances)");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Skipping contract deposit proof verification (plaintext balances)");
+        }
 
         // Balance simplification: All deposits are now plaintext
         // Basic validation is performed in verify_invoke_contract
@@ -967,7 +973,9 @@ impl Transaction {
     ) -> Result<(), VerificationError<E>> {
         // Balance simplification: No decompression needed for plaintext balances
 
-        trace!("Pre-verifying transaction on state");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Pre-verifying transaction on state");
+        }
         state
             .pre_verify_tx(self)
             .await
@@ -2293,7 +2301,9 @@ impl Transaction {
         sigma_batch_collector: &mut BatchCollector,
     ) -> Result<(Transcript, Vec<(RistrettoPoint, CompressedRistretto)>), VerificationError<E>>
     {
-        trace!("Pre-verifying UNO transaction");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Pre-verifying UNO transaction");
+        }
 
         if !self.has_valid_version_format() {
             return Err(VerificationError::InvalidFormat);
@@ -2496,7 +2506,9 @@ impl Transaction {
         }
 
         // 1. Verify CommitmentEqProofs for source balances
-        trace!("verifying UNO commitments eq proofs");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("verifying UNO commitments eq proofs");
+        }
 
         for (commitment, new_source_commitment) in self
             .source_commitments
@@ -2541,7 +2553,9 @@ impl Transaction {
         }
 
         // 2. Verify CiphertextValidityProofs for transfers
-        trace!("verifying UNO transfer ciphertext validity proofs");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("verifying UNO transfer ciphertext validity proofs");
+        }
 
         let mut value_commitments: Vec<(RistrettoPoint, CompressedRistretto)> = Vec::new();
 
@@ -2627,7 +2641,9 @@ impl Transaction {
         sigma_batch_collector: &mut BatchCollector,
     ) -> Result<(Transcript, Vec<(RistrettoPoint, CompressedRistretto)>), VerificationError<E>>
     {
-        trace!("Pre-verifying Unshield transaction");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Pre-verifying Unshield transaction");
+        }
 
         if !self.has_valid_version_format() {
             return Err(VerificationError::InvalidFormat);
@@ -2824,7 +2840,9 @@ impl Transaction {
         // The transcript state must be identical between generation and verification.
 
         // 1. Verify CiphertextValidityProofs for transfers (FIRST - matches generation order)
-        trace!("verifying Unshield transfer ciphertext validity proofs");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("verifying Unshield transfer ciphertext validity proofs");
+        }
 
         let mut value_commitments: Vec<(RistrettoPoint, CompressedRistretto)> = Vec::new();
 
@@ -2866,7 +2884,9 @@ impl Transaction {
         }
 
         // 2. Verify CommitmentEqProofs for source balances (SECOND - matches generation order)
-        trace!("verifying Unshield commitments eq proofs");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("verifying Unshield commitments eq proofs");
+        }
 
         for (commitment, new_source_commitment) in self
             .source_commitments
@@ -2949,7 +2969,9 @@ impl Transaction {
         tx_hash: &'a Hash,
         state: &mut B,
     ) -> Result<(), VerificationError<E>> {
-        trace!("Pre-verifying transaction");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Pre-verifying transaction");
+        }
         if !self.has_valid_version_format() {
             return Err(VerificationError::InvalidFormat);
         }
@@ -2995,7 +3017,9 @@ impl Transaction {
             }
         }
 
-        trace!("Pre-verifying transaction on state");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Pre-verifying transaction on state");
+        }
         state
             .pre_verify_tx(self)
             .await
@@ -3902,7 +3926,9 @@ impl Transaction {
         }
 
         // Balance verification handled by plaintext balance system
-        trace!("Balance verification handled by plaintext balance system");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Balance verification handled by plaintext balance system");
+        }
 
         // With plaintext balances, we no longer need:
         // - CiphertextValidityProof verification
@@ -3915,7 +3941,9 @@ impl Transaction {
         // 2. Add transfer.amount to receiver balance
         // 3. Update state with new receiver balance
 
-        trace!("Processing transfers with plaintext amounts");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Processing transfers with plaintext amounts");
+        }
 
         // NOTE: Transfer verification is implemented below in the spending_per_asset logic (lines 700-709)
         // where all transfer amounts are accumulated and verified against sender balances.
@@ -4054,7 +4082,9 @@ impl Transaction {
 
         // With plaintext balances, we don't need Bulletproofs range proofs
         // Balances are plain u64, always in valid range [0, 2^64)
-        trace!("Skipping range proof verification (plaintext balances)");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Skipping range proof verification (plaintext balances)");
+        }
 
         // SECURITY FIX: Check balances inline (can't call verify_dynamic_parts as it also does CAS nonce update)
         // Calculate total spending per asset and verify sender has sufficient balance
@@ -4350,7 +4380,9 @@ impl Transaction {
         B: BlockchainVerificationState<'a, E> + Send,
         C: ZKPCache<E>,
     {
-        trace!("Verifying batch of transactions");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Verifying batch of transactions");
+        }
 
         // Batch collector for sigma proofs (CommitmentEqProof, CiphertextValidityProof)
         let mut sigma_batch_collector = BatchCollector::default();
@@ -4466,12 +4498,16 @@ impl Transaction {
             // Verify ZK proofs synchronously for single transaction
             let tx_clone = Arc::clone(self);
             spawn_blocking_safe(move || {
-                trace!("Verifying UNO sigma proofs");
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!("Verifying UNO sigma proofs");
+                }
                 sigma_batch_collector
                     .verify()
                     .map_err(|_| ProofVerificationError::GenericProof)?;
 
-                trace!("Verifying UNO range proof");
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!("Verifying UNO range proof");
+                }
                 let range_proof = tx_clone
                     .range_proof
                     .as_ref()
@@ -4498,12 +4534,16 @@ impl Transaction {
             // Verify ZK proofs synchronously for single transaction
             let tx_clone = Arc::clone(self);
             spawn_blocking_safe(move || {
-                trace!("Verifying Unshield sigma proofs");
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!("Verifying Unshield sigma proofs");
+                }
                 sigma_batch_collector
                     .verify()
                     .map_err(|_| ProofVerificationError::GenericProof)?;
 
-                trace!("Verifying Unshield range proof");
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!("Verifying Unshield range proof");
+                }
                 let range_proof = tx_clone
                     .range_proof
                     .as_ref()
@@ -4540,7 +4580,9 @@ impl Transaction {
         tx_hash: &'a Hash,
         state: &mut B,
     ) -> Result<(), VerificationError<E>> {
-        trace!("Applying transaction data");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Applying transaction data");
+        }
         // Update nonce
         state
             .update_account_nonce(self.get_source(), self.nonce + 1)
@@ -5875,7 +5917,7 @@ impl Transaction {
                                     result.new_energy,
                                     result.recycled_energy
                                 );
-                            } else {
+                            } else if log::log_enabled!(log::Level::Debug) {
                                 debug!(
                                     "FreezeTos applied: {} TOS frozen for {} duration, energy gained: {} units",
                                     amount, duration.name(), result.new_energy
@@ -7465,11 +7507,15 @@ impl Transaction {
         tx_hash: &'a Hash,
         state: &mut B,
     ) -> Result<(), VerificationError<E>> {
-        trace!("apply with partial verify");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("apply with partial verify");
+        }
 
         // Balance simplification: No decompression needed for plaintext balances
         // Private deposits are not supported, only Public deposits with plain u64 amounts
-        trace!("Partial verify with plaintext balances - no proof verification needed");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Partial verify with plaintext balances - no proof verification needed");
+        }
 
         // Delegate to apply_without_verify which handles balance deduction
         // (BLOCKDAG alignment: both functions now perform inline balance deduction)

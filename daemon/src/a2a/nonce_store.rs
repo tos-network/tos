@@ -54,7 +54,9 @@ where
     async fn get_nonce_timestamp(&self, nonce: &str) -> Result<Option<u64>, AuthError> {
         let storage = self.blockchain.get_storage().read().await;
         storage.get_a2a_nonce_timestamp(nonce).await.map_err(|e| {
-            warn!("failed to load a2a nonce timestamp: {e}");
+            if log::log_enabled!(log::Level::Warn) {
+                warn!("failed to load a2a nonce timestamp: {e}");
+            }
             AuthError::TosNonceInvalid
         })
     }
@@ -65,7 +67,9 @@ where
             .set_a2a_nonce_timestamp(nonce, timestamp)
             .await
             .map_err(|e| {
-                warn!("failed to store a2a nonce timestamp: {e}");
+                if log::log_enabled!(log::Level::Warn) {
+                    warn!("failed to store a2a nonce timestamp: {e}");
+                }
                 AuthError::TosNonceInvalid
             })
     }
@@ -73,7 +77,9 @@ where
     async fn remove_nonce(&self, nonce: &str) -> Result<(), AuthError> {
         let mut storage = self.blockchain.get_storage().write().await;
         storage.remove_a2a_nonce(nonce).await.map_err(|e| {
-            warn!("failed to remove a2a nonce: {e}");
+            if log::log_enabled!(log::Level::Warn) {
+                warn!("failed to remove a2a nonce: {e}");
+            }
             AuthError::TosNonceInvalid
         })
     }
@@ -89,7 +95,9 @@ where
             .prune_a2a_nonces_older_than(cutoff, max_scan, start_key)
             .await
             .map_err(|e| {
-                warn!("failed to prune a2a nonces: {e}");
+                if log::log_enabled!(log::Level::Warn) {
+                    warn!("failed to prune a2a nonces: {e}");
+                }
                 AuthError::TosNonceInvalid
             })
     }
@@ -105,7 +113,9 @@ where
             .check_and_store_a2a_nonce(nonce, timestamp, cutoff)
             .await
             .map_err(|e| {
-                warn!("failed to check and store a2a nonce: {e}");
+                if log::log_enabled!(log::Level::Warn) {
+                    warn!("failed to check and store a2a nonce: {e}");
+                }
                 AuthError::TosNonceInvalid
             })
     }

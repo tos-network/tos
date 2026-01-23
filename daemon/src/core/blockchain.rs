@@ -204,28 +204,38 @@ impl<S: Storage> Blockchain<S> {
         // Do some checks on config params
         {
             if config.simulator.is_some() && network != Network::Devnet {
-                error!("Impossible to enable simulator mode except in dev network!");
+                if log::log_enabled!(log::Level::Error) {
+                    error!("Impossible to enable simulator mode except in dev network!");
+                }
                 return Err(BlockchainError::InvalidNetwork.into());
             }
 
             if let Some(keep_only) = config.auto_prune_keep_n_blocks {
                 if keep_only < PRUNE_SAFETY_LIMIT {
-                    error!("Auto prune mode should keep at least 80 blocks");
+                    if log::log_enabled!(log::Level::Error) {
+                        error!("Auto prune mode should keep at least 80 blocks");
+                    }
                     return Err(BlockchainError::AutoPruneMode.into());
                 }
             }
 
             if config.p2p.allow_boost_sync && config.p2p.allow_fast_sync {
-                error!("Boost sync and fast sync can't be enabled at the same time!");
+                if log::log_enabled!(log::Level::Error) {
+                    error!("Boost sync and fast sync can't be enabled at the same time!");
+                }
                 return Err(BlockchainError::ConfigSyncMode.into());
             }
 
             if config.skip_pow_verification {
-                warn!("PoW verification is disabled! This is dangerous in production!");
+                if log::log_enabled!(log::Level::Warn) {
+                    warn!("PoW verification is disabled! This is dangerous in production!");
+                }
             }
 
             if config.txs_verification_threads_count == 0 {
-                error!("TXs threads count must be above 0");
+                if log::log_enabled!(log::Level::Error) {
+                    error!("TXs threads count must be above 0");
+                }
                 return Err(BlockchainError::InvalidConfig.into());
             } else {
                 if log::log_enabled!(log::Level::Info) {
@@ -242,17 +252,23 @@ impl<S: Storage> Blockchain<S> {
             }
 
             if config.p2p.proxy.kind.is_some() != config.p2p.proxy.address.is_some() {
-                error!("P2P Proxy must be specified with an address");
+                if log::log_enabled!(log::Level::Error) {
+                    error!("P2P Proxy must be specified with an address");
+                }
                 return Err(BlockchainError::InvalidConfig.into());
             }
 
             if config.p2p.proxy.username.is_some() != config.p2p.proxy.password.is_some() {
-                error!("P2P Proxy auth username/password mismatch");
+                if log::log_enabled!(log::Level::Error) {
+                    error!("P2P Proxy auth username/password mismatch");
+                }
                 return Err(BlockchainError::InvalidConfig.into());
             }
 
             if config.p2p.max_outgoing_peers > config.p2p.max_peers {
-                warn!("max outgoing peers is above max peers, cap it to max peers");
+                if log::log_enabled!(log::Level::Warn) {
+                    warn!("max outgoing peers is above max peers, cap it to max peers");
+                }
                 config.p2p.max_outgoing_peers = config.p2p.max_peers;
             }
 
@@ -354,7 +370,9 @@ impl<S: Storage> Blockchain<S> {
             }
         };
 
-        info!("Initializing chain...");
+        if log::log_enabled!(log::Level::Info) {
+            info!("Initializing chain...");
+        }
         let blockchain = Self {
             height: AtomicU64::new(height),
             topoheight: AtomicU64::new(topoheight),
@@ -391,7 +409,9 @@ impl<S: Storage> Blockchain<S> {
                 .create_genesis_block(config.genesis_block_hex.as_deref())
                 .await?;
         } else if !config.recovery_mode {
-            debug!("Retrieving tips for computing current difficulty");
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Retrieving tips for computing current difficulty");
+            }
             let mut storage = blockchain.get_storage().write().await;
             let tips = storage.get_tips().await?;
             let (difficulty, _) = blockchain
@@ -402,7 +422,9 @@ impl<S: Storage> Blockchain<S> {
                 .await?;
 
             // now compute the stable height
-            debug!("Retrieving tips for computing current stable height");
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Retrieving tips for computing current stable height");
+            }
             let (stable_hash, stable_height) =
                 blockchain.find_common_base::<S, _>(&storage, &tips).await?;
             // Search the stable topoheight
@@ -453,7 +475,9 @@ impl<S: Storage> Blockchain<S> {
                     .await?;
             }
         } else {
-            warn!("Recovery mode enabled, required pre-computed data have been skipped.");
+            if log::log_enabled!(log::Level::Warn) {
+                warn!("Recovery mode enabled, required pre-computed data have been skipped.");
+            }
         }
 
         let arc = Arc::new(blockchain);
@@ -461,7 +485,9 @@ impl<S: Storage> Blockchain<S> {
         if !config.p2p.disable {
             let dir_path = config.dir_path;
             let config = config.p2p;
-            info!("Starting P2p server...");
+            if log::log_enabled!(log::Level::Info) {
+                info!("Starting P2p server...");
+            }
             // setup exclusive nodes
             let mut exclusive_nodes: Vec<SocketAddr> =
                 Vec::with_capacity(config.exclusive_nodes.len());
@@ -724,16 +750,22 @@ impl<S: Storage> Blockchain<S> {
     // then stops each module in its own scope to avoid holding multiple locks.
     // Lock ordering: storage_semaphore -> p2p -> rpc -> storage -> mempool
     pub async fn stop(&self) -> Result<(), BlockchainError> {
-        info!("Stopping modules...");
+        if log::log_enabled!(log::Level::Info) {
+            info!("Stopping modules...");
+        }
 
         // Acquire storage semaphore FIRST to:
         // 1. Wait for any ongoing storage operations to complete
         // 2. Ensure consistent lock ordering (prevents deadlock with in-flight tasks)
-        debug!("acquiring storage semaphore for shutdown");
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("acquiring storage semaphore for shutdown");
+        }
         let _permit = self.storage_semaphore.acquire().await?;
 
         {
-            debug!("stopping p2p module");
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("stopping p2p module");
+            }
             let mut p2p = self.p2p.write().await;
             if let Some(p2p) = p2p.take() {
                 p2p.stop().await;
@@ -741,7 +773,9 @@ impl<S: Storage> Blockchain<S> {
         }
 
         {
-            debug!("stopping rpc module");
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("stopping rpc module");
+            }
             let mut rpc = self.rpc.write().await;
             if let Some(rpc) = rpc.take() {
                 rpc.stop().await;
@@ -749,7 +783,9 @@ impl<S: Storage> Blockchain<S> {
         }
 
         {
-            debug!("stopping storage module");
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("stopping storage module");
+            }
             let mut storage = self.storage.write().await;
             if let Err(e) = storage.stop().await {
                 if log::log_enabled!(log::Level::Error) {
@@ -764,18 +800,24 @@ impl<S: Storage> Blockchain<S> {
             mempool.stop().await;
         }
 
-        info!("All modules are now stopped!");
+        if log::log_enabled!(log::Level::Info) {
+            info!("All modules are now stopped!");
+        }
         Ok(())
     }
 
     // Clear all caches
     // Acquires storage semaphore for write path consistency
     pub async fn clear_caches(&self) -> Result<(), BlockchainError> {
-        debug!("Clearing caches...");
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("Clearing caches...");
+        }
         let _permit = self.storage_semaphore.acquire().await?;
         let mut storage = self.storage.write().await;
         self.clear_chain_caches_with_storage(&mut *storage).await;
-        debug!("Caches are now cleared!");
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("Caches are now cleared!");
+        }
         Ok(())
     }
 
@@ -803,10 +845,14 @@ impl<S: Storage> Blockchain<S> {
     // Reload the storage and update all cache values
     // Clear the mempool also in case of not being up-to-date
     pub async fn reload_from_disk(&self) -> Result<(), BlockchainError> {
-        debug!("Reloading chain from disk");
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("Reloading chain from disk");
+        }
         let _permit = self.storage_semaphore.acquire().await?;
         let mut storage = self.storage.write().await;
-        debug!("storage lock acquired for reload from disk");
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("storage lock acquired for reload from disk");
+        }
         self.reload_from_disk_with_storage(&mut *storage).await
     }
 
@@ -834,9 +880,13 @@ impl<S: Storage> Blockchain<S> {
 
         // TXs in mempool may be outdated, clear them as they will be asked later again
         {
-            debug!("locking mempool for cleaning");
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("locking mempool for cleaning");
+            }
             let mut mempool = self.mempool.write().await;
-            debug!("Clearing mempool");
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Clearing mempool");
+            }
             mempool.clear();
         }
 
@@ -848,7 +898,9 @@ impl<S: Storage> Blockchain<S> {
 
     // function to include the genesis block and register the public dev key.
     async fn create_genesis_block(&self, genesis_hex: Option<&str>) -> Result<(), BlockchainError> {
-        debug!("create genesis block");
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("create genesis block");
+        }
         let genesis_block = {
             let mut storage = self.storage.write().await;
 
@@ -914,8 +966,12 @@ impl<S: Storage> Blockchain<S> {
 
                     (genesis, expected_hash)
                 } else {
-                    warn!("No genesis block found!");
-                    info!("Generating a new genesis block...");
+                    if log::log_enabled!(log::Level::Warn) {
+                        warn!("No genesis block found!");
+                    }
+                    if log::log_enabled!(log::Level::Info) {
+                        info!("Generating a new genesis block...");
+                    }
                     let header = BlockHeader::new(
                         BlockVersion::Nobunaga,
                         0,
@@ -1108,7 +1164,9 @@ impl<S: Storage> Blockchain<S> {
             counter!("tos_blockchain_prune_until_topoheight").increment(1);
             Ok(located_sync_topoheight)
         } else {
-            debug!("located_sync_topoheight <= topoheight, no pruning needed");
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("located_sync_topoheight <= topoheight, no pruning needed");
+            }
             Ok(last_pruned_topoheight)
         }
     }
@@ -1382,7 +1440,9 @@ impl<S: Storage> Blockchain<S> {
     pub async fn get_burned_supply(&self) -> Result<u64, BlockchainError> {
         debug!("get burned supply");
         let storage = self.storage.read().await;
-        debug!("storage read acquired for get burned supply");
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("storage read acquired for get burned supply");
+        }
         storage
             .get_burned_supply_at_topo_height(self.get_topo_height())
             .await
@@ -1390,15 +1450,21 @@ impl<S: Storage> Blockchain<S> {
 
     // Get the count of transactions available in the mempool
     pub async fn get_mempool_size(&self) -> usize {
-        trace!("get mempool size");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get mempool size");
+        }
         self.mempool.read().await.size()
     }
 
     // Get the current top block hash in chain
     pub async fn get_top_block_hash(&self) -> Result<Hash, BlockchainError> {
-        debug!("get top block hash");
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("get top block hash");
+        }
         let storage = self.storage.read().await;
-        debug!("storage read acquired for get top block hash");
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("storage read acquired for get top block hash");
+        }
 
         self.get_top_block_hash_for_storage(&storage).await
     }
@@ -1731,7 +1797,9 @@ impl<S: Storage> Blockchain<S> {
         }
         let chain_cache = provider.chain_cache().await;
         let mut cache = chain_cache.common_base_cache.lock().await;
-        debug!("common base cache locked");
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("common base cache locked");
+        }
 
         let combined_tips = get_combined_hash_for_tips(tips.into_iter());
         if let Some((hash, height)) = cache.get(&combined_tips) {
@@ -1764,7 +1832,9 @@ impl<S: Storage> Blockchain<S> {
 
         // check that we have at least one value
         if bases.is_empty() {
-            error!("bases list is empty");
+            if log::log_enabled!(log::Level::Error) {
+                error!("bases list is empty");
+            }
             return Err(BlockchainError::ExpectedTips);
         }
 
@@ -2209,7 +2279,9 @@ impl<S: Storage> Blockchain<S> {
         I: IntoIterator<Item = &'a Hash> + ExactSizeIterator + Clone,
         I::IntoIter: ExactSizeIterator,
     {
-        trace!("get difficulty at tips");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get difficulty at tips");
+        }
 
         // Get the height at the tips
         let height = blockdag::calculate_height_at_tips(provider, tips.clone().into_iter()).await?;
@@ -2220,7 +2292,9 @@ impl<S: Storage> Blockchain<S> {
         if tips.len() == 0 {
             // Genesis block: use minimal difficulty (1) since genesis is hardcoded with nonce=0
             // GENESIS_BLOCK_DIFFICULTY (300) is used for cache initialization, not genesis verification
-            trace!("genesis difficulty (hardcoded block, minimal difficulty)");
+            if log::log_enabled!(log::Level::Trace) {
+                trace!("genesis difficulty (hardcoded block, minimal difficulty)");
+            }
             return Ok((
                 Difficulty::from_u64(1),
                 difficulty::get_covariance_p(version),
@@ -2237,7 +2311,9 @@ impl<S: Storage> Blockchain<S> {
             if let Some(difficulty) =
                 difficulty::get_difficulty_at_hard_fork(self.get_network(), version)
             {
-                trace!("difficulty for hard fork found");
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!("difficulty for hard fork found");
+                }
                 return Ok((difficulty, difficulty::get_covariance_p(version)));
             }
         }
@@ -2404,9 +2480,13 @@ impl<S: Storage> Blockchain<S> {
         let current_topoheight = self.get_topo_height();
 
         let hash = {
-            debug!("locking mempool to add tx");
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("locking mempool to add tx");
+            }
             let mut mempool = self.mempool.write().await;
-            debug!("mempool locked to add tx");
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("mempool locked to add tx");
+            }
 
             if mempool.contains_tx(&hash) {
                 return Err(BlockchainError::TxAlreadyInMempool(hash.into_owned()));
@@ -2531,9 +2611,13 @@ impl<S: Storage> Blockchain<S> {
         &self,
         address: PublicKey,
     ) -> Result<BlockHeader, BlockchainError> {
-        debug!("get block template");
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("get block template");
+        }
         let storage = self.storage.read().await;
-        debug!("storage read acquired for get block template");
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("storage read acquired for get block template");
+        }
         self.get_block_template_for_storage(&storage, address).await
     }
 
@@ -2681,9 +2765,13 @@ impl<S: Storage> Blockchain<S> {
         &self,
         address: PublicKey,
     ) -> Result<BlockHeader, BlockchainError> {
-        debug!("get block header template");
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("get block header template");
+        }
         let storage = self.storage.read().await;
-        debug!("get block header template lock acquired");
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("get block header template lock acquired");
+        }
         self.get_block_header_template_for_storage(&storage, address)
             .await
     }
@@ -2694,7 +2782,9 @@ impl<S: Storage> Blockchain<S> {
         storage: &S,
         address: PublicKey,
     ) -> Result<BlockHeader, BlockchainError> {
-        trace!("get block header template");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get block header template");
+        }
         let start = Instant::now();
 
         // SECURITY: Use OsRng for cryptographically secure random nonce
@@ -2781,7 +2871,9 @@ impl<S: Storage> Blockchain<S> {
         // Check that our current timestamp is correct
         let current_timestamp = get_current_time_in_millis();
         if current_timestamp < timestamp {
-            warn!("Current timestamp is less than the newest tip timestamp, using newest timestamp from tips");
+            if log::log_enabled!(log::Level::Warn) {
+                warn!("Current timestamp is less than the newest tip timestamp, using newest timestamp from tips");
+            }
         } else {
             timestamp = current_timestamp;
         }
@@ -2814,9 +2906,13 @@ impl<S: Storage> Blockchain<S> {
             .get_block_header_template_for_storage(storage, address)
             .await?;
 
-        trace!("Locking mempool for building block template");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Locking mempool for building block template");
+        }
         let mempool = self.mempool.read().await;
-        trace!("Mempool locked for building block template");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Mempool locked for building block template");
+        }
 
         let start = Instant::now();
 
@@ -2855,7 +2951,9 @@ impl<S: Storage> Blockchain<S> {
         let stable_height = chain_cache.stable_height;
         let topoheight = self.get_topo_height();
 
-        trace!("build chain state for block template");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("build chain state for block template");
+        }
         let mut chain_state = ChainState::new(
             storage,
             &self.environment,
@@ -3117,9 +3215,13 @@ impl<S: Storage> Blockchain<S> {
         };
 
         // Semaphore is required to ensure sequential verification of blocks
-        debug!("acquiring storage semaphore");
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("acquiring storage semaphore");
+        }
         let _permit = self.storage_semaphore.acquire().await?;
-        debug!("storage semaphore acquired, locking storage for block verification");
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("storage semaphore acquired, locking storage for block verification");
+        }
         let storage = holder.read().await?;
 
         if log::log_enabled!(log::Level::Debug) {
@@ -3560,7 +3662,9 @@ impl<S: Storage> Blockchain<S> {
 
                 debug!("locking mempool read mode for cache usage");
                 let mempool = self.mempool.read().await;
-                debug!("mempool locked for cache usage");
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("mempool locked for cache usage");
+                }
 
                 let tx_cache = TxCache::new(&*storage, &mempool, self.disable_zkp_cache);
 
@@ -3703,9 +3807,13 @@ impl<S: Storage> Blockchain<S> {
 
         // Broadcast to p2p nodes the block asap as its valid
         if broadcast.p2p() {
-            debug!("Broadcasting block");
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Broadcasting block");
+            }
             if let Some(p2p) = self.p2p.read().await.as_ref() {
-                trace!("P2p locked, broadcasting in new task");
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!("P2p locked, broadcasting in new task");
+                }
                 let p2p = p2p.clone();
                 let pruned_topoheight = storage.get_pruned_topoheight().await?;
                 let block = block.clone();
@@ -3847,7 +3955,9 @@ impl<S: Storage> Blockchain<S> {
             let start = Instant::now();
             let mut skipped = 0;
             // detect which part of DAG reorg stay, for other part, undo all executed txs
-            debug!("Detecting stable point of DAG and cleaning txs above it");
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Detecting stable point of DAG and cleaning txs above it");
+            }
             {
                 let mut topoheight = base_topo_height;
                 while topoheight <= current_topoheight {
@@ -4652,7 +4762,9 @@ impl<S: Storage> Blockchain<S> {
             self.set_stable_with_storage(&mut *storage, base_height, base_topo_height)
                 .await?;
 
-            debug!("update difficulty in cache for new tips");
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("update difficulty in cache for new tips");
+            }
             let (difficulty, _) = self.get_difficulty_at_tips(&*storage, tips.iter()).await?;
             self.set_difficulty_with_storage(&mut *storage, difficulty)
                 .await?;
@@ -4663,9 +4775,13 @@ impl<S: Storage> Blockchain<S> {
 
         // Clean mempool from old txs if the DAG has been updated
         let mempool_deleted_txs = {
-            debug!("Locking mempool write mode");
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Locking mempool write mode");
+            }
             let mut mempool = self.mempool.write().await;
-            debug!("mempool write mode ok");
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("mempool write mode ok");
+            }
             let version = get_version_at_height(self.get_network(), current_height);
             let start = Instant::now();
             let res = mempool
@@ -4783,7 +4899,9 @@ impl<S: Storage> Blockchain<S> {
             .flush_db_every_n_blocks
             .is_some_and(|n| current_topoheight % n == 0)
         {
-            debug!("force flushing storage");
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("force flushing storage");
+            }
             storage.flush().await?;
         }
 
@@ -4808,7 +4926,9 @@ impl<S: Storage> Blockchain<S> {
         gauge!("tos_block_difficulty").set(difficulty.as_u64().unwrap_or(0) as f64);
 
         if let Some(p2p) = self.p2p.read().await.as_ref().filter(|_| broadcast.p2p()) {
-            trace!("P2p locked, ping peers");
+            if log::log_enabled!(log::Level::Trace) {
+                trace!("P2p locked, ping peers");
+            }
             let p2p = p2p.clone();
             spawn_task("notify-ping-peers", async move {
                 p2p.ping_peers().await;
@@ -4836,7 +4956,9 @@ impl<S: Storage> Blockchain<S> {
             }
 
             // atm, we always notify websocket clients
-            trace!("Notifying websocket clients");
+            if log::log_enabled!(log::Level::Trace) {
+                trace!("Notifying websocket clients");
+            }
             if should_track_events.contains(&NotifyEvent::NewBlock) {
                 // We are not including the transactions in `NewBlock` event to prevent spamming
                 match get_block_response(
@@ -4893,7 +5015,9 @@ impl<S: Storage> Blockchain<S> {
         side_blocks_count: u64,
         version: BlockVersion,
     ) -> Result<u64, BlockchainError> {
-        trace!("internal get block reward");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("internal get block reward");
+        }
         let block_time_target = get_block_time_target_for_version(version);
         let mut block_reward = get_block_reward(past_supply, block_time_target);
         if is_side_block {
@@ -5164,9 +5288,13 @@ impl<S: Storage> Blockchain<S> {
 
         // Clean mempool from old txs if the DAG has been updated
         {
-            debug!("lock mempool in write mode for cleaning old TXs");
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("lock mempool in write mode for cleaning old TXs");
+            }
             let mut mempool = self.mempool.write().await;
-            debug!("mempool lock acquired for cleaning old TXs");
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("mempool lock acquired for cleaning old TXs");
+            }
             txs.extend(
                 mempool
                     .drain()

@@ -100,7 +100,9 @@ impl DiskCache {
 
     // Flush the cache to disk
     pub async fn flush(&self) -> Result<(), DiskError> {
-        info!("Flushing Disk Cache");
+        if log::log_enabled!(log::Level::Info) {
+            info!("Flushing Disk Cache");
+        }
         self.db.flush_async().await?;
         Ok(())
     }

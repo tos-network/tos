@@ -83,7 +83,9 @@ impl<S: Storage> P2pServer<S> {
     ) -> Result<(), BlockchainError> {
         // Check if fast sync support is disabled
         if self.disable_fast_sync_support {
-            debug!("Fast sync is disabled, ignoring bootstrap chain request");
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Fast sync is disabled, ignoring bootstrap chain request");
+            }
             return Err(P2pError::FastSyncDisabled.into());
         }
 
@@ -142,7 +144,9 @@ impl<S: Storage> P2pServer<S> {
             }
             StepRequest::Assets(min, max, page) => {
                 if min > max {
-                    warn!("Invalid range for assets");
+                    if log::log_enabled!(log::Level::Warn) {
+                        warn!("Invalid range for assets");
+                    }
                     return Err(P2pError::InvalidPacket.into());
                 }
 
@@ -184,7 +188,9 @@ impl<S: Storage> P2pServer<S> {
             }
             StepRequest::KeyBalances(key, min, max, page) => {
                 if min > max {
-                    warn!("Invalid range for key assets");
+                    if log::log_enabled!(log::Level::Warn) {
+                        warn!("Invalid range for key assets");
+                    }
                     return Err(P2pError::InvalidPacket.into());
                 }
 
@@ -220,7 +226,9 @@ impl<S: Storage> P2pServer<S> {
             }
             StepRequest::SpendableBalances(key, asset, min, max) => {
                 if min > max {
-                    warn!("Invalid range for spendable balances");
+                    if log::log_enabled!(log::Level::Warn) {
+                        warn!("Invalid range for spendable balances");
+                    }
                     return Err(P2pError::InvalidPacket.into());
                 }
 
@@ -239,7 +247,9 @@ impl<S: Storage> P2pServer<S> {
             }
             StepRequest::Accounts(min, max, keys) => {
                 if min > max {
-                    warn!("Invalid range for accounts");
+                    if log::log_enabled!(log::Level::Warn) {
+                        warn!("Invalid range for accounts");
+                    }
                     return Err(P2pError::InvalidPacket.into());
                 }
 
@@ -285,7 +295,9 @@ impl<S: Storage> P2pServer<S> {
             }
             StepRequest::Keys(min, max, page) => {
                 if min > max {
-                    warn!("Invalid range for keys");
+                    if log::log_enabled!(log::Level::Warn) {
+                        warn!("Invalid range for keys");
+                    }
                     return Err(P2pError::InvalidPacket.into());
                 }
 
@@ -306,7 +318,9 @@ impl<S: Storage> P2pServer<S> {
             }
             StepRequest::Contracts(min, max, page) => {
                 if min > max {
-                    warn!("Invalid range for contracts");
+                    if log::log_enabled!(log::Level::Warn) {
+                        warn!("Invalid range for contracts");
+                    }
                     return Err(P2pError::InvalidPacket.into());
                 }
 
@@ -327,7 +341,9 @@ impl<S: Storage> P2pServer<S> {
             }
             StepRequest::ContractModule(min, max, contract) => {
                 if min > max {
-                    warn!("Invalid range for contract metadata");
+                    if log::log_enabled!(log::Level::Warn) {
+                        warn!("Invalid range for contract metadata");
+                    }
                     return Err(P2pError::InvalidPacket.into());
                 }
 
@@ -415,7 +431,9 @@ impl<S: Storage> P2pServer<S> {
             }
             StepRequest::ContractsExecutions(min, max, page) => {
                 if min > max {
-                    warn!("Invalid range for contract executions");
+                    if log::log_enabled!(log::Level::Warn) {
+                        warn!("Invalid range for contract executions");
+                    }
                     return Err(P2pError::InvalidPacket.into());
                 }
 
@@ -1427,10 +1445,12 @@ impl<S: Storage> P2pServer<S> {
                 .await?;
             let StepResponse::KeyBalances(balances, next_page) = response else {
                 // shouldn't happen
-                error!(
-                    "Received an invalid StepResponse (how ?) while fetching key balances: {:?}",
-                    response
-                );
+                if log::log_enabled!(log::Level::Error) {
+                    error!(
+                        "Received an invalid StepResponse (how ?) while fetching key balances: {:?}",
+                        response
+                    );
+                }
                 return Err(P2pError::InvalidPacket.into());
             };
 
@@ -1582,7 +1602,9 @@ impl<S: Storage> P2pServer<S> {
         update_registration: bool,
     ) -> Result<(), P2pError> {
         if keys.is_empty() {
-            warn!("No keys to update");
+            if log::log_enabled!(log::Level::Warn) {
+                warn!("No keys to update");
+            }
             return Ok(());
         }
 
@@ -1818,7 +1840,9 @@ impl<S: Storage> P2pServer<S> {
         stable_topoheight: u64,
     ) -> Result<(), P2pError> {
         if contracts.is_empty() {
-            warn!("No contract to update");
+            if log::log_enabled!(log::Level::Warn) {
+                warn!("No contract to update");
+            }
             return Ok(());
         }
 

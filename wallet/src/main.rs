@@ -279,7 +279,9 @@ async fn main() -> Result<()> {
         // Sanity check
         // check that we don't have both server enabled
         if config.enable_xswd && config.rpc.rpc_bind_address.is_some() {
-            error!("Invalid parameters configuration: RPC Server and XSWD cannot be enabled at the same time");
+            if log::log_enabled!(log::Level::Error) {
+                error!("Invalid parameters configuration: RPC Server and XSWD cannot be enabled at the same time");
+            }
             return Ok(()); // exit
         }
 
@@ -287,7 +289,9 @@ async fn main() -> Result<()> {
         if config.rpc.rpc_bind_address.is_none()
             && (config.rpc.rpc_password.is_some() || config.rpc.rpc_username.is_some())
         {
-            error!("Invalid parameters configuration for rpc password and username: RPC Server is not enabled");
+            if log::log_enabled!(log::Level::Error) {
+                error!("Invalid parameters configuration for rpc password and username: RPC Server is not enabled");
+            }
             return Ok(());
         }
 
@@ -295,7 +299,9 @@ async fn main() -> Result<()> {
         if config.rpc.rpc_bind_address.is_some()
             && config.rpc.rpc_password.is_some() != config.rpc.rpc_username.is_some()
         {
-            error!("Invalid parameters configuration: usernamd AND password must be provided");
+            if log::log_enabled!(log::Level::Error) {
+                error!("Invalid parameters configuration: usernamd AND password must be provided");
+            }
             return Ok(());
         }
     }
@@ -571,20 +577,20 @@ async fn xswd_handler(mut receiver: UnboundedReceiver<XSWDEvent>, prompt: Sharea
         match event {
             XSWDEvent::CancelRequest(_, callback) => {
                 let res = prompt.cancel_read_input().await;
-                if callback.send(res).is_err() {
+                if callback.send(res).is_err() && log::log_enabled!(log::Level::Error) {
                     error!("Error while sending cancel response back to XSWD");
                 }
             }
             XSWDEvent::RequestApplication(app_state, callback) => {
                 let prompt = prompt.clone();
                 let res = xswd_handle_request_application(&prompt, app_state).await;
-                if callback.send(res).is_err() {
+                if callback.send(res).is_err() && log::log_enabled!(log::Level::Error) {
                     error!("Error while sending application response back to XSWD");
                 }
             }
             XSWDEvent::RequestPermission(app_state, request, callback) => {
                 let res = xswd_handle_request_permission(&prompt, app_state, request).await;
-                if callback.send(res).is_err() {
+                if callback.send(res).is_err() && log::log_enabled!(log::Level::Error) {
                     error!("Error while sending permission response back to XSWD");
                 }
             }

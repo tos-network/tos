@@ -1552,7 +1552,9 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
         }
 
         // Start by storing the contracts
-        debug!("Storing contracts");
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("Storing contracts");
+        }
         for (hash, (state, module)) in self.inner.contracts.iter() {
             if state.should_be_stored() {
                 if log::log_enabled!(log::Level::Trace) {
@@ -1575,7 +1577,9 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
             }
         }
 
-        debug!("Storing contract storage changes");
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("Storing contract storage changes");
+        }
         // Apply all the contract storage changes
         for (contract, cache) in self.contract_manager.caches {
             // Apply all storage changes
@@ -1650,7 +1654,9 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
             }
         }
 
-        debug!("Storing NFT cache changes");
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("Storing NFT cache changes");
+        }
         let nft_cache = std::mem::take(&mut self.contract_manager.nft_cache);
         for (collection, (state, value)) in nft_cache.collections {
             if state.should_be_stored() {
@@ -1812,7 +1818,9 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
             }
         }
 
-        debug!("applying external transfers");
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("applying external transfers");
+        }
         // Apply all the transfers to the receiver accounts
         for (key, assets) in self.contract_manager.tracker.transfers {
             for (asset, amount) in assets {
@@ -1874,7 +1882,9 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
         }
 
         // Apply all the contract outputs
-        debug!("storing contract outputs");
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("storing contract outputs");
+        }
         for (key, outputs) in self.contract_manager.outputs.drain() {
             self.inner
                 .storage

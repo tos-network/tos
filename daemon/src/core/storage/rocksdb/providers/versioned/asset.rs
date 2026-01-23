@@ -18,7 +18,9 @@ impl VersionedAssetProvider for RocksStorage {
         &mut self,
         topoheight: TopoHeight,
     ) -> Result<(), BlockchainError> {
-        trace!("delete versioned assets at topoheight {}", topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("delete versioned assets at topoheight {}", topoheight);
+        }
         let prefix = topoheight.to_be_bytes();
 
         // Cloned snapshot to iterate without borrowing issues
@@ -70,7 +72,9 @@ impl VersionedAssetProvider for RocksStorage {
         &mut self,
         topoheight: TopoHeight,
     ) -> Result<(), BlockchainError> {
-        trace!("delete versioned assets above topoheight {}", topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("delete versioned assets above topoheight {}", topoheight);
+        }
         let start = (topoheight + 1).to_be_bytes();
         let snapshot = self.snapshot.clone();
         for res in Self::iter_raw_internal(
@@ -125,7 +129,9 @@ impl VersionedAssetProvider for RocksStorage {
         topoheight: TopoHeight,
         keep_last: bool,
     ) -> Result<(), BlockchainError> {
-        trace!("delete versioned assets below topoheight {}", topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("delete versioned assets below topoheight {}", topoheight);
+        }
         self.delete_versioned_below_topoheight::<AssetId, Asset>(
             Column::Assets,
             Column::VersionedAssets,

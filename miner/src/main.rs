@@ -402,7 +402,9 @@ async fn main() -> Result<()> {
 // It maintains a http listener and sends stats on connection in json.
 #[cfg(feature = "api_stats")]
 async fn broadcast_stats_task(broadcast_address: String) -> Result<()> {
-    info!("Starting broadcast task");
+    if log::log_enabled!(log::Level::Info) {
+        info!("Starting broadcast task");
+    }
     // Start TCP listener
     let listener = TcpListener::bind(broadcast_address).await?;
     loop {
@@ -480,14 +482,16 @@ fn benchmark(threads: usize, iterations: usize, algorithm: Algorithm) {
         }
         let duration = start.elapsed().as_millis();
         let hashrate = format_hashrate(1000f64 / (duration as f64 / (bench * iterations) as f64));
-        info!(
-            "{0: <10} | {1: <10} | {2: <16} | {3: <13} | {4: <13}",
-            bench,
-            duration,
-            bench * iterations,
-            duration / (bench * iterations) as u128,
-            hashrate
-        );
+        if log::log_enabled!(log::Level::Info) {
+            info!(
+                "{0: <10} | {1: <10} | {2: <16} | {3: <13} | {4: <13}",
+                bench,
+                duration,
+                bench * iterations,
+                duration / (bench * iterations) as u128,
+                hashrate
+            );
+        }
     }
 }
 
@@ -502,7 +506,9 @@ async fn communication_task(
     address: Address,
     worker: String,
 ) {
-    info!("Starting communication task");
+    if log::log_enabled!(log::Level::Info) {
+        info!("Starting communication task");
+    }
     let daemon_address = sanitize_ws_address(&daemon_address);
     'main: loop {
         if log::log_enabled!(log::Level::Info) {
@@ -540,7 +546,9 @@ async fn communication_task(
                         }
                     }
 
-                    warn!("Trying to connect to WebSocket again in 10 seconds...");
+                    if log::log_enabled!(log::Level::Warn) {
+                        warn!("Trying to connect to WebSocket again in 10 seconds...");
+                    }
                     tokio::time::sleep(Duration::from_secs(10)).await;
                     continue 'main;
                 }
@@ -589,11 +597,14 @@ async fn communication_task(
         if job_sender
             .send(ThreadNotification::WebSocketClosed)
             .is_err()
+            && log::log_enabled!(log::Level::Error)
         {
             error!("Error while sending WebSocketClosed message to threads");
         }
 
-        warn!("Trying to connect to WebSocket again in 10 seconds...");
+        if log::log_enabled!(log::Level::Warn) {
+            warn!("Trying to connect to WebSocket again in 10 seconds...");
+        }
         tokio::time::sleep(Duration::from_secs(10)).await;
     }
 }

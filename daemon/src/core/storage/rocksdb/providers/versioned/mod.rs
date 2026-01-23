@@ -181,16 +181,22 @@ impl RocksStorage {
                 let mut versioned_key = vec![0; bytes.len() + 8];
                 versioned_key[8..].copy_from_slice(&bytes);
 
-                trace!("pointer detected is {:?}", prev_version);
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!("pointer detected is {:?}", prev_version);
+                }
                 while let Some(prev_topo) = prev_version.take() {
-                    trace!("loading versioned data at topoheight {}", prev_topo);
+                    if log::log_enabled!(log::Level::Trace) {
+                        trace!("loading versioned data at topoheight {}", prev_topo);
+                    }
 
                     versioned_key[0..8].copy_from_slice(&prev_topo.to_be_bytes());
 
                     // Fetch the previous version before potentially deleting it
                     prev_version = self.load_from_disk(column_versioned, &versioned_key)?;
                     if patched {
-                        trace!("deleting versioned data at topoheight {}", prev_topo);
+                        if log::log_enabled!(log::Level::Trace) {
+                            trace!("deleting versioned data at topoheight {}", prev_topo);
+                        }
                         Self::remove_from_disk_internal(
                             &self.db,
                             self.snapshot.as_mut(),
@@ -198,7 +204,9 @@ impl RocksStorage {
                             &versioned_key,
                         )?;
                     } else if prev_topo < topoheight {
-                        trace!("Patching versioned data at topoheight {}", prev_topo);
+                        if log::log_enabled!(log::Level::Trace) {
+                            trace!("Patching versioned data at topoheight {}", prev_topo);
+                        }
                         patched = true;
 
                         let mut data: Versioned<RawBytes> =

@@ -118,7 +118,9 @@ impl Encryption {
 
     // Encrypt a packet using the shared symetric key
     pub async fn encrypt_packet(&self, input: &mut impl Buffer) -> Result<(), EncryptionError> {
-        trace!("Encrypting packet with length {}", input.len());
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Encrypting packet with length {}", input.len());
+        }
         let mut lock = self.our_cipher.lock().await;
         trace!("our cipher locked");
 
@@ -148,7 +150,9 @@ impl Encryption {
 
     // Decrypt a packet using the shared symetric key
     pub async fn decrypt_packet(&self, buf: &mut impl Buffer) -> Result<(), EncryptionError> {
-        trace!("Decrypting packet with length {}", buf.len());
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Decrypting packet with length {}", buf.len());
+        }
         let mut lock = self.peer_cipher.lock().await;
         trace!("peer cipher locked");
 
@@ -173,7 +177,9 @@ impl Encryption {
         // Increment the nonce so we don't use the same nonce twice
         cipher_state.nonce += 1;
 
-        trace!("Packet decrypted with length {}", buf.len());
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Packet decrypted with length {}", buf.len());
+        }
 
         Ok(())
     }

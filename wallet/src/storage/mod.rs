@@ -104,13 +104,17 @@ impl EncryptedStorage {
     // Internal helper methods for encryption/decryption
 
     fn load_from_disk_optional<V: Serializer>(&self, tree: &Tree, key: &[u8]) -> Result<Option<V>> {
-        trace!("load from disk optional");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("load from disk optional");
+        }
         let hashed_key = self.cipher.hash_key(key);
         self.internal_load(tree, &hashed_key)
     }
 
     fn load_from_disk<V: Serializer>(&self, tree: &Tree, key: &[u8]) -> Result<V> {
-        trace!("load from disk");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("load from disk");
+        }
         self.load_from_disk_optional(tree, key)?.context(format!(
             "Error while loading data with hashed key {} from disk",
             hex::encode(self.cipher.hash_key(key))
@@ -118,7 +122,9 @@ impl EncryptedStorage {
     }
 
     fn load_from_disk_with_key<V: Serializer>(&self, tree: &Tree, key: &[u8]) -> Result<V> {
-        trace!("load from disk with key");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("load from disk with key");
+        }
         self.internal_load(tree, key)?.context(format!(
             "Error while loading data with key {} from disk",
             hex::encode(key)
@@ -160,26 +166,34 @@ impl EncryptedStorage {
     }
 
     fn save_to_disk_with_encrypted_key(&self, tree: &Tree, key: &[u8], value: &[u8]) -> Result<()> {
-        trace!("save to disk with encrypted key");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("save to disk with encrypted key");
+        }
         let encrypted_key = self.create_encrypted_key(key)?;
         self.save_to_disk_with_key(tree, &encrypted_key, value)
     }
 
     fn save_to_disk(&self, tree: &Tree, key: &[u8], value: &[u8]) -> Result<()> {
-        trace!("save to disk");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("save to disk");
+        }
         let hashed_key = self.cipher.hash_key(key);
         self.save_to_disk_with_key(tree, &hashed_key, value)
     }
 
     fn save_to_disk_with_key(&self, tree: &Tree, key: &[u8], value: &[u8]) -> Result<()> {
-        trace!("save to disk with key");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("save to disk with key");
+        }
         tree.insert(key, self.cipher.encrypt_value(value)?)?;
         Ok(())
     }
 
     #[allow(dead_code)]
     fn delete_from_disk(&self, tree: &Tree, key: &[u8]) -> Result<()> {
-        trace!("delete from disk");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("delete from disk");
+        }
         let hashed_key = self.cipher.hash_key(key);
         tree.remove(hashed_key)?;
         Ok(())
@@ -187,26 +201,34 @@ impl EncryptedStorage {
 
     #[allow(dead_code)]
     fn delete_from_disk_with_key(&self, tree: &Tree, key: &[u8]) -> Result<()> {
-        trace!("delete from disk with key");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("delete from disk with key");
+        }
         tree.remove(key)?;
         Ok(())
     }
 
     fn delete_from_disk_with_encrypted_key(&self, tree: &Tree, key: &[u8]) -> Result<()> {
-        trace!("delete from disk with encrypted key");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("delete from disk with encrypted key");
+        }
         let encrypted_key = self.create_encrypted_key(key)?;
         tree.remove(encrypted_key)?;
         Ok(())
     }
 
     fn contains_data(&self, tree: &Tree, key: &[u8]) -> Result<bool> {
-        trace!("contains data");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("contains data");
+        }
         let hashed_key = self.cipher.hash_key(key);
         Ok(tree.contains_key(hashed_key)?)
     }
 
     fn contains_with_encrypted_key(&self, tree: &Tree, key: &[u8]) -> Result<bool> {
-        trace!("contains encrypted data");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("contains encrypted data");
+        }
         let encrypted_key = self.create_encrypted_key(key)?;
         Ok(tree.contains_key(encrypted_key)?)
     }

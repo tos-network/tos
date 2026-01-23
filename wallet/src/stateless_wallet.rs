@@ -116,13 +116,17 @@ impl StatelessWallet {
 
     /// Get chain info from daemon
     pub async fn get_info(&self) -> Result<GetInfoResult> {
-        trace!("get_info from daemon");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get_info from daemon");
+        }
         self.daemon_api.get_info().await
     }
 
     /// Get current nonce from daemon
     pub async fn get_nonce(&self) -> Result<u64> {
-        trace!("get_nonce from daemon");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get_nonce from daemon");
+        }
         let address = self.get_address();
         let result = self.daemon_api.get_nonce(&address).await?;
         Ok(result.version.get_nonce())
@@ -130,14 +134,18 @@ impl StatelessWallet {
 
     /// Get nonce result with version info
     pub async fn get_nonce_result(&self) -> Result<GetNonceResult> {
-        trace!("get_nonce_result from daemon");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get_nonce_result from daemon");
+        }
         let address = self.get_address();
         self.daemon_api.get_nonce(&address).await
     }
 
     /// Get balance for a specific asset from daemon
     pub async fn get_balance(&self, asset: &Hash) -> Result<u64> {
-        trace!("get_balance from daemon");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get_balance from daemon");
+        }
         let address = self.get_address();
         let result = self.daemon_api.get_balance(&address, asset).await?;
         Ok(result.balance)
@@ -145,7 +153,9 @@ impl StatelessWallet {
 
     /// Get balance result with version info
     pub async fn get_balance_result(&self, asset: &Hash) -> Result<GetBalanceResult> {
-        trace!("get_balance_result from daemon");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get_balance_result from daemon");
+        }
         let address = self.get_address();
         self.daemon_api.get_balance(&address, asset).await
     }
@@ -157,13 +167,17 @@ impl StatelessWallet {
 
     /// Get asset info from daemon
     pub async fn get_asset(&self, asset: &Hash) -> Result<RPCAssetData<'static>> {
-        trace!("get_asset from daemon");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get_asset from daemon");
+        }
         self.daemon_api.get_asset(asset).await
     }
 
     /// Get all assets for this account from daemon
     pub async fn get_account_assets(&self) -> Result<std::collections::HashSet<Hash>> {
-        trace!("get_account_assets from daemon");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get_account_assets from daemon");
+        }
         let address = self.get_address();
         self.daemon_api
             .get_account_assets(&address, None, None)
@@ -172,14 +186,18 @@ impl StatelessWallet {
 
     /// Get mempool cache (pending transactions) from daemon
     pub async fn get_mempool_cache(&self) -> Result<GetMempoolCacheResult> {
-        trace!("get_mempool_cache from daemon");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get_mempool_cache from daemon");
+        }
         let address = self.get_address();
         self.daemon_api.get_mempool_cache(&address).await
     }
 
     /// Check if this account is registered on chain
     pub async fn is_registered(&self, in_stable_height: bool) -> Result<bool> {
-        trace!("is_registered from daemon");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("is_registered from daemon");
+        }
         let address = self.get_address();
         self.daemon_api
             .is_account_registered(&address, in_stable_height)
@@ -188,14 +206,18 @@ impl StatelessWallet {
 
     /// Get multisig state from daemon
     pub async fn get_multisig(&self) -> Result<GetMultisigResult> {
-        trace!("get_multisig from daemon");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get_multisig from daemon");
+        }
         let address = self.get_address();
         self.daemon_api.get_multisig(&address).await
     }
 
     /// Check if this account has multisig
     pub async fn has_multisig(&self) -> Result<bool> {
-        trace!("has_multisig from daemon");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("has_multisig from daemon");
+        }
         let address = self.get_address();
         self.daemon_api.has_multisig(&address).await
     }

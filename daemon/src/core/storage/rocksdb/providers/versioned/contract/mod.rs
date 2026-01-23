@@ -23,7 +23,9 @@ impl VersionedContractProvider for RocksStorage {
         &mut self,
         topoheight: TopoHeight,
     ) -> Result<(), BlockchainError> {
-        trace!("delete versioned contracts at topoheight {}", topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("delete versioned contracts at topoheight {}", topoheight);
+        }
         let prefix = topoheight.to_be_bytes();
         let snapshot = self.snapshot.clone();
         for res in Self::iter_raw_internal(
@@ -73,7 +75,9 @@ impl VersionedContractProvider for RocksStorage {
         &mut self,
         topoheight: TopoHeight,
     ) -> Result<(), BlockchainError> {
-        trace!("delete versioned contracts above topoheight {}", topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("delete versioned contracts above topoheight {}", topoheight);
+        }
         let start = (topoheight + 1).to_be_bytes();
         let snapshot = self.snapshot.clone();
         for res in Self::iter_raw_internal(
@@ -128,7 +132,9 @@ impl VersionedContractProvider for RocksStorage {
         topoheight: TopoHeight,
         keep_last: bool,
     ) -> Result<(), BlockchainError> {
-        trace!("delete versioned contracts below topoheight {}", topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("delete versioned contracts below topoheight {}", topoheight);
+        }
         self.delete_versioned_below_topoheight::<ContractId, Contract>(
             Column::Contracts,
             Column::VersionedContracts,

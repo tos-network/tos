@@ -216,7 +216,9 @@ pub trait Storage:
         // Clear all caches to not have old data after rewind
         self.clear_objects_cache().await?;
 
-        trace!("Storing new pointers");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Storing new pointers");
+        }
         // store the new tips and topo topoheight
         self.store_tips(&tips).await?;
         self.set_top_topoheight(topoheight).await?;

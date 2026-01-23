@@ -283,7 +283,9 @@ where
         request: ActixHttpRequest,
         body: Payload,
     ) -> Result<HttpResponse, actix_web::Error> {
-        debug!("Handling new WebSocket connection");
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("Handling new WebSocket connection");
+        }
 
         let (response, session, stream) = actix_ws::handle(&request, body)?;
         let id = self.next_id();

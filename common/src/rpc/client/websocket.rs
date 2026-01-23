@@ -40,7 +40,9 @@ fn init_rustls_crypto_provider() {
 
             // Check if a crypto provider is already installed
             if rustls::crypto::CryptoProvider::get_default().is_some() {
-                debug!("Rustls crypto provider already initialized");
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Rustls crypto provider already initialized");
+                }
                 return;
             }
 
@@ -273,7 +275,9 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
 
     // resubscribe to all events because of a reconnection
     async fn resubscribe_events(self: Arc<Self>) -> Result<(), JsonRPCError> {
-        trace!("Resubscribe events requested");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Resubscribe events requested");
+        }
         let events = {
             let events = self.events_to_id.lock().await;
             events.clone()
@@ -317,7 +321,9 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
     pub async fn disconnect(&self) -> Result<(), Error> {
         trace!("disconnect");
         if !self.is_online() {
-            debug!("Already disconnected from the server");
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Already disconnected from the server");
+            }
             return Ok(());
         }
 
@@ -443,7 +449,9 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
         mut receiver: mpsc::Receiver<InternalMessage>,
         ws: WebSocketStream,
     ) -> Result<(), JsonRPCError> {
-        debug!("Starting background task");
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("Starting background task");
+        }
         self.set_online(true).await;
 
         let zelf = Arc::clone(&self);
@@ -565,7 +573,9 @@ impl<E: Serialize + Hash + Eq + Send + Sync + Clone + std::fmt::Debug + 'static>
                             write.send(Message::Text(text.into())).await?;
                         },
                         InternalMessage::Close => {
-                            debug!("Closing the connection");
+                            if log::log_enabled!(log::Level::Debug) {
+                                debug!("Closing the connection");
+                            }
                             write.close().await?;
                             break;
                         }

@@ -18,7 +18,9 @@ impl VersionedDagOrderProvider for RocksStorage {
         &mut self,
         topoheight: TopoHeight,
     ) -> Result<(), BlockchainError> {
-        trace!("delete topo height for block {}", topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("delete topo height for block {}", topoheight);
+        }
         let hash = self.get_hash_at_topo_height(topoheight).await?;
 
         self.remove_from_disk(Column::TopoByHash, hash)?;
@@ -30,7 +32,9 @@ impl VersionedDagOrderProvider for RocksStorage {
         &mut self,
         topoheight: TopoHeight,
     ) -> Result<(), BlockchainError> {
-        trace!("delete dag order above topoheight {}", topoheight);
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("delete dag order above topoheight {}", topoheight);
+        }
 
         let start = (topoheight + 1).to_be_bytes();
         let snapshot = self.snapshot.clone();
@@ -41,10 +45,12 @@ impl VersionedDagOrderProvider for RocksStorage {
             Column::HashAtTopo,
         )? {
             let (topo, hash) = el?;
-            debug!(
-                "found hash {} at topoheight {} while threshold topoheight is at {}",
-                hash, topo, topoheight
-            );
+            if log::log_enabled!(log::Level::Debug) {
+                debug!(
+                    "found hash {} at topoheight {} while threshold topoheight is at {}",
+                    hash, topo, topoheight
+                );
+            }
             Self::remove_from_disk_internal(
                 &self.db,
                 self.snapshot.as_mut(),

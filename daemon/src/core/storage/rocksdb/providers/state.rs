@@ -19,14 +19,18 @@ use crate::core::{
 impl StateProvider for RocksStorage {
     // Get the top block hash of the chain
     async fn get_top_block_hash(&self) -> Result<Hash, BlockchainError> {
-        trace!("get top block hash");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get top block hash");
+        }
         self.get_hash_at_topo_height(self.get_top_topoheight().await?)
             .await
     }
 
     // Get the top block of the chain, based on top block hash
     async fn get_top_block(&self) -> Result<Block, BlockchainError> {
-        trace!("get top block");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get top block");
+        }
         let hash = self.get_top_block_hash().await?;
         self.get_block_by_hash(&hash).await
     }
@@ -35,14 +39,18 @@ impl StateProvider for RocksStorage {
     async fn get_top_block_header(
         &self,
     ) -> Result<(Immutable<BlockHeader>, Hash), BlockchainError> {
-        trace!("get top block header");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get top block header");
+        }
         let hash = self.get_top_block_hash().await?;
         Ok((self.get_block_header_by_hash(&hash).await?, hash))
     }
 
     // Get the top topoheight of the chain
     async fn get_top_topoheight(&self) -> Result<TopoHeight, BlockchainError> {
-        trace!("get top topoheight");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get top topoheight");
+        }
         Ok(self.cache().chain.topoheight)
     }
 

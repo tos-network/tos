@@ -279,7 +279,9 @@ impl Serializer for ChainResponse {
         for _ in 0..len {
             let hash = reader.read_hash()?;
             if blocks.contains(&hash) || !top_blocks.insert(hash) {
-                debug!("Invalid chain response duplicate top block");
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Invalid chain response duplicate top block");
+                }
                 return Err(ReaderError::InvalidValue);
             }
         }

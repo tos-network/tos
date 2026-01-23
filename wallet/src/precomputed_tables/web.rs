@@ -204,7 +204,9 @@ async fn generate_tables<P: ecdlp::ProgressTableGenerationReportFunction>(
     let tables = ecdlp::ECDLPTables::generate_with_progress_report(l1, progress_report)?;
 
     let slice = tables.as_slice();
-    info!("Precomputed tables generated");
+    if log::log_enabled!(log::Level::Info) {
+        info!("Precomputed tables generated");
+    }
 
     let res: Option<FileSystemWritableFileStream> = match file_handle {
         Some(file_handle) => {
@@ -238,7 +240,9 @@ async fn generate_tables<P: ecdlp::ProgressTableGenerationReportFunction>(
         let _: JsValue = execute!(promise, WriteResult)?;
         let _: JsValue = execute!(writable.close(), WriteClose)?;
     } else {
-        warn!("Failed to create writable file stream, precomputed tables will not be stored");
+        if log::log_enabled!(log::Level::Warn) {
+            warn!("Failed to create writable file stream, precomputed tables will not be stored");
+        }
     }
 
     Ok(tables)

@@ -596,7 +596,9 @@ pub fn register_methods<S: Storage>(
     allow_admin_methods: bool,
     enable_a2a: bool,
 ) {
-    info!("Registering RPC methods...");
+    if log::log_enabled!(log::Level::Info) {
+        info!("Registering RPC methods...");
+    }
     handler.register_method("get_version", async_handler!(version::<S>));
     handler.register_method("get_height", async_handler!(get_height::<S>));
     handler.register_method("get_topoheight", async_handler!(get_topoheight::<S>));
@@ -2030,10 +2032,12 @@ fn get_range(
 
     let range_end = end.unwrap_or(current);
     if range_end < range_start || range_end > current {
-        debug!(
-            "get range: start = {}, end = {}, max = {}",
-            range_start, range_end, current
-        );
+        if log::log_enabled!(log::Level::Debug) {
+            debug!(
+                "get range: start = {}, end = {}, max = {}",
+                range_start, range_end, current
+            );
+        }
         return Err(InternalRpcError::InvalidJSONRequest).context(format!(
             "Invalid range requested, start: {}, end: {}",
             range_start, range_end
@@ -2290,14 +2294,16 @@ async fn get_account_history<S: Storage>(
 
     let is_dev_address = *key == *DEV_PUBLIC_KEY;
     while let Some((topo, prev_nonce, versioned_balance)) = version.take() {
-        trace!(
-            "Searching history of {} ({}) at topoheight {}, nonce: {:?}, type: {:?}",
-            params.address,
-            params.asset,
-            topo,
-            prev_nonce,
-            versioned_balance.get_balance_type()
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "Searching history of {} ({}) at topoheight {}, nonce: {:?}, type: {:?}",
+                params.address,
+                params.asset,
+                topo,
+                prev_nonce,
+                versioned_balance.get_balance_type()
+            );
+        }
         if topo < minimum_topoheight || topo < pruned_topoheight {
             break;
         }

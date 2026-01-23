@@ -89,10 +89,12 @@ impl CallbackService {
                     }
                 }
                 CallbackResult::Failed { error, attempts } => {
-                    error!(
-                        "Callback delivery failed to {} for payment {} after {} attempts: {}",
-                        config.url, payload.payment_id, attempts, error
-                    );
+                    if log::log_enabled!(log::Level::Error) {
+                        error!(
+                            "Callback delivery failed to {} for payment {} after {} attempts: {}",
+                            config.url, payload.payment_id, attempts, error
+                        );
+                    }
                 }
             }
         });
@@ -193,12 +195,14 @@ impl CallbackService {
                     return CallbackResult::Success;
                 }
                 Err(e) => {
-                    warn!(
-                        "Callback attempt {} to {} failed: {}",
-                        attempt + 1,
-                        config.url,
-                        e
-                    );
+                    if log::log_enabled!(log::Level::Warn) {
+                        warn!(
+                            "Callback attempt {} to {} failed: {}",
+                            attempt + 1,
+                            config.url,
+                            e
+                        );
+                    }
                     // Continue to next retry
                 }
             }

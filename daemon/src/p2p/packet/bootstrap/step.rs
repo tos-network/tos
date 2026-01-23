@@ -825,7 +825,9 @@ impl Serializer for StepResponse {
                     let key = Hash::read(reader)?;
                     let value = AssetData::read(reader)?;
                     if assets.insert(key, value).is_some() {
-                        debug!("Duplicated asset key in Step Response");
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("Duplicated asset key in Step Response");
+                        }
                         return Err(ReaderError::InvalidValue);
                     }
                 }
@@ -990,7 +992,9 @@ impl Serializer for StepResponse {
                     let asset = Hash::read(reader)?;
                     let value = reader.read_u64()?;
                     if assets.insert(asset, value).is_some() {
-                        debug!("Duplicated contract asset in Step Response");
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("Duplicated contract asset in Step Response");
+                        }
                         return Err(ReaderError::InvalidValue);
                     }
                 }
@@ -1080,7 +1084,9 @@ impl Serializer for StepResponse {
                     let key = PublicKey::read(reader)?;
                     let value = KycData::read(reader)?;
                     if entries.insert(key, value).is_some() {
-                        debug!("Duplicated public key in KycData Step Response");
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("Duplicated public key in KycData Step Response");
+                        }
                         return Err(ReaderError::InvalidValue);
                     }
                 }
@@ -1110,7 +1116,9 @@ impl Serializer for StepResponse {
                     let key = Hash::read(reader)?;
                     let value = SecurityCommittee::read(reader)?;
                     if entries.insert(key, value).is_some() {
-                        debug!("Duplicated hash in Committees Step Response");
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("Duplicated hash in Committees Step Response");
+                        }
                         return Err(ReaderError::InvalidValue);
                     }
                 }
@@ -1141,7 +1149,9 @@ impl Serializer for StepResponse {
                     let key = Hash::read(reader)?;
                     let value = NftCollection::read(reader)?;
                     if entries.insert(key, value).is_some() {
-                        debug!("Duplicated hash in NftCollections Step Response");
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("Duplicated hash in NftCollections Step Response");
+                        }
                         return Err(ReaderError::InvalidValue);
                     }
                 }
@@ -1172,7 +1182,9 @@ impl Serializer for StepResponse {
                     let token_id = reader.read_u64()?;
                     let nft = Nft::read(reader)?;
                     if entries.insert(token_id, nft).is_some() {
-                        debug!("Duplicated token id in NftTokens Step Response");
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("Duplicated token id in NftTokens Step Response");
+                        }
                         return Err(ReaderError::InvalidValue);
                     }
                 }
@@ -1203,7 +1215,9 @@ impl Serializer for StepResponse {
                     let token_id = reader.read_u64()?;
                     let owner = PublicKey::read(reader)?;
                     if entries.insert(token_id, owner).is_some() {
-                        debug!("Duplicated token id in NftOwnership Step Response");
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("Duplicated token id in NftOwnership Step Response");
+                        }
                         return Err(ReaderError::InvalidValue);
                     }
                 }
@@ -1233,7 +1247,9 @@ impl Serializer for StepResponse {
                     let key = Hash::read(reader)?;
                     let value = EscrowAccount::read(reader)?;
                     if entries.insert(key, value).is_some() {
-                        debug!("Duplicated hash in EscrowAccounts Step Response");
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("Duplicated hash in EscrowAccounts Step Response");
+                        }
                         return Err(ReaderError::InvalidValue);
                     }
                 }
@@ -1288,7 +1304,9 @@ impl Serializer for StepResponse {
                     let key = PublicKey::read(reader)?;
                     let value = ArbiterAccount::read(reader)?;
                     if entries.insert(key, value).is_some() {
-                        debug!("Duplicated public key in ArbiterAccounts Step Response");
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("Duplicated public key in ArbiterAccounts Step Response");
+                        }
                         return Err(ReaderError::InvalidValue);
                     }
                 }
@@ -1318,7 +1336,9 @@ impl Serializer for StepResponse {
                     let key = Hash::read(reader)?;
                     let value = PublicKey::read(reader)?;
                     if entries.insert(key, value).is_some() {
-                        debug!("Duplicated hash in TnsNames Step Response");
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("Duplicated hash in TnsNames Step Response");
+                        }
                         return Err(ReaderError::InvalidValue);
                     }
                 }
@@ -1364,7 +1384,9 @@ impl Serializer for StepResponse {
                     let key = PublicKey::read(reader)?;
                     let value = ReferralRecord::read(reader)?;
                     if entries.insert(key, value).is_some() {
-                        debug!("Duplicated public key in ReferralRecords Step Response");
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("Duplicated public key in ReferralRecords Step Response");
+                        }
                         return Err(ReaderError::InvalidValue);
                     }
                 }
@@ -1419,7 +1441,9 @@ impl Serializer for StepResponse {
                     let key = PublicKey::read(reader)?;
                     let value = AgentAccountMeta::read(reader)?;
                     if entries.insert(key, value).is_some() {
-                        debug!("Duplicated public key in AgentData Step Response");
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("Duplicated public key in AgentData Step Response");
+                        }
                         return Err(ReaderError::InvalidValue);
                     }
                 }
@@ -1482,7 +1506,9 @@ impl Serializer for StepResponse {
                     let mut sub_reader = Reader::new(data_bytes);
                     let value = ContractAssetData::read(&mut sub_reader)?;
                     if entries.insert(key, value).is_some() {
-                        debug!("Duplicated hash in ContractAssets Step Response");
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("Duplicated hash in ContractAssets Step Response");
+                        }
                         return Err(ReaderError::InvalidValue);
                     }
                 }

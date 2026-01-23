@@ -140,11 +140,13 @@ impl NonceProvider for RocksStorage {
             // Check if the account has a nonce at the requested topoheight
             let versioned_key = Self::get_versioned_account_key(account.id, topo);
             if topo <= maximum_topoheight {
-                trace!(
-                    "found nonce at topoheight {} with maximum topoheight {}",
-                    topo,
-                    maximum_topoheight
-                );
+                if log::log_enabled!(log::Level::Trace) {
+                    trace!(
+                        "found nonce at topoheight {} with maximum topoheight {}",
+                        topo,
+                        maximum_topoheight
+                    );
+                }
                 let version = self.load_from_disk(Column::VersionedNonces, &versioned_key)?;
                 return Ok(Some((topo, version)));
             }

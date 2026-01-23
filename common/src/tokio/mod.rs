@@ -138,7 +138,9 @@ pub fn is_multi_threads_supported() -> bool {
 // Try blocking on using the current executor available for the thread
 // If the current executor is not available, return an error
 pub fn try_block_on<F: Future>(_future: F) -> Result<F::Output, anyhow::Error> {
-    trace!("try block on");
+    if log::log_enabled!(log::Level::Trace) {
+        trace!("try block on");
+    }
     cfg_if! {
         if #[cfg(feature = "tokio")] {
             if is_multi_threads_supported() {
@@ -150,11 +152,15 @@ pub fn try_block_on<F: Future>(_future: F) -> Result<F::Output, anyhow::Error> {
                     )))] {
                         let handle = runtime::Handle::try_current()?;
                         return if is_in_block_in_place() {
-                            trace!("tokio block on directly");
+                            if log::log_enabled!(log::Level::Trace) {
+                                trace!("tokio block on directly");
+                            }
                             Ok(handle.block_on(_future))
                         } else {
                             Ok(block_in_place_internal(|| {
-                                trace!("tokio block in place");
+                                if log::log_enabled!(log::Level::Trace) {
+                                    trace!("tokio block in place");
+                                }
                                 handle.block_on(_future)
                             }))
                         }
@@ -184,13 +190,17 @@ where
         if #[cfg(feature = "tokio")] {
             use futures::TryFutureExt;
 
-            trace!("tokio spawn blocking");
+            if log::log_enabled!(log::Level::Trace) {
+                trace!("tokio spawn blocking");
+            }
 
             // If tokio is enabled, we spawn a blocking task
             task::spawn_blocking(f)
                 .map_err(|e| anyhow::anyhow!("Failed to spawn blocking task: {e}"))
         } else {
-            trace!("simulated spawn blocking");
+            if log::log_enabled!(log::Level::Trace) {
+                trace!("simulated spawn blocking");
+            }
             async move {
                 // We can use the block_in_place_safe function to ensure we are blocking correctly
                 let res = block_in_place_safe(f);
@@ -220,7 +230,9 @@ where
         return block_in_place_internal(f);
     }
 
-    trace!("direct call block in place");
+    if log::log_enabled!(log::Level::Trace) {
+        trace!("direct call block in place");
+    }
     f()
 }
 
@@ -236,7 +248,9 @@ fn block_in_place_internal<F, R>(f: F) -> R
 where
     F: FnOnce() -> R,
 {
-    trace!("tokio block in place internal");
+    if log::log_enabled!(log::Level::Trace) {
+        trace!("tokio block in place internal");
+    }
     let old = is_in_block_in_place();
     set_in_block_in_place(true);
 

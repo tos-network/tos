@@ -26,7 +26,9 @@ use log::{debug, info, warn};
 
 // Register all RPC methods
 pub fn register_methods(handler: &mut RPCHandler<Arc<Wallet>>) {
-    info!("Registering RPC methods...");
+    if log::log_enabled!(log::Level::Info) {
+        info!("Registering RPC methods...");
+    }
     handler.register_method("get_version", async_handler!(get_version));
     handler.register_method("get_network", async_handler!(get_network));
     handler.register_method("get_nonce", async_handler!(get_nonce));

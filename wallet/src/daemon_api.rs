@@ -49,14 +49,18 @@ impl DaemonAPI {
 
     // is the websocket connection alive
     pub fn is_online(&self) -> bool {
-        trace!("is_online");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("is_online");
+        }
         self.client.is_online()
     }
 
     // Disconnect by closing the connection with node RPC
     // This will only disconnect if there are no more references to the daemon API
     pub async fn disconnect(self: &Arc<Self>) -> Result<bool> {
-        trace!("disconnect");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("disconnect");
+        }
         let count = Arc::strong_count(self);
         if count > 1 {
             if log::log_enabled!(log::Level::Debug) {
@@ -70,31 +74,41 @@ impl DaemonAPI {
 
     // Disconnect by closing the connection with node RPC
     pub async fn disconnect_force(&self) -> Result<()> {
-        trace!("disconnect_force");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("disconnect_force");
+        }
         self.client.disconnect().await
     }
 
     // Try to reconnect using the same client
     pub async fn reconnect(&self) -> Result<bool> {
-        trace!("reconnect");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("reconnect");
+        }
         self.client.reconnect().await
     }
 
     // On connection event
     pub async fn on_connection(&self) -> broadcast::Receiver<()> {
-        trace!("on_connection");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("on_connection");
+        }
         self.client.on_connection().await
     }
 
     // On reconnect event
     pub async fn on_reconnect(&self) -> broadcast::Receiver<()> {
-        trace!("on_reconnect");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("on_reconnect");
+        }
         self.client.on_reconnect().await
     }
 
     // On connection lost
     pub async fn on_connection_lost(&self) -> broadcast::Receiver<()> {
-        trace!("on_connection_lost");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("on_connection_lost");
+        }
         self.client.on_connection_lost().await
     }
 
@@ -115,7 +129,9 @@ impl DaemonAPI {
     }
 
     pub async fn on_block_ordered_event(&self) -> Result<EventReceiver<BlockOrderedEvent<'_>>> {
-        trace!("on_block_ordered_event");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("on_block_ordered_event");
+        }
         let receiver = self
             .client
             .subscribe_event(NotifyEvent::BlockOrdered, self.capacity)
@@ -126,7 +142,9 @@ impl DaemonAPI {
     pub async fn on_transaction_orphaned_event(
         &self,
     ) -> Result<EventReceiver<TransactionOrphanedEvent>> {
-        trace!("on_transaction_orphaned_event");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("on_transaction_orphaned_event");
+        }
         let receiver = self
             .client
             .subscribe_event(NotifyEvent::TransactionOrphaned, self.capacity)
@@ -137,7 +155,9 @@ impl DaemonAPI {
     pub async fn on_stable_height_changed_event(
         &self,
     ) -> Result<EventReceiver<StableHeightChangedEvent>> {
-        trace!("on_stable_height_changed_event");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("on_stable_height_changed_event");
+        }
         let receiver = self
             .client
             .subscribe_event(NotifyEvent::StableHeightChanged, self.capacity)
@@ -148,7 +168,9 @@ impl DaemonAPI {
     pub async fn on_transaction_added_in_mempool_event(
         &self,
     ) -> Result<EventReceiver<TransactionAddedInMempoolEvent>> {
-        trace!("on_transaction_added_in_mempool_event");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("on_transaction_added_in_mempool_event");
+        }
         let receiver = self
             .client
             .subscribe_event(NotifyEvent::TransactionAddedInMempool, self.capacity)
@@ -159,7 +181,9 @@ impl DaemonAPI {
     pub async fn on_stable_topoheight_changed_event(
         &self,
     ) -> Result<EventReceiver<StableTopoHeightChangedEvent>> {
-        trace!("on_stable_topoheight_changed_event");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("on_stable_topoheight_changed_event");
+        }
         let receiver = self
             .client
             .subscribe_event(NotifyEvent::StableTopoHeightChanged, self.capacity)
@@ -171,7 +195,9 @@ impl DaemonAPI {
         &self,
         address: Address,
     ) -> Result<EventReceiver<ContractTransferEvent<'_>>> {
-        trace!("on_contract_transfer_event");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("on_contract_transfer_event");
+        }
         let receiver = self
             .client
             .subscribe_event(NotifyEvent::ContractTransfer { address }, self.capacity)
@@ -180,25 +206,33 @@ impl DaemonAPI {
     }
 
     pub async fn get_version(&self) -> Result<String> {
-        trace!("get_version");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get_version");
+        }
         let version = self.client.call("get_version").await?;
         Ok(version)
     }
 
     pub async fn get_info(&self) -> Result<GetInfoResult> {
-        trace!("get_info");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get_info");
+        }
         let info = self.client.call("get_info").await?;
         Ok(info)
     }
 
     pub async fn get_pruned_topoheight(&self) -> Result<Option<u64>> {
-        trace!("get_pruned_topoheight");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get_pruned_topoheight");
+        }
         let topoheight = self.client.call("get_pruned_topoheight").await?;
         Ok(topoheight)
     }
 
     pub async fn get_asset(&self, asset: &Hash) -> Result<RPCAssetData<'static>> {
-        trace!("get_asset");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get_asset");
+        }
         let assets = self
             .client
             .call_with(
@@ -217,7 +251,9 @@ impl DaemonAPI {
         maximum: Option<usize>,
         skip: Option<usize>,
     ) -> Result<HashSet<Hash>> {
-        trace!("get_account_assets");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get_account_assets");
+        }
         let assets = self
             .client
             .call_with(
@@ -233,7 +269,9 @@ impl DaemonAPI {
     }
 
     pub async fn count_assets(&self) -> Result<usize> {
-        trace!("count_assets");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("count_assets");
+        }
         let count = self.client.call("count_assets").await?;
         Ok(count)
     }
@@ -245,7 +283,9 @@ impl DaemonAPI {
         minimum_topoheight: Option<u64>,
         maximum_topoheight: Option<u64>,
     ) -> Result<Vec<RPCAssetData<'_>>> {
-        trace!("get_assets");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get_assets");
+        }
         let assets = self
             .client
             .call_with(
@@ -262,7 +302,9 @@ impl DaemonAPI {
     }
 
     pub async fn get_balance(&self, address: &Address, asset: &Hash) -> Result<GetBalanceResult> {
-        trace!("get_balance");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get_balance");
+        }
         let balance = self
             .client
             .call_with(
@@ -282,7 +324,9 @@ impl DaemonAPI {
         asset: &Hash,
         topoheight: u64,
     ) -> Result<VersionedBalance> {
-        trace!("get_balance_at_topoheight");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get_balance_at_topoheight");
+        }
         let balance = self
             .client
             .call_with(
@@ -299,7 +343,9 @@ impl DaemonAPI {
 
     /// Get UNO (encrypted) balance for an address
     pub async fn get_uno_balance(&self, address: &Address) -> Result<GetUnoBalanceResult> {
-        trace!("get_uno_balance");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get_uno_balance");
+        }
         let balance = self
             .client
             .call_with(
@@ -315,7 +361,9 @@ impl DaemonAPI {
 
     /// Check if an address has a UNO (encrypted) balance
     pub async fn has_uno_balance(&self, address: &Address) -> Result<bool> {
-        trace!("has_uno_balance");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("has_uno_balance");
+        }
         let result: HasUnoBalanceResult = self
             .client
             .call_with(
@@ -336,7 +384,9 @@ impl DaemonAPI {
         address: &Address,
         topoheight: u64,
     ) -> Result<tos_common::account::VersionedUnoBalance> {
-        trace!("get_uno_balance_at_topoheight");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get_uno_balance_at_topoheight");
+        }
         let balance = self
             .client
             .call_with(
@@ -352,7 +402,9 @@ impl DaemonAPI {
     }
 
     pub async fn get_block_at_topoheight(&self, topoheight: u64) -> Result<BlockResponse> {
-        trace!("get_block_at_topoheight");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get_block_at_topoheight");
+        }
         let block = self
             .client
             .call_with(
@@ -367,7 +419,9 @@ impl DaemonAPI {
     }
 
     pub async fn get_block_with_txs_at_topoheight(&self, topoheight: u64) -> Result<BlockResponse> {
-        trace!("get_block_with_txs_at_topoheight");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get_block_with_txs_at_topoheight");
+        }
         let block = self
             .client
             .call_with(
@@ -382,7 +436,9 @@ impl DaemonAPI {
     }
 
     pub async fn get_transaction(&self, hash: &Hash) -> Result<Transaction> {
-        trace!("get_transaction");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get_transaction");
+        }
         let tx = self
             .client
             .call_with(
@@ -399,7 +455,9 @@ impl DaemonAPI {
         &self,
         hash: &Hash,
     ) -> Result<GetTransactionExecutorResult<'_>> {
-        trace!("get_transaction_executor");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get_transaction_executor");
+        }
         let executor = self
             .client
             .call_with(
@@ -413,7 +471,9 @@ impl DaemonAPI {
     }
 
     pub async fn submit_transaction(&self, transaction: &Transaction) -> Result<()> {
-        trace!("submit_transaction");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("submit_transaction");
+        }
         let _: bool = self
             .client
             .call_with(
@@ -427,7 +487,9 @@ impl DaemonAPI {
     }
 
     pub async fn get_nonce(&self, address: &Address) -> Result<GetNonceResult> {
-        trace!("get_nonce");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get_nonce");
+        }
         let nonce = self
             .client
             .call_with(
@@ -441,7 +503,9 @@ impl DaemonAPI {
     }
 
     pub async fn is_tx_executed_in_block(&self, tx_hash: &Hash, block_hash: &Hash) -> Result<bool> {
-        trace!("is_tx_executed_in_block");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("is_tx_executed_in_block");
+        }
         let is_executed = self
             .client
             .call_with(
@@ -456,7 +520,9 @@ impl DaemonAPI {
     }
 
     pub async fn get_mempool_cache(&self, address: &Address) -> Result<GetMempoolCacheResult> {
-        trace!("get_mempool_cache");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get_mempool_cache");
+        }
         let cache = self
             .client
             .call_with(
@@ -474,7 +540,9 @@ impl DaemonAPI {
         address: &Address,
         in_stable_height: bool,
     ) -> Result<bool> {
-        trace!("is_account_registered");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("is_account_registered");
+        }
         let is_registered = self
             .client
             .call_with(
@@ -489,7 +557,9 @@ impl DaemonAPI {
     }
 
     pub async fn get_stable_topoheight(&self) -> Result<u64> {
-        trace!("get_stable_topoheight");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get_stable_topoheight");
+        }
         let topoheight = self.client.call("get_stable_topoheight").await?;
         Ok(topoheight)
     }
@@ -499,7 +569,9 @@ impl DaemonAPI {
         address: &Address,
         asset: &Hash,
     ) -> Result<GetStableBalanceResult> {
-        trace!("get_stable_balance");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get_stable_balance");
+        }
         let balance = self
             .client
             .call_with(
@@ -514,7 +586,9 @@ impl DaemonAPI {
     }
 
     pub async fn has_multisig(&self, address: &Address) -> Result<bool> {
-        trace!("has_multisig");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("has_multisig");
+        }
         let has_multisig = self
             .client
             .call_with(
@@ -528,7 +602,9 @@ impl DaemonAPI {
     }
 
     pub async fn get_multisig(&self, address: &Address) -> Result<GetMultisigResult> {
-        trace!("get_multisig");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get_multisig");
+        }
         let multisig = self
             .client
             .call_with(
@@ -542,7 +618,9 @@ impl DaemonAPI {
     }
 
     pub async fn get_agent_account(&self, address: &Address) -> Result<GetAgentAccountResult> {
-        trace!("get_agent_account");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get_agent_account");
+        }
         let meta = self
             .client
             .call_with(
@@ -556,7 +634,9 @@ impl DaemonAPI {
     }
 
     pub async fn has_agent_account(&self, address: &Address) -> Result<HasAgentAccountResult> {
-        trace!("has_agent_account");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("has_agent_account");
+        }
         let has_agent_account = self
             .client
             .call_with(
@@ -574,7 +654,9 @@ impl DaemonAPI {
         address: &Address,
         key_id: u64,
     ) -> Result<GetAgentSessionKeyResult> {
-        trace!("get_agent_session_key");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get_agent_session_key");
+        }
         let key = self
             .client
             .call_with(
@@ -592,7 +674,9 @@ impl DaemonAPI {
         &self,
         address: &Address,
     ) -> Result<GetAgentSessionKeysResult> {
-        trace!("get_agent_session_keys");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get_agent_session_keys");
+        }
         let keys = self
             .client
             .call_with(
@@ -613,7 +697,9 @@ impl DaemonAPI {
         minimum_topoheight: Option<u64>,
         maximum_topoheight: Option<u64>,
     ) -> Result<Vec<AccountHistoryEntry>> {
-        trace!("get_account_history");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get_account_history");
+        }
         let history: Vec<AccountHistoryEntry> = self
             .client
             .call_with(
@@ -633,7 +719,9 @@ impl DaemonAPI {
 
     /// Get escrow by ID
     pub async fn get_escrow(&self, escrow_id: &Hash) -> Result<EscrowAccount> {
-        trace!("get_escrow");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get_escrow");
+        }
         let escrow = self
             .client
             .call_with(
@@ -653,7 +741,9 @@ impl DaemonAPI {
         maximum: Option<usize>,
         skip: Option<usize>,
     ) -> Result<Vec<EscrowAccount>> {
-        trace!("get_escrows_by_client");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get_escrows_by_client");
+        }
         let result: EscrowListResult = self
             .client
             .call_with(
@@ -675,7 +765,9 @@ impl DaemonAPI {
         maximum: Option<usize>,
         skip: Option<usize>,
     ) -> Result<Vec<EscrowAccount>> {
-        trace!("get_escrows_by_provider");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get_escrows_by_provider");
+        }
         let result: EscrowListResult = self
             .client
             .call_with(
@@ -697,7 +789,9 @@ impl DaemonAPI {
         maximum: Option<usize>,
         skip: Option<usize>,
     ) -> Result<Vec<EscrowAccount>> {
-        trace!("get_escrows_by_task");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get_escrows_by_task");
+        }
         let result: EscrowListResult = self
             .client
             .call_with(
@@ -720,7 +814,9 @@ impl DaemonAPI {
         skip: Option<usize>,
         descending: bool,
     ) -> Result<EscrowHistoryResult> {
-        trace!("get_escrow_history_with_options");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get_escrow_history_with_options");
+        }
         let history = self
             .client
             .call_with(
@@ -744,7 +840,9 @@ impl DaemonAPI {
 
     /// Get dispute details for escrow
     pub async fn get_dispute_details(&self, escrow_id: &Hash) -> Result<DisputeDetailsResult> {
-        trace!("get_dispute_details");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get_dispute_details");
+        }
         let details = self
             .client
             .call_with(
@@ -759,7 +857,9 @@ impl DaemonAPI {
 
     /// Get appeal status for escrow
     pub async fn get_appeal_status(&self, escrow_id: &Hash) -> Result<AppealStatusResult> {
-        trace!("get_appeal_status");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get_appeal_status");
+        }
         let status = self
             .client
             .call_with(
@@ -776,14 +876,18 @@ impl DaemonAPI {
 
     /// Get the number of deployed contracts
     pub async fn count_contracts(&self) -> Result<usize> {
-        trace!("count_contracts");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("count_contracts");
+        }
         let count = self.client.call("count_contracts").await?;
         Ok(count)
     }
 
     /// Get contract module (bytecode) by contract hash
     pub async fn get_contract_module(&self, contract: &Hash) -> Result<Module> {
-        trace!("get_contract_module");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get_contract_module");
+        }
         let module = self
             .client
             .call_with(
@@ -805,7 +909,9 @@ impl DaemonAPI {
         &self,
         tx_hash: &Hash,
     ) -> Result<GetContractAddressFromTxResult> {
-        trace!("get_contract_address_from_tx");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get_contract_address_from_tx");
+        }
         let result = self
             .client
             .call_with(
@@ -820,7 +926,9 @@ impl DaemonAPI {
 
     /// Get contract balance for a specific asset
     pub async fn get_contract_balance(&self, contract: &Hash, asset: &Hash) -> Result<u64> {
-        trace!("get_contract_balance");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get_contract_balance");
+        }
         let balance = self
             .client
             .call_with(
@@ -841,7 +949,9 @@ impl DaemonAPI {
         asset: &Hash,
         topoheight: u64,
     ) -> Result<VersionedBalance> {
-        trace!("get_contract_balance_at_topoheight");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get_contract_balance_at_topoheight");
+        }
         let balance = self
             .client
             .call_with(
@@ -863,7 +973,9 @@ impl DaemonAPI {
         skip: Option<usize>,
         maximum: Option<usize>,
     ) -> Result<Vec<Hash>> {
-        trace!("get_contract_assets");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get_contract_assets");
+        }
         let assets = self
             .client
             .call_with(
@@ -882,7 +994,9 @@ impl DaemonAPI {
 
     /// Check if a user has bound a referrer
     pub async fn has_referrer(&self, address: &Address) -> Result<bool> {
-        trace!("has_referrer");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("has_referrer");
+        }
         let result: HasReferrerResult = self
             .client
             .call_with(
@@ -897,7 +1011,9 @@ impl DaemonAPI {
 
     /// Get the referrer for a user
     pub async fn get_referrer(&self, address: &Address) -> Result<Option<Address>> {
-        trace!("get_referrer");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get_referrer");
+        }
         let result: GetReferrerResult = self
             .client
             .call_with(
@@ -912,7 +1028,9 @@ impl DaemonAPI {
 
     /// Get N levels of uplines for a user
     pub async fn get_uplines(&self, address: &Address, levels: u8) -> Result<GetUplinesResult> {
-        trace!("get_uplines");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get_uplines");
+        }
         let result: GetUplinesResult = self
             .client
             .call_with(
@@ -933,7 +1051,9 @@ impl DaemonAPI {
         offset: u32,
         limit: u32,
     ) -> Result<GetDirectReferralsResult> {
-        trace!("get_direct_referrals");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get_direct_referrals");
+        }
         let result: GetDirectReferralsResult = self
             .client
             .call_with(
@@ -950,7 +1070,9 @@ impl DaemonAPI {
 
     /// Get the full referral record for a user
     pub async fn get_referral_record(&self, address: &Address) -> Result<GetReferralRecordResult> {
-        trace!("get_referral_record");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get_referral_record");
+        }
         let result: GetReferralRecordResult = self
             .client
             .call_with(
@@ -969,7 +1091,9 @@ impl DaemonAPI {
         address: &Address,
         use_cache: bool,
     ) -> Result<GetTeamSizeResult> {
-        trace!("get_team_size");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get_team_size");
+        }
         let result: GetTeamSizeResult = self
             .client
             .call_with(
@@ -985,7 +1109,9 @@ impl DaemonAPI {
 
     /// Get the level (depth) of a user in the referral tree
     pub async fn get_referral_level(&self, address: &Address) -> Result<u8> {
-        trace!("get_referral_level");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get_referral_level");
+        }
         let result: GetReferralLevelResult = self
             .client
             .call_with(
@@ -1002,7 +1128,9 @@ impl DaemonAPI {
 
     /// Resolve a TNS name to an address
     pub async fn resolve_name(&self, name: &str) -> Result<ResolveNameResult<'static>> {
-        trace!("resolve_name");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("resolve_name");
+        }
         let result: ResolveNameResult = self
             .client
             .call_with(
@@ -1017,7 +1145,9 @@ impl DaemonAPI {
 
     /// Check if a TNS name is available for registration
     pub async fn is_name_available(&self, name: &str) -> Result<IsNameAvailableResult> {
-        trace!("is_name_available");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("is_name_available");
+        }
         let result: IsNameAvailableResult = self
             .client
             .call_with(
@@ -1032,7 +1162,9 @@ impl DaemonAPI {
 
     /// Check if an address has a registered TNS name
     pub async fn has_registered_name(&self, address: &Address) -> Result<HasRegisteredNameResult> {
-        trace!("has_registered_name");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("has_registered_name");
+        }
         let result: HasRegisteredNameResult = self
             .client
             .call_with(
@@ -1050,7 +1182,9 @@ impl DaemonAPI {
         &self,
         address: &Address,
     ) -> Result<GetAccountNameHashResult<'static>> {
-        trace!("get_account_name_hash");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get_account_name_hash");
+        }
         let result: GetAccountNameHashResult = self
             .client
             .call_with(
@@ -1072,7 +1206,9 @@ impl DaemonAPI {
         offset: u32,
         limit: u32,
     ) -> Result<GetMessagesResult<'static>> {
-        trace!("get_messages");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get_messages");
+        }
         let result: GetMessagesResult = self
             .client
             .call_with(
@@ -1092,7 +1228,9 @@ impl DaemonAPI {
         &self,
         recipient_name_hash: &Hash,
     ) -> Result<GetMessageCountResult> {
-        trace!("get_message_count");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get_message_count");
+        }
         let result: GetMessageCountResult = self
             .client
             .call_with(
@@ -1110,7 +1248,9 @@ impl DaemonAPI {
         &self,
         message_id: &Hash,
     ) -> Result<GetMessageByIdResult<'static>> {
-        trace!("get_message_by_id");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get_message_by_id");
+        }
         let result: GetMessageByIdResult = self
             .client
             .call_with(

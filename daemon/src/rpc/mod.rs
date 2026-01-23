@@ -76,11 +76,13 @@ impl<S: Storage> DaemonRpcServer<S> {
     ) -> Result<SharedDaemonRpcServer<S>, BlockchainError> {
         // SECURITY WARNING: Check for insecure bind address
         if config.bind_address.starts_with("0.0.0.0") {
-            warn!(
-                "RPC server binding to 0.0.0.0 exposes the API to ALL network interfaces. \
-                 For production, consider using 127.0.0.1 to restrict access to localhost only. \
-                 Ensure proper firewall rules and authentication are in place."
-            );
+            if log::log_enabled!(log::Level::Warn) {
+                warn!(
+                    "RPC server binding to 0.0.0.0 exposes the API to ALL network interfaces. \
+                     For production, consider using 127.0.0.1 to restrict access to localhost only. \
+                     Ensure proper firewall rules and authentication are in place."
+                );
+            }
         }
 
         // Create WebSocket security configuration from RPC config
@@ -107,7 +109,9 @@ impl<S: Storage> DaemonRpcServer<S> {
                 ws_security_config.max_messages_per_connection_per_second
             );
         }
-        info!("A2A service enabled: {}", config.enable_a2a);
+        if log::log_enabled!(log::Level::Info) {
+            info!("A2A service enabled: {}", config.enable_a2a);
+        }
         if config.enable_a2a {
             let _ = crate::a2a::registry::spawn_health_checks();
             let nonce_store: Option<Arc<dyn A2ANonceStore>> =
@@ -159,7 +163,9 @@ impl<S: Storage> DaemonRpcServer<S> {
         let websocket_security = Arc::new(WebSocketSecurity::new(ws_security_config));
 
         let getwork = if !config.getwork.disable {
-            info!("Creating GetWork server...");
+            if log::log_enabled!(log::Level::Info) {
+                info!("Creating GetWork server...");
+            }
             Some(WebSocketServer::new(GetWorkServer::new(
                 blockchain.clone(),
                 config.getwork.rate_limit_ms,
@@ -228,10 +234,12 @@ impl<S: Storage> DaemonRpcServer<S> {
             metrics::set_global_recorder(Box::new(recorder))
                 .context("Failed to set global recorder for Prometheus")?;
 
-            info!(
-                "Prometheus metrics enabled on route: {}",
-                config.prometheus.route
-            );
+            if log::log_enabled!(log::Level::Info) {
+                info!(
+                    "Prometheus metrics enabled on route: {}",
+                    config.prometheus.route
+                );
+            }
             Some((config.prometheus.route, handle))
         } else {
             None

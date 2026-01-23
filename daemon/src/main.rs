@@ -236,7 +236,9 @@ async fn main() -> Result<()> {
 
     let dir_path = blockchain_config.dir_path.as_deref().unwrap_or_default();
     crate::a2a::set_base_dir(dir_path);
-    if !matches!(blockchain_config.use_db_backend, StorageBackend::RocksDB) {
+    if !matches!(blockchain_config.use_db_backend, StorageBackend::RocksDB)
+        && log::log_enabled!(log::Level::Warn)
+    {
         warn!(
             "use_db_backend is set to {:?}, but only rocksdb is supported; continuing with RocksDB",
             blockchain_config.use_db_backend
@@ -510,7 +512,9 @@ async fn run_prompt<S: Storage>(
     };
 
     let closure = |_: &_, _: _| async {
-        trace!("Retrieving P2P peers and median topoheight");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Retrieving P2P peers and median topoheight");
+        }
         let topoheight = blockchain.get_topo_height();
         let (peers, median, syncing_rate) = match &p2p {
             Some(p2p) => {
@@ -527,13 +531,17 @@ async fn run_prompt<S: Storage>(
             None => (0, blockchain.get_topo_height(), None),
         };
 
-        trace!("Retrieving RPC connections count");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Retrieving RPC connections count");
+        }
         let rpc_count = match &rpc {
             Some(rpc) => rpc.get_websocket().count_connections().await,
             None => 0,
         };
 
-        trace!("Retrieving miners count");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Retrieving miners count");
+        }
         let miners = {
             match blockchain
                 .get_rpc()
@@ -547,17 +555,23 @@ async fn run_prompt<S: Storage>(
             }
         };
 
-        trace!("Retrieving mempool size");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Retrieving mempool size");
+        }
         let mempool = blockchain.get_mempool_size().await;
 
-        trace!("Retrieving network hashrate");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Retrieving network hashrate");
+        }
         let version = get_version_at_height(blockchain.get_network(), blockchain.get_height());
         let block_time_target = get_block_time_target_for_version(version);
         // SAFE: f64 for display/monitoring only, not consensus-critical
         let network_hashrate: f64 =
             (blockchain.get_difficulty().await / (block_time_target / MILLIS_PER_SECOND)).into();
 
-        trace!("Building prompt message");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Building prompt message");
+        }
         Ok(build_prompt_message(
             &prompt,
             topoheight,
@@ -1701,10 +1715,14 @@ async fn clear_mempool<S: Storage>(
         let blockchain: &Arc<Blockchain<S>> = context.get()?;
         blockchain.clone()
     };
-    info!("Clearing mempool...");
+    if log::log_enabled!(log::Level::Info) {
+        info!("Clearing mempool...");
+    }
     let mut mempool = blockchain.get_mempool().write().await;
     mempool.clear();
-    info!("Mempool cleared");
+    if log::log_enabled!(log::Level::Info) {
+        info!("Mempool cleared");
+    }
 
     Ok(())
 }
@@ -1817,7 +1835,9 @@ async fn status<S: Storage>(
         blockchain.clone()
     };
 
-    debug!("Retrieving blockchain status");
+    if log::log_enabled!(log::Level::Debug) {
+        debug!("Retrieving blockchain status");
+    }
 
     let height = blockchain.get_height();
     let topoheight = blockchain.get_topo_height();
@@ -1825,9 +1845,13 @@ async fn status<S: Storage>(
     let stable_topoheight = blockchain.get_stable_topoheight().await;
     let difficulty = blockchain.get_difficulty().await;
 
-    debug!("Retrieving blockchain info from storage");
+    if log::log_enabled!(log::Level::Debug) {
+        debug!("Retrieving blockchain info from storage");
+    }
     let storage = blockchain.get_storage().read().await;
-    debug!("storage read lock acquired");
+    if log::log_enabled!(log::Level::Debug) {
+        debug!("storage read lock acquired");
+    }
 
     let tips = storage
         .get_tips()

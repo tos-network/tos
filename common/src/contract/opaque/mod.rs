@@ -54,7 +54,9 @@ tid!(Transaction);
 tid!(Block);
 
 pub fn register_opaque_types() {
-    debug!("Registering opaque types");
+    if log::log_enabled!(log::Level::Debug) {
+        debug!("Registering opaque types");
+    }
     // SAFETY: This function is called once during initialization, before any concurrent access.
     // Handle potential RwLock poisoning by recovering the inner guard.
     // Poisoning occurs when a thread panics while holding the lock, but we can still access the data.

@@ -240,7 +240,9 @@ impl Serializer for AddressType {
                 let read = reader.total_read();
                 let addr_type = AddressType::Data(DataElement::read(reader)?);
                 if reader.total_read() - read > EXTRA_DATA_LIMIT_SIZE {
-                    debug!("Invalid data in integrated address, maximum size reached");
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("Invalid data in integrated address, maximum size reached");
+                    }
                     return Err(ReaderError::InvalidSize);
                 }
 

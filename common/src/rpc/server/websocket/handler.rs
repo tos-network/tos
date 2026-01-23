@@ -62,17 +62,25 @@ where
 
     // Get all the tracked events across all sessions
     pub async fn get_tracked_events(&self) -> HashSet<E> {
-        trace!("getting tracked events");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("getting tracked events");
+        }
         let sessions = self.events.read().await;
-        trace!("tracked events sessions locked");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("tracked events sessions locked");
+        }
         HashSet::from_iter(sessions.values().flat_map(|e| e.keys().cloned()))
     }
 
     // Check if an event is tracked by any session
     pub async fn is_event_tracked(&self, event: &E) -> bool {
-        trace!("checking if event is tracked");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("checking if event is tracked");
+        }
         let sessions = self.events.read().await;
-        trace!("tracked events sessions locked");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("tracked events sessions locked");
+        }
         sessions.values().any(|e| e.keys().any(|x| x == event))
     }
 
@@ -84,14 +92,18 @@ where
             event: Cow::Borrowed(event),
             value
         });
-        debug!("notifying event");
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("notifying event");
+        }
         // SAFE: WebSocketSessionShared contains Arc<WebSocketSession> which has interior mutability,
         // but the Hash/Eq implementation only depends on immutable fields (session ID).
         // The interior mutability is used for connection state management, not for hashing.
         #[allow(clippy::mutable_key_type)]
         let sessions = {
             let events = self.events.read().await;
-            trace!("events locked for propagation");
+            if log::log_enabled!(log::Level::Trace) {
+                trace!("events locked for propagation");
+            }
             events.clone()
         };
 
@@ -130,9 +142,13 @@ where
         event: E,
         id: Option<Id>,
     ) -> Result<(), RpcResponseError> {
-        trace!("subscribing session to event");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("subscribing session to event");
+        }
         let mut sessions = self.events.write().await;
-        trace!("subscribe events locked");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("subscribe events locked");
+        }
         let events = sessions.entry(session.clone()).or_insert_with(HashMap::new);
         if events.contains_key(&event) {
             return Err(RpcResponseError::new(
@@ -153,9 +169,13 @@ where
         event: E,
         id: Option<Id>,
     ) -> Result<(), RpcResponseError> {
-        trace!("unsubscribing session from event");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("unsubscribing session from event");
+        }
         let mut sessions = self.events.write().await;
-        trace!("unsubscribe events locked");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("unsubscribe events locked");
+        }
 
         let events = sessions.entry(session.clone()).or_insert_with(HashMap::new);
         if !events.contains_key(&event) {
@@ -293,10 +313,14 @@ where
     E: Serialize + DeserializeOwned + Sync + Send + Eq + Hash + Clone + 'static,
 {
     async fn on_close(&self, session: &WebSocketSessionShared<Self>) -> Result<(), anyhow::Error> {
-        trace!("deleting ws session from events");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("deleting ws session from events");
+        }
         let mut sessions = self.events.write().await;
         sessions.remove(session);
-        trace!("session deleted from events");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("session deleted from events");
+        }
         Ok(())
     }
 
@@ -305,7 +329,9 @@ where
         session: &WebSocketSessionShared<Self>,
         message: &[u8],
     ) -> Result<(), anyhow::Error> {
-        trace!("new message received on websocket");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("new message received on websocket");
+        }
         let response: Value = match self.on_message_internal(session, message).await {
             Ok(result) => result,
             Err(e) => e.to_json(),

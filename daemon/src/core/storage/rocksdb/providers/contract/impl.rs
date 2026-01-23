@@ -257,19 +257,25 @@ impl ContractProvider for RocksStorage {
 
     // Count the number of contracts
     async fn count_contracts(&self) -> Result<u64, BlockchainError> {
-        trace!("count contracts");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("count contracts");
+        }
         self.get_last_contract_id()
     }
 }
 
 impl RocksStorage {
     fn get_last_contract_id(&self) -> Result<ContractId, BlockchainError> {
-        trace!("get current contract id");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get current contract id");
+        }
         Ok(self.cache().counter.contracts_count)
     }
 
     fn get_next_contract_id(&mut self) -> Result<u64, BlockchainError> {
-        trace!("get next contract id");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get next contract id");
+        }
         let id = self.get_last_contract_id()?;
         if log::log_enabled!(log::Level::Trace) {
             trace!("next contract id is {}", id);
@@ -284,12 +290,16 @@ impl RocksStorage {
         &self,
         contract: &Hash,
     ) -> Result<Option<ContractId>, BlockchainError> {
-        trace!("get contract id");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get contract id");
+        }
         self.load_optional_from_disk(Column::Contracts, contract)
     }
 
     pub(super) fn get_contract_id(&self, contract: &Hash) -> Result<ContractId, BlockchainError> {
-        trace!("get contract id");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get contract id");
+        }
         self.get_optional_contract_id(contract)?
             .ok_or_else(|| BlockchainError::ContractNotFound(contract.clone()))
     }

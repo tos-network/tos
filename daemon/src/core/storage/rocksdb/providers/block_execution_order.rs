@@ -18,7 +18,9 @@ impl BlockExecutionOrderProvider for RocksStorage {
     async fn get_blocks_execution_order<'a>(
         &'a self,
     ) -> Result<impl Iterator<Item = Result<Hash, BlockchainError>> + 'a, BlockchainError> {
-        trace!("get blocks execution order");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("get blocks execution order");
+        }
         self.iter_keys(Column::BlocksExecutionOrder, IteratorMode::Start)
     }
 

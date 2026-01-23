@@ -78,16 +78,22 @@ impl NetworkHandler {
     // Start the network handler - maintains WebSocket connection and propagates events
     // For stateless wallet: only establishes connection, no block syncing
     pub async fn start(self: &Arc<Self>, auto_reconnect: bool) -> Result<(), NetworkError> {
-        trace!("Starting network handler");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Starting network handler");
+        }
 
         if self.is_running().await {
             return Err(NetworkError::AlreadyRunning);
         }
 
         if !self.api.is_online() {
-            debug!("API is offline, trying to reconnect #1");
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("API is offline, trying to reconnect #1");
+            }
             if !self.api.reconnect().await? {
-                error!("Couldn't reconnect to server");
+                if log::log_enabled!(log::Level::Error) {
+                    error!("Couldn't reconnect to server");
+                }
                 return Err(NetworkError::NotRunning);
             }
         }
@@ -152,14 +158,20 @@ impl NetworkHandler {
 
     // Stop the internal loop to stop syncing
     pub async fn stop(&self, api: bool) -> Result<(), NetworkError> {
-        trace!("Stopping network handler");
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Stopping network handler");
+        }
         if let Some(handle) = self.task.lock().await.take() {
             if handle.is_finished() {
-                debug!("Network handler is already finished");
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Network handler is already finished");
+                }
                 // We are already finished, which mean the event got triggered
                 handle.await??;
             } else {
-                debug!("Network handler is running, stopping it");
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Network handler is running, stopping it");
+                }
                 handle.abort();
 
                 // Notify that we are offline
@@ -169,7 +181,9 @@ impl NetworkHandler {
 
         // Disconnect API if requested (for both running and stateless wallet modes)
         if api {
-            debug!("Disconnecting API connection");
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Disconnecting API connection");
+            }
             if let Err(e) = self.api.disconnect().await {
                 if log::log_enabled!(log::Level::Debug) {
                     debug!("Error while closing websocket connection: {}", e);
@@ -198,7 +212,9 @@ impl NetworkHandler {
     // Maintain WebSocket connection and subscribe to events
     // For stateless wallet: no block syncing, only connection management
     async fn maintain_connection(self: &Arc<Self>) -> Result<(), Error> {
-        debug!("Maintaining WebSocket connection");
+        if log::log_enabled!(log::Level::Debug) {
+            debug!("Maintaining WebSocket connection");
+        }
 
         // Verify network compatibility
         let info = self.api.get_info().await?;
@@ -231,7 +247,9 @@ impl NetworkHandler {
                     self.wallet.propagate_event(Event::Online).await;
                 },
                 res = on_connection_lost.recv() => {
-                    trace!("on_connection_lost");
+                    if log::log_enabled!(log::Level::Trace) {
+                        trace!("on_connection_lost");
+                    }
                     res?;
                     self.wallet.propagate_event(Event::Offline).await;
                     // Connection lost, return to trigger reconnect
