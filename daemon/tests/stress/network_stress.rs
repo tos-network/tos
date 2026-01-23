@@ -329,10 +329,8 @@ async fn stress_block_propagation() {
         });
 
         // Progress logging
-        if block_id % 100 == 0 {
-            if log::log_enabled!(log::Level::Debug) {
-                log::debug!("Propagated {}/{} blocks", block_id, NUM_BLOCKS);
-            }
+        if block_id % 100 == 0 && log::log_enabled!(log::Level::Debug) {
+            log::debug!("Propagated {}/{} blocks", block_id, NUM_BLOCKS);
         }
     }
 
@@ -430,15 +428,13 @@ async fn stress_connection_churn() {
             let _ = network.send_message(peer_id, msg).await;
         }
 
-        if event % 50 == 0 {
-            if log::log_enabled!(log::Level::Debug) {
-                log::debug!(
-                    "Churn event {}/{}, current peers: {}",
-                    event,
-                    CHURN_EVENTS,
-                    current_peers
-                );
-            }
+        if event % 50 == 0 && log::log_enabled!(log::Level::Debug) {
+            log::debug!(
+                "Churn event {}/{}, current peers: {}",
+                event,
+                CHURN_EVENTS,
+                current_peers
+            );
         }
 
         tokio::time::sleep(Duration::from_millis(10)).await;

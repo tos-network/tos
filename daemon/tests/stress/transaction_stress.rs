@@ -202,10 +202,7 @@ async fn stress_mempool_saturation() {
             }
 
             let tx = create_mock_transaction(tx_id);
-            match mempool_clone.submit(tx).await {
-                Ok(_) => {}
-                Err(_) => {}
-            }
+            let _ = mempool_clone.submit(tx).await;
 
             tx_id += 1;
             tokio::time::sleep(interval).await;
@@ -355,7 +352,7 @@ async fn simulate_transaction_processing(tx_id: usize) -> Result<(), String> {
     tokio::time::sleep(Duration::from_micros(delay_micros as u64)).await;
 
     // Simulate occasional failures (1% failure rate)
-    if tx_id % 100 == 0 {
+    if tx_id.is_multiple_of(100) {
         Err("Validation failed".to_string())
     } else {
         Ok(())
@@ -374,7 +371,7 @@ fn generate_test_transactions(count: usize, seed: usize) -> Vec<MockTransaction>
             receiver: format!("account_{}", (tx_id + 1) % 100),
             amount: (tx_id % 1000) as u64 + 1,
             nonce: (tx_id / 100) as u64,
-            valid: tx_id % 20 != 0, // 5% invalid
+            valid: !tx_id.is_multiple_of(20), // 5% invalid
         });
     }
 
@@ -574,7 +571,7 @@ mod unit_tests {
             nonce: 0,
             valid: true,
         };
-        assert_eq!(validator.validate_and_record(tx1).await.unwrap(), true);
+        assert!(validator.validate_and_record(tx1).await.unwrap());
 
         // Try to resubmit with same nonce (double-spend)
         let tx2 = MockTransaction {
@@ -585,7 +582,7 @@ mod unit_tests {
             nonce: 0, // Same nonce!
             valid: true,
         };
-        assert_eq!(validator.validate_and_record(tx2).await.unwrap(), false);
+        assert!(!validator.validate_and_record(tx2).await.unwrap());
 
         // Submit with correct next nonce
         let tx3 = MockTransaction {
@@ -596,6 +593,6 @@ mod unit_tests {
             nonce: 1,
             valid: true,
         };
-        assert_eq!(validator.validate_and_record(tx3).await.unwrap(), true);
+        assert!(validator.validate_and_record(tx3).await.unwrap());
     }
 }
