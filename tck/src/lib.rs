@@ -70,8 +70,14 @@ pub mod tier1_component;
 /// Tier 2: Integration testing (single daemon + RPC)
 pub mod tier2_integration;
 
+/// Tier 1.5: ChainClient direct blockchain access (between component and integration)
+pub mod tier1_5;
+
 /// Tier 3: E2E testing (multi-node networks)
 pub mod tier3_e2e;
+
+/// Transaction Fixture Testing Framework (declarative YAML-based tests)
+pub mod fixtures;
 
 /// Tier 4: Chaos & property-based testing
 #[cfg(feature = "chaos")]
@@ -138,6 +144,18 @@ pub mod formal;
 // Re-export commonly used types at crate root
 pub use orchestrator::{Clock, DeterministicTestEnv, PausedClock, SystemClock, TestRng};
 pub use tier1_component::{TestBlockchain, TestBlockchainBuilder};
+
+// Re-export Tier 1.5 types
+pub use tier1_5::{
+    BlockWarp, ChainClient, ChainClientConfig, ConfirmationDepth, ContractTest,
+    ContractTestContext, FeatureSet, SimulationResult, TransactionError, TxResult,
+};
+
+// Re-export fixtures types
+pub use fixtures::{
+    create_backend, execute_fixture, parse_fixture, run_fixture_on_backend, FixtureBackend,
+    FixtureResult, Tier,
+};
 
 // Re-export conformance types
 pub use conformance::{Category, ConformanceRunner, ConformanceSpec, TestReport, TestStatus};

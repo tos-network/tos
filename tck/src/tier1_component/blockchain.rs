@@ -701,6 +701,28 @@ impl TestBlockchain {
         let expected = self.calc_pruning_point(&blocks, &block.selected_parent, block.topoheight);
         Ok(block.pruning_point == expected)
     }
+
+    /// Force-set account balance (test-only, bypasses normal transaction flow).
+    pub async fn force_set_balance(&self, address: &Hash, balance: u64) -> Result<()> {
+        let mut accounts = self.accounts.write();
+        let account = accounts.entry(address.clone()).or_insert(AccountState {
+            balance: 0,
+            nonce: 0,
+        });
+        account.balance = balance;
+        Ok(())
+    }
+
+    /// Force-set account nonce (test-only, bypasses normal transaction flow).
+    pub async fn force_set_nonce(&self, address: &Hash, nonce: u64) -> Result<()> {
+        let mut accounts = self.accounts.write();
+        let account = accounts.entry(address.clone()).or_insert(AccountState {
+            balance: 0,
+            nonce: 0,
+        });
+        account.nonce = nonce;
+        Ok(())
+    }
 }
 
 // RAII cleanup is handled by TempRocksDB's Drop implementation
