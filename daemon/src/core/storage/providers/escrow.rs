@@ -65,6 +65,15 @@ impl Serializer for EscrowHistoryKey {
 
 #[async_trait]
 pub trait EscrowProvider: Send + Sync {
+    // ===== Bootstrap Sync =====
+
+    /// List all escrow accounts with skip/limit pagination (returns key-value pairs)
+    async fn list_all_escrows(
+        &self,
+        skip: usize,
+        limit: usize,
+    ) -> Result<Vec<(Hash, EscrowAccount)>, BlockchainError>;
+
     async fn get_escrow(&self, escrow_id: &Hash) -> Result<Option<EscrowAccount>, BlockchainError>;
     async fn set_escrow(&mut self, escrow: &EscrowAccount) -> Result<(), BlockchainError>;
     async fn add_escrow_history(

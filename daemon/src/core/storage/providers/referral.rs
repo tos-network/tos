@@ -14,6 +14,22 @@ use tos_common::{
 /// Storage provider for referral relationships
 #[async_trait]
 pub trait ReferralProvider {
+    // ===== Bootstrap Sync =====
+
+    /// List all referral records with skip/limit pagination
+    async fn list_all_referral_records(
+        &self,
+        skip: usize,
+        limit: usize,
+    ) -> Result<Vec<(PublicKey, ReferralRecord)>, BlockchainError>;
+
+    /// Import referral record directly without validation (bootstrap sync)
+    async fn import_referral_record(
+        &mut self,
+        user: &PublicKey,
+        record: &ReferralRecord,
+    ) -> Result<(), BlockchainError>;
+
     // ===== Basic Referrer Operations =====
 
     /// Check if a user has already bound a referrer

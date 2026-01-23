@@ -7,6 +7,15 @@ use tos_common::{
 
 #[async_trait]
 pub trait AgentAccountProvider {
+    // ===== Bootstrap Sync =====
+
+    /// List all agent account metadata with skip/limit pagination
+    async fn list_all_agent_accounts(
+        &self,
+        skip: usize,
+        limit: usize,
+    ) -> Result<Vec<(PublicKey, AgentAccountMeta)>, BlockchainError>;
+
     async fn get_agent_account_meta(
         &self,
         account: &PublicKey,

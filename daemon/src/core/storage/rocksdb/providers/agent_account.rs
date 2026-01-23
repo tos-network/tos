@@ -23,6 +23,29 @@ fn session_key_storage_key(account: &PublicKey, key_id: u64) -> [u8; 40] {
 
 #[async_trait]
 impl AgentAccountProvider for RocksStorage {
+    async fn list_all_agent_accounts(
+        &self,
+        skip: usize,
+        limit: usize,
+    ) -> Result<Vec<(PublicKey, AgentAccountMeta)>, BlockchainError> {
+        let iter = self
+            .iter::<PublicKey, AgentAccountMeta>(Column::AgentAccountMeta, IteratorMode::Start)?;
+        let mut out = Vec::new();
+        let mut skipped = 0usize;
+        for item in iter {
+            let (key, value) = item?;
+            if skipped < skip {
+                skipped += 1;
+                continue;
+            }
+            out.push((key, value));
+            if out.len() >= limit {
+                break;
+            }
+        }
+        Ok(out)
+    }
+
     async fn get_agent_account_meta(
         &self,
         account: &PublicKey,

@@ -17,6 +17,30 @@ use tos_common::{
 
 #[async_trait]
 impl TnsProvider for RocksStorage {
+    // ===== Bootstrap Sync =====
+
+    async fn list_all_tns_names(
+        &self,
+        skip: usize,
+        limit: usize,
+    ) -> Result<Vec<(Hash, PublicKey)>, BlockchainError> {
+        let iter = self.iter::<Hash, PublicKey>(Column::TnsNameToOwner, IteratorMode::Start)?;
+        let mut out = Vec::new();
+        let mut skipped = 0usize;
+        for item in iter {
+            let (key, value) = item?;
+            if skipped < skip {
+                skipped += 1;
+                continue;
+            }
+            out.push((key, value));
+            if out.len() >= limit {
+                break;
+            }
+        }
+        Ok(out)
+    }
+
     // ===== Name Registration =====
 
     async fn is_name_registered(&self, name_hash: &Hash) -> Result<bool, BlockchainError> {

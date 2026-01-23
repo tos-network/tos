@@ -4,6 +4,13 @@ use tos_common::{arbitration::ArbiterAccount, crypto::PublicKey};
 
 #[async_trait]
 pub trait ArbiterProvider: Send + Sync {
+    /// List all arbiter accounts with skip/limit pagination
+    async fn list_all_arbiters(
+        &self,
+        skip: usize,
+        limit: usize,
+    ) -> Result<Vec<(PublicKey, ArbiterAccount)>, BlockchainError>;
+
     async fn get_arbiter(
         &self,
         arbiter: &PublicKey,

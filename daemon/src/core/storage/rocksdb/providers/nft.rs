@@ -44,6 +44,132 @@ async fn get_versioned_at_maximum<T: tos_common::serializer::Serializer>(
 
 #[async_trait]
 impl NftProvider for RocksStorage {
+    // ===== Bootstrap Sync =====
+
+    async fn list_all_nft_collections(
+        &self,
+        topoheight: TopoHeight,
+        skip: usize,
+        limit: usize,
+    ) -> Result<Vec<(Hash, NftCollection)>, BlockchainError> {
+        use crate::core::storage::rocksdb::IteratorMode;
+        use tos_common::nft::prefixes;
+
+        let prefix = prefixes::COLLECTION;
+        // Collect pointer keys first to avoid borrow conflicts
+        let pointer_keys: Vec<Hash> = {
+            let iter = RocksStorage::iter_raw_internal(
+                &self.db,
+                self.snapshot.as_ref(),
+                IteratorMode::Start,
+                Column::NftCollections,
+            )?;
+            let mut keys = Vec::new();
+            for result in iter {
+                let (key_bytes, _) = result?;
+                let key_ref = key_bytes.as_ref();
+                if key_ref.len() == prefix.len() + 32 && key_ref.starts_with(prefix) {
+                    let mut hash_bytes = [0u8; 32];
+                    hash_bytes.copy_from_slice(&key_ref[prefix.len()..prefix.len() + 32]);
+                    keys.push(Hash::new(hash_bytes));
+                }
+            }
+            keys
+        };
+
+        // Resolve each collection at the given topoheight
+        let mut out = Vec::new();
+        let mut skipped = 0usize;
+        for id in pointer_keys {
+            if let Some((_, collection)) = self.get_nft_collection(&id, topoheight).await? {
+                if skipped < skip {
+                    skipped += 1;
+                    continue;
+                }
+                out.push((id, collection));
+                if out.len() >= limit {
+                    break;
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    async fn list_nft_tokens_for_collection(
+        &self,
+        collection: &Hash,
+        topoheight: TopoHeight,
+        skip: usize,
+        limit: usize,
+    ) -> Result<Vec<(u64, Nft)>, BlockchainError> {
+        use crate::core::storage::rocksdb::IteratorMode;
+        use crate::core::storage::snapshot::Direction;
+        use tos_common::nft::prefixes;
+
+        // Token keys: prefix + collection_hash + token_id (8 + 32 + 8 = 48 bytes)
+        let mut start_key = Vec::with_capacity(prefixes::TOKEN.len() + 32);
+        start_key.extend_from_slice(prefixes::TOKEN);
+        start_key.extend_from_slice(collection.as_bytes());
+
+        // Collect token IDs with the matching collection prefix
+        let token_ids: Vec<u64> = {
+            let iter = RocksStorage::iter_raw_internal(
+                &self.db,
+                self.snapshot.as_ref(),
+                IteratorMode::From(&start_key, Direction::Forward),
+                Column::NftTokens,
+            )?;
+            let mut ids = Vec::new();
+            for result in iter {
+                let (key_bytes, _) = result?;
+                let key_ref = key_bytes.as_ref();
+                let expected_prefix_len = prefixes::TOKEN.len() + 32;
+                if key_ref.len() != expected_prefix_len + 8 || !key_ref.starts_with(&start_key) {
+                    break;
+                }
+                let mut id_bytes = [0u8; 8];
+                id_bytes.copy_from_slice(&key_ref[expected_prefix_len..]);
+                ids.push(u64::from_be_bytes(id_bytes));
+            }
+            ids
+        };
+
+        // Resolve each token at the given topoheight
+        let mut out = Vec::new();
+        let mut skipped = 0usize;
+        for token_id in token_ids {
+            if let Some((_, nft)) = self.get_nft_token(collection, token_id, topoheight).await? {
+                if skipped < skip {
+                    skipped += 1;
+                    continue;
+                }
+                out.push((token_id, nft));
+                if out.len() >= limit {
+                    break;
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    async fn list_nft_owners_for_collection(
+        &self,
+        collection: &Hash,
+        topoheight: TopoHeight,
+        skip: usize,
+        limit: usize,
+    ) -> Result<Vec<(u64, PublicKey)>, BlockchainError> {
+        // Reuse token listing and extract owner from each Nft
+        let tokens = self
+            .list_nft_tokens_for_collection(collection, topoheight, skip, limit)
+            .await?;
+        let mut out = Vec::with_capacity(tokens.len());
+        for (token_id, nft) in tokens {
+            out.push((token_id, nft.owner));
+        }
+        Ok(out)
+    }
+
     async fn get_nft_collection(
         &self,
         id: &Hash,

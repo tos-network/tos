@@ -1,15 +1,39 @@
 use crate::core::{
     error::BlockchainError,
-    storage::{rocksdb::Column, ArbiterProvider, NetworkProvider},
+    storage::{
+        rocksdb::{Column, IteratorMode, RocksStorage},
+        ArbiterProvider, NetworkProvider,
+    },
 };
 use async_trait::async_trait;
 use log::trace;
 use tos_common::{arbitration::ArbiterAccount, crypto::PublicKey};
 
-use crate::core::storage::RocksStorage;
-
 #[async_trait]
 impl ArbiterProvider for RocksStorage {
+    async fn list_all_arbiters(
+        &self,
+        skip: usize,
+        limit: usize,
+    ) -> Result<Vec<(PublicKey, ArbiterAccount)>, BlockchainError> {
+        let iter =
+            self.iter::<PublicKey, ArbiterAccount>(Column::ArbiterAccounts, IteratorMode::Start)?;
+        let mut out = Vec::new();
+        let mut skipped = 0usize;
+        for item in iter {
+            let (key, value) = item?;
+            if skipped < skip {
+                skipped += 1;
+                continue;
+            }
+            out.push((key, value));
+            if out.len() >= limit {
+                break;
+            }
+        }
+        Ok(out)
+    }
+
     async fn get_arbiter(
         &self,
         arbiter: &PublicKey,

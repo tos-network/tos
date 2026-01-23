@@ -13,6 +13,17 @@ use tos_common::{
     versioned_type::State,
 };
 
+// TOS extension types for bootstrap sync handlers
+use tos_common::{
+    account::AgentAccountMeta,
+    arbitration::ArbiterAccount,
+    contract_asset::ContractAssetData,
+    escrow::EscrowAccount,
+    kyc::{KycData, SecurityCommittee},
+    nft::{Nft, NftCollection},
+    referral::ReferralRecord,
+};
+
 use crate::{
     config::PRUNE_SAFETY_LIMIT,
     core::{
@@ -390,6 +401,209 @@ impl<S: Storage> P2pServer<S> {
                     None
                 };
                 StepResponse::ContractsExecutions(executions, page)
+            }
+            // === TOS Extension Handlers ===
+            StepRequest::KycData(page) => {
+                let page = page.unwrap_or(0);
+                let skip = page as usize * MAX_ITEMS_PER_PAGE;
+                let entries = storage.list_all_kyc_data(skip, MAX_ITEMS_PER_PAGE).await?;
+                let next_page = if entries.len() == MAX_ITEMS_PER_PAGE {
+                    Some(page + 1)
+                } else {
+                    None
+                };
+                let map: IndexMap<PublicKey, KycData> = entries.into_iter().collect();
+                StepResponse::KycData(map, next_page)
+            }
+            StepRequest::Committees(page) => {
+                let page = page.unwrap_or(0);
+                let skip = page as usize * MAX_ITEMS_PER_PAGE;
+                let entries = storage
+                    .list_all_committees(skip, MAX_ITEMS_PER_PAGE)
+                    .await?;
+                let next_page = if entries.len() == MAX_ITEMS_PER_PAGE {
+                    Some(page + 1)
+                } else {
+                    None
+                };
+                let map: IndexMap<Hash, SecurityCommittee> = entries.into_iter().collect();
+                StepResponse::Committees(map, next_page)
+            }
+            StepRequest::GlobalCommittee => {
+                let committee_id = storage.get_global_committee_id().await?;
+                StepResponse::GlobalCommittee(committee_id)
+            }
+            StepRequest::NftCollections(topoheight, page) => {
+                let page = page.unwrap_or(0);
+                let skip = page as usize * MAX_ITEMS_PER_PAGE;
+                let entries = storage
+                    .list_all_nft_collections(topoheight, skip, MAX_ITEMS_PER_PAGE)
+                    .await?;
+                let next_page = if entries.len() == MAX_ITEMS_PER_PAGE {
+                    Some(page + 1)
+                } else {
+                    None
+                };
+                let map: IndexMap<Hash, NftCollection> = entries.into_iter().collect();
+                StepResponse::NftCollections(map, next_page)
+            }
+            StepRequest::NftTokens(collection_id, topoheight, page) => {
+                let page = page.unwrap_or(0);
+                let skip = page as usize * MAX_ITEMS_PER_PAGE;
+                let entries = storage
+                    .list_nft_tokens_for_collection(
+                        &collection_id,
+                        topoheight,
+                        skip,
+                        MAX_ITEMS_PER_PAGE,
+                    )
+                    .await?;
+                let next_page = if entries.len() == MAX_ITEMS_PER_PAGE {
+                    Some(page + 1)
+                } else {
+                    None
+                };
+                let map: IndexMap<u64, Nft> = entries.into_iter().collect();
+                StepResponse::NftTokens(collection_id.into_owned(), map, next_page)
+            }
+            StepRequest::NftOwnership(collection_id, topoheight, page) => {
+                let page = page.unwrap_or(0);
+                let skip = page as usize * MAX_ITEMS_PER_PAGE;
+                let entries = storage
+                    .list_nft_owners_for_collection(
+                        &collection_id,
+                        topoheight,
+                        skip,
+                        MAX_ITEMS_PER_PAGE,
+                    )
+                    .await?;
+                let next_page = if entries.len() == MAX_ITEMS_PER_PAGE {
+                    Some(page + 1)
+                } else {
+                    None
+                };
+                let map: IndexMap<u64, PublicKey> = entries.into_iter().collect();
+                StepResponse::NftOwnership(collection_id.into_owned(), map, next_page)
+            }
+            StepRequest::EscrowAccounts(page) => {
+                let page = page.unwrap_or(0);
+                let skip = page as usize * MAX_ITEMS_PER_PAGE;
+                let entries = storage.list_all_escrows(skip, MAX_ITEMS_PER_PAGE).await?;
+                let next_page = if entries.len() == MAX_ITEMS_PER_PAGE {
+                    Some(page + 1)
+                } else {
+                    None
+                };
+                let map: IndexMap<Hash, EscrowAccount> = entries.into_iter().collect();
+                StepResponse::EscrowAccounts(map, next_page)
+            }
+            StepRequest::ArbitrationData(page) => {
+                let page = page.unwrap_or(0);
+                let skip = page as usize * MAX_ITEMS_PER_PAGE;
+                let entries = storage
+                    .list_all_arbitration_opens(skip, MAX_ITEMS_PER_PAGE)
+                    .await?;
+                let next_page = if entries.len() == MAX_ITEMS_PER_PAGE {
+                    Some(page + 1)
+                } else {
+                    None
+                };
+                StepResponse::ArbitrationData(entries, next_page)
+            }
+            StepRequest::ArbiterAccounts(page) => {
+                let page = page.unwrap_or(0);
+                let skip = page as usize * MAX_ITEMS_PER_PAGE;
+                let entries = storage.list_all_arbiters(skip, MAX_ITEMS_PER_PAGE).await?;
+                let next_page = if entries.len() == MAX_ITEMS_PER_PAGE {
+                    Some(page + 1)
+                } else {
+                    None
+                };
+                let map: IndexMap<PublicKey, ArbiterAccount> = entries.into_iter().collect();
+                StepResponse::ArbiterAccounts(map, next_page)
+            }
+            StepRequest::TnsNames(page) => {
+                let page = page.unwrap_or(0);
+                let skip = page as usize * MAX_ITEMS_PER_PAGE;
+                let entries = storage.list_all_tns_names(skip, MAX_ITEMS_PER_PAGE).await?;
+                let next_page = if entries.len() == MAX_ITEMS_PER_PAGE {
+                    Some(page + 1)
+                } else {
+                    None
+                };
+                let map: IndexMap<Hash, PublicKey> = entries.into_iter().collect();
+                StepResponse::TnsNames(map, next_page)
+            }
+            StepRequest::EnergyData(keys, _topoheight) => {
+                let mut results = Vec::with_capacity(keys.len());
+                for key in keys.iter() {
+                    let energy = storage.get_energy_resource(key).await?;
+                    results.push(energy);
+                }
+                StepResponse::EnergyData(results)
+            }
+            StepRequest::ReferralRecords(page) => {
+                let page = page.unwrap_or(0);
+                let skip = page as usize * MAX_ITEMS_PER_PAGE;
+                let entries = storage
+                    .list_all_referral_records(skip, MAX_ITEMS_PER_PAGE)
+                    .await?;
+                let next_page = if entries.len() == MAX_ITEMS_PER_PAGE {
+                    Some(page + 1)
+                } else {
+                    None
+                };
+                let map: IndexMap<PublicKey, ReferralRecord> = entries.into_iter().collect();
+                StepResponse::ReferralRecords(map, next_page)
+            }
+            StepRequest::UnoBalances(key, asset, topoheight, page) => {
+                // Use the topoheight as max boundary for first request, then page as cursor
+                let max = page.unwrap_or(topoheight);
+                let (balances, next_max) = storage
+                    .get_spendable_balances_for(&key, &asset, 0, max, MAX_ITEMS_PER_PAGE)
+                    .await?;
+                StepResponse::UnoBalances(balances, next_max)
+            }
+            StepRequest::AgentData(page) => {
+                let page = page.unwrap_or(0);
+                let skip = page as usize * MAX_ITEMS_PER_PAGE;
+                let entries = storage
+                    .list_all_agent_accounts(skip, MAX_ITEMS_PER_PAGE)
+                    .await?;
+                let next_page = if entries.len() == MAX_ITEMS_PER_PAGE {
+                    Some(page + 1)
+                } else {
+                    None
+                };
+                let map: IndexMap<PublicKey, AgentAccountMeta> = entries.into_iter().collect();
+                StepResponse::AgentData(map, next_page)
+            }
+            StepRequest::A2aNonces(page) => {
+                let page = page.unwrap_or(0);
+                let skip = page as usize * MAX_ITEMS_PER_PAGE;
+                let entries = storage
+                    .list_all_a2a_nonces(skip, MAX_ITEMS_PER_PAGE)
+                    .await?;
+                let next_page = if entries.len() == MAX_ITEMS_PER_PAGE {
+                    Some(page + 1)
+                } else {
+                    None
+                };
+                StepResponse::A2aNonces(entries, next_page)
+            }
+            StepRequest::ContractAssets(page) => {
+                let page = page.unwrap_or(0);
+                let skip = page as usize * MAX_ITEMS_PER_PAGE;
+                let entries = storage
+                    .list_all_contract_assets(skip, MAX_ITEMS_PER_PAGE)
+                    .await?;
+                let next_page = if entries.len() == MAX_ITEMS_PER_PAGE {
+                    Some(page + 1)
+                } else {
+                    None
+                };
+                let map: IndexMap<Hash, ContractAssetData> = entries.into_iter().collect();
+                StepResponse::ContractAssets(map, next_page)
             }
             StepRequest::BlocksMetadata(topoheight) => {
                 // go from the lowest available point until the requested stable topoheight
@@ -787,6 +1001,9 @@ impl<S: Storage> P2pServer<S> {
                             stable_topoheight,
                         )
                         .await?;
+
+                        // Sync TOS extension data before blocks
+                        self.sync_tos_extensions(peer, stable_topoheight).await?;
 
                         // Go to next step
                         Some(StepRequest::BlocksMetadata(stable_topoheight))
@@ -1522,6 +1739,464 @@ impl<S: Storage> P2pServer<S> {
             }
         }
 
+        Ok(())
+    }
+
+    /// Sync TOS extension data from peer during bootstrap
+    async fn sync_tos_extensions(
+        &self,
+        peer: &Arc<Peer>,
+        stable_topoheight: u64,
+    ) -> Result<(), BlockchainError> {
+        if log::log_enabled!(log::Level::Info) {
+            info!("Syncing TOS extension data from peer");
+        }
+
+        // 1. Sync KYC data
+        self.sync_kyc_data(peer).await?;
+
+        // 2. Sync committees
+        self.sync_committees(peer).await?;
+
+        // 3. Sync global committee
+        self.sync_global_committee(peer).await?;
+
+        // 4. Sync NFT collections and their tokens/ownership
+        self.sync_nft_data(peer, stable_topoheight).await?;
+
+        // 5. Sync escrow accounts
+        self.sync_escrow_accounts(peer).await?;
+
+        // 6. Sync arbitration data
+        self.sync_arbitration_data(peer).await?;
+
+        // 7. Sync arbiter accounts
+        self.sync_arbiter_accounts(peer).await?;
+
+        // 8. Sync TNS names
+        self.sync_tns_names(peer).await?;
+
+        // 9. Sync referral records
+        self.sync_referral_records(peer).await?;
+
+        // 10. Sync agent data
+        self.sync_agent_data(peer).await?;
+
+        // 11. Sync A2A nonces
+        self.sync_a2a_nonces(peer).await?;
+
+        // 12. Sync contract assets
+        self.sync_contract_assets(peer).await?;
+
+        if log::log_enabled!(log::Level::Info) {
+            info!("TOS extension data sync complete");
+        }
+
+        Ok(())
+    }
+
+    async fn sync_kyc_data(&self, peer: &Arc<Peer>) -> Result<(), BlockchainError> {
+        let mut next_page = None;
+        loop {
+            let StepResponse::KycData(entries, page) = peer
+                .request_boostrap_chain(StepRequest::KycData(next_page))
+                .await?
+            else {
+                if log::log_enabled!(log::Level::Error) {
+                    error!("Received an invalid StepResponse while fetching KYC data");
+                }
+                return Err(P2pError::InvalidPacket.into());
+            };
+
+            if !entries.is_empty() {
+                let _permit = self.blockchain.storage_semaphore().acquire().await?;
+                let mut storage = self.blockchain.get_storage().write().await;
+                for (user, data) in &entries {
+                    storage.import_kyc_data(user, data).await?;
+                }
+            }
+
+            next_page = page;
+            if next_page.is_none() {
+                break;
+            }
+        }
+        Ok(())
+    }
+
+    async fn sync_committees(&self, peer: &Arc<Peer>) -> Result<(), BlockchainError> {
+        let mut next_page = None;
+        loop {
+            let StepResponse::Committees(entries, page) = peer
+                .request_boostrap_chain(StepRequest::Committees(next_page))
+                .await?
+            else {
+                if log::log_enabled!(log::Level::Error) {
+                    error!("Received an invalid StepResponse while fetching committees");
+                }
+                return Err(P2pError::InvalidPacket.into());
+            };
+
+            if !entries.is_empty() {
+                let _permit = self.blockchain.storage_semaphore().acquire().await?;
+                let mut storage = self.blockchain.get_storage().write().await;
+                for (id, committee) in &entries {
+                    storage.import_committee(id, committee).await?;
+                }
+            }
+
+            next_page = page;
+            if next_page.is_none() {
+                break;
+            }
+        }
+        Ok(())
+    }
+
+    async fn sync_global_committee(&self, peer: &Arc<Peer>) -> Result<(), BlockchainError> {
+        let StepResponse::GlobalCommittee(committee_id) = peer
+            .request_boostrap_chain(StepRequest::GlobalCommittee)
+            .await?
+        else {
+            if log::log_enabled!(log::Level::Error) {
+                error!("Received an invalid StepResponse while fetching global committee");
+            }
+            return Err(P2pError::InvalidPacket.into());
+        };
+
+        if let Some(id) = committee_id {
+            let _permit = self.blockchain.storage_semaphore().acquire().await?;
+            let mut storage = self.blockchain.get_storage().write().await;
+            storage.set_global_committee_id(&id).await?;
+        }
+        Ok(())
+    }
+
+    async fn sync_nft_data(
+        &self,
+        peer: &Arc<Peer>,
+        stable_topoheight: u64,
+    ) -> Result<(), BlockchainError> {
+        let mut next_page = None;
+        loop {
+            let StepResponse::NftCollections(collections, page) = peer
+                .request_boostrap_chain(StepRequest::NftCollections(stable_topoheight, next_page))
+                .await?
+            else {
+                if log::log_enabled!(log::Level::Error) {
+                    error!("Received an invalid StepResponse while fetching NFT collections");
+                }
+                return Err(P2pError::InvalidPacket.into());
+            };
+
+            if !collections.is_empty() {
+                let _permit = self.blockchain.storage_semaphore().acquire().await?;
+                let mut storage = self.blockchain.get_storage().write().await;
+                for (id, collection) in &collections {
+                    storage
+                        .set_last_nft_collection_to(id, stable_topoheight, collection)
+                        .await?;
+                }
+            }
+
+            // Sync tokens and ownership for each collection in this batch
+            for (collection_id, _) in &collections {
+                self.sync_nft_tokens(peer, collection_id, stable_topoheight)
+                    .await?;
+            }
+
+            next_page = page;
+            if next_page.is_none() {
+                break;
+            }
+        }
+        Ok(())
+    }
+
+    async fn sync_nft_tokens(
+        &self,
+        peer: &Arc<Peer>,
+        collection_id: &Hash,
+        stable_topoheight: u64,
+    ) -> Result<(), BlockchainError> {
+        let mut next_page = None;
+        loop {
+            let StepResponse::NftTokens(_, tokens, page) = peer
+                .request_boostrap_chain(StepRequest::NftTokens(
+                    Cow::Borrowed(collection_id),
+                    stable_topoheight,
+                    next_page,
+                ))
+                .await?
+            else {
+                if log::log_enabled!(log::Level::Error) {
+                    error!("Received an invalid StepResponse while fetching NFT tokens");
+                }
+                return Err(P2pError::InvalidPacket.into());
+            };
+
+            if !tokens.is_empty() {
+                let _permit = self.blockchain.storage_semaphore().acquire().await?;
+                let mut storage = self.blockchain.get_storage().write().await;
+                for (token_id, nft) in &tokens {
+                    storage
+                        .set_last_nft_token_to(collection_id, *token_id, stable_topoheight, nft)
+                        .await?;
+                }
+            }
+
+            next_page = page;
+            if next_page.is_none() {
+                break;
+            }
+        }
+        Ok(())
+    }
+
+    async fn sync_escrow_accounts(&self, peer: &Arc<Peer>) -> Result<(), BlockchainError> {
+        let mut next_page = None;
+        loop {
+            let StepResponse::EscrowAccounts(entries, page) = peer
+                .request_boostrap_chain(StepRequest::EscrowAccounts(next_page))
+                .await?
+            else {
+                if log::log_enabled!(log::Level::Error) {
+                    error!("Received an invalid StepResponse while fetching escrow accounts");
+                }
+                return Err(P2pError::InvalidPacket.into());
+            };
+
+            if !entries.is_empty() {
+                let _permit = self.blockchain.storage_semaphore().acquire().await?;
+                let mut storage = self.blockchain.get_storage().write().await;
+                for (_, escrow) in &entries {
+                    storage.set_escrow(escrow).await?;
+                }
+            }
+
+            next_page = page;
+            if next_page.is_none() {
+                break;
+            }
+        }
+        Ok(())
+    }
+
+    async fn sync_arbitration_data(&self, peer: &Arc<Peer>) -> Result<(), BlockchainError> {
+        use tos_common::arbitration::{ArbitrationRequestKey, ArbitrationRoundKey};
+
+        let mut next_page = None;
+        loop {
+            let StepResponse::ArbitrationData(entries, page) = peer
+                .request_boostrap_chain(StepRequest::ArbitrationData(next_page))
+                .await?
+            else {
+                if log::log_enabled!(log::Level::Error) {
+                    error!("Received an invalid StepResponse while fetching arbitration data");
+                }
+                return Err(P2pError::InvalidPacket.into());
+            };
+
+            if !entries.is_empty() {
+                let _permit = self.blockchain.storage_semaphore().acquire().await?;
+                let mut storage = self.blockchain.get_storage().write().await;
+                for payload in &entries {
+                    let round_key = ArbitrationRoundKey {
+                        escrow_id: payload.escrow_id.clone(),
+                        dispute_id: payload.dispute_id.clone(),
+                        round: payload.round,
+                    };
+                    let request_key = ArbitrationRequestKey {
+                        request_id: payload.request_id.clone(),
+                    };
+                    storage
+                        .set_commit_arbitration_open(&round_key, &request_key, payload)
+                        .await?;
+                }
+            }
+
+            next_page = page;
+            if next_page.is_none() {
+                break;
+            }
+        }
+        Ok(())
+    }
+
+    async fn sync_arbiter_accounts(&self, peer: &Arc<Peer>) -> Result<(), BlockchainError> {
+        let mut next_page = None;
+        loop {
+            let StepResponse::ArbiterAccounts(entries, page) = peer
+                .request_boostrap_chain(StepRequest::ArbiterAccounts(next_page))
+                .await?
+            else {
+                if log::log_enabled!(log::Level::Error) {
+                    error!("Received an invalid StepResponse while fetching arbiter accounts");
+                }
+                return Err(P2pError::InvalidPacket.into());
+            };
+
+            if !entries.is_empty() {
+                let _permit = self.blockchain.storage_semaphore().acquire().await?;
+                let mut storage = self.blockchain.get_storage().write().await;
+                for (_, arbiter) in &entries {
+                    storage.set_arbiter(arbiter).await?;
+                }
+            }
+
+            next_page = page;
+            if next_page.is_none() {
+                break;
+            }
+        }
+        Ok(())
+    }
+
+    async fn sync_tns_names(&self, peer: &Arc<Peer>) -> Result<(), BlockchainError> {
+        let mut next_page = None;
+        loop {
+            let StepResponse::TnsNames(entries, page) = peer
+                .request_boostrap_chain(StepRequest::TnsNames(next_page))
+                .await?
+            else {
+                if log::log_enabled!(log::Level::Error) {
+                    error!("Received an invalid StepResponse while fetching TNS names");
+                }
+                return Err(P2pError::InvalidPacket.into());
+            };
+
+            if !entries.is_empty() {
+                let _permit = self.blockchain.storage_semaphore().acquire().await?;
+                let mut storage = self.blockchain.get_storage().write().await;
+                for (name_hash, owner) in entries {
+                    storage.register_name(name_hash, owner).await?;
+                }
+            }
+
+            next_page = page;
+            if next_page.is_none() {
+                break;
+            }
+        }
+        Ok(())
+    }
+
+    async fn sync_referral_records(&self, peer: &Arc<Peer>) -> Result<(), BlockchainError> {
+        let mut next_page = None;
+        loop {
+            let StepResponse::ReferralRecords(entries, page) = peer
+                .request_boostrap_chain(StepRequest::ReferralRecords(next_page))
+                .await?
+            else {
+                if log::log_enabled!(log::Level::Error) {
+                    error!("Received an invalid StepResponse while fetching referral records");
+                }
+                return Err(P2pError::InvalidPacket.into());
+            };
+
+            if !entries.is_empty() {
+                let _permit = self.blockchain.storage_semaphore().acquire().await?;
+                let mut storage = self.blockchain.get_storage().write().await;
+                for (user, record) in &entries {
+                    storage.import_referral_record(user, record).await?;
+                }
+            }
+
+            next_page = page;
+            if next_page.is_none() {
+                break;
+            }
+        }
+        Ok(())
+    }
+
+    async fn sync_agent_data(&self, peer: &Arc<Peer>) -> Result<(), BlockchainError> {
+        let mut next_page = None;
+        loop {
+            let StepResponse::AgentData(entries, page) = peer
+                .request_boostrap_chain(StepRequest::AgentData(next_page))
+                .await?
+            else {
+                if log::log_enabled!(log::Level::Error) {
+                    error!("Received an invalid StepResponse while fetching agent data");
+                }
+                return Err(P2pError::InvalidPacket.into());
+            };
+
+            if !entries.is_empty() {
+                let _permit = self.blockchain.storage_semaphore().acquire().await?;
+                let mut storage = self.blockchain.get_storage().write().await;
+                for (account, meta) in &entries {
+                    storage.set_agent_account_meta(account, meta).await?;
+                }
+            }
+
+            next_page = page;
+            if next_page.is_none() {
+                break;
+            }
+        }
+        Ok(())
+    }
+
+    async fn sync_a2a_nonces(&self, peer: &Arc<Peer>) -> Result<(), BlockchainError> {
+        let mut next_page = None;
+        loop {
+            let StepResponse::A2aNonces(entries, page) = peer
+                .request_boostrap_chain(StepRequest::A2aNonces(next_page))
+                .await?
+            else {
+                if log::log_enabled!(log::Level::Error) {
+                    error!("Received an invalid StepResponse while fetching A2A nonces");
+                }
+                return Err(P2pError::InvalidPacket.into());
+            };
+
+            if !entries.is_empty() {
+                let _permit = self.blockchain.storage_semaphore().acquire().await?;
+                let mut storage = self.blockchain.get_storage().write().await;
+                for (nonce_bytes, timestamp) in &entries {
+                    let nonce_str = String::from_utf8_lossy(nonce_bytes);
+                    storage
+                        .set_a2a_nonce_timestamp(&nonce_str, *timestamp)
+                        .await?;
+                }
+            }
+
+            next_page = page;
+            if next_page.is_none() {
+                break;
+            }
+        }
+        Ok(())
+    }
+
+    async fn sync_contract_assets(&self, peer: &Arc<Peer>) -> Result<(), BlockchainError> {
+        let mut next_page = None;
+        loop {
+            let StepResponse::ContractAssets(entries, page) = peer
+                .request_boostrap_chain(StepRequest::ContractAssets(next_page))
+                .await?
+            else {
+                if log::log_enabled!(log::Level::Error) {
+                    error!("Received an invalid StepResponse while fetching contract assets");
+                }
+                return Err(P2pError::InvalidPacket.into());
+            };
+
+            if !entries.is_empty() {
+                let _permit = self.blockchain.storage_semaphore().acquire().await?;
+                let mut storage = self.blockchain.get_storage().write().await;
+                for (asset, data) in &entries {
+                    storage.import_contract_asset(asset, data).await?;
+                }
+            }
+
+            next_page = page;
+            if next_page.is_none() {
+                break;
+            }
+        }
         Ok(())
     }
 }

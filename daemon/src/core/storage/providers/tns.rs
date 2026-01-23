@@ -123,6 +123,16 @@ impl Serializer for StoredEphemeralMessage {
 /// Storage provider for TNS (TOS Name Service)
 #[async_trait]
 pub trait TnsProvider: Send + Sync {
+    // ===== Bootstrap Sync =====
+
+    /// List all TNS name registrations with skip/limit pagination
+    /// Returns (name_hash, owner) pairs
+    async fn list_all_tns_names(
+        &self,
+        skip: usize,
+        limit: usize,
+    ) -> Result<Vec<(Hash, PublicKey)>, BlockchainError>;
+
     // ===== Name Registration =====
 
     /// Check if a name hash is already registered
@@ -388,6 +398,33 @@ impl ConfigurableTnsProvider {
 
 #[async_trait]
 impl TnsProvider for ConfigurableTnsProvider {
+    // ===== Bootstrap Sync =====
+
+    async fn list_all_tns_names(
+        &self,
+        skip: usize,
+        limit: usize,
+    ) -> Result<Vec<(Hash, PublicKey)>, BlockchainError> {
+        if self.fail_on_lookup {
+            return Err(BlockchainError::Unknown);
+        }
+        let mut out = Vec::new();
+        let mut skipped = 0usize;
+        for (name_hash, owner_bytes) in &self.name_to_owner {
+            if skipped < skip {
+                skipped += 1;
+                continue;
+            }
+            let pubkey = PublicKey::from_bytes(owner_bytes)
+                .map_err(|_| BlockchainError::InvalidPublicKey)?;
+            out.push((name_hash.clone(), pubkey));
+            if out.len() >= limit {
+                break;
+            }
+        }
+        Ok(out)
+    }
+
     // ===== Name Registration =====
 
     async fn is_name_registered(&self, name_hash: &Hash) -> Result<bool, BlockchainError> {

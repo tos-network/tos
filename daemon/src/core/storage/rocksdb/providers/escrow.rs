@@ -12,6 +12,28 @@ use tos_common::{crypto::Hash, crypto::PublicKey, escrow::EscrowAccount, seriali
 
 #[async_trait]
 impl EscrowProvider for RocksStorage {
+    async fn list_all_escrows(
+        &self,
+        skip: usize,
+        limit: usize,
+    ) -> Result<Vec<(Hash, EscrowAccount)>, BlockchainError> {
+        let iter = self.iter::<Hash, EscrowAccount>(Column::EscrowAccounts, IteratorMode::Start)?;
+        let mut out = Vec::new();
+        let mut skipped = 0usize;
+        for item in iter {
+            let (key, value) = item?;
+            if skipped < skip {
+                skipped += 1;
+                continue;
+            }
+            out.push((key, value));
+            if out.len() >= limit {
+                break;
+            }
+        }
+        Ok(out)
+    }
+
     async fn get_escrow(&self, escrow_id: &Hash) -> Result<Option<EscrowAccount>, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("get escrow {}", escrow_id);

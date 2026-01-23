@@ -1,7 +1,8 @@
 use crate::core::{
     error::BlockchainError,
     storage::{
-        rocksdb::{Column, ContractId},
+        rocksdb::{Column, ContractId, IteratorMode},
+        snapshot::Direction,
         ContractAssetExtProvider, RocksStorage,
     },
 };
@@ -420,6 +421,55 @@ impl RocksStorage {
 
 #[async_trait]
 impl ContractAssetExtProvider for RocksStorage {
+    async fn list_all_contract_assets(
+        &self,
+        skip: usize,
+        limit: usize,
+    ) -> Result<Vec<(Hash, ContractAssetData)>, BlockchainError> {
+        let prefix = tos_common::contract_asset::NATIVE_ASSET_PREFIX;
+        let iter = RocksStorage::iter_raw_internal(
+            &self.db,
+            self.snapshot.as_ref(),
+            IteratorMode::From(prefix, Direction::Forward),
+            Column::ContractAssets,
+        )?;
+        let mut out = Vec::new();
+        let mut skipped = 0usize;
+        for result in iter {
+            let (key_bytes, value_bytes) = result?;
+            let key_ref = key_bytes.as_ref();
+            // Only process entries with NATIVE_ASSET_PREFIX (4 bytes prefix + 32 bytes hash)
+            if key_ref.len() != prefix.len() + 32 || !key_ref.starts_with(prefix) {
+                break;
+            }
+            if skipped < skip {
+                skipped += 1;
+                continue;
+            }
+            let mut hash_bytes = [0u8; 32];
+            hash_bytes.copy_from_slice(&key_ref[prefix.len()..prefix.len() + 32]);
+            let hash = Hash::new(hash_bytes);
+            let mut reader = Reader::new(value_bytes.as_ref());
+            let data = ContractAssetData::read(&mut reader)?;
+            out.push((hash, data));
+            if out.len() >= limit {
+                break;
+            }
+        }
+        Ok(out)
+    }
+
+    async fn import_contract_asset(
+        &mut self,
+        asset: &Hash,
+        data: &ContractAssetData,
+    ) -> Result<(), BlockchainError> {
+        let mut key = Vec::with_capacity(4 + 32);
+        key.extend_from_slice(tos_common::contract_asset::NATIVE_ASSET_PREFIX);
+        key.extend_from_slice(asset.as_bytes());
+        self.insert_into_disk(Column::ContractAssets, &key, data)
+    }
+
     async fn get_contract_asset_ext(
         &self,
         contract: &Hash,

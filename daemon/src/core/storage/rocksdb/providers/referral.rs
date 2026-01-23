@@ -4,7 +4,7 @@ use crate::core::{
     error::BlockchainError,
     storage::{
         providers::NetworkProvider,
-        rocksdb::{Column, RocksStorage},
+        rocksdb::{Column, IteratorMode, RocksStorage},
         ReferralProvider,
     },
 };
@@ -26,6 +26,37 @@ const MAX_DIRECT_REFERRALS: u32 = 100_000;
 
 #[async_trait]
 impl ReferralProvider for RocksStorage {
+    async fn list_all_referral_records(
+        &self,
+        skip: usize,
+        limit: usize,
+    ) -> Result<Vec<(PublicKey, ReferralRecord)>, BlockchainError> {
+        let iter =
+            self.iter::<PublicKey, ReferralRecord>(Column::Referrals, IteratorMode::Start)?;
+        let mut out = Vec::new();
+        let mut skipped = 0usize;
+        for item in iter {
+            let (key, value) = item?;
+            if skipped < skip {
+                skipped += 1;
+                continue;
+            }
+            out.push((key, value));
+            if out.len() >= limit {
+                break;
+            }
+        }
+        Ok(out)
+    }
+
+    async fn import_referral_record(
+        &mut self,
+        user: &PublicKey,
+        record: &ReferralRecord,
+    ) -> Result<(), BlockchainError> {
+        self.insert_into_disk(Column::Referrals, user.as_bytes(), record)
+    }
+
     async fn has_referrer(&self, user: &PublicKey) -> Result<bool, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!(

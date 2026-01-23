@@ -4,7 +4,7 @@ use crate::core::{
     error::BlockchainError,
     storage::{
         providers::NetworkProvider,
-        rocksdb::{Column, RocksStorage},
+        rocksdb::{Column, IteratorMode, RocksStorage},
         CommitteeProvider,
     },
 };
@@ -21,6 +21,40 @@ const GLOBAL_COMMITTEE_KEY: &[u8] = b"global_committee_id";
 
 #[async_trait]
 impl CommitteeProvider for RocksStorage {
+    async fn list_all_committees(
+        &self,
+        skip: usize,
+        limit: usize,
+    ) -> Result<Vec<(Hash, SecurityCommittee)>, BlockchainError> {
+        let iter = self.iter::<Hash, SecurityCommittee>(Column::Committees, IteratorMode::Start)?;
+        let mut out = Vec::new();
+        let mut skipped = 0usize;
+        for item in iter {
+            let (key, value) = item?;
+            if skipped < skip {
+                skipped += 1;
+                continue;
+            }
+            out.push((key, value));
+            if out.len() >= limit {
+                break;
+            }
+        }
+        Ok(out)
+    }
+
+    async fn import_committee(
+        &mut self,
+        id: &Hash,
+        committee: &SecurityCommittee,
+    ) -> Result<(), BlockchainError> {
+        self.insert_into_disk(Column::Committees, id.as_bytes(), committee)
+    }
+
+    async fn set_global_committee_id(&mut self, id: &Hash) -> Result<(), BlockchainError> {
+        self.insert_into_disk(Column::GlobalCommittee, GLOBAL_COMMITTEE_KEY, id)
+    }
+
     async fn committee_exists(&self, committee_id: &Hash) -> Result<bool, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("checking if committee {} exists", committee_id);
