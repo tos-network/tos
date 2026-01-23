@@ -51,16 +51,14 @@ async fn stress_rapid_concurrent_writes() {
         }
 
         // Periodic status update
-        if batch_id % 10 == 0 {
-            if log::log_enabled!(log::Level::Debug) {
-                let progress = batch_id * BATCH_SIZE;
-                log::debug!(
-                    "Write progress: {}/{} ({:.1}%)",
-                    progress,
-                    TOTAL_WRITES,
-                    (progress as f64 / TOTAL_WRITES as f64) * 100.0
-                );
-            }
+        if batch_id % 10 == 0 && log::log_enabled!(log::Level::Debug) {
+            let progress = batch_id * BATCH_SIZE;
+            log::debug!(
+                "Write progress: {}/{} ({:.1}%)",
+                progress,
+                TOTAL_WRITES,
+                (progress as f64 / TOTAL_WRITES as f64) * 100.0
+            );
         }
     }
 

@@ -393,6 +393,22 @@ impl ReferralProvider for MockReferralProvider {
     ) -> Result<Option<TeamVolumeRecord>, BlockchainError> {
         Ok(None)
     }
+
+    async fn list_all_referral_records(
+        &self,
+        _skip: usize,
+        _limit: usize,
+    ) -> Result<Vec<(PublicKey, ReferralRecord)>, BlockchainError> {
+        Ok(Vec::new())
+    }
+
+    async fn import_referral_record(
+        &mut self,
+        _user: &PublicKey,
+        _record: &ReferralRecord,
+    ) -> Result<(), BlockchainError> {
+        Ok(())
+    }
 }
 
 // ===================================================================

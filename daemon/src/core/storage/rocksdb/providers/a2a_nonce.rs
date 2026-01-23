@@ -11,6 +11,34 @@ use tos_common::serializer::Serializer;
 
 #[async_trait]
 impl A2ANonceProvider for RocksStorage {
+    async fn list_all_a2a_nonces(
+        &self,
+        skip: usize,
+        limit: usize,
+    ) -> Result<Vec<(Vec<u8>, u64)>, BlockchainError> {
+        let iter = RocksStorage::iter_raw_internal(
+            &self.db,
+            self.snapshot.as_ref(),
+            IteratorMode::Start,
+            Column::A2ANonces,
+        )?;
+        let mut out = Vec::new();
+        let mut skipped = 0usize;
+        for result in iter {
+            let (key, value) = result?;
+            if skipped < skip {
+                skipped += 1;
+                continue;
+            }
+            let timestamp = u64::from_bytes(value.as_ref())?;
+            out.push((key.as_ref().to_vec(), timestamp));
+            if out.len() >= limit {
+                break;
+            }
+        }
+        Ok(out)
+    }
+
     async fn get_a2a_nonce_timestamp(&self, nonce: &str) -> Result<Option<u64>, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("get a2a nonce timestamp");

@@ -2,12 +2,26 @@ use crate::core::error::BlockchainError;
 use async_trait::async_trait;
 use tos_common::{
     block::TopoHeight,
-    contract_asset::{TokenKey, TokenValue},
+    contract_asset::{ContractAssetData, TokenKey, TokenValue},
     crypto::Hash,
 };
 
 #[async_trait]
 pub trait ContractAssetExtProvider {
+    /// List all contract assets with skip/limit pagination (bootstrap sync)
+    async fn list_all_contract_assets(
+        &self,
+        skip: usize,
+        limit: usize,
+    ) -> Result<Vec<(Hash, ContractAssetData)>, BlockchainError>;
+
+    /// Import contract asset directly (bootstrap sync)
+    async fn import_contract_asset(
+        &mut self,
+        asset: &Hash,
+        data: &ContractAssetData,
+    ) -> Result<(), BlockchainError>;
+
     async fn get_contract_asset_ext(
         &self,
         contract: &Hash,

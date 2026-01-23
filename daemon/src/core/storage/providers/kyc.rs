@@ -14,6 +14,22 @@ use tos_common::{
 /// Storage provider for user KYC data
 #[async_trait]
 pub trait KycProvider {
+    // ===== Bootstrap Sync =====
+
+    /// List all KYC data entries with skip/limit pagination
+    async fn list_all_kyc_data(
+        &self,
+        skip: usize,
+        limit: usize,
+    ) -> Result<Vec<(PublicKey, KycData)>, BlockchainError>;
+
+    /// Import KYC data directly without validation (bootstrap sync)
+    async fn import_kyc_data(
+        &mut self,
+        user: &PublicKey,
+        data: &KycData,
+    ) -> Result<(), BlockchainError>;
+
     // ===== Basic KYC Operations =====
 
     /// Check if a user has any KYC data

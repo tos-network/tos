@@ -46,18 +46,6 @@ pub enum StorageWriteGuard<'a, S: Storage> {
     Snapshot(SnapshotGuard<'a, S>),
 }
 
-impl<'a, S: Storage> StorageWriteGuard<'a, S> {
-    #[inline]
-    pub fn downgrade(self) -> StorageReadGuard<'a, S> {
-        match self {
-            StorageWriteGuard::Storage(guard) => {
-                StorageReadGuard::Storage(RwLockWriteGuard::downgrade(guard))
-            }
-            StorageWriteGuard::Snapshot(guard) => StorageReadGuard::Snapshot(guard),
-        }
-    }
-}
-
 impl<S: Storage> Deref for StorageWriteGuard<'_, S> {
     type Target = S;
 

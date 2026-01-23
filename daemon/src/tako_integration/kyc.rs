@@ -200,6 +200,22 @@ mod tests {
 
     #[async_trait]
     impl KycProvider for MockKycProvider {
+        async fn list_all_kyc_data(
+            &self,
+            _skip: usize,
+            _limit: usize,
+        ) -> Result<Vec<(PublicKey, KycData)>, BlockchainError> {
+            Ok(Vec::new())
+        }
+
+        async fn import_kyc_data(
+            &mut self,
+            _user: &PublicKey,
+            _data: &KycData,
+        ) -> Result<(), BlockchainError> {
+            Ok(())
+        }
+
         async fn has_kyc(&self, _user: &PublicKey) -> Result<bool, BlockchainError> {
             Ok(self.has_kyc_result)
         }

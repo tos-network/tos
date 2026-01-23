@@ -5,10 +5,17 @@ use tos_common::{account::EnergyResource, block::TopoHeight, crypto::PublicKey};
 /// Provider for energy resource storage operations
 #[async_trait]
 pub trait EnergyProvider {
-    /// Get energy resource for an account
+    /// Get energy resource for an account (latest version via pointer)
     async fn get_energy_resource(
         &self,
         account: &PublicKey,
+    ) -> Result<Option<EnergyResource>, BlockchainError>;
+
+    /// Get energy resource for an account at or before the given topoheight
+    async fn get_energy_resource_at_maximum_topoheight(
+        &self,
+        account: &PublicKey,
+        maximum_topoheight: TopoHeight,
     ) -> Result<Option<EnergyResource>, BlockchainError>;
 
     /// Set energy resource for an account at a specific topoheight
@@ -29,7 +36,15 @@ impl EnergyProvider for MockEnergyProvider {
         &self,
         _account: &PublicKey,
     ) -> Result<Option<EnergyResource>, BlockchainError> {
-        Ok(None) // Return None for now
+        Ok(None)
+    }
+
+    async fn get_energy_resource_at_maximum_topoheight(
+        &self,
+        _account: &PublicKey,
+        _maximum_topoheight: TopoHeight,
+    ) -> Result<Option<EnergyResource>, BlockchainError> {
+        Ok(None)
     }
 
     async fn set_energy_resource(
@@ -38,6 +53,6 @@ impl EnergyProvider for MockEnergyProvider {
         _topoheight: TopoHeight,
         _energy_resource: &EnergyResource,
     ) -> Result<(), BlockchainError> {
-        Ok(()) // Do nothing for now
+        Ok(())
     }
 }

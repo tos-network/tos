@@ -125,4 +125,29 @@ impl ArbitrationCommitProvider for RocksStorage {
         }
         Ok(out)
     }
+
+    async fn list_all_arbitration_opens(
+        &self,
+        skip: usize,
+        limit: usize,
+    ) -> Result<Vec<CommitArbitrationOpenPayload>, BlockchainError> {
+        let iter = self.iter::<ArbitrationRequestKey, CommitArbitrationOpenPayload>(
+            Column::ArbitrationCommitOpenByRequest,
+            IteratorMode::Start,
+        )?;
+        let mut out = Vec::new();
+        let mut skipped = 0usize;
+        for item in iter {
+            let (_key, value) = item?;
+            if skipped < skip {
+                skipped += 1;
+                continue;
+            }
+            out.push(value);
+            if out.len() >= limit {
+                break;
+            }
+        }
+        Ok(out)
+    }
 }

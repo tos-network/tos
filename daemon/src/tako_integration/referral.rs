@@ -285,6 +285,23 @@ mod tests {
 
     #[async_trait]
     impl ReferralProvider for MockReferralProvider {
+        async fn list_all_referral_records(
+            &self,
+            _skip: usize,
+            _limit: usize,
+        ) -> Result<Vec<(PublicKey, tos_common::referral::ReferralRecord)>, BlockchainError>
+        {
+            Ok(Vec::new())
+        }
+
+        async fn import_referral_record(
+            &mut self,
+            _user: &PublicKey,
+            _record: &tos_common::referral::ReferralRecord,
+        ) -> Result<(), BlockchainError> {
+            Ok(())
+        }
+
         async fn has_referrer(&self, _user: &PublicKey) -> Result<bool, BlockchainError> {
             Ok(self.has_referrer_result)
         }

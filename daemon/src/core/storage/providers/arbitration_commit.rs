@@ -65,4 +65,11 @@ pub trait ArbitrationCommitProvider: Send + Sync {
         &self,
         request_id: &Hash,
     ) -> Result<Vec<CommitJurorVotePayload>, BlockchainError>;
+
+    /// List all arbitration open payloads with pagination
+    async fn list_all_arbitration_opens(
+        &self,
+        skip: usize,
+        limit: usize,
+    ) -> Result<Vec<CommitArbitrationOpenPayload>, BlockchainError>;
 }

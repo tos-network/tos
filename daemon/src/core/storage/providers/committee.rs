@@ -14,6 +14,25 @@ use tos_common::{
 /// Storage provider for security committees
 #[async_trait]
 pub trait CommitteeProvider {
+    // ===== Bootstrap Sync =====
+
+    /// List all committees with skip/limit pagination
+    async fn list_all_committees(
+        &self,
+        skip: usize,
+        limit: usize,
+    ) -> Result<Vec<(Hash, SecurityCommittee)>, BlockchainError>;
+
+    /// Import committee directly without validation (bootstrap sync)
+    async fn import_committee(
+        &mut self,
+        id: &Hash,
+        committee: &SecurityCommittee,
+    ) -> Result<(), BlockchainError>;
+
+    /// Set global committee ID directly (bootstrap sync)
+    async fn set_global_committee_id(&mut self, id: &Hash) -> Result<(), BlockchainError>;
+
     // ===== Committee Existence and Retrieval =====
 
     /// Check if a committee exists

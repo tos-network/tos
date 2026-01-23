@@ -7,6 +7,16 @@ pub type PruneResult = (usize, Option<Vec<u8>>);
 
 #[async_trait]
 pub trait A2ANonceProvider {
+    // ===== Bootstrap Sync =====
+
+    /// List all A2A nonces with skip/limit pagination
+    /// Returns (nonce_bytes, timestamp) pairs
+    async fn list_all_a2a_nonces(
+        &self,
+        skip: usize,
+        limit: usize,
+    ) -> Result<Vec<(Vec<u8>, u64)>, BlockchainError>;
+
     async fn get_a2a_nonce_timestamp(&self, nonce: &str) -> Result<Option<u64>, BlockchainError>;
     async fn set_a2a_nonce_timestamp(
         &mut self,

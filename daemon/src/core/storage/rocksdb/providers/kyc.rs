@@ -4,7 +4,7 @@ use crate::core::{
     error::BlockchainError,
     storage::{
         providers::NetworkProvider,
-        rocksdb::{Column, RocksStorage},
+        rocksdb::{Column, IteratorMode, RocksStorage},
         KycProvider,
     },
 };
@@ -85,6 +85,36 @@ impl Serializer for EmergencySuspensionData {
 
 #[async_trait]
 impl KycProvider for RocksStorage {
+    async fn list_all_kyc_data(
+        &self,
+        skip: usize,
+        limit: usize,
+    ) -> Result<Vec<(PublicKey, KycData)>, BlockchainError> {
+        let iter = self.iter::<PublicKey, KycData>(Column::KycData, IteratorMode::Start)?;
+        let mut out = Vec::new();
+        let mut skipped = 0usize;
+        for item in iter {
+            let (key, value) = item?;
+            if skipped < skip {
+                skipped += 1;
+                continue;
+            }
+            out.push((key, value));
+            if out.len() >= limit {
+                break;
+            }
+        }
+        Ok(out)
+    }
+
+    async fn import_kyc_data(
+        &mut self,
+        user: &PublicKey,
+        data: &KycData,
+    ) -> Result<(), BlockchainError> {
+        self.insert_into_disk(Column::KycData, user.as_bytes(), data)
+    }
+
     async fn has_kyc(&self, user: &PublicKey) -> Result<bool, BlockchainError> {
         if log::log_enabled!(log::Level::Trace) {
             trace!(

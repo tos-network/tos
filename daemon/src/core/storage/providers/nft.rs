@@ -8,6 +8,34 @@ use tos_common::{
 
 #[async_trait]
 pub trait NftProvider {
+    // ===== Bootstrap Sync =====
+
+    /// List all NFT collection IDs with skip/limit pagination
+    async fn list_all_nft_collections(
+        &self,
+        topoheight: TopoHeight,
+        skip: usize,
+        limit: usize,
+    ) -> Result<Vec<(Hash, NftCollection)>, BlockchainError>;
+
+    /// List all tokens in a collection with skip/limit pagination
+    async fn list_nft_tokens_for_collection(
+        &self,
+        collection: &Hash,
+        topoheight: TopoHeight,
+        skip: usize,
+        limit: usize,
+    ) -> Result<Vec<(u64, Nft)>, BlockchainError>;
+
+    /// List all token owners in a collection with skip/limit pagination
+    async fn list_nft_owners_for_collection(
+        &self,
+        collection: &Hash,
+        topoheight: TopoHeight,
+        skip: usize,
+        limit: usize,
+    ) -> Result<Vec<(u64, PublicKey)>, BlockchainError>;
+
     async fn get_nft_collection(
         &self,
         id: &Hash,
