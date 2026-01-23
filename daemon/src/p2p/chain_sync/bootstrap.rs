@@ -375,9 +375,14 @@ impl<S: Storage> P2pServer<S> {
                     .skip(page_id as usize * MAX_ITEMS_PER_PAGE)
                     .take(MAX_ITEMS_PER_PAGE);
 
-                let entries = stream.boxed().try_collect().await?;
+                let entries: IndexMap<_, _> = stream.boxed().try_collect().await?;
 
-                StepResponse::ContractStores(entries, page)
+                let next_page = if entries.len() == MAX_ITEMS_PER_PAGE {
+                    Some(page_id + 1)
+                } else {
+                    None
+                };
+                StepResponse::ContractStores(entries, next_page)
             }
             StepRequest::ContractsExecutions(min, max, page) => {
                 if min > max {
@@ -622,10 +627,10 @@ impl<S: Storage> P2pServer<S> {
             }
             StepRequest::BlocksMetadata(topoheight) => {
                 // go from the lowest available point until the requested stable topoheight
-                let lower = if topoheight - PRUNE_SAFETY_LIMIT <= pruned_topoheight {
+                let lower = if topoheight.saturating_sub(PRUNE_SAFETY_LIMIT) <= pruned_topoheight {
                     pruned_topoheight + 1
                 } else {
-                    topoheight - PRUNE_SAFETY_LIMIT
+                    topoheight.saturating_sub(PRUNE_SAFETY_LIMIT)
                 };
 
                 let storage = &storage;
@@ -892,8 +897,11 @@ impl<S: Storage> P2pServer<S> {
                         let _permit = self.blockchain.storage_semaphore().acquire().await?;
                         let mut storage = self.blockchain.get_storage().write().await;
                         for ((asset, data), supply) in assets.into_iter().zip(supply) {
-                            if log::log_enabled!(log::Level::Info) {
-                                info!("Saving asset {} at topoheight {}", asset, stable_topoheight);
+                            if log::log_enabled!(log::Level::Debug) {
+                                debug!(
+                                    "Saving asset {} at topoheight {}",
+                                    asset, stable_topoheight
+                                );
                             }
                             storage
                                 .add_asset(
@@ -1059,7 +1067,7 @@ impl<S: Storage> P2pServer<S> {
                         return Err(P2pError::InvalidPacket.into());
                     }
 
-                    let lowest_topoheight = stable_topoheight - PRUNE_SAFETY_LIMIT;
+                    let lowest_topoheight = stable_topoheight.saturating_sub(PRUNE_SAFETY_LIMIT);
 
                     stream::iter(blocks.into_iter().enumerate().map(Ok))
                         .try_for_each_concurrent(
@@ -1260,6 +1268,17 @@ impl<S: Storage> P2pServer<S> {
             return Err(P2pError::InvalidPacket.into());
         };
 
+        if nonces.len() != keys.len() {
+            if log::log_enabled!(log::Level::Error) {
+                error!(
+                    "Accounts response length mismatch: expected {}, got {}",
+                    keys.len(),
+                    nonces.len()
+                );
+            }
+            return Err(P2pError::InvalidPacket.into());
+        }
+
         let _permit = self.blockchain.storage_semaphore().acquire().await?;
         let mut storage = self.blockchain.get_storage().write().await;
         // save all nonces
@@ -1449,8 +1468,8 @@ impl<S: Storage> P2pServer<S> {
                             }
                         }
 
-                        if log::log_enabled!(log::Level::Info) {
-                            info!("Synced {} balance versions {} of {}", total_versions, asset, key.as_address(blockchain.get_network().is_mainnet()));
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("Synced {} balance versions {} of {}", total_versions, asset, key.as_address(blockchain.get_network().is_mainnet()));
                         }
                     } else {
                         if log::log_enabled!(log::Level::Debug) {
@@ -2294,7 +2313,7 @@ impl<S: Storage> P2pServer<S> {
         // Step 2: For each pair, fetch the full balance history
         for (key, asset) in &all_pairs {
             let mut max_topoheight: Option<u64> = Some(stable_topoheight);
-            let mut previous_version: Option<(u64, VersionedUnoBalance)> = None;
+            let mut all_versions: Vec<(u64, VersionedUnoBalance)> = Vec::new();
 
             while let Some(max) = max_topoheight {
                 let StepResponse::UnoBalances(balances, next_max) = peer
@@ -2314,30 +2333,29 @@ impl<S: Storage> P2pServer<S> {
 
                 for balance in balances {
                     let (topo, version) = balance.as_version();
-
-                    // Link previous (newer) version to this one
-                    if let Some((prev_topo, mut prev_version)) = previous_version.take() {
-                        prev_version.set_previous_topoheight(Some(topo));
-                        let _permit = self.blockchain.storage_semaphore().acquire().await?;
-                        let mut storage = self.blockchain.get_storage().write().await;
-                        storage
-                            .import_uno_balance(key, asset, prev_topo, &prev_version)
-                            .await?;
-                    }
-
-                    previous_version = Some((topo, version));
+                    all_versions.push((topo, version));
                 }
 
                 max_topoheight = next_max;
             }
 
-            // Store the last (oldest) version with previous_topoheight = None
-            if let Some((topo, version)) = previous_version.take() {
+            // Link versions: each entry's previous_topoheight points to the next-older entry
+            // all_versions is ordered newest-to-oldest
+            for i in 0..all_versions.len().saturating_sub(1) {
+                let next_topo = all_versions[i + 1].0;
+                all_versions[i].1.set_previous_topoheight(Some(next_topo));
+            }
+            // The oldest entry keeps previous_topoheight = None (already default)
+
+            // Batch write all versions under a single lock acquisition
+            if !all_versions.is_empty() {
                 let _permit = self.blockchain.storage_semaphore().acquire().await?;
                 let mut storage = self.blockchain.get_storage().write().await;
-                storage
-                    .import_uno_balance(key, asset, topo, &version)
-                    .await?;
+                for (topo, version) in &all_versions {
+                    storage
+                        .import_uno_balance(key, asset, *topo, version)
+                        .await?;
+                }
             }
         }
 
@@ -2382,6 +2400,17 @@ impl<S: Storage> P2pServer<S> {
                 }
                 return Err(P2pError::InvalidPacket.into());
             };
+
+            if results.len() != keys.len() {
+                if log::log_enabled!(log::Level::Error) {
+                    error!(
+                        "Energy data response length mismatch: expected {}, got {}",
+                        keys.len(),
+                        results.len()
+                    );
+                }
+                return Err(P2pError::InvalidPacket.into());
+            }
 
             // Store non-None energy resources
             let has_entries = results.iter().any(|e| e.is_some());
