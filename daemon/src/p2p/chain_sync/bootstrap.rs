@@ -1,4 +1,9 @@
-use std::{borrow::Cow, collections::HashSet, sync::Arc, time::Instant};
+use std::{
+    borrow::Cow,
+    collections::{HashMap, HashSet},
+    sync::Arc,
+    time::Instant,
+};
 
 use futures::{stream, StreamExt, TryStreamExt};
 use indexmap::{IndexMap, IndexSet};
@@ -1965,6 +1970,8 @@ impl<S: Storage> P2pServer<S> {
             for (collection_id, _) in &collections {
                 self.sync_nft_tokens(peer, collection_id, stable_topoheight)
                     .await?;
+                self.sync_nft_ownership(peer, collection_id, stable_topoheight)
+                    .await?;
             }
 
             next_page = page;
@@ -2022,6 +2029,63 @@ impl<S: Storage> P2pServer<S> {
                 break;
             }
         }
+        Ok(())
+    }
+
+    async fn sync_nft_ownership(
+        &self,
+        peer: &Arc<Peer>,
+        collection_id: &Hash,
+        stable_topoheight: u64,
+    ) -> Result<(), BlockchainError> {
+        let mut owner_counts: HashMap<PublicKey, u64> = HashMap::new();
+        let mut next_page = None;
+        loop {
+            let StepResponse::NftOwnership(resp_collection_id, entries, page) = peer
+                .request_boostrap_chain(StepRequest::NftOwnership(
+                    Cow::Borrowed(collection_id),
+                    stable_topoheight,
+                    next_page,
+                ))
+                .await?
+            else {
+                if log::log_enabled!(log::Level::Error) {
+                    error!("Received an invalid StepResponse while fetching NFT ownership");
+                }
+                return Err(P2pError::InvalidPacket.into());
+            };
+
+            if resp_collection_id != *collection_id {
+                if log::log_enabled!(log::Level::Error) {
+                    error!(
+                        "NFT ownership response collection ID mismatch: expected {}, got {}",
+                        collection_id, resp_collection_id
+                    );
+                }
+                return Err(P2pError::InvalidPacket.into());
+            }
+
+            for (_token_id, owner) in &entries {
+                let count = owner_counts.entry(owner.clone()).or_insert(0);
+                *count = count.saturating_add(1);
+            }
+
+            next_page = page;
+            if next_page.is_none() {
+                break;
+            }
+        }
+
+        if !owner_counts.is_empty() {
+            let _permit = self.blockchain.storage_semaphore().acquire().await?;
+            let mut storage = self.blockchain.get_storage().write().await;
+            for (owner, count) in &owner_counts {
+                storage
+                    .set_last_nft_owner_balance_to(collection_id, owner, stable_topoheight, *count)
+                    .await?;
+            }
+        }
+
         Ok(())
     }
 
