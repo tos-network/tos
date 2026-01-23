@@ -22,7 +22,7 @@ use crate::orchestrator::{Clock, PausedClock};
 use crate::tier1_component::{TestBlockchain, TestBlockchainBuilder, TestTransaction};
 
 use super::block_warp::{BlockWarp, WarpError, BLOCK_TIME_MS, MAX_WARP_BLOCKS};
-use super::chain_client_config::{AutoMineConfig, ChainClientConfig};
+use super::chain_client_config::{AutoMineConfig, ChainClientConfig, GenesisAccount};
 use super::confirmation::ConfirmationDepth;
 use super::features::FeatureSet;
 use super::tx_result::{
@@ -128,6 +128,15 @@ impl ChainClient {
         })
     }
 
+    /// Start a ChainClient with minimal defaults: one pre-funded account and OnTransaction auto-mine.
+    pub async fn start_default() -> Result<Self, WarpError> {
+        let default_address = Hash::new([1u8; 32]);
+        let config = ChainClientConfig::default()
+            .with_account(GenesisAccount::new(default_address, 10_000_000))
+            .with_auto_mine(AutoMineConfig::OnTransaction);
+        Self::start(config).await
+    }
+
     // --- Transaction Operations ---
 
     /// Process a transaction and return the structured result.
@@ -209,6 +218,129 @@ impl ChainClient {
         };
 
         self.tx_log.write().await.insert(tx_hash, result.clone());
+        Ok(result)
+    }
+
+    /// Process multiple transactions in a single block.
+    ///
+    /// All transactions are submitted to the mempool, then a single block is mined.
+    pub async fn process_batch(
+        &mut self,
+        txs: Vec<TestTransaction>,
+    ) -> Result<Vec<TxResult>, WarpError> {
+        let mut results = Vec::with_capacity(txs.len());
+        // Track pending nonces per sender within the batch so that
+        // sequential transactions from the same sender validate correctly
+        let mut pending_nonces: std::collections::HashMap<Hash, u64> =
+            std::collections::HashMap::new();
+
+        for tx in &txs {
+            let tx_hash = tx.hash.clone();
+            let sender = tx.sender.clone();
+
+            // Validate with batch-aware nonce tracking
+            if let Some(error) = self.validate_batch_transaction(tx, &pending_nonces).await {
+                results.push(TxResult {
+                    success: false,
+                    tx_hash: tx_hash.clone(),
+                    block_hash: None,
+                    topoheight: None,
+                    error: Some(error),
+                    gas_used: 0,
+                    events: vec![],
+                    log_messages: vec![],
+                    inner_calls: vec![],
+                    return_data: vec![],
+                    new_nonce: pending_nonces.get(&sender).copied().unwrap_or(0),
+                });
+                continue;
+            }
+
+            let submit_result = self.blockchain.submit_transaction(tx.clone()).await;
+            let (success, error) = match &submit_result {
+                Ok(_) => (true, None),
+                Err(e) => (
+                    false,
+                    Some(TransactionError::MalformedTransaction {
+                        reason: e.to_string(),
+                    }),
+                ),
+            };
+
+            if success {
+                // Track the pending nonce for this sender
+                pending_nonces.insert(sender.clone(), tx.nonce);
+            }
+
+            results.push(TxResult {
+                success,
+                tx_hash: tx_hash.clone(),
+                block_hash: None,
+                topoheight: None,
+                error,
+                gas_used: tx.fee,
+                events: vec![],
+                log_messages: vec![],
+                inner_calls: vec![],
+                return_data: vec![],
+                new_nonce: if success {
+                    tx.nonce
+                } else {
+                    self.get_nonce(&sender).await.unwrap_or(0)
+                },
+            });
+        }
+
+        // Mine a single block containing all successful transactions
+        let block = self
+            .blockchain
+            .mine_block()
+            .await
+            .map_err(|e| WarpError::BlockCreationFailed(e.to_string()))?;
+        self.topoheight = self.topoheight.saturating_add(1);
+        self.clock.sleep(Duration::from_millis(BLOCK_TIME_MS)).await;
+
+        // Update block info for successful transactions
+        for result in &mut results {
+            if result.success {
+                result.block_hash = Some(block.hash.clone());
+                result.topoheight = Some(self.topoheight);
+            }
+        }
+
+        // Store all results
+        for result in &results {
+            self.tx_log
+                .write()
+                .await
+                .insert(result.tx_hash.clone(), result.clone());
+        }
+
+        Ok(results)
+    }
+
+    /// Process a transaction and wait for the specified confirmation depth.
+    ///
+    /// Mines additional empty blocks after the transaction block to reach
+    /// the desired confirmation depth.
+    pub async fn process_transaction_with_depth(
+        &mut self,
+        tx: TestTransaction,
+        depth: ConfirmationDepth,
+    ) -> Result<TxResult, WarpError> {
+        let result = self.process_transaction(tx).await?;
+
+        // Mine additional blocks to reach desired depth
+        let blocks_to_mine = match depth {
+            ConfirmationDepth::Included => 0,
+            ConfirmationDepth::Confirmed(n) => n,
+            ConfirmationDepth::Stable => 10, // 10 blocks for stability
+        };
+
+        if blocks_to_mine > 0 {
+            self.mine_blocks(blocks_to_mine).await?;
+        }
+
         Ok(result)
     }
 
@@ -482,6 +614,55 @@ impl ChainClient {
         Ok(block.hash)
     }
 
+    /// Mine N empty blocks, advancing the chain.
+    pub async fn mine_blocks(&mut self, count: u64) -> Result<Vec<Hash>, WarpError> {
+        let mut hashes = Vec::with_capacity(count as usize);
+        for _ in 0..count {
+            let hash = self.mine_empty_block().await?;
+            hashes.push(hash);
+        }
+        Ok(hashes)
+    }
+
+    /// Submit a transaction to the mempool without mining a block.
+    ///
+    /// The transaction will be included in the next mined block.
+    pub async fn submit_to_mempool(&mut self, tx: TestTransaction) -> Result<(), WarpError> {
+        if let Some(error) = self.validate_transaction(&tx).await {
+            return Err(WarpError::StateTransition(format!(
+                "Transaction validation failed: {:?}",
+                error
+            )));
+        }
+        self.blockchain
+            .submit_transaction(tx)
+            .await
+            .map(|_| ())
+            .map_err(|e| WarpError::StateTransition(e.to_string()))
+    }
+
+    /// Mine a block containing all pending mempool transactions.
+    pub async fn mine_mempool(&mut self) -> Result<Hash, WarpError> {
+        let block = self
+            .blockchain
+            .mine_block()
+            .await
+            .map_err(|e| WarpError::BlockCreationFailed(e.to_string()))?;
+        self.topoheight = self.topoheight.saturating_add(1);
+        self.clock.sleep(Duration::from_millis(BLOCK_TIME_MS)).await;
+        Ok(block.hash)
+    }
+
+    /// Get the current topoheight of the chain.
+    pub fn topoheight(&self) -> u64 {
+        self.topoheight
+    }
+
+    /// Get a mutable reference to the underlying blockchain.
+    pub fn blockchain_mut(&mut self) -> &mut TestBlockchain {
+        &mut self.blockchain
+    }
+
     // --- Feature Queries ---
 
     /// Check if a feature is active at the current topoheight.
@@ -537,6 +718,58 @@ impl ChainClient {
         // Check nonce (blockchain expects stored_nonce + 1)
         let stored_nonce = self.blockchain.get_nonce(&tx.sender).await.unwrap_or(0);
         let expected_nonce = stored_nonce.saturating_add(1);
+        if tx.nonce != expected_nonce {
+            return Some(TransactionError::InvalidNonce {
+                expected: expected_nonce,
+                provided: tx.nonce,
+            });
+        }
+
+        // Check amount > 0 for transfers
+        if tx.amount == 0 && tx.recipient != tx.sender {
+            return Some(TransactionError::MalformedTransaction {
+                reason: "transfer amount must be > 0".to_string(),
+            });
+        }
+
+        None
+    }
+
+    /// Validate a transaction within a batch context.
+    ///
+    /// Uses pending nonces to allow sequential transactions from the same sender
+    /// within a single batch (before any block is mined).
+    async fn validate_batch_transaction(
+        &self,
+        tx: &TestTransaction,
+        pending_nonces: &std::collections::HashMap<Hash, u64>,
+    ) -> Option<TransactionError> {
+        // Check sender exists and has sufficient balance
+        let balance = match self.blockchain.get_balance(&tx.sender).await {
+            Ok(b) => b,
+            Err(_) => {
+                return Some(TransactionError::AccountNotFound {
+                    address: tx.sender.clone(),
+                })
+            }
+        };
+
+        let total_cost = tx.amount.checked_add(tx.fee)?;
+        if balance < total_cost {
+            return Some(TransactionError::InsufficientBalance {
+                have: balance,
+                need: total_cost,
+                asset: Hash::zero(),
+            });
+        }
+
+        // Check nonce using pending nonces if available
+        let base_nonce = if let Some(&pending) = pending_nonces.get(&tx.sender) {
+            pending
+        } else {
+            self.blockchain.get_nonce(&tx.sender).await.unwrap_or(0)
+        };
+        let expected_nonce = base_nonce.saturating_add(1);
         if tx.nonce != expected_nonce {
             return Some(TransactionError::InvalidNonce {
                 expected: expected_nonce,
@@ -889,5 +1122,196 @@ mod tests {
 
         let err = client.warp_blocks(MAX_WARP_BLOCKS + 1).await;
         assert!(matches!(err, Err(WarpError::ExceedsMaxWarp { .. })));
+    }
+
+    #[tokio::test]
+    async fn test_start_default() {
+        let client = ChainClient::start_default().await.unwrap();
+        assert_eq!(client.topoheight(), 0);
+
+        // Default address is [1u8; 32] with 10_000_000 balance
+        let default_address = Hash::new([1u8; 32]);
+        let balance = client.get_balance(&default_address).await.unwrap();
+        assert_eq!(balance, 10_000_000);
+    }
+
+    #[tokio::test]
+    async fn test_mine_blocks() {
+        let config = ChainClientConfig::default()
+            .with_account(GenesisAccount::new(sample_hash(1), 1_000_000));
+
+        let mut client = ChainClient::start(config).await.unwrap();
+        assert_eq!(client.topoheight(), 0);
+
+        let hashes = client.mine_blocks(5).await.unwrap();
+        assert_eq!(hashes.len(), 5);
+        assert_eq!(client.topoheight(), 5);
+
+        // All hashes should be unique
+        for i in 0..hashes.len() {
+            for j in (i + 1)..hashes.len() {
+                assert_ne!(hashes[i], hashes[j]);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_mine_blocks_zero() {
+        let config = ChainClientConfig::default()
+            .with_account(GenesisAccount::new(sample_hash(1), 1_000_000));
+
+        let mut client = ChainClient::start(config).await.unwrap();
+        let hashes = client.mine_blocks(0).await.unwrap();
+        assert!(hashes.is_empty());
+        assert_eq!(client.topoheight(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_process_batch() {
+        let alice = sample_hash(1);
+        let bob = sample_hash(2);
+        let charlie = sample_hash(3);
+        let config = ChainClientConfig::default()
+            .with_account(GenesisAccount::new(alice.clone(), 1_000_000))
+            .with_account(GenesisAccount::new(bob.clone(), 0))
+            .with_account(GenesisAccount::new(charlie.clone(), 0));
+
+        let mut client = ChainClient::start(config).await.unwrap();
+
+        let txs = vec![
+            TestTransaction {
+                hash: sample_hash(90),
+                sender: alice.clone(),
+                recipient: bob.clone(),
+                amount: 1000,
+                fee: 10,
+                nonce: 1,
+            },
+            TestTransaction {
+                hash: sample_hash(91),
+                sender: alice.clone(),
+                recipient: charlie.clone(),
+                amount: 2000,
+                fee: 10,
+                nonce: 2,
+            },
+        ];
+
+        let results = client.process_batch(txs).await.unwrap();
+        assert_eq!(results.len(), 2);
+        assert!(results[0].success);
+        assert!(results[1].success);
+
+        // Both should have the same block hash
+        assert_eq!(results[0].block_hash, results[1].block_hash);
+        assert!(results[0].block_hash.is_some());
+
+        // Verify balances
+        let bob_balance = client.get_balance(&bob).await.unwrap();
+        assert_eq!(bob_balance, 1000);
+        let charlie_balance = client.get_balance(&charlie).await.unwrap();
+        assert_eq!(charlie_balance, 2000);
+    }
+
+    #[tokio::test]
+    async fn test_process_batch_with_invalid_tx() {
+        let alice = sample_hash(1);
+        let bob = sample_hash(2);
+        let config = ChainClientConfig::default()
+            .with_account(GenesisAccount::new(alice.clone(), 100))
+            .with_account(GenesisAccount::new(bob.clone(), 0));
+
+        let mut client = ChainClient::start(config).await.unwrap();
+
+        let txs = vec![
+            // This one should fail: amount + fee > balance
+            TestTransaction {
+                hash: sample_hash(90),
+                sender: alice.clone(),
+                recipient: bob.clone(),
+                amount: 200,
+                fee: 10,
+                nonce: 1,
+            },
+        ];
+
+        let results = client.process_batch(txs).await.unwrap();
+        assert_eq!(results.len(), 1);
+        assert!(!results[0].success);
+        assert!(results[0].block_hash.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_submit_to_mempool() {
+        let alice = sample_hash(1);
+        let bob = sample_hash(2);
+        let config = ChainClientConfig::default()
+            .with_account(GenesisAccount::new(alice.clone(), 1_000_000))
+            .with_account(GenesisAccount::new(bob.clone(), 0));
+
+        let mut client = ChainClient::start(config).await.unwrap();
+
+        let tx = TestTransaction {
+            hash: sample_hash(99),
+            sender: alice.clone(),
+            recipient: bob.clone(),
+            amount: 5000,
+            fee: 10,
+            nonce: 1,
+        };
+
+        // Submit without mining
+        client.submit_to_mempool(tx).await.unwrap();
+
+        // Balance should not have changed yet (no block mined)
+        let bob_balance = client.get_balance(&bob).await.unwrap();
+        assert_eq!(bob_balance, 0);
+
+        // Now mine the mempool
+        let hash = client.mine_mempool().await.unwrap();
+        assert_ne!(hash, Hash::zero());
+
+        // Balance should now reflect the transfer
+        let bob_balance = client.get_balance(&bob).await.unwrap();
+        assert_eq!(bob_balance, 5000);
+    }
+
+    #[tokio::test]
+    async fn test_submit_to_mempool_invalid_tx() {
+        let alice = sample_hash(1);
+        let bob = sample_hash(2);
+        let config = ChainClientConfig::default()
+            .with_account(GenesisAccount::new(alice.clone(), 100))
+            .with_account(GenesisAccount::new(bob.clone(), 0));
+
+        let mut client = ChainClient::start(config).await.unwrap();
+
+        let tx = TestTransaction {
+            hash: sample_hash(99),
+            sender: alice,
+            recipient: bob,
+            amount: 200,
+            fee: 10,
+            nonce: 1,
+        };
+
+        // Should fail validation
+        let result = client.submit_to_mempool(tx).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_mine_mempool() {
+        let alice = sample_hash(1);
+        let config = ChainClientConfig::default()
+            .with_account(GenesisAccount::new(alice.clone(), 1_000_000));
+
+        let mut client = ChainClient::start(config).await.unwrap();
+        assert_eq!(client.topoheight(), 0);
+
+        // Mining an empty mempool should still produce a block
+        let hash = client.mine_mempool().await.unwrap();
+        assert_ne!(hash, Hash::zero());
+        assert_eq!(client.topoheight(), 1);
     }
 }

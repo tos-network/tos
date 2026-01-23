@@ -1,0 +1,49 @@
+fixture:
+  name: "uno_transfer"
+  version: "1.0"
+  description: "Transfer UNO (custom) assets between accounts"
+  tier: [1, 2]
+
+setup:
+  assets:
+    - id: GOLD
+      name: "Gold Token"
+      supply: 1000000
+      decimals: 8
+
+  accounts:
+    alice:
+      balance: "10000 TOS"
+      nonce: 0
+      uno_balances:
+        GOLD: 500000
+    bob:
+      balance: "10000 TOS"
+      nonce: 0
+      uno_balances:
+        GOLD: 0
+
+steps:
+  - transaction:
+      type: uno_transfer
+      from: alice
+      to: bob
+      asset: GOLD
+      amount: "200000"
+      fee: "10 TOS"
+      expected_result: success
+
+expected_state:
+  alice:
+    balance: "9990 TOS"
+    uno_balances:
+      GOLD: 300000
+    nonce: 1
+  bob:
+    uno_balances:
+      GOLD: 200000
+
+invariants:
+  - uno_supply_conservation:
+      asset: GOLD
+      total: 500000

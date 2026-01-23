@@ -65,6 +65,37 @@ pub struct GenesisContract {
     pub owner: Hash,
 }
 
+/// Storage backend for the ChainClient.
+#[derive(Debug, Clone, Default)]
+pub enum StorageBackend {
+    /// In-memory storage (fastest, default for tests)
+    #[default]
+    Memory,
+    /// Temporary directory-backed storage (realistic but ephemeral)
+    TempDir,
+}
+
+/// Fee configuration for the test environment.
+#[derive(Debug, Clone)]
+pub struct FeeConfig {
+    /// Gas price per unit
+    pub gas_price: u64,
+    /// Burn percentage (0-100)
+    pub burn_percent: u64,
+    /// Whether to enforce fees (can disable for simpler tests)
+    pub enforce_fees: bool,
+}
+
+impl Default for FeeConfig {
+    fn default() -> Self {
+        Self {
+            gas_price: 1,
+            burn_percent: 0,
+            enforce_fees: true,
+        }
+    }
+}
+
 /// Configuration for initializing a ChainClient test environment.
 ///
 /// # Example
@@ -94,6 +125,10 @@ pub struct ChainClientConfig {
     pub track_state_diffs: bool,
     /// Network type (mainnet vs testnet prefix for addresses)
     pub mainnet: bool,
+    /// Storage backend configuration
+    pub storage: StorageBackend,
+    /// Fee model configuration
+    pub fee_config: FeeConfig,
 }
 
 impl Default for ChainClientConfig {
@@ -108,6 +143,8 @@ impl Default for ChainClientConfig {
             max_gas_per_tx: 5_000_000,
             track_state_diffs: false,
             mainnet: false,
+            storage: StorageBackend::default(),
+            fee_config: FeeConfig::default(),
         }
     }
 }
@@ -177,6 +214,24 @@ impl ChainClientConfig {
         self.mainnet = true;
         self
     }
+
+    /// Set the storage backend.
+    pub fn with_storage(mut self, storage: StorageBackend) -> Self {
+        self.storage = storage;
+        self
+    }
+
+    /// Set the fee configuration.
+    pub fn with_fee_config(mut self, fee_config: FeeConfig) -> Self {
+        self.fee_config = fee_config;
+        self
+    }
+
+    /// Disable fee enforcement for simpler tests.
+    pub fn with_fees_disabled(mut self) -> Self {
+        self.fee_config.enforce_fees = false;
+        self
+    }
 }
 
 impl std::fmt::Debug for ChainClientConfig {
@@ -190,6 +245,8 @@ impl std::fmt::Debug for ChainClientConfig {
             .field("max_gas_per_tx", &self.max_gas_per_tx)
             .field("track_state_diffs", &self.track_state_diffs)
             .field("mainnet", &self.mainnet)
+            .field("storage", &self.storage)
+            .field("fee_config", &self.fee_config)
             .finish()
     }
 }

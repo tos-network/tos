@@ -70,6 +70,8 @@ pub mod backend;
 pub mod backends;
 pub mod invariants;
 pub mod parser;
+/// Regression capture utility for generating fixture files from observed behavior
+pub mod regression;
 pub mod runner;
 pub mod types;
 pub mod verification;
@@ -81,6 +83,7 @@ pub use backends::tier1_5::ChainClientBackend;
 pub use backends::tier2::TestDaemonBackend;
 pub use backends::tier3::LocalClusterBackend;
 pub use parser::{parse_fixture, parse_fixture_file};
+pub use regression::RegressionCapture;
 pub use runner::{
     create_backend, execute_fixture, run_fixture_cross_tier, run_fixture_file_on_backend,
     run_fixture_on_backend,

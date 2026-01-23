@@ -1,0 +1,37 @@
+fixture:
+  name: "freeze_unfreeze"
+  version: "1.0"
+  description: "Freeze TOS for energy and then unfreeze"
+  tier: [1]
+
+setup:
+  accounts:
+    alice:
+      balance: "50000 TOS"
+      nonce: 0
+      frozen_balance: "0 TOS"
+
+steps:
+  - transaction:
+      type: freeze
+      from: alice
+      amount: "10000 TOS"
+      fee: "10 TOS"
+      expected_result: success
+  - transaction:
+      type: unfreeze
+      from: alice
+      amount: "5000 TOS"
+      fee: "10 TOS"
+      expected_result: success
+
+expected_state:
+  alice:
+    balance: "44980 TOS"
+    frozen_balance: "5000 TOS"
+    nonce: 2
+
+invariants:
+  - balance_conservation:
+      total_supply_change: "-20 TOS"
+  - energy_weight_consistency: true

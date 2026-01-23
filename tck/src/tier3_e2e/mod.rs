@@ -20,6 +20,15 @@ pub mod restart;
 /// Multi-layer state verification across cluster nodes
 pub mod verification;
 
+/// Enhanced cluster configuration types
+pub mod cluster_config;
+/// Cluster-level operations (mining, transfers, sync)
+pub mod operations;
+/// Network partition testing
+pub mod partition;
+/// Transport abstraction with fault injection hooks
+pub mod transport;
+
 #[cfg(test)]
 mod e2e_tests;
 
@@ -34,3 +43,16 @@ pub use byzantine::{BlockInvalidity, DropTarget, FaultInjector, FaultStats, Node
 pub use clone::{CloneConfig, ClonedAccount, ClonedContract, ClonedState};
 pub use confirmation::TxConfirmation;
 pub use restart::{PreStopState, RestartMode};
+
+pub use cluster_config::{ClusterConfig, MiningConfig, NodeConfig, NodeRole};
+pub use operations::{
+    create_transfer_tx, mine_and_propagate, run_transaction_sequence, send_and_verify_transfer,
+    verify_cluster_consistency,
+};
+pub use partition::{
+    run_partition_test, AsyncFn, Partition, PartitionController, PartitionTestResult,
+};
+pub use transport::{
+    InterceptRule, LocalhostTransport, MessageType, TransportAction, TransportMessage,
+    TransportStats,
+};

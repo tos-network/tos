@@ -1,0 +1,44 @@
+fixture:
+  name: "delegation"
+  version: "1.0"
+  description: "Delegate frozen TOS to a validator"
+  tier: [1]
+
+setup:
+  accounts:
+    delegator:
+      balance: "100000 TOS"
+      nonce: 0
+      frozen_balance: "50000 TOS"
+    validator:
+      balance: "1000000 TOS"
+      nonce: 0
+      frozen_balance: "500000 TOS"
+
+steps:
+  - transaction:
+      type: delegate
+      from: delegator
+      to: validator
+      amount: "20000 TOS"
+      fee: "10 TOS"
+      expected_result: success
+  - transaction:
+      type: delegate
+      from: delegator
+      to: validator
+      amount: "40000 TOS"
+      fee: "10 TOS"
+      expected_result: failure
+      expected_error: "delegation_exceeds_frozen"
+
+expected_state:
+  delegator:
+    balance: "99980 TOS"
+    frozen_balance: "50000 TOS"
+    nonce: 1
+
+invariants:
+  - delegation_bounds:
+      account: delegator
+      max_delegation: "50000 TOS"

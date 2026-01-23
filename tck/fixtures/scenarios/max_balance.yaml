@@ -1,0 +1,35 @@
+fixture:
+  name: "max_balance_overflow"
+  version: "1.0"
+  description: "Transfer that would cause recipient overflow is handled safely"
+  tier: [1]
+
+setup:
+  accounts:
+    alice:
+      balance: "1000000 TOS"
+      nonce: 0
+    bob:
+      balance: "18446744073709551000 TOS"
+      nonce: 0
+
+steps:
+  - transaction:
+      from: alice
+      to: bob
+      amount: "1000 TOS"
+      fee: "10 TOS"
+      expected_result: failure
+      expected_error: "overflow"
+
+expected_state:
+  alice:
+    balance: "1000000 TOS"
+    nonce: 0
+  bob:
+    balance: "18446744073709551000 TOS"
+
+invariants:
+  - balance_conservation:
+      total_supply_change: "0 TOS"
+  - no_negative_balances: true
