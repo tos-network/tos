@@ -9,7 +9,7 @@ use indexmap::{IndexMap, IndexSet};
 use log::debug;
 use std::borrow::Cow;
 use tos_common::{
-    account::{AccountSummary, AgentAccountMeta, Balance, EnergyResource, Nonce},
+    account::{AccountSummary, AgentAccountMeta, Balance, EnergyResource, Nonce, UnoBalance},
     arbitration::ArbiterAccount,
     asset::AssetData,
     block::TopoHeight,
@@ -165,6 +165,8 @@ pub enum StepRequest<'a> {
     A2aNonces(Option<u64>),
     // Contract asset data, pagination
     ContractAssets(Option<u64>),
+    // UNO balance keys discovery (list all key+asset pairs), pagination
+    UnoBalanceKeys(Option<u64>),
 
     // Request blocks metadata starting topoheight
     BlocksMetadata(TopoHeight),
@@ -201,6 +203,7 @@ impl<'a> StepRequest<'a> {
             Self::AgentData(_) => StepKind::Agent,
             Self::A2aNonces(_) => StepKind::A2aNonce,
             Self::ContractAssets(_) => StepKind::ContractAsset,
+            Self::UnoBalanceKeys(_) => StepKind::UnoBalance,
             Self::BlocksMetadata(_) => StepKind::BlocksMetadata,
         }
     }
@@ -460,6 +463,7 @@ impl Serializer for StepRequest<'_> {
             26 => Self::AgentData(Option::read(reader)?),
             27 => Self::A2aNonces(Option::read(reader)?),
             28 => Self::ContractAssets(Option::read(reader)?),
+            29 => Self::UnoBalanceKeys(Option::read(reader)?),
             id => {
                 if log::log_enabled!(log::Level::Debug) {
                     debug!("Received invalid value for StepRequest: {}", id);
@@ -620,6 +624,10 @@ impl Serializer for StepRequest<'_> {
                 writer.write_u8(28);
                 page.write(writer);
             }
+            Self::UnoBalanceKeys(page) => {
+                writer.write_u8(29);
+                page.write(writer);
+            }
             Self::BlocksMetadata(topoheight) => {
                 writer.write_u8(10);
                 writer.write_u64(topoheight);
@@ -673,6 +681,7 @@ impl Serializer for StepRequest<'_> {
             Self::AgentData(page) => page.size(),
             Self::A2aNonces(page) => page.size(),
             Self::ContractAssets(page) => page.size(),
+            Self::UnoBalanceKeys(page) => page.size(),
             Self::BlocksMetadata(topoheight) => topoheight.size(),
         };
         // 1 for the id
@@ -740,13 +749,15 @@ pub enum StepResponse {
     // Referral record entries, pagination
     ReferralRecords(IndexMap<PublicKey, ReferralRecord>, Option<u64>),
     // UNO balance entries, pagination
-    UnoBalances(Vec<Balance>, Option<u64>),
+    UnoBalances(Vec<UnoBalance>, Option<u64>),
     // Agent account entries, pagination
     AgentData(IndexMap<PublicKey, AgentAccountMeta>, Option<u64>),
     // A2A nonce entries (nonce_bytes, timestamp), pagination
     A2aNonces(Vec<(Vec<u8>, u64)>, Option<u64>),
     // Contract asset data entries, pagination
     ContractAssets(IndexMap<Hash, ContractAssetData>, Option<u64>),
+    // UNO balance keys discovery (key, asset pairs), pagination
+    UnoBalanceKeys(Vec<(PublicKey, Hash)>, Option<u64>),
 
     // top blocks metadata
     BlocksMetadata(IndexSet<BlockMetadata>),
@@ -783,6 +794,7 @@ impl StepResponse {
             Self::AgentData(_, _) => StepKind::Agent,
             Self::A2aNonces(_, _) => StepKind::A2aNonce,
             Self::ContractAssets(_, _) => StepKind::ContractAsset,
+            Self::UnoBalanceKeys(_, _) => StepKind::UnoBalance,
             Self::BlocksMetadata(_) => StepKind::BlocksMetadata,
         }
     }
@@ -1379,7 +1391,7 @@ impl Serializer for StepResponse {
 
                 let mut entries = Vec::with_capacity(len as usize);
                 for _ in 0..len {
-                    entries.push(Balance::read(reader)?);
+                    entries.push(UnoBalance::read(reader)?);
                 }
 
                 let page = Option::read(reader)?;
@@ -1485,6 +1497,33 @@ impl Serializer for StepResponse {
                     }
                 }
                 Self::ContractAssets(entries, page)
+            }
+            29 => {
+                let len = reader.read_u16()?;
+                if len > MAX_ITEMS_PER_PAGE as u16 {
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("Invalid uno balance keys response length: {}", len);
+                    }
+                    return Err(ReaderError::InvalidValue);
+                }
+
+                let mut entries = Vec::with_capacity(len as usize);
+                for _ in 0..len {
+                    let key = PublicKey::read(reader)?;
+                    let asset = Hash::read(reader)?;
+                    entries.push((key, asset));
+                }
+
+                let page = Option::read(reader)?;
+                if let Some(page_number) = &page {
+                    if *page_number == 0 {
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("Invalid page number (0) in Step Response");
+                        }
+                        return Err(ReaderError::InvalidValue);
+                    }
+                }
+                Self::UnoBalanceKeys(entries, page)
             }
             10 => {
                 let len = reader.read_u16()?;
@@ -1675,6 +1714,15 @@ impl Serializer for StepResponse {
                 }
                 page.write(writer);
             }
+            Self::UnoBalanceKeys(entries, page) => {
+                writer.write_u8(29);
+                writer.write_u16(entries.len() as u16);
+                for (key, asset) in entries {
+                    key.write(writer);
+                    asset.write(writer);
+                }
+                page.write(writer);
+            }
             Self::BlocksMetadata(blocks) => {
                 writer.write_u8(10);
                 blocks.write(writer);
@@ -1739,6 +1787,13 @@ impl Serializer for StepResponse {
                 2 + entries
                     .iter()
                     .map(|(key, value)| key.size() + 4 + value.size())
+                    .sum::<usize>()
+                    + page.size()
+            }
+            Self::UnoBalanceKeys(entries, page) => {
+                2 + entries
+                    .iter()
+                    .map(|(key, asset)| key.size() + asset.size())
                     .sum::<usize>()
                     + page.size()
             }
@@ -3080,6 +3135,43 @@ mod tests {
             StepResponse::UnoBalances(entries, page) => {
                 assert!(entries.is_empty());
                 assert_eq!(page, None);
+            }
+            _ => panic!("Expected UnoBalances variant"),
+        }
+        verify_size_response(&response);
+    }
+
+    #[test]
+    fn test_response_uno_balances_with_data() {
+        use tos_common::account::{BalanceType, CiphertextCache};
+        use tos_common::crypto::elgamal::Ciphertext;
+
+        let entries = vec![
+            UnoBalance {
+                topoheight: 100,
+                output_balance: None,
+                final_balance: CiphertextCache::Decompressed(Ciphertext::zero()),
+                balance_type: BalanceType::Input,
+            },
+            UnoBalance {
+                topoheight: 200,
+                output_balance: Some(CiphertextCache::Decompressed(Ciphertext::zero())),
+                final_balance: CiphertextCache::Decompressed(Ciphertext::zero()),
+                balance_type: BalanceType::Both,
+            },
+        ];
+        let response = StepResponse::UnoBalances(entries, Some(3));
+        let decoded = round_trip_response(&response);
+        match decoded {
+            StepResponse::UnoBalances(entries, page) => {
+                assert_eq!(entries.len(), 2);
+                assert_eq!(entries[0].topoheight, 100);
+                assert_eq!(entries[0].balance_type, BalanceType::Input);
+                assert!(entries[0].output_balance.is_none());
+                assert_eq!(entries[1].topoheight, 200);
+                assert_eq!(entries[1].balance_type, BalanceType::Both);
+                assert!(entries[1].output_balance.is_some());
+                assert_eq!(page, Some(3));
             }
             _ => panic!("Expected UnoBalances variant"),
         }

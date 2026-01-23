@@ -3,7 +3,7 @@
 use crate::core::{
     error::BlockchainError,
     storage::{
-        rocksdb::{AccountId, AssetId, Column},
+        rocksdb::{AccountId, AssetId, Column, IteratorMode},
         NetworkProvider, RocksStorage, UnoBalanceProvider,
     },
 };
@@ -522,6 +522,73 @@ impl UnoBalanceProvider for RocksStorage {
         let asset_id = self.get_asset_id(asset)?;
         let versioned_key = Self::get_versioned_uno_balance_key(account_id, asset_id, topoheight);
         self.remove_from_disk(Column::VersionedUnoBalances, &versioned_key)
+    }
+
+    async fn list_all_uno_balance_keys(
+        &self,
+        skip: usize,
+        limit: usize,
+    ) -> Result<Vec<(PublicKey, Hash)>, BlockchainError> {
+        let mut results = Vec::new();
+        let iter = Self::iter_raw_internal(
+            &self.db,
+            self.snapshot.as_ref(),
+            IteratorMode::Start,
+            Column::UnoBalances,
+        )?;
+
+        let mut skipped = 0usize;
+        for item in iter {
+            let (key_bytes, _) = item?;
+            let key_ref = key_bytes.as_ref();
+            if key_ref.len() < 16 {
+                continue;
+            }
+            if skipped < skip {
+                skipped += 1;
+                continue;
+            }
+            if results.len() >= limit {
+                break;
+            }
+            let account_id = AccountId::from_be_bytes(
+                key_ref[0..8]
+                    .try_into()
+                    .map_err(|_| BlockchainError::Unknown)?,
+            );
+            let asset_id = AssetId::from_be_bytes(
+                key_ref[8..16]
+                    .try_into()
+                    .map_err(|_| BlockchainError::Unknown)?,
+            );
+            let pubkey = self.get_account_key_from_id(account_id)?;
+            let asset_hash = self.get_asset_hash_from_id(asset_id)?;
+            results.push((pubkey, asset_hash));
+        }
+
+        Ok(results)
+    }
+
+    async fn import_uno_balance(
+        &mut self,
+        key: &PublicKey,
+        asset: &Hash,
+        topoheight: TopoHeight,
+        balance: &VersionedUnoBalance,
+    ) -> Result<(), BlockchainError> {
+        let account_id = self.get_account_id(key)?;
+        let asset_id = self.get_asset_id(asset)?;
+        let versioned_key = Self::get_versioned_uno_balance_key(account_id, asset_id, topoheight);
+        self.insert_into_disk(Column::VersionedUnoBalances, &versioned_key, balance)?;
+
+        // Update the last topoheight pointer if this is newer
+        let pointer_key = Self::get_uno_balance_key(account_id, asset_id);
+        let current_last: Option<TopoHeight> =
+            self.load_optional_from_disk(Column::UnoBalances, &pointer_key)?;
+        if current_last.map_or(true, |last| topoheight > last) {
+            self.insert_into_disk(Column::UnoBalances, &pointer_key, &topoheight.to_be_bytes())?;
+        }
+        Ok(())
     }
 }
 

@@ -5,7 +5,7 @@ use indexmap::{IndexMap, IndexSet};
 use log::{debug, error, info, log_enabled, trace, warn, Level};
 use tokio::try_join;
 use tos_common::{
-    account::{VersionedBalance, VersionedNonce},
+    account::{VersionedBalance, VersionedNonce, VersionedUnoBalance},
     asset::VersionedAssetData,
     contract::{ScheduledExecution, ScheduledExecutionKind},
     crypto::{Hash, PublicKey},
@@ -560,7 +560,7 @@ impl<S: Storage> P2pServer<S> {
                 // Use the topoheight as max boundary for first request, then page as cursor
                 let max = page.unwrap_or(topoheight);
                 let (balances, next_max) = storage
-                    .get_spendable_balances_for(&key, &asset, 0, max, MAX_ITEMS_PER_PAGE)
+                    .get_spendable_uno_balances_for(&key, &asset, 0, max, MAX_ITEMS_PER_PAGE)
                     .await?;
                 StepResponse::UnoBalances(balances, next_max)
             }
@@ -604,6 +604,19 @@ impl<S: Storage> P2pServer<S> {
                 };
                 let map: IndexMap<Hash, ContractAssetData> = entries.into_iter().collect();
                 StepResponse::ContractAssets(map, next_page)
+            }
+            StepRequest::UnoBalanceKeys(page) => {
+                let page = page.unwrap_or(0);
+                let skip = page as usize * MAX_ITEMS_PER_PAGE;
+                let entries = storage
+                    .list_all_uno_balance_keys(skip, MAX_ITEMS_PER_PAGE)
+                    .await?;
+                let next_page = if entries.len() == MAX_ITEMS_PER_PAGE {
+                    Some(page + 1)
+                } else {
+                    None
+                };
+                StepResponse::UnoBalanceKeys(entries, next_page)
             }
             StepRequest::BlocksMetadata(topoheight) => {
                 // go from the lowest available point until the requested stable topoheight
@@ -1788,6 +1801,12 @@ impl<S: Storage> P2pServer<S> {
         // 12. Sync contract assets
         self.sync_contract_assets(peer).await?;
 
+        // 13. Sync UNO balances
+        self.sync_uno_balances(peer, stable_topoheight).await?;
+
+        // 14. Sync energy data
+        self.sync_energy_data(peer, stable_topoheight).await?;
+
         if log::log_enabled!(log::Level::Info) {
             info!("TOS extension data sync complete");
         }
@@ -2197,6 +2216,149 @@ impl<S: Storage> P2pServer<S> {
                 break;
             }
         }
+        Ok(())
+    }
+
+    async fn sync_uno_balances(
+        &self,
+        peer: &Arc<Peer>,
+        stable_topoheight: u64,
+    ) -> Result<(), BlockchainError> {
+        // Step 1: Discover all (key, asset) pairs with UNO balances
+        let mut all_pairs: Vec<(PublicKey, Hash)> = Vec::new();
+        let mut next_page = None;
+        loop {
+            let StepResponse::UnoBalanceKeys(entries, page) = peer
+                .request_boostrap_chain(StepRequest::UnoBalanceKeys(next_page))
+                .await?
+            else {
+                if log::log_enabled!(log::Level::Error) {
+                    error!("Received an invalid StepResponse while fetching UNO balance keys");
+                }
+                return Err(P2pError::InvalidPacket.into());
+            };
+
+            all_pairs.extend(entries);
+            next_page = page;
+            if next_page.is_none() {
+                break;
+            }
+        }
+
+        if log::log_enabled!(log::Level::Info) {
+            info!(
+                "Syncing UNO balances for {} key/asset pairs",
+                all_pairs.len()
+            );
+        }
+
+        // Step 2: For each pair, fetch the full balance history
+        for (key, asset) in &all_pairs {
+            let mut max_topoheight: Option<u64> = Some(stable_topoheight);
+            let mut previous_version: Option<(u64, VersionedUnoBalance)> = None;
+
+            while let Some(max) = max_topoheight {
+                let StepResponse::UnoBalances(balances, next_max) = peer
+                    .request_boostrap_chain(StepRequest::UnoBalances(
+                        Cow::Borrowed(key),
+                        Cow::Borrowed(asset),
+                        stable_topoheight,
+                        Some(max),
+                    ))
+                    .await?
+                else {
+                    if log::log_enabled!(log::Level::Error) {
+                        error!("Received an invalid StepResponse while fetching UNO balances");
+                    }
+                    return Err(P2pError::InvalidPacket.into());
+                };
+
+                for balance in balances {
+                    let (topo, version) = balance.as_version();
+
+                    // Link previous (newer) version to this one
+                    if let Some((prev_topo, mut prev_version)) = previous_version.take() {
+                        prev_version.set_previous_topoheight(Some(topo));
+                        let _permit = self.blockchain.storage_semaphore().acquire().await?;
+                        let mut storage = self.blockchain.get_storage().write().await;
+                        storage
+                            .import_uno_balance(key, asset, prev_topo, &prev_version)
+                            .await?;
+                    }
+
+                    previous_version = Some((topo, version));
+                }
+
+                max_topoheight = next_max;
+            }
+
+            // Store the last (oldest) version with previous_topoheight = None
+            if let Some((topo, version)) = previous_version.take() {
+                let _permit = self.blockchain.storage_semaphore().acquire().await?;
+                let mut storage = self.blockchain.get_storage().write().await;
+                storage
+                    .import_uno_balance(key, asset, topo, &version)
+                    .await?;
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn sync_energy_data(
+        &self,
+        peer: &Arc<Peer>,
+        stable_topoheight: u64,
+    ) -> Result<(), BlockchainError> {
+        // Collect all registered account keys from local storage
+        let all_keys: Vec<PublicKey> = {
+            let storage = self.blockchain.get_storage().read().await;
+            let keys = storage
+                .get_registered_keys(None, None)
+                .await?
+                .collect::<Result<Vec<_>, _>>()?;
+            keys
+        };
+
+        if all_keys.is_empty() {
+            return Ok(());
+        }
+
+        if log::log_enabled!(log::Level::Info) {
+            info!("Syncing energy data for {} accounts", all_keys.len());
+        }
+
+        // Batch keys and request energy data from peer
+        for chunk in all_keys.chunks(MAX_ITEMS_PER_PAGE) {
+            let keys = chunk.to_vec();
+            let StepResponse::EnergyData(results) = peer
+                .request_boostrap_chain(StepRequest::EnergyData(
+                    Cow::Owned(keys.clone()),
+                    stable_topoheight,
+                ))
+                .await?
+            else {
+                if log::log_enabled!(log::Level::Error) {
+                    error!("Received an invalid StepResponse while fetching energy data");
+                }
+                return Err(P2pError::InvalidPacket.into());
+            };
+
+            // Store non-None energy resources
+            let has_entries = results.iter().any(|e| e.is_some());
+            if has_entries {
+                let _permit = self.blockchain.storage_semaphore().acquire().await?;
+                let mut storage = self.blockchain.get_storage().write().await;
+                for (key, energy_opt) in keys.iter().zip(results.iter()) {
+                    if let Some(energy) = energy_opt {
+                        storage
+                            .set_energy_resource(key, stable_topoheight, energy)
+                            .await?;
+                    }
+                }
+            }
+        }
+
         Ok(())
     }
 }

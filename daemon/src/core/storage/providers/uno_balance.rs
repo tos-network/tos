@@ -136,4 +136,22 @@ pub trait UnoBalanceProvider: AccountProvider + NetworkProvider {
         asset: &Hash,
         topoheight: TopoHeight,
     ) -> Result<(), BlockchainError>;
+
+    // ===== Bootstrap Sync =====
+
+    /// List all (key, asset) pairs that have UNO balances with skip/limit pagination
+    async fn list_all_uno_balance_keys(
+        &self,
+        skip: usize,
+        limit: usize,
+    ) -> Result<Vec<(PublicKey, Hash)>, BlockchainError>;
+
+    /// Import a UNO balance version directly without validation (bootstrap sync)
+    async fn import_uno_balance(
+        &mut self,
+        key: &PublicKey,
+        asset: &Hash,
+        topoheight: TopoHeight,
+        balance: &VersionedUnoBalance,
+    ) -> Result<(), BlockchainError>;
 }
