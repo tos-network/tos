@@ -1,0 +1,85 @@
+fixture:
+  name: "multi_asset_workflow"
+  version: "1.0"
+  description: "Tests TOS and UNO asset transfers in sequence"
+  tier: [1, 2, 3]
+
+setup:
+  assets:
+    - id: GOLD
+      name: "Gold Token"
+      supply: "1_000_000"
+      decimals: 8
+
+  accounts:
+    alice:
+      balance: "10_000 TOS"
+      nonce: 0
+      uno_balances:
+        GOLD: 500
+    bob:
+      balance: "1_000 TOS"
+      nonce: 0
+      uno_balances:
+        GOLD: 0
+    charlie:
+      balance: "5_000 TOS"
+      nonce: 0
+
+transactions:
+  - step: 1
+    name: "Alice sends TOS to Bob"
+    type: transfer
+    from: alice
+    to: bob
+    amount: "2_000 TOS"
+    fee: "10 TOS"
+    expect_status: success
+
+  - step: 2
+    name: "Alice sends GOLD to Bob"
+    type: uno_transfer
+    from: alice
+    to: bob
+    asset: GOLD
+    amount: "200"
+    fee: "10 TOS"
+    expect_status: success
+
+  - step: 3
+    name: "Bob sends GOLD to Charlie"
+    type: uno_transfer
+    from: bob
+    to: charlie
+    asset: GOLD
+    amount: "100"
+    fee: "10 TOS"
+    expect_status: success
+
+  - step: 4
+    type: mine_block
+
+expected:
+  accounts:
+    alice:
+      balance: "7_980 TOS"
+      nonce: 2
+      uno_balances:
+        GOLD: 300
+    bob:
+      balance: "2_990 TOS"
+      nonce: 1
+      uno_balances:
+        GOLD: 100
+    charlie:
+      balance: "5_000 TOS"
+      uno_balances:
+        GOLD: 100
+
+invariants:
+  - balance_conservation:
+      total_supply_change: "-30 TOS"
+  - uno_supply_conservation:
+      asset: GOLD
+      total: 500
+  - nonce_monotonicity: true

@@ -1,0 +1,71 @@
+fixture:
+  name: "rapid_freeze_unfreeze"
+  version: "1.0"
+  description: "Stress test: Rapid freeze/unfreeze cycles to verify state consistency"
+  tier: [1]
+
+setup:
+  accounts:
+    staker:
+      balance: "500_000 TOS"
+      nonce: 0
+      frozen_balance: "0 TOS"
+
+transactions:
+  - step: 1
+    type: freeze
+    from: staker
+    amount: "100_000 TOS"
+    fee: "10 TOS"
+    expect_status: success
+
+  - step: 2
+    type: unfreeze
+    from: staker
+    amount: "50_000 TOS"
+    fee: "10 TOS"
+    expect_status: success
+
+  - step: 3
+    type: freeze
+    from: staker
+    amount: "200_000 TOS"
+    fee: "10 TOS"
+    expect_status: success
+
+  - step: 4
+    type: unfreeze
+    from: staker
+    amount: "100_000 TOS"
+    fee: "10 TOS"
+    expect_status: success
+
+  - step: 5
+    type: freeze
+    from: staker
+    amount: "50_000 TOS"
+    fee: "10 TOS"
+    expect_status: success
+
+  - step: 6
+    type: unfreeze
+    from: staker
+    amount: "200_000 TOS"
+    fee: "10 TOS"
+    expect_status: success
+
+  - step: 7
+    type: mine_block
+
+expected:
+  accounts:
+    staker:
+      nonce: 6
+      frozen_balance: "0 TOS"
+
+invariants:
+  - balance_conservation:
+      total_supply_change: "-60 TOS"
+  - nonce_monotonicity: true
+  - energy_weight_consistency: true
+  - no_negative_balances: true

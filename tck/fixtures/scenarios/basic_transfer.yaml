@@ -1,0 +1,41 @@
+fixture:
+  name: "basic_transfer"
+  version: "1.0"
+  description: "Simple TOS transfer between two accounts"
+  tier: [1, 2, 3]
+
+setup:
+  accounts:
+    alice:
+      balance: "10_000 TOS"
+      nonce: 0
+    bob:
+      balance: "1_000 TOS"
+      nonce: 0
+
+transactions:
+  - step: 1
+    name: "Alice sends TOS to Bob"
+    type: transfer
+    from: alice
+    to: bob
+    amount: "2_000 TOS"
+    fee: "10 TOS"
+    expect_status: success
+
+  - step: 2
+    type: mine_block
+
+expected:
+  accounts:
+    alice:
+      balance: "7_990 TOS"
+      nonce: 1
+    bob:
+      balance: "3_000 TOS"
+      nonce: 0
+
+invariants:
+  - balance_conservation:
+      total_supply_change: "-10 TOS"
+  - nonce_monotonicity: true

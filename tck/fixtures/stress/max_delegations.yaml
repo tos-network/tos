@@ -1,0 +1,90 @@
+fixture:
+  name: "max_delegations"
+  version: "1.0"
+  description: "Stress test: Delegate to multiple validators up to capacity limit"
+  tier: [1]
+
+setup:
+  accounts:
+    delegator:
+      balance: "1_000_000 TOS"
+      nonce: 0
+      frozen_balance: "500_000 TOS"
+    validator_1:
+      balance: "100_000 TOS"
+      nonce: 0
+    validator_2:
+      balance: "100_000 TOS"
+      nonce: 0
+    validator_3:
+      balance: "100_000 TOS"
+      nonce: 0
+    validator_4:
+      balance: "100_000 TOS"
+      nonce: 0
+    validator_5:
+      balance: "100_000 TOS"
+      nonce: 0
+
+transactions:
+  - step: 1
+    type: delegate
+    from: delegator
+    to: validator_1
+    amount: "100_000 TOS"
+    fee: "10 TOS"
+    expect_status: success
+
+  - step: 2
+    type: delegate
+    from: delegator
+    to: validator_2
+    amount: "100_000 TOS"
+    fee: "10 TOS"
+    expect_status: success
+
+  - step: 3
+    type: delegate
+    from: delegator
+    to: validator_3
+    amount: "100_000 TOS"
+    fee: "10 TOS"
+    expect_status: success
+
+  - step: 4
+    type: delegate
+    from: delegator
+    to: validator_4
+    amount: "100_000 TOS"
+    fee: "10 TOS"
+    expect_status: success
+
+  - step: 5
+    type: delegate
+    from: delegator
+    to: validator_5
+    amount: "100_000 TOS"
+    fee: "10 TOS"
+    expect_status: success
+
+  - step: 6
+    type: mine_block
+
+expected:
+  accounts:
+    delegator:
+      nonce: 5
+      frozen_balance: "500_000 TOS"
+      delegations_out:
+        validator_1: "100_000 TOS"
+        validator_2: "100_000 TOS"
+        validator_3: "100_000 TOS"
+        validator_4: "100_000 TOS"
+        validator_5: "100_000 TOS"
+
+invariants:
+  - delegation_bounds:
+      account: delegator
+      max_delegation: "500_000 TOS"
+  - nonce_monotonicity: true
+  - no_negative_balances: true

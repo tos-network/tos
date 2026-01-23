@@ -1,0 +1,61 @@
+fixture:
+  name: "reg_002_nonce_gap_after_failed_tx"
+  version: "1.0"
+  description: "Regression: Nonce should not increment on failed transactions"
+  tier: [1, 2]
+
+setup:
+  accounts:
+    alice:
+      balance: "1_000 TOS"
+      nonce: 0
+    bob:
+      balance: "0 TOS"
+      nonce: 0
+
+transactions:
+  - step: 1
+    name: "Insufficient balance transfer (should fail)"
+    type: transfer
+    from: alice
+    to: bob
+    amount: "5_000 TOS"
+    fee: "10 TOS"
+    expect_status: error
+    expect_error: "insufficient_balance"
+
+  - step: 2
+    name: "Second failed transfer"
+    type: transfer
+    from: alice
+    to: bob
+    amount: "2_000 TOS"
+    fee: "10 TOS"
+    expect_status: error
+    expect_error: "insufficient_balance"
+
+  - step: 3
+    name: "Valid transfer should succeed with nonce 1"
+    type: transfer
+    from: alice
+    to: bob
+    amount: "500 TOS"
+    fee: "10 TOS"
+    expect_status: success
+
+  - step: 4
+    type: mine_block
+
+expected:
+  accounts:
+    alice:
+      balance: "490 TOS"
+      nonce: 1
+    bob:
+      balance: "500 TOS"
+      nonce: 0
+
+invariants:
+  - balance_conservation:
+      total_supply_change: "-10 TOS"
+  - nonce_monotonicity: true

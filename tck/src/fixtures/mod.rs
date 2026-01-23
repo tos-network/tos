@@ -73,6 +73,10 @@ pub mod parser;
 /// Regression capture utility for generating fixture files from observed behavior
 pub mod regression;
 pub mod runner;
+/// Template loading and interpolation for reusable account/scenario definitions
+pub mod templates;
+/// Calculation trace output for debugging fixture execution
+pub mod trace;
 pub mod types;
 pub mod verification;
 
@@ -88,6 +92,8 @@ pub use runner::{
     create_backend, execute_fixture, run_fixture_cross_tier, run_fixture_file_on_backend,
     run_fixture_on_backend,
 };
+pub use templates::{AccountTemplate, ScenarioTemplate, TemplateRegistry};
+pub use trace::{ExecutionTrace, StepTrace, TraceBuilder};
 pub use types::{
     AccountState, CrossTierResult, EnergyState, ExpectStatus, Fixture, FixtureMeta, FixtureResult,
     FixtureSetup, Step, StepResult, Tier, TransactionStep, TransactionType,
