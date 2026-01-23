@@ -48,6 +48,30 @@ use crate::{
     },
 };
 
+/// Maximum number of pagination pages allowed during bootstrap sync.
+/// Prevents infinite loops from malicious peers sending endless pages.
+/// At MAX_ITEMS_PER_PAGE=1024, this allows up to ~100M items per query.
+const MAX_BOOTSTRAP_PAGES: u64 = 100_000;
+
+/// Maximum number of balance versions allowed per key/asset pair during sync.
+/// Prevents unbounded memory accumulation from malicious peers.
+const MAX_VERSIONS_PER_BALANCE: usize = 1_000_000;
+
+/// Maximum number of entries allowed in memory accumulators during sync.
+/// Prevents OOM from malicious peers sending excessive unique entries.
+const MAX_ACCUMULATOR_ENTRIES: usize = 10_000_000;
+
+/// Compute checked page offset for skip-based pagination.
+/// Returns an error if the multiplication would overflow.
+#[inline]
+fn checked_page_offset(page: u64) -> Result<usize, BlockchainError> {
+    (page as usize)
+        .checked_mul(MAX_ITEMS_PER_PAGE)
+        .ok_or_else(|| {
+            BlockchainError::Unknown // page offset overflow
+        })
+}
+
 impl<S: Storage> P2pServer<S> {
     // Handle a bootstrap chain request
     // We have differents steps available for a bootstrap sync
@@ -126,7 +150,7 @@ impl<S: Storage> P2pServer<S> {
                 let assets = storage
                     .get_assets_with_data_in_range(Some(min), Some(max))
                     .await?
-                    .skip(page as usize * MAX_ITEMS_PER_PAGE)
+                    .skip(checked_page_offset(page)?)
                     .take(MAX_ITEMS_PER_PAGE)
                     .map(|res| match res {
                         Ok((hash, _, data)) => Ok((hash, data)),
@@ -168,7 +192,7 @@ impl<S: Storage> P2pServer<S> {
                 let assets = storage
                     .get_assets_for(&key)
                     .await?
-                    .skip(page as usize * MAX_ITEMS_PER_PAGE)
+                    .skip(checked_page_offset(page)?)
                     .take(MAX_ITEMS_PER_PAGE)
                     .collect::<Result<IndexSet<_>, _>>()?;
 
@@ -269,7 +293,7 @@ impl<S: Storage> P2pServer<S> {
                 let keys: IndexSet<PublicKey> = storage
                     .get_registered_keys(Some(min), Some(max))
                     .await?
-                    .skip(page as usize * MAX_ITEMS_PER_PAGE)
+                    .skip(checked_page_offset(page)?)
                     .take(MAX_ITEMS_PER_PAGE)
                     .collect::<Result<_, _>>()?;
 
@@ -290,7 +314,7 @@ impl<S: Storage> P2pServer<S> {
                 let contracts = storage
                     .get_contracts(min, max)
                     .await?
-                    .skip(page as usize * MAX_ITEMS_PER_PAGE)
+                    .skip(checked_page_offset(page)?)
                     .take(MAX_ITEMS_PER_PAGE)
                     .collect::<Result<IndexSet<Hash>, _>>()?;
 
@@ -331,7 +355,7 @@ impl<S: Storage> P2pServer<S> {
                 let assets = storage
                     .get_contract_assets_for(&contract)
                     .await?
-                    .skip(page as usize * MAX_ITEMS_PER_PAGE)
+                    .skip(checked_page_offset(page)?)
                     .take(MAX_ITEMS_PER_PAGE)
                     .collect::<Result<IndexSet<_>, _>>()?;
 
@@ -377,7 +401,7 @@ impl<S: Storage> P2pServer<S> {
                 let stream = storage
                     .get_contract_data_entries_at_maximum_topoheight(&contract, topoheight)
                     .await?
-                    .skip(page_id as usize * MAX_ITEMS_PER_PAGE)
+                    .skip(checked_page_offset(page_id)?)
                     .take(MAX_ITEMS_PER_PAGE);
 
                 let entries: IndexMap<_, _> = stream.boxed().try_collect().await?;
@@ -399,7 +423,7 @@ impl<S: Storage> P2pServer<S> {
                 let stream = storage
                     .get_registered_contract_scheduled_executions_in_range(min, max)
                     .await?
-                    .skip(page as usize * MAX_ITEMS_PER_PAGE)
+                    .skip(checked_page_offset(page)?)
                     .take(MAX_ITEMS_PER_PAGE)
                     .map(|res| res.map(|(_, _, execution)| execution));
 
@@ -415,7 +439,7 @@ impl<S: Storage> P2pServer<S> {
             // === TOS Extension Handlers ===
             StepRequest::KycData(page) => {
                 let page = page.unwrap_or(0);
-                let skip = page as usize * MAX_ITEMS_PER_PAGE;
+                let skip = checked_page_offset(page)?;
                 let entries = storage.list_all_kyc_data(skip, MAX_ITEMS_PER_PAGE).await?;
                 let next_page = if entries.len() == MAX_ITEMS_PER_PAGE {
                     Some(page + 1)
@@ -427,7 +451,7 @@ impl<S: Storage> P2pServer<S> {
             }
             StepRequest::Committees(page) => {
                 let page = page.unwrap_or(0);
-                let skip = page as usize * MAX_ITEMS_PER_PAGE;
+                let skip = checked_page_offset(page)?;
                 let entries = storage
                     .list_all_committees(skip, MAX_ITEMS_PER_PAGE)
                     .await?;
@@ -445,7 +469,7 @@ impl<S: Storage> P2pServer<S> {
             }
             StepRequest::NftCollections(topoheight, page) => {
                 let page = page.unwrap_or(0);
-                let skip = page as usize * MAX_ITEMS_PER_PAGE;
+                let skip = checked_page_offset(page)?;
                 let entries = storage
                     .list_all_nft_collections(topoheight, skip, MAX_ITEMS_PER_PAGE)
                     .await?;
@@ -459,7 +483,7 @@ impl<S: Storage> P2pServer<S> {
             }
             StepRequest::NftTokens(collection_id, topoheight, page) => {
                 let page = page.unwrap_or(0);
-                let skip = page as usize * MAX_ITEMS_PER_PAGE;
+                let skip = checked_page_offset(page)?;
                 let entries = storage
                     .list_nft_tokens_for_collection(
                         &collection_id,
@@ -478,7 +502,7 @@ impl<S: Storage> P2pServer<S> {
             }
             StepRequest::NftOwnership(collection_id, topoheight, page) => {
                 let page = page.unwrap_or(0);
-                let skip = page as usize * MAX_ITEMS_PER_PAGE;
+                let skip = checked_page_offset(page)?;
                 let entries = storage
                     .list_nft_owners_for_collection(
                         &collection_id,
@@ -497,7 +521,7 @@ impl<S: Storage> P2pServer<S> {
             }
             StepRequest::EscrowAccounts(page) => {
                 let page = page.unwrap_or(0);
-                let skip = page as usize * MAX_ITEMS_PER_PAGE;
+                let skip = checked_page_offset(page)?;
                 let entries = storage.list_all_escrows(skip, MAX_ITEMS_PER_PAGE).await?;
                 let next_page = if entries.len() == MAX_ITEMS_PER_PAGE {
                     Some(page + 1)
@@ -509,7 +533,7 @@ impl<S: Storage> P2pServer<S> {
             }
             StepRequest::ArbitrationData(page) => {
                 let page = page.unwrap_or(0);
-                let skip = page as usize * MAX_ITEMS_PER_PAGE;
+                let skip = checked_page_offset(page)?;
                 let entries = storage
                     .list_all_arbitration_opens(skip, MAX_ITEMS_PER_PAGE)
                     .await?;
@@ -522,7 +546,7 @@ impl<S: Storage> P2pServer<S> {
             }
             StepRequest::ArbiterAccounts(page) => {
                 let page = page.unwrap_or(0);
-                let skip = page as usize * MAX_ITEMS_PER_PAGE;
+                let skip = checked_page_offset(page)?;
                 let entries = storage.list_all_arbiters(skip, MAX_ITEMS_PER_PAGE).await?;
                 let next_page = if entries.len() == MAX_ITEMS_PER_PAGE {
                     Some(page + 1)
@@ -534,7 +558,7 @@ impl<S: Storage> P2pServer<S> {
             }
             StepRequest::TnsNames(page) => {
                 let page = page.unwrap_or(0);
-                let skip = page as usize * MAX_ITEMS_PER_PAGE;
+                let skip = checked_page_offset(page)?;
                 let entries = storage.list_all_tns_names(skip, MAX_ITEMS_PER_PAGE).await?;
                 let next_page = if entries.len() == MAX_ITEMS_PER_PAGE {
                     Some(page + 1)
@@ -556,7 +580,7 @@ impl<S: Storage> P2pServer<S> {
             }
             StepRequest::ReferralRecords(page) => {
                 let page = page.unwrap_or(0);
-                let skip = page as usize * MAX_ITEMS_PER_PAGE;
+                let skip = checked_page_offset(page)?;
                 let entries = storage
                     .list_all_referral_records(skip, MAX_ITEMS_PER_PAGE)
                     .await?;
@@ -578,7 +602,7 @@ impl<S: Storage> P2pServer<S> {
             }
             StepRequest::AgentData(page) => {
                 let page = page.unwrap_or(0);
-                let skip = page as usize * MAX_ITEMS_PER_PAGE;
+                let skip = checked_page_offset(page)?;
                 let entries = storage
                     .list_all_agent_accounts(skip, MAX_ITEMS_PER_PAGE)
                     .await?;
@@ -592,7 +616,7 @@ impl<S: Storage> P2pServer<S> {
             }
             StepRequest::A2aNonces(page) => {
                 let page = page.unwrap_or(0);
-                let skip = page as usize * MAX_ITEMS_PER_PAGE;
+                let skip = checked_page_offset(page)?;
                 let entries = storage
                     .list_all_a2a_nonces(skip, MAX_ITEMS_PER_PAGE)
                     .await?;
@@ -605,7 +629,7 @@ impl<S: Storage> P2pServer<S> {
             }
             StepRequest::ContractAssets(page) => {
                 let page = page.unwrap_or(0);
-                let skip = page as usize * MAX_ITEMS_PER_PAGE;
+                let skip = checked_page_offset(page)?;
                 let entries = storage
                     .list_all_contract_assets(skip, MAX_ITEMS_PER_PAGE)
                     .await?;
@@ -619,7 +643,7 @@ impl<S: Storage> P2pServer<S> {
             }
             StepRequest::UnoBalanceKeys(page) => {
                 let page = page.unwrap_or(0);
-                let skip = page as usize * MAX_ITEMS_PER_PAGE;
+                let skip = checked_page_offset(page)?;
                 let entries = storage
                     .list_all_uno_balance_keys(skip, MAX_ITEMS_PER_PAGE)
                     .await?;
@@ -718,8 +742,17 @@ impl<S: Storage> P2pServer<S> {
         let mut top_topoheight: u64 = 0;
         let mut top_height: u64 = 0;
         let mut top_block_hash: Option<Hash> = None;
+        let mut main_loop_iterations: u64 = 0;
 
         loop {
+            main_loop_iterations = main_loop_iterations.saturating_add(1);
+            if main_loop_iterations > MAX_BOOTSTRAP_PAGES {
+                if log::log_enabled!(log::Level::Error) {
+                    error!("Bootstrap main loop exceeded maximum iterations");
+                }
+                return Err(P2pError::InvalidPacket.into());
+            }
+
             let response = if let Some(step) = step.take() {
                 if log::log_enabled!(log::Level::Info) {
                     info!("Requesting step {:?}", step.kind());
@@ -1382,6 +1415,7 @@ impl<S: Storage> P2pServer<S> {
             );
         }
         let mut page = None;
+        let mut pages_received: u64 = 0;
         loop {
             let response = peer
                 .request_boostrap_chain(StepRequest::KeyBalances(
@@ -1421,10 +1455,18 @@ impl<S: Storage> P2pServer<S> {
                         let min_topo = account.output_topoheight.unwrap_or(0);
 
                         let mut highest_topoheight = None;
-                        let mut total_versions = 0;
+                        let mut total_versions: usize = 0;
                         let mut pending_writes: Vec<(u64, VersionedBalance)> = Vec::new();
+                        let mut last_topo: Option<u64> = None;
                         // Go through all balance history
                         while let Some(max) = max_topoheight {
+                            if total_versions >= MAX_VERSIONS_PER_BALANCE {
+                                if log::log_enabled!(log::Level::Error) {
+                                    error!("Balance version count exceeded limit for asset {}", asset);
+                                }
+                                return Err(P2pError::InvalidPacket)
+                            }
+
                             if log::log_enabled!(log::Level::Debug) {
                                 debug!("Requesting spendable balances for asset...");
                             }
@@ -1436,10 +1478,22 @@ impl<S: Storage> P2pServer<S> {
                                 return Err(P2pError::InvalidPacket)
                             };
 
-                            total_versions += balances.len();
+                            total_versions = total_versions.saturating_add(balances.len());
 
                             for balance in balances {
                                 let (topo, version) = balance.as_version();
+
+                                // Validate topoheight ordering: versions must be non-increasing
+                                if let Some(prev) = last_topo {
+                                    if topo >= prev {
+                                        if log::log_enabled!(log::Level::Error) {
+                                            error!("Balance version ordering violation: topo {} >= previous {}", topo, prev);
+                                        }
+                                        return Err(P2pError::InvalidPacket)
+                                    }
+                                }
+                                last_topo = Some(topo);
+
                                 if highest_topoheight.is_none() {
                                     highest_topoheight = Some(topo);
                                 }
@@ -1450,6 +1504,16 @@ impl<S: Storage> P2pServer<S> {
                                 }
 
                                 previous_version = Some((topo, version));
+                            }
+
+                            // Validate next cursor is strictly less than current max
+                            if let Some(next) = max_next {
+                                if next >= max {
+                                    if log::log_enabled!(log::Level::Error) {
+                                        error!("SpendableBalances cursor not decreasing: next {} >= current {}", next, max);
+                                    }
+                                    return Err(P2pError::InvalidPacket)
+                                }
                             }
 
                             max_topoheight = max_next;
@@ -1484,6 +1548,14 @@ impl<S: Storage> P2pServer<S> {
 
                     Ok(())
                 }).await?;
+
+            pages_received = pages_received.saturating_add(1);
+            if pages_received >= MAX_BOOTSTRAP_PAGES {
+                if log::log_enabled!(log::Level::Error) {
+                    error!("KeyBalances pagination exceeded max pages limit");
+                }
+                return Err(P2pError::InvalidPacket.into());
+            }
 
             if page.is_none() {
                 if log::log_enabled!(log::Level::Debug) {
@@ -1630,6 +1702,7 @@ impl<S: Storage> P2pServer<S> {
         stable_topoheight: u64,
     ) -> Result<(), P2pError> {
         let mut next_page = None;
+        let mut pages_received: u64 = 0;
         loop {
             let StepResponse::ContractBalances(balances, page) = peer
                 .request_boostrap_chain(StepRequest::ContractBalances(
@@ -1661,6 +1734,14 @@ impl<S: Storage> P2pServer<S> {
                     .await?;
             }
 
+            pages_received = pages_received.saturating_add(1);
+            if pages_received >= MAX_BOOTSTRAP_PAGES {
+                if log::log_enabled!(log::Level::Error) {
+                    error!("Bootstrap sync exceeded maximum page limit");
+                }
+                return Err(P2pError::InvalidPacket.into());
+            }
+
             next_page = page;
             if next_page.is_none() {
                 break;
@@ -1678,6 +1759,7 @@ impl<S: Storage> P2pServer<S> {
         stable_topoheight: u64,
     ) -> Result<(), P2pError> {
         let mut next_page = None;
+        let mut pages_received: u64 = 0;
         loop {
             let StepResponse::ContractStores(entries, page) = peer
                 .request_boostrap_chain(StepRequest::ContractStores(
@@ -1707,6 +1789,14 @@ impl<S: Storage> P2pServer<S> {
                         &VersionedContractData::new(Some(value), None),
                     )
                     .await?;
+            }
+
+            pages_received = pages_received.saturating_add(1);
+            if pages_received >= MAX_BOOTSTRAP_PAGES {
+                if log::log_enabled!(log::Level::Error) {
+                    error!("Bootstrap sync exceeded maximum page limit");
+                }
+                return Err(P2pError::InvalidPacket.into());
             }
 
             next_page = page;
@@ -1759,6 +1849,7 @@ impl<S: Storage> P2pServer<S> {
         stable_topoheight: u64,
     ) -> Result<(), BlockchainError> {
         let mut next_page = None;
+        let mut pages_received: u64 = 0;
         loop {
             let StepResponse::ContractsExecutions(executions, page) = peer
                 .request_boostrap_chain(StepRequest::ContractsExecutions(
@@ -1792,6 +1883,14 @@ impl<S: Storage> P2pServer<S> {
                         )
                         .await?;
                 }
+            }
+
+            pages_received = pages_received.saturating_add(1);
+            if pages_received >= MAX_BOOTSTRAP_PAGES {
+                if log::log_enabled!(log::Level::Error) {
+                    error!("Bootstrap sync exceeded maximum page limit");
+                }
+                return Err(P2pError::InvalidPacket.into());
             }
 
             next_page = page;
@@ -1864,6 +1963,7 @@ impl<S: Storage> P2pServer<S> {
 
     async fn sync_kyc_data(&self, peer: &Arc<Peer>) -> Result<(), BlockchainError> {
         let mut next_page = None;
+        let mut pages_received: u64 = 0;
         loop {
             let StepResponse::KycData(entries, page) = peer
                 .request_boostrap_chain(StepRequest::KycData(next_page))
@@ -1883,6 +1983,14 @@ impl<S: Storage> P2pServer<S> {
                 }
             }
 
+            pages_received = pages_received.saturating_add(1);
+            if pages_received >= MAX_BOOTSTRAP_PAGES {
+                if log::log_enabled!(log::Level::Error) {
+                    error!("Bootstrap sync exceeded maximum page limit");
+                }
+                return Err(P2pError::InvalidPacket.into());
+            }
+
             next_page = page;
             if next_page.is_none() {
                 break;
@@ -1893,6 +2001,7 @@ impl<S: Storage> P2pServer<S> {
 
     async fn sync_committees(&self, peer: &Arc<Peer>) -> Result<(), BlockchainError> {
         let mut next_page = None;
+        let mut pages_received: u64 = 0;
         loop {
             let StepResponse::Committees(entries, page) = peer
                 .request_boostrap_chain(StepRequest::Committees(next_page))
@@ -1910,6 +2019,14 @@ impl<S: Storage> P2pServer<S> {
                 for (id, committee) in &entries {
                     storage.import_committee(id, committee).await?;
                 }
+            }
+
+            pages_received = pages_received.saturating_add(1);
+            if pages_received >= MAX_BOOTSTRAP_PAGES {
+                if log::log_enabled!(log::Level::Error) {
+                    error!("Bootstrap sync exceeded maximum page limit");
+                }
+                return Err(P2pError::InvalidPacket.into());
             }
 
             next_page = page;
@@ -1945,6 +2062,7 @@ impl<S: Storage> P2pServer<S> {
         stable_topoheight: u64,
     ) -> Result<(), BlockchainError> {
         let mut next_page = None;
+        let mut pages_received: u64 = 0;
         loop {
             let StepResponse::NftCollections(collections, page) = peer
                 .request_boostrap_chain(StepRequest::NftCollections(stable_topoheight, next_page))
@@ -1974,6 +2092,14 @@ impl<S: Storage> P2pServer<S> {
                     .await?;
             }
 
+            pages_received = pages_received.saturating_add(1);
+            if pages_received >= MAX_BOOTSTRAP_PAGES {
+                if log::log_enabled!(log::Level::Error) {
+                    error!("Bootstrap sync exceeded maximum page limit");
+                }
+                return Err(P2pError::InvalidPacket.into());
+            }
+
             next_page = page;
             if next_page.is_none() {
                 break;
@@ -1989,6 +2115,7 @@ impl<S: Storage> P2pServer<S> {
         stable_topoheight: u64,
     ) -> Result<(), BlockchainError> {
         let mut next_page = None;
+        let mut pages_received: u64 = 0;
         loop {
             let StepResponse::NftTokens(resp_collection_id, tokens, page) = peer
                 .request_boostrap_chain(StepRequest::NftTokens(
@@ -2024,6 +2151,14 @@ impl<S: Storage> P2pServer<S> {
                 }
             }
 
+            pages_received = pages_received.saturating_add(1);
+            if pages_received >= MAX_BOOTSTRAP_PAGES {
+                if log::log_enabled!(log::Level::Error) {
+                    error!("Bootstrap sync exceeded maximum page limit");
+                }
+                return Err(P2pError::InvalidPacket.into());
+            }
+
             next_page = page;
             if next_page.is_none() {
                 break;
@@ -2041,6 +2176,7 @@ impl<S: Storage> P2pServer<S> {
         let mut owner_counts: HashMap<PublicKey, u64> = HashMap::new();
         let mut seen_tokens: HashSet<u64> = HashSet::new();
         let mut next_page = None;
+        let mut pages_received: u64 = 0;
         loop {
             let StepResponse::NftOwnership(resp_collection_id, entries, page) = peer
                 .request_boostrap_chain(StepRequest::NftOwnership(
@@ -2074,6 +2210,24 @@ impl<S: Storage> P2pServer<S> {
                 *count = count.saturating_add(1);
             }
 
+            if seen_tokens.len() > MAX_ACCUMULATOR_ENTRIES {
+                if log::log_enabled!(log::Level::Error) {
+                    error!(
+                        "NFT ownership accumulator exceeded max entries: {}",
+                        seen_tokens.len()
+                    );
+                }
+                return Err(P2pError::InvalidPacket.into());
+            }
+
+            pages_received = pages_received.saturating_add(1);
+            if pages_received >= MAX_BOOTSTRAP_PAGES {
+                if log::log_enabled!(log::Level::Error) {
+                    error!("Bootstrap sync exceeded maximum page limit");
+                }
+                return Err(P2pError::InvalidPacket.into());
+            }
+
             next_page = page;
             if next_page.is_none() {
                 break;
@@ -2095,6 +2249,7 @@ impl<S: Storage> P2pServer<S> {
 
     async fn sync_escrow_accounts(&self, peer: &Arc<Peer>) -> Result<(), BlockchainError> {
         let mut next_page = None;
+        let mut pages_received: u64 = 0;
         loop {
             let StepResponse::EscrowAccounts(entries, page) = peer
                 .request_boostrap_chain(StepRequest::EscrowAccounts(next_page))
@@ -2114,6 +2269,14 @@ impl<S: Storage> P2pServer<S> {
                 }
             }
 
+            pages_received = pages_received.saturating_add(1);
+            if pages_received >= MAX_BOOTSTRAP_PAGES {
+                if log::log_enabled!(log::Level::Error) {
+                    error!("Bootstrap sync exceeded maximum page limit");
+                }
+                return Err(P2pError::InvalidPacket.into());
+            }
+
             next_page = page;
             if next_page.is_none() {
                 break;
@@ -2126,6 +2289,7 @@ impl<S: Storage> P2pServer<S> {
         use tos_common::arbitration::{ArbitrationRequestKey, ArbitrationRoundKey};
 
         let mut next_page = None;
+        let mut pages_received: u64 = 0;
         loop {
             let StepResponse::ArbitrationData(entries, page) = peer
                 .request_boostrap_chain(StepRequest::ArbitrationData(next_page))
@@ -2155,6 +2319,14 @@ impl<S: Storage> P2pServer<S> {
                 }
             }
 
+            pages_received = pages_received.saturating_add(1);
+            if pages_received >= MAX_BOOTSTRAP_PAGES {
+                if log::log_enabled!(log::Level::Error) {
+                    error!("Bootstrap sync exceeded maximum page limit");
+                }
+                return Err(P2pError::InvalidPacket.into());
+            }
+
             next_page = page;
             if next_page.is_none() {
                 break;
@@ -2165,6 +2337,7 @@ impl<S: Storage> P2pServer<S> {
 
     async fn sync_arbiter_accounts(&self, peer: &Arc<Peer>) -> Result<(), BlockchainError> {
         let mut next_page = None;
+        let mut pages_received: u64 = 0;
         loop {
             let StepResponse::ArbiterAccounts(entries, page) = peer
                 .request_boostrap_chain(StepRequest::ArbiterAccounts(next_page))
@@ -2184,6 +2357,14 @@ impl<S: Storage> P2pServer<S> {
                 }
             }
 
+            pages_received = pages_received.saturating_add(1);
+            if pages_received >= MAX_BOOTSTRAP_PAGES {
+                if log::log_enabled!(log::Level::Error) {
+                    error!("Bootstrap sync exceeded maximum page limit");
+                }
+                return Err(P2pError::InvalidPacket.into());
+            }
+
             next_page = page;
             if next_page.is_none() {
                 break;
@@ -2194,6 +2375,7 @@ impl<S: Storage> P2pServer<S> {
 
     async fn sync_tns_names(&self, peer: &Arc<Peer>) -> Result<(), BlockchainError> {
         let mut next_page = None;
+        let mut pages_received: u64 = 0;
         loop {
             let StepResponse::TnsNames(entries, page) = peer
                 .request_boostrap_chain(StepRequest::TnsNames(next_page))
@@ -2213,6 +2395,14 @@ impl<S: Storage> P2pServer<S> {
                 }
             }
 
+            pages_received = pages_received.saturating_add(1);
+            if pages_received >= MAX_BOOTSTRAP_PAGES {
+                if log::log_enabled!(log::Level::Error) {
+                    error!("Bootstrap sync exceeded maximum page limit");
+                }
+                return Err(P2pError::InvalidPacket.into());
+            }
+
             next_page = page;
             if next_page.is_none() {
                 break;
@@ -2223,6 +2413,7 @@ impl<S: Storage> P2pServer<S> {
 
     async fn sync_referral_records(&self, peer: &Arc<Peer>) -> Result<(), BlockchainError> {
         let mut next_page = None;
+        let mut pages_received: u64 = 0;
         loop {
             let StepResponse::ReferralRecords(entries, page) = peer
                 .request_boostrap_chain(StepRequest::ReferralRecords(next_page))
@@ -2242,6 +2433,14 @@ impl<S: Storage> P2pServer<S> {
                 }
             }
 
+            pages_received = pages_received.saturating_add(1);
+            if pages_received >= MAX_BOOTSTRAP_PAGES {
+                if log::log_enabled!(log::Level::Error) {
+                    error!("Bootstrap sync exceeded maximum page limit");
+                }
+                return Err(P2pError::InvalidPacket.into());
+            }
+
             next_page = page;
             if next_page.is_none() {
                 break;
@@ -2252,6 +2451,7 @@ impl<S: Storage> P2pServer<S> {
 
     async fn sync_agent_data(&self, peer: &Arc<Peer>) -> Result<(), BlockchainError> {
         let mut next_page = None;
+        let mut pages_received: u64 = 0;
         loop {
             let StepResponse::AgentData(entries, page) = peer
                 .request_boostrap_chain(StepRequest::AgentData(next_page))
@@ -2271,6 +2471,14 @@ impl<S: Storage> P2pServer<S> {
                 }
             }
 
+            pages_received = pages_received.saturating_add(1);
+            if pages_received >= MAX_BOOTSTRAP_PAGES {
+                if log::log_enabled!(log::Level::Error) {
+                    error!("Bootstrap sync exceeded maximum page limit");
+                }
+                return Err(P2pError::InvalidPacket.into());
+            }
+
             next_page = page;
             if next_page.is_none() {
                 break;
@@ -2281,6 +2489,7 @@ impl<S: Storage> P2pServer<S> {
 
     async fn sync_a2a_nonces(&self, peer: &Arc<Peer>) -> Result<(), BlockchainError> {
         let mut next_page = None;
+        let mut pages_received: u64 = 0;
         loop {
             let StepResponse::A2aNonces(entries, page) = peer
                 .request_boostrap_chain(StepRequest::A2aNonces(next_page))
@@ -2308,6 +2517,14 @@ impl<S: Storage> P2pServer<S> {
                 }
             }
 
+            pages_received = pages_received.saturating_add(1);
+            if pages_received >= MAX_BOOTSTRAP_PAGES {
+                if log::log_enabled!(log::Level::Error) {
+                    error!("Bootstrap sync exceeded maximum page limit");
+                }
+                return Err(P2pError::InvalidPacket.into());
+            }
+
             next_page = page;
             if next_page.is_none() {
                 break;
@@ -2318,6 +2535,7 @@ impl<S: Storage> P2pServer<S> {
 
     async fn sync_contract_assets(&self, peer: &Arc<Peer>) -> Result<(), BlockchainError> {
         let mut next_page = None;
+        let mut pages_received: u64 = 0;
         loop {
             let StepResponse::ContractAssets(entries, page) = peer
                 .request_boostrap_chain(StepRequest::ContractAssets(next_page))
@@ -2337,6 +2555,14 @@ impl<S: Storage> P2pServer<S> {
                 }
             }
 
+            pages_received = pages_received.saturating_add(1);
+            if pages_received >= MAX_BOOTSTRAP_PAGES {
+                if log::log_enabled!(log::Level::Error) {
+                    error!("Bootstrap sync exceeded maximum page limit");
+                }
+                return Err(P2pError::InvalidPacket.into());
+            }
+
             next_page = page;
             if next_page.is_none() {
                 break;
@@ -2353,6 +2579,7 @@ impl<S: Storage> P2pServer<S> {
         // Step 1: Discover all (key, asset) pairs with UNO balances
         let mut all_pairs: Vec<(PublicKey, Hash)> = Vec::new();
         let mut next_page = None;
+        let mut pages_received: u64 = 0;
         loop {
             let StepResponse::UnoBalanceKeys(entries, page) = peer
                 .request_boostrap_chain(StepRequest::UnoBalanceKeys(next_page))
@@ -2365,6 +2592,25 @@ impl<S: Storage> P2pServer<S> {
             };
 
             all_pairs.extend(entries);
+
+            if all_pairs.len() > MAX_ACCUMULATOR_ENTRIES {
+                if log::log_enabled!(log::Level::Error) {
+                    error!(
+                        "UNO balance keys accumulator exceeded max entries: {}",
+                        all_pairs.len()
+                    );
+                }
+                return Err(P2pError::InvalidPacket.into());
+            }
+
+            pages_received = pages_received.saturating_add(1);
+            if pages_received >= MAX_BOOTSTRAP_PAGES {
+                if log::log_enabled!(log::Level::Error) {
+                    error!("Bootstrap sync exceeded maximum page limit");
+                }
+                return Err(P2pError::InvalidPacket.into());
+            }
+
             next_page = page;
             if next_page.is_none() {
                 break;
@@ -2382,8 +2628,19 @@ impl<S: Storage> P2pServer<S> {
         for (key, asset) in &all_pairs {
             let mut max_topoheight: Option<u64> = Some(stable_topoheight);
             let mut all_versions: Vec<(u64, VersionedUnoBalance)> = Vec::new();
+            let mut last_topo: Option<u64> = None;
 
             while let Some(max) = max_topoheight {
+                if all_versions.len() >= MAX_VERSIONS_PER_BALANCE {
+                    if log::log_enabled!(log::Level::Error) {
+                        error!(
+                            "UNO balance version count exceeded limit for asset {}",
+                            asset
+                        );
+                    }
+                    return Err(P2pError::InvalidPacket.into());
+                }
+
                 let StepResponse::UnoBalances(balances, next_max) = peer
                     .request_boostrap_chain(StepRequest::UnoBalances(
                         Cow::Borrowed(key),
@@ -2401,7 +2658,32 @@ impl<S: Storage> P2pServer<S> {
 
                 for balance in balances {
                     let (topo, version) = balance.as_version();
+
+                    // Validate topoheight ordering: versions must be non-increasing
+                    if let Some(prev) = last_topo {
+                        if topo >= prev {
+                            if log::log_enabled!(log::Level::Error) {
+                                error!("UNO balance version ordering violation: topo {} >= previous {}", topo, prev);
+                            }
+                            return Err(P2pError::InvalidPacket.into());
+                        }
+                    }
+                    last_topo = Some(topo);
+
                     all_versions.push((topo, version));
+                }
+
+                // Validate cursor is strictly decreasing
+                if let Some(next) = next_max {
+                    if next >= max {
+                        if log::log_enabled!(log::Level::Error) {
+                            error!(
+                                "UnoBalances cursor not decreasing: next {} >= current {}",
+                                next, max
+                            );
+                        }
+                        return Err(P2pError::InvalidPacket.into());
+                    }
                 }
 
                 max_topoheight = next_max;
