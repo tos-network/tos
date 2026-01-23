@@ -1940,7 +1940,7 @@ impl<S: Storage> P2pServer<S> {
     ) -> Result<(), BlockchainError> {
         let mut next_page = None;
         loop {
-            let StepResponse::NftTokens(_, tokens, page) = peer
+            let StepResponse::NftTokens(resp_collection_id, tokens, page) = peer
                 .request_boostrap_chain(StepRequest::NftTokens(
                     Cow::Borrowed(collection_id),
                     stable_topoheight,
@@ -1953,6 +1953,16 @@ impl<S: Storage> P2pServer<S> {
                 }
                 return Err(P2pError::InvalidPacket.into());
             };
+
+            if resp_collection_id != *collection_id {
+                if log::log_enabled!(log::Level::Error) {
+                    error!(
+                        "NFT tokens response collection ID mismatch: expected {}, got {}",
+                        collection_id, resp_collection_id
+                    );
+                }
+                return Err(P2pError::InvalidPacket.into());
+            }
 
             if !tokens.is_empty() {
                 let _permit = self.blockchain.storage_semaphore().acquire().await?;
