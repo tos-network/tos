@@ -107,6 +107,12 @@ pub mod blockdag;
 /// Transaction processing tests (block assembly, verify/apply phases)
 pub mod transaction;
 
+/// P2P protocol testing (connection lifecycle, encryption, peer management)
+pub mod p2p;
+
+/// Data Sync & Reorg testing (FastSync, chain sync, validation, DAG reorg, snapshots, pruning)
+pub mod sync;
+
 // =============================================================================
 // TCK-Specific Modules (New)
 // =============================================================================
