@@ -416,7 +416,7 @@ mod tests {
         assert!(err.is_err());
     }
 
-    // 11. unknown addr -> balance 0, after transfer -> balance > 0 and account exists
+    // 11. unknown addr -> account_exists false, after transfer -> true
     #[tokio::test]
     async fn test_account_exists_after_first_receive() {
         let alice = addr(1);
@@ -427,9 +427,9 @@ mod tests {
 
         let mut client = ChainClient::start(config).await.unwrap();
 
-        // Unknown address has zero balance before any transfer
-        let balance_before = client.get_balance(&unknown).await.unwrap();
-        assert_eq!(balance_before, 0);
+        // Unknown address does not exist before any transfer
+        let exists_before = client.account_exists(&unknown).await.unwrap();
+        assert!(!exists_before);
 
         // Transfer to unknown address creates the account
         let tx = TestTransaction {
@@ -443,7 +443,7 @@ mod tests {
         let result = client.process_transaction(tx).await.unwrap();
         assert!(result.success);
 
-        // Now the address has a balance and account_exists returns true
+        // Now the account exists and has the expected balance
         let exists_after = client.account_exists(&unknown).await.unwrap();
         assert!(exists_after);
 

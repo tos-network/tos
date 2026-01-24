@@ -67,8 +67,7 @@ mod tests {
 
         let mut client = ChainClient::start(config).await.unwrap();
 
-        // Submit transactions from different senders (mempool validates nonce
-        // against stored state, so same-sender sequential requires process_batch)
+        // Submit transactions from different senders to verify multi-sender mining
         let tx1 = TestTransaction {
             hash: tx_hash(90),
             sender: alice.clone(),
@@ -166,7 +165,7 @@ mod tests {
         assert_eq!(charlie_balance, 500_000 - 3000 - 10);
     }
 
-    // 4. Mempool nonce ordering within sender (nonces 1,2,3 via process_batch)
+    // 4. Mempool nonce ordering within sender (nonces 1,2,3 via submit_to_mempool)
     #[tokio::test]
     async fn test_mempool_nonce_ordering_within_sender() {
         let alice = addr(1);
@@ -177,22 +176,23 @@ mod tests {
 
         let mut client = ChainClient::start(config).await.unwrap();
 
-        // Submit three transactions with sequential nonces in a batch
-        // (process_batch uses batch-aware nonce validation)
-        let txs: Vec<TestTransaction> = (1..=3u64)
-            .map(|nonce| TestTransaction {
+        // Submit three transactions with sequential nonces via submit_to_mempool.
+        // Pending nonce tracking allows same-sender sequential submissions.
+        for nonce in 1..=3u64 {
+            let tx = TestTransaction {
                 hash: tx_hash(90 + nonce as u8),
                 sender: alice.clone(),
                 recipient: bob.clone(),
                 amount: 1000,
                 fee: 10,
                 nonce,
-            })
-            .collect();
+            };
+            client.submit_to_mempool(tx).await.unwrap();
+        }
 
-        let results = client.process_batch(txs).await.unwrap();
-        assert_eq!(results.len(), 3);
-        assert!(results.iter().all(|r| r.success));
+        // Mine all three in one block
+        let block_hash = client.mine_mempool().await.unwrap();
+        assert_ne!(block_hash, Hash::zero());
 
         // Verify all three processed correctly
         let bob_balance = client.get_balance(&bob).await.unwrap();

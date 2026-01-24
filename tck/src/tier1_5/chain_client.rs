@@ -155,6 +155,9 @@ pub struct ChainClient {
     topoheight: u64,
     /// Track state diffs flag
     track_state_diffs: bool,
+    /// Pending nonces for mempool-aware sequential nonce validation.
+    /// Maps sender address to their latest pending (unconfirmed) nonce.
+    pending_nonces: HashMap<Hash, u64>,
 }
 
 impl ChainClient {
@@ -188,6 +191,7 @@ impl ChainClient {
             tx_log: Arc::new(RwLock::new(HashMap::new())),
             topoheight: 0,
             track_state_diffs,
+            pending_nonces: HashMap::new(),
         })
     }
 
@@ -787,21 +791,32 @@ impl ChainClient {
     /// Submit a transaction to the mempool without mining a block.
     ///
     /// The transaction will be included in the next mined block.
+    /// Supports sequential nonces from the same sender (e.g., nonce 1, 2, 3)
+    /// without requiring a mine between each submission.
     pub async fn submit_to_mempool(&mut self, tx: TestTransaction) -> Result<(), WarpError> {
-        if let Some(error) = self.validate_transaction(&tx).await {
+        if let Some(error) = self
+            .validate_batch_transaction(&tx, &self.pending_nonces.clone())
+            .await
+        {
             return Err(WarpError::StateTransition(format!(
                 "Transaction validation failed: {:?}",
                 error
             )));
         }
+        let sender = tx.sender.clone();
+        let nonce = tx.nonce;
         self.blockchain
             .submit_transaction(tx)
             .await
-            .map(|_| ())
-            .map_err(|e| WarpError::StateTransition(e.to_string()))
+            .map_err(|e| WarpError::StateTransition(e.to_string()))?;
+        self.pending_nonces.insert(sender, nonce);
+        Ok(())
     }
 
     /// Mine a block containing all pending mempool transactions.
+    ///
+    /// Clears pending nonce tracking after mining, since all pending
+    /// transactions are now confirmed in the blockchain state.
     pub async fn mine_mempool(&mut self) -> Result<Hash, WarpError> {
         let block = self
             .blockchain
@@ -809,6 +824,7 @@ impl ChainClient {
             .await
             .map_err(|e| WarpError::BlockCreationFailed(e.to_string()))?;
         self.topoheight = self.topoheight.saturating_add(1);
+        self.pending_nonces.clear();
         self.clock.sleep(Duration::from_millis(BLOCK_TIME_MS)).await;
         Ok(block.hash)
     }
@@ -838,11 +854,11 @@ impl ChainClient {
     // --- Additional State Queries ---
 
     /// Check if an account exists in the blockchain state.
+    ///
+    /// Returns true only if the account has been explicitly created
+    /// (via genesis funding or receiving a transfer).
     pub async fn account_exists(&self, address: &Hash) -> Result<bool, ChainClientError> {
-        match self.blockchain.get_balance(address).await {
-            Ok(_) => Ok(true),
-            Err(_) => Ok(false),
-        }
+        Ok(self.blockchain.account_exists(address).await)
     }
 
     /// Get native TOS balance (convenience alias for get_balance with native asset).

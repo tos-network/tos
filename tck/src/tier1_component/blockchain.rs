@@ -613,6 +613,15 @@ impl TestBlockchain {
         Ok(blocks.iter().find(|b| b.height == height).cloned())
     }
 
+    /// Check if an account exists in the blockchain state.
+    ///
+    /// Returns true only if the account has been explicitly created
+    /// (via genesis funding or receiving a transfer).
+    pub async fn account_exists(&self, address: &Hash) -> bool {
+        let accounts = self.accounts.read();
+        accounts.contains_key(address)
+    }
+
     /// Get account balance
     pub async fn get_balance(&self, address: &Hash) -> Result<u64> {
         let accounts = self.accounts.read();
