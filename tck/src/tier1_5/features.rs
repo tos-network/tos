@@ -66,7 +66,8 @@ impl FeatureRegistry {
             .register(features::P2P_COMPRESSION)
             .register(features::RPC_V2_RESPONSES)
             .register(features::MAX_BLOCK_SIZE_INCREASE)
-            .register(features::CHECKED_ARITHMETIC_ENFORCE);
+            .register(features::CHECKED_ARITHMETIC_ENFORCE)
+            .register(features::VRF_BLOCK_DATA);
         registry
     }
 }
@@ -144,6 +145,13 @@ pub mod features {
         id: "checked_arithmetic_enforce",
         description: "Enforce checked math in contracts",
         activation_height: None,
+    };
+
+    /// VRF block data production and validation
+    pub const VRF_BLOCK_DATA: Feature = Feature {
+        id: "vrf_block_data",
+        description: "VRF data in block headers for verifiable randomness",
+        activation_height: Some(0),
     };
 }
 

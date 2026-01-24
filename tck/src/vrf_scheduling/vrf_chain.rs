@@ -181,37 +181,112 @@ mod tests {
     // ========================================================================
 
     #[tokio::test]
-    #[ignore = "Requires TestBlockchain block validation with VRF checks"]
     async fn block_without_vrf_rejected() {
-        // Construct a block without VRF data
-        // Submit to blockchain
-        // Assert: Block rejected with appropriate error
+        let secret_hex = test_vrf_secret_hex();
+        let config = ChainClientConfig::default()
+            .with_account(GenesisAccount::new(sample_hash(1), 1_000_000))
+            .with_vrf(VrfConfig {
+                secret_key_hex: Some(secret_hex),
+                chain_id: 1,
+            });
+
+        let mut client = ChainClient::start(config).await.unwrap();
+        client.mine_empty_block().await.unwrap();
+
+        // Get the mined block and strip VRF data
+        let mut block = client.get_block_at_topoheight(1).await.unwrap();
+        block.vrf_data = None;
+
+        // Validation should fail
+        let result = client.validate_block_vrf(&block);
+        assert!(result.is_err());
+        assert!(
+            result.unwrap_err().to_string().contains("missing VRF data"),
+            "Error should mention missing VRF data"
+        );
     }
 
     #[tokio::test]
-    #[ignore = "Requires TestBlockchain block validation with VRF checks"]
     async fn tampered_vrf_output_rejected() {
-        // Mine a valid block
-        // Tamper with VRF output field
-        // Resubmit
-        // Assert: Rejected
+        let secret_hex = test_vrf_secret_hex();
+        let config = ChainClientConfig::default()
+            .with_account(GenesisAccount::new(sample_hash(1), 1_000_000))
+            .with_vrf(VrfConfig {
+                secret_key_hex: Some(secret_hex),
+                chain_id: 1,
+            });
+
+        let mut client = ChainClient::start(config).await.unwrap();
+        client.mine_empty_block().await.unwrap();
+
+        let mut block = client.get_block_at_topoheight(1).await.unwrap();
+        // Tamper VRF output
+        if let Some(ref mut vrf) = block.vrf_data {
+            vrf.output[0] ^= 0xFF;
+        }
+
+        let result = client.validate_block_vrf(&block);
+        assert!(result.is_err(), "Tampered VRF output should be rejected");
     }
 
     #[tokio::test]
-    #[ignore = "Requires TestBlockchain block validation with VRF checks"]
     async fn tampered_vrf_proof_rejected() {
-        // Mine a valid block
-        // Tamper with VRF proof field
-        // Resubmit
-        // Assert: Rejected
+        let secret_hex = test_vrf_secret_hex();
+        let config = ChainClientConfig::default()
+            .with_account(GenesisAccount::new(sample_hash(1), 1_000_000))
+            .with_vrf(VrfConfig {
+                secret_key_hex: Some(secret_hex),
+                chain_id: 1,
+            });
+
+        let mut client = ChainClient::start(config).await.unwrap();
+        client.mine_empty_block().await.unwrap();
+
+        let mut block = client.get_block_at_topoheight(1).await.unwrap();
+        // Tamper VRF proof
+        if let Some(ref mut vrf) = block.vrf_data {
+            vrf.proof[0] ^= 0xFF;
+        }
+
+        let result = client.validate_block_vrf(&block);
+        assert!(result.is_err(), "Tampered VRF proof should be rejected");
     }
 
     #[tokio::test]
-    #[ignore = "Requires TestBlockchain block validation with VRF checks"]
     async fn wrong_miner_binding_rejected() {
-        // Create VRF data with different miner's binding signature
-        // Submit block with this data
-        // Assert: Rejected
+        let secret_hex = test_vrf_secret_hex();
+        let config = ChainClientConfig::default()
+            .with_account(GenesisAccount::new(sample_hash(1), 1_000_000))
+            .with_vrf(VrfConfig {
+                secret_key_hex: Some(secret_hex),
+                chain_id: 1,
+            });
+
+        let mut client = ChainClient::start(config).await.unwrap();
+        client.mine_empty_block().await.unwrap();
+
+        let mut block = client.get_block_at_topoheight(1).await.unwrap();
+        // Replace binding signature with one from a different keypair
+        if let Some(ref mut vrf) = block.vrf_data {
+            let different_keypair = tos_common::crypto::KeyPair::new();
+            let binding_message = tos_common::block::compute_vrf_binding_message(
+                1,
+                &vrf.public_key,
+                block.hash.as_bytes(),
+            );
+            let wrong_sig = different_keypair.sign(&binding_message);
+            vrf.binding_signature = wrong_sig.to_bytes();
+        }
+
+        let result = client.validate_block_vrf(&block);
+        assert!(result.is_err(), "Wrong miner binding should be rejected");
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("binding signature verification failed"),
+            "Error should mention binding signature"
+        );
     }
 
     // ========================================================================
@@ -287,23 +362,61 @@ mod tests {
     // ========================================================================
 
     #[tokio::test]
-    #[ignore = "Requires FeatureSet VRF activation control"]
     async fn feature_gate_vrf_activation() {
-        // Setup: ChainClient with VRF feature deactivated
-        // Deploy contract that calls vrf_random()
-        // Assert: Returns error (feature not active)
-        //
-        // Activate feature at height N
-        // Warp past height N
-        // Call again
-        // Assert: Returns valid VRF data
+        let secret_hex = test_vrf_secret_hex();
+        // VRF configured but feature only activated at height 50
+        let config = ChainClientConfig::default()
+            .with_account(GenesisAccount::new(sample_hash(1), 1_000_000))
+            .with_vrf(VrfConfig {
+                secret_key_hex: Some(secret_hex),
+                chain_id: 1,
+            })
+            .with_features(
+                crate::tier1_5::features::FeatureSet::empty().activate_at("vrf_block_data", 50),
+            );
+
+        let mut client = ChainClient::start(config).await.unwrap();
+
+        // Mine blocks before activation: no VRF data
+        client.mine_empty_block().await.unwrap();
+        assert!(
+            client.get_block_vrf_data(1).is_none(),
+            "VRF data should not be present before feature activation"
+        );
+
+        // Warp to activation height
+        client.warp_to_topoheight(50).await.unwrap();
+
+        // Mine block after activation: VRF data present
+        client.mine_empty_block().await.unwrap();
+        assert!(
+            client.get_block_vrf_data(51).is_some(),
+            "VRF data should be present after feature activation"
+        );
     }
 
     #[tokio::test]
-    #[ignore = "Requires state_diff tracking with VRF"]
     async fn vrf_survives_state_diff_tracking() {
-        // Setup: ChainClient with track_state_diffs = true
-        // Mine blocks
-        // Assert: VRF data still correct
+        let secret_hex = test_vrf_secret_hex();
+        let config = ChainClientConfig::default()
+            .with_account(GenesisAccount::new(sample_hash(1), 1_000_000))
+            .with_vrf(VrfConfig {
+                secret_key_hex: Some(secret_hex),
+                chain_id: 1,
+            })
+            .with_state_diff_tracking();
+
+        let mut client = ChainClient::start(config).await.unwrap();
+
+        // Mine several blocks
+        for _ in 0..5 {
+            client.mine_empty_block().await.unwrap();
+        }
+
+        // VRF data should be present on all mined blocks
+        for topo in 1..=5 {
+            let vrf = client.get_block_vrf_data(topo);
+            assert!(vrf.is_some(), "VRF missing at topo {}", topo);
+        }
     }
 }

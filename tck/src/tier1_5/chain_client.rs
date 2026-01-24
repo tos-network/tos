@@ -16,13 +16,13 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use tokio::sync::RwLock;
-use tos_common::block::BlockVrfData;
+use tos_common::block::{compute_vrf_binding_message, compute_vrf_input, BlockVrfData};
 use tos_common::contract::{
     ScheduledExecution, ScheduledExecutionStatus, MAX_SCHEDULED_EXECUTIONS_PER_BLOCK,
     MAX_SCHEDULED_EXECUTION_GAS_PER_BLOCK, MAX_SCHEDULING_HORIZON,
 };
-use tos_common::crypto::{Hash, KeyPair};
-use tos_daemon::vrf::VrfKeyManager;
+use tos_common::crypto::{Hash, KeyPair, Signature};
+use tos_daemon::vrf::{VrfKeyManager, VrfOutput, VrfProof, VrfPublicKey};
 
 use crate::orchestrator::{Clock, PausedClock};
 use crate::tier1_component::{TestBlockchain, TestBlockchainBuilder, TestTransaction};
@@ -88,6 +88,8 @@ pub enum ChainClientError {
     Storage(String),
     /// Block mining error
     Mining(String),
+    /// VRF validation failed
+    VrfValidationFailed(String),
 }
 
 impl std::fmt::Display for ChainClientError {
@@ -106,6 +108,7 @@ impl std::fmt::Display for ChainClientError {
             }
             Self::Storage(msg) => write!(f, "storage error: {}", msg),
             Self::Mining(msg) => write!(f, "mining error: {}", msg),
+            Self::VrfValidationFailed(msg) => write!(f, "VRF validation failed: {}", msg),
         }
     }
 }
@@ -1070,6 +1073,71 @@ impl ChainClient {
         self.block_vrf_data.get(&topo)
     }
 
+    /// Validate VRF data for a block.
+    /// Returns Ok(()) if valid, Err if VRF is configured but data is missing/invalid.
+    pub fn validate_block_vrf(&self, block: &BlockInfo) -> Result<(), ChainClientError> {
+        // If VRF not configured, any block is valid
+        if self.vrf_key_manager.is_none() {
+            return Ok(());
+        }
+
+        // Check feature gate
+        if !self.features.is_active("vrf_block_data", block.topoheight) {
+            return Ok(());
+        }
+
+        // VRF data must be present
+        let vrf_data = block
+            .vrf_data
+            .as_ref()
+            .ok_or_else(|| ChainClientError::VrfValidationFailed("missing VRF data".to_string()))?;
+
+        // Parse VRF public key
+        let public_key = VrfPublicKey::from_bytes(&vrf_data.public_key).map_err(|e| {
+            ChainClientError::VrfValidationFailed(format!("invalid VRF public key: {}", e))
+        })?;
+
+        // Parse VRF output and proof
+        let output = VrfOutput::from_bytes(&vrf_data.output).map_err(|e| {
+            ChainClientError::VrfValidationFailed(format!("invalid VRF output: {}", e))
+        })?;
+        let proof = VrfProof::from_bytes(&vrf_data.proof).map_err(|e| {
+            ChainClientError::VrfValidationFailed(format!("invalid VRF proof: {}", e))
+        })?;
+
+        // Compute VRF input: BLAKE3("TOS-VRF-INPUT-v1" || block_hash || miner)
+        let miner_compressed = self.miner_keypair.get_public_key().compress();
+        let vrf_input = compute_vrf_input(block.hash.as_bytes(), &miner_compressed);
+
+        // Verify VRF proof
+        public_key
+            .verify(&vrf_input, &output, &proof)
+            .map_err(|e| {
+                ChainClientError::VrfValidationFailed(format!(
+                    "VRF proof verification failed: {}",
+                    e
+                ))
+            })?;
+
+        // Verify binding signature
+        let binding_message = compute_vrf_binding_message(
+            self.config.vrf.chain_id,
+            &vrf_data.public_key,
+            block.hash.as_bytes(),
+        );
+        let sig = Signature::from_bytes(&vrf_data.binding_signature).map_err(|_| {
+            ChainClientError::VrfValidationFailed("invalid binding signature bytes".to_string())
+        })?;
+        let miner_pk = self.miner_keypair.get_public_key();
+        if !sig.verify(&binding_message, miner_pk) {
+            return Err(ChainClientError::VrfValidationFailed(
+                "binding signature verification failed".to_string(),
+            ));
+        }
+
+        Ok(())
+    }
+
     // --- Scheduled Execution API ---
 
     /// Schedule a contract execution at a target topoheight.
@@ -1174,15 +1242,23 @@ impl ChainClient {
 
     /// Cancel a scheduled execution (returns refund amount).
     pub async fn cancel_scheduled(&mut self, hash: &Hash) -> Result<u64, ChainClientError> {
+        let current_topo = self.topoheight;
         // Find and remove from queue
         for (_topo, entries) in self.scheduled_queue.iter_mut() {
             if let Some(pos) = entries.iter().position(|e| &e.hash == hash) {
-                let exec = entries.remove(pos);
+                let exec = &entries[pos];
                 if exec.status != ScheduledExecutionStatus::Pending {
                     return Err(ChainClientError::TransactionRejected(
                         "execution not in pending state".to_string(),
                     ));
                 }
+                // Check cancellation window
+                if !exec.can_cancel(current_topo) {
+                    return Err(ChainClientError::TransactionRejected(
+                        "cannot cancel: within minimum cancellation window".to_string(),
+                    ));
+                }
+                let exec = entries.remove(pos);
                 // Refund 70% (30% was already burned)
                 let refund = exec.offer_amount.saturating_mul(70) / 100;
                 if refund > 0 {
@@ -1210,6 +1286,11 @@ impl ChainClient {
 
     /// Produce VRF data for a block hash and store it.
     fn produce_vrf_for_block(&mut self, block_hash: &Hash) {
+        // Check feature gate: skip VRF if feature not active at current topoheight
+        if !self.features.is_active("vrf_block_data", self.topoheight) {
+            return;
+        }
+
         let chain_id = self.config.vrf.chain_id;
         let block_hash_bytes = block_hash.as_bytes();
         let miner_compressed = self.miner_keypair.get_public_key().compress();

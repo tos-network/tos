@@ -366,19 +366,62 @@ mod tests {
     // ========================================================================
 
     #[tokio::test]
-    #[ignore = "Requires ChainClient cancellation syscall"]
     async fn cancellation_far_future() {
-        // Schedule at target=current+100
-        // Cancel at current+10
-        // Assert: Cancelled, refund = offer - burn
+        let scheduler = sample_hash(1);
+        let miner = sample_hash(99);
+
+        let config = ChainClientConfig::default()
+            .with_account(GenesisAccount::new(scheduler.clone(), 10_000_000))
+            .with_account(GenesisAccount::new(miner.clone(), 0))
+            .with_miner(miner);
+
+        let mut client = ChainClient::start(config).await.unwrap();
+
+        // Schedule at target=100
+        let exec = make_exec(sample_hash(10), 100, 1_000_000, 50_000, 0, scheduler);
+        let hash = client.schedule_execution(exec).await.unwrap();
+
+        // Warp to topo 10 (well before target=100, cancellation should succeed)
+        // can_cancel: target(100) > current(10) + MIN_CANCELLATION_WINDOW(1) = 11? Yes
+        client.warp_to_topoheight(10).await.unwrap();
+
+        // Cancel
+        let refund = client.cancel_scheduled(&hash).await.unwrap();
+        // Refund = 70% of offer (30% burned at schedule)
+        assert_eq!(refund, 700_000);
+
+        // Verify status is Cancelled
+        let (status, _) = client.get_scheduled_status(&hash).unwrap();
+        assert_eq!(status, ScheduledExecutionStatus::Cancelled);
     }
 
     #[tokio::test]
-    #[ignore = "Requires ChainClient cancellation syscall"]
     async fn cancellation_near_future_rejected() {
-        // Schedule at target=current+2
-        // Try to cancel at current+1 (within MIN_CANCELLATION_WINDOW)
-        // Assert: Cancellation rejected (ERR_CANNOT_CANCEL)
+        let scheduler = sample_hash(1);
+
+        let config = ChainClientConfig::default()
+            .with_account(GenesisAccount::new(scheduler.clone(), 10_000_000));
+
+        let mut client = ChainClient::start(config).await.unwrap();
+
+        // Schedule at target=2
+        let exec = make_exec(sample_hash(10), 2, 500_000, 50_000, 0, scheduler);
+        let hash = client.schedule_execution(exec).await.unwrap();
+
+        // Warp to topo 1 (target - current = 2 - 1 = 1, which equals MIN_CANCELLATION_WINDOW)
+        // can_cancel requires: target > current + MIN_CANCELLATION_WINDOW
+        // 2 > 1 + 1 = 2? No (not strictly greater), so should reject
+        client.mine_empty_block().await.unwrap();
+
+        let result = client.cancel_scheduled(&hash).await;
+        assert!(result.is_err(), "Cancel within window should be rejected");
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("cancellation window"),
+            "Error should mention cancellation window"
+        );
     }
 
     // ========================================================================
