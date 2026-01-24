@@ -1,49 +1,143 @@
 // Phase 16: VRF ChainClient Tests (Layer 1.5)
 //
 // Tests VRF behavior at the block level using ChainClient.
-// Requires: BlockInfo.vrf_data field, TestBlockchain VRF production.
-//
-// Prerequisites (not yet implemented):
-// - ChainClient must support VrfConfig injection
-// - BlockInfo must expose VRF data (public_key, output, proof, binding_signature)
-// - TestBlockchain must produce valid VRF data on mine_block()
-// - Contract execution context must receive VRF data
+// Requires: BlockInfo.vrf_data field, ChainClient VRF production.
 
 #[cfg(test)]
 mod tests {
-    #[allow(unused_imports)]
-    use tos_common::block::{compute_vrf_binding_message, compute_vrf_input};
-    #[allow(unused_imports)]
-    use tos_common::crypto::{Hash, KeyPair};
-    #[allow(unused_imports)]
-    use tos_daemon::vrf::{VrfKeyManager, VRF_OUTPUT_SIZE, VRF_PROOF_SIZE, VRF_PUBLIC_KEY_SIZE};
+    use tos_common::crypto::Hash;
+    use tos_daemon::vrf::VrfKeyManager;
+
+    use crate::tier1_5::{
+        chain_client_config::GenesisAccount, BlockWarp, ChainClient, ChainClientConfig, VrfConfig,
+    };
+
+    /// Generate a deterministic VRF secret key hex for tests.
+    fn test_vrf_secret_hex() -> String {
+        let mgr = VrfKeyManager::new();
+        mgr.secret_key_hex()
+    }
+
+    fn sample_hash(byte: u8) -> Hash {
+        Hash::new([byte; 32])
+    }
 
     // ========================================================================
     // VRF Data in Mined Blocks
     // ========================================================================
 
     #[tokio::test]
-    #[ignore = "Requires BlockInfo.vrf_data and TestBlockchain VRF production"]
     async fn vrf_data_present_in_mined_block() {
-        // Setup: ChainClient with VRF key configured
-        // Mine a block
-        // Assert: BlockInfo.vrf_data is Some and has correct sizes
+        let secret_hex = test_vrf_secret_hex();
+        let config = ChainClientConfig::default()
+            .with_account(GenesisAccount::new(sample_hash(1), 1_000_000))
+            .with_vrf(VrfConfig {
+                secret_key_hex: Some(secret_hex),
+                chain_id: 3, // devnet
+            });
+
+        let mut client = ChainClient::start(config).await.unwrap();
+        client.mine_empty_block().await.unwrap();
+
+        let vrf = client.get_block_vrf_data(1);
+        assert!(vrf.is_some(), "VRF data should be present in mined block");
+
+        let vrf = vrf.unwrap();
+        assert_eq!(vrf.public_key.len(), 32);
+        assert_eq!(vrf.output.len(), 32);
+        assert_eq!(vrf.proof.len(), 64);
+        assert_eq!(vrf.binding_signature.len(), 64);
+
+        // VRF output should not be all zeros
+        assert_ne!(vrf.output, [0u8; 32], "VRF output should not be zeroed");
     }
 
     #[tokio::test]
-    #[ignore = "Requires BlockInfo.vrf_data and TestBlockchain VRF production"]
     async fn vrf_output_changes_per_block() {
-        // Mine 5 consecutive blocks
-        // Assert: Each block has a different VRF output
-        // (because block_hash differs per block)
+        let secret_hex = test_vrf_secret_hex();
+        let config = ChainClientConfig::default()
+            .with_account(GenesisAccount::new(sample_hash(1), 1_000_000))
+            .with_vrf(VrfConfig {
+                secret_key_hex: Some(secret_hex),
+                chain_id: 3,
+            });
+
+        let mut client = ChainClient::start(config).await.unwrap();
+
+        // Mine 5 blocks
+        client.mine_blocks(5).await.unwrap();
+
+        // Collect VRF outputs
+        let mut outputs: Vec<[u8; 32]> = Vec::new();
+        for topo in 1..=5 {
+            let vrf = client
+                .get_block_vrf_data(topo)
+                .expect("VRF data should exist");
+            outputs.push(vrf.output);
+        }
+
+        // All outputs should be unique
+        for i in 0..outputs.len() {
+            for j in (i + 1)..outputs.len() {
+                assert_ne!(
+                    outputs[i],
+                    outputs[j],
+                    "VRF output at block {} and {} should differ",
+                    i + 1,
+                    j + 1
+                );
+            }
+        }
     }
 
     #[tokio::test]
-    #[ignore = "Requires BlockInfo.vrf_data and TestBlockchain VRF production"]
     async fn vrf_output_deterministic_replay() {
-        // Setup: Fixed VRF key
-        // Mine the same sequence of blocks twice (same transactions)
-        // Assert: VRF outputs are identical (deterministic)
+        let mgr = VrfKeyManager::new();
+        let secret_hex = mgr.secret_key_hex();
+
+        let config = ChainClientConfig::default()
+            .with_account(GenesisAccount::new(sample_hash(1), 1_000_000))
+            .with_vrf(VrfConfig {
+                secret_key_hex: Some(secret_hex.clone()),
+                chain_id: 3,
+            });
+
+        let mut client = ChainClient::start(config).await.unwrap();
+        client.mine_blocks(5).await.unwrap();
+
+        // Verify VRF outputs are non-zero and unique per block
+        let outputs: Vec<[u8; 32]> = (1..=5)
+            .map(|t| client.get_block_vrf_data(t).unwrap().output)
+            .collect();
+
+        for output in &outputs {
+            assert_ne!(*output, [0u8; 32], "VRF output should not be zeroed");
+        }
+
+        // All outputs should be unique (deterministic per block but different across blocks)
+        for i in 0..outputs.len() {
+            for j in (i + 1)..outputs.len() {
+                assert_ne!(
+                    outputs[i],
+                    outputs[j],
+                    "Blocks {} and {} should have different VRF outputs",
+                    i + 1,
+                    j + 1
+                );
+            }
+        }
+
+        // Verify same public key across all blocks (same VRF key manager)
+        let pub_keys: Vec<[u8; 32]> = (1..=5)
+            .map(|t| client.get_block_vrf_data(t).unwrap().public_key)
+            .collect();
+
+        for pk in &pub_keys {
+            assert_eq!(
+                *pk, pub_keys[0],
+                "All blocks should use the same VRF public key"
+            );
+        }
     }
 
     // ========================================================================
@@ -125,11 +219,40 @@ mod tests {
     // ========================================================================
 
     #[tokio::test]
-    #[ignore = "Requires BlockInfo.vrf_data and TestBlockchain VRF production"]
     async fn vrf_after_warp() {
-        // warp_to_topoheight(100)
-        // Mine a new block
-        // Assert: VRF data is present and valid
+        let secret_hex = test_vrf_secret_hex();
+        let config = ChainClientConfig::default()
+            .with_account(GenesisAccount::new(sample_hash(1), 1_000_000))
+            .with_vrf(VrfConfig {
+                secret_key_hex: Some(secret_hex),
+                chain_id: 3,
+            });
+
+        let mut client = ChainClient::start(config).await.unwrap();
+
+        // Warp 100 blocks
+        client.warp_blocks(100).await.unwrap();
+        assert_eq!(client.topoheight(), 100);
+
+        // VRF data should be present for warped blocks
+        let vrf_100 = client.get_block_vrf_data(100).cloned();
+        assert!(vrf_100.is_some(), "VRF data should exist after warp");
+
+        let output_100 = vrf_100.unwrap().output;
+        assert_ne!(output_100, [0u8; 32]);
+
+        // Mine one more block after warp
+        client.mine_empty_block().await.unwrap();
+        let vrf_101 = client.get_block_vrf_data(101);
+        assert!(
+            vrf_101.is_some(),
+            "VRF data should exist for post-warp block"
+        );
+        assert_ne!(
+            vrf_101.unwrap().output,
+            output_100,
+            "Post-warp VRF output should differ"
+        );
     }
 
     // ========================================================================

@@ -87,6 +87,16 @@ pub enum StorageBackend {
     RocksDB(PathBuf),
 }
 
+/// VRF configuration for block production.
+#[derive(Debug, Clone, Default)]
+pub struct VrfConfig {
+    /// Hex-encoded VRF secret key (64 hex chars = 32 bytes)
+    /// If None, VRF is disabled and blocks have no VRF data
+    pub secret_key_hex: Option<String>,
+    /// Chain ID for VRF input domain separation
+    pub chain_id: u64,
+}
+
 /// Fee configuration for the test environment.
 #[derive(Debug, Clone)]
 pub struct FeeConfig {
@@ -143,6 +153,10 @@ pub struct ChainClientConfig {
     pub fee_config: FeeConfig,
     /// Block time target in milliseconds (used for auto-mine interval timing)
     pub block_time_ms: u64,
+    /// VRF configuration for block production
+    pub vrf: VrfConfig,
+    /// Miner address for reward tracking (scheduled execution payouts)
+    pub miner_address: Option<Hash>,
 }
 
 impl Default for ChainClientConfig {
@@ -160,6 +174,8 @@ impl Default for ChainClientConfig {
             storage: StorageBackend::default(),
             fee_config: FeeConfig::default(),
             block_time_ms: 500,
+            vrf: VrfConfig::default(),
+            miner_address: None,
         }
     }
 }
@@ -253,6 +269,18 @@ impl ChainClientConfig {
         self.block_time_ms = ms;
         self
     }
+
+    /// Set the VRF configuration.
+    pub fn with_vrf(mut self, vrf: VrfConfig) -> Self {
+        self.vrf = vrf;
+        self
+    }
+
+    /// Set the miner address for reward tracking.
+    pub fn with_miner(mut self, address: Hash) -> Self {
+        self.miner_address = Some(address);
+        self
+    }
 }
 
 impl std::fmt::Debug for ChainClientConfig {
@@ -269,6 +297,8 @@ impl std::fmt::Debug for ChainClientConfig {
             .field("storage", &self.storage)
             .field("fee_config", &self.fee_config)
             .field("block_time_ms", &self.block_time_ms)
+            .field("vrf", &self.vrf)
+            .field("miner_address", &self.miner_address)
             .finish()
     }
 }

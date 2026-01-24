@@ -45,7 +45,7 @@ pub mod tx_result;
 pub use block_warp::{BlockWarp, WarpError, BLOCK_TIME_MS, MAX_WARP_BLOCKS};
 pub use chain_client::{BlockInfo, ChainClient, ChainClientError, TransactionType};
 pub use chain_client_config::{
-    AutoMineConfig, ChainClientConfig, GenesisAccount, GenesisContract, StorageBackend,
+    AutoMineConfig, ChainClientConfig, GenesisAccount, GenesisContract, StorageBackend, VrfConfig,
 };
 pub use confirmation::ConfirmationDepth;
 pub use contract_test::{ContractTest, ContractTestContext};

@@ -10,13 +10,19 @@
 //! - Block warp for fast chain advancement
 //! - Feature gate configuration
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
 use tokio::sync::RwLock;
-use tos_common::crypto::Hash;
+use tos_common::block::BlockVrfData;
+use tos_common::contract::{
+    ScheduledExecution, ScheduledExecutionStatus, MAX_SCHEDULED_EXECUTIONS_PER_BLOCK,
+    MAX_SCHEDULED_EXECUTION_GAS_PER_BLOCK, MAX_SCHEDULING_HORIZON,
+};
+use tos_common::crypto::{Hash, KeyPair};
+use tos_daemon::vrf::VrfKeyManager;
 
 use crate::orchestrator::{Clock, PausedClock};
 use crate::tier1_component::{TestBlockchain, TestBlockchainBuilder, TestTransaction};
@@ -117,6 +123,8 @@ pub struct BlockInfo {
     pub tx_hashes: Vec<Hash>,
     /// Timestamp (mock clock time when mined)
     pub timestamp: u64,
+    /// VRF output data for this block (None if VRF not configured)
+    pub vrf_data: Option<BlockVrfData>,
 }
 
 /// ChainClient provides direct blockchain access for testing.
@@ -158,6 +166,18 @@ pub struct ChainClient {
     /// Pending nonces for mempool-aware sequential nonce validation.
     /// Maps sender address to their latest pending (unconfirmed) nonce.
     pending_nonces: HashMap<Hash, u64>,
+    /// VRF key manager (None if VRF not configured)
+    vrf_key_manager: Option<VrfKeyManager>,
+    /// Miner keypair for VRF signing (generated at start)
+    miner_keypair: KeyPair,
+    /// VRF data per block: topoheight -> BlockVrfData
+    block_vrf_data: HashMap<u64, BlockVrfData>,
+    /// Scheduled execution queue: target_topoheight -> executions
+    scheduled_queue: BTreeMap<u64, Vec<ScheduledExecution>>,
+    /// Execution results: hash -> (status, execution_topo)
+    scheduled_results: HashMap<Hash, (ScheduledExecutionStatus, u64)>,
+    /// Miner address for reward tracking
+    miner_address: Option<Hash>,
 }
 
 impl ChainClient {
@@ -181,6 +201,18 @@ impl ChainClient {
         let track_state_diffs = config.track_state_diffs;
         let features = config.features.clone();
         let auto_mine = config.auto_mine.clone();
+        let miner_address = config.miner_address.clone();
+
+        // Initialize VRF key manager if configured
+        let vrf_key_manager = if let Some(ref hex) = config.vrf.secret_key_hex {
+            Some(VrfKeyManager::from_hex(hex).map_err(|e| {
+                WarpError::BlockCreationFailed(format!("Failed to load VRF key: {}", e))
+            })?)
+        } else {
+            None
+        };
+
+        let miner_keypair = KeyPair::new();
 
         Ok(Self {
             blockchain,
@@ -192,6 +224,12 @@ impl ChainClient {
             topoheight: 0,
             track_state_diffs,
             pending_nonces: HashMap::new(),
+            vrf_key_manager,
+            miner_keypair,
+            block_vrf_data: HashMap::new(),
+            scheduled_queue: BTreeMap::new(),
+            scheduled_results: HashMap::new(),
+            miner_address,
         })
     }
 
@@ -775,6 +813,13 @@ impl ChainClient {
             .map_err(|e| WarpError::BlockCreationFailed(e.to_string()))?;
         self.topoheight = self.topoheight.saturating_add(1);
         self.clock.sleep(Duration::from_millis(BLOCK_TIME_MS)).await;
+
+        // Produce VRF data if configured
+        self.produce_vrf_for_block(&block.hash);
+
+        // Process scheduled executions at this topoheight
+        self.process_scheduled_at_topoheight(self.topoheight);
+
         Ok(block.hash)
     }
 
@@ -895,6 +940,7 @@ impl ChainClient {
             .await
             .map_err(|e| ChainClientError::Storage(e.to_string()))?
             .ok_or(ChainClientError::BlockNotFound(topo))?;
+        let vrf_data = self.block_vrf_data.get(&topo).cloned();
         Ok(BlockInfo {
             hash: block.hash,
             topoheight: block.topoheight,
@@ -904,6 +950,7 @@ impl ChainClient {
                 .map(|tx| tx.hash.clone())
                 .collect(),
             timestamp: topo.saturating_mul(self.config.block_time_ms),
+            vrf_data,
         })
     }
 
@@ -915,6 +962,7 @@ impl ChainClient {
             .await
             .map_err(|e| ChainClientError::Storage(e.to_string()))?
             .ok_or_else(|| ChainClientError::Storage(format!("block {} not found", hash)))?;
+        let vrf_data = self.block_vrf_data.get(&block.topoheight).cloned();
         Ok(BlockInfo {
             hash: block.hash,
             topoheight: block.topoheight,
@@ -924,6 +972,7 @@ impl ChainClient {
                 .map(|tx| tx.hash.clone())
                 .collect(),
             timestamp: block.topoheight.saturating_mul(self.config.block_time_ms),
+            vrf_data,
         })
     }
 
@@ -1014,7 +1063,265 @@ impl ChainClient {
         &self.config
     }
 
+    // --- VRF Queries ---
+
+    /// Get VRF data for a block at the given topoheight.
+    pub fn get_block_vrf_data(&self, topo: u64) -> Option<&BlockVrfData> {
+        self.block_vrf_data.get(&topo)
+    }
+
+    // --- Scheduled Execution API ---
+
+    /// Schedule a contract execution at a target topoheight.
+    pub async fn schedule_execution(
+        &mut self,
+        exec: ScheduledExecution,
+    ) -> Result<Hash, ChainClientError> {
+        let target_topo = match exec.kind {
+            tos_common::contract::ScheduledExecutionKind::TopoHeight(t) => t,
+            tos_common::contract::ScheduledExecutionKind::BlockEnd => {
+                return Err(ChainClientError::TransactionRejected(
+                    "BlockEnd scheduling not supported via direct API".to_string(),
+                ));
+            }
+        };
+
+        // Validate: target must be in the future
+        if target_topo <= self.topoheight {
+            return Err(ChainClientError::InvalidWarpTarget {
+                target: target_topo,
+                current: self.topoheight,
+            });
+        }
+
+        // Validate: within scheduling horizon
+        let horizon = target_topo.saturating_sub(self.topoheight);
+        if horizon > MAX_SCHEDULING_HORIZON {
+            return Err(ChainClientError::TransactionRejected(format!(
+                "target {} exceeds scheduling horizon (max {} blocks ahead)",
+                target_topo, MAX_SCHEDULING_HORIZON
+            )));
+        }
+
+        // Check for duplicate hash
+        if self.scheduled_results.contains_key(&exec.hash) {
+            return Err(ChainClientError::TransactionRejected(
+                "duplicate scheduled execution hash".to_string(),
+            ));
+        }
+        for queue_entries in self.scheduled_queue.values() {
+            for existing in queue_entries {
+                if existing.hash == exec.hash {
+                    return Err(ChainClientError::TransactionRejected(
+                        "duplicate scheduled execution hash".to_string(),
+                    ));
+                }
+            }
+        }
+
+        // Validate: sender (scheduler_contract) has sufficient balance for offer
+        if exec.offer_amount > 0 {
+            let balance = self
+                .blockchain
+                .get_balance(&exec.scheduler_contract)
+                .await
+                .map_err(|_| {
+                    ChainClientError::AccountNotFound(format!("{}", exec.scheduler_contract))
+                })?;
+            if balance < exec.offer_amount {
+                return Err(ChainClientError::InsufficientBalance {
+                    have: balance,
+                    need: exec.offer_amount,
+                });
+            }
+
+            // Deduct offer from sender balance
+            let new_balance = balance.saturating_sub(exec.offer_amount);
+            self.blockchain
+                .force_set_balance(&exec.scheduler_contract, new_balance)
+                .await
+                .map_err(|e| ChainClientError::Storage(e.to_string()))?;
+
+            // Burn 30% immediately
+            let burn_amount = exec.offer_amount.saturating_mul(30) / 100;
+            let counters = self.blockchain.counters();
+            let mut c = counters.write();
+            c.supply = c.supply.saturating_sub(burn_amount as u128);
+            c.fees_burned = c.fees_burned.saturating_add(burn_amount);
+        }
+
+        let exec_hash = exec.hash.clone();
+        self.scheduled_queue
+            .entry(target_topo)
+            .or_default()
+            .push(exec);
+
+        Ok(exec_hash)
+    }
+
+    /// Query scheduled execution status by hash.
+    pub fn get_scheduled_status(&self, hash: &Hash) -> Option<(ScheduledExecutionStatus, u64)> {
+        self.scheduled_results.get(hash).cloned()
+    }
+
+    /// Get all pending executions at a topoheight.
+    pub fn get_pending_at(&self, topo: u64) -> Vec<&ScheduledExecution> {
+        self.scheduled_queue
+            .get(&topo)
+            .map(|v| v.iter().collect())
+            .unwrap_or_default()
+    }
+
+    /// Cancel a scheduled execution (returns refund amount).
+    pub async fn cancel_scheduled(&mut self, hash: &Hash) -> Result<u64, ChainClientError> {
+        // Find and remove from queue
+        for (_topo, entries) in self.scheduled_queue.iter_mut() {
+            if let Some(pos) = entries.iter().position(|e| &e.hash == hash) {
+                let exec = entries.remove(pos);
+                if exec.status != ScheduledExecutionStatus::Pending {
+                    return Err(ChainClientError::TransactionRejected(
+                        "execution not in pending state".to_string(),
+                    ));
+                }
+                // Refund 70% (30% was already burned)
+                let refund = exec.offer_amount.saturating_mul(70) / 100;
+                if refund > 0 {
+                    let balance = self
+                        .blockchain
+                        .get_balance(&exec.scheduler_contract)
+                        .await
+                        .unwrap_or(0);
+                    let _ = self
+                        .blockchain
+                        .force_set_balance(&exec.scheduler_contract, balance.saturating_add(refund))
+                        .await;
+                }
+                self.scheduled_results
+                    .insert(hash.clone(), (ScheduledExecutionStatus::Cancelled, 0));
+                return Ok(refund);
+            }
+        }
+        Err(ChainClientError::Storage(
+            "scheduled execution not found".to_string(),
+        ))
+    }
+
     // --- Private Helpers ---
+
+    /// Produce VRF data for a block hash and store it.
+    fn produce_vrf_for_block(&mut self, block_hash: &Hash) {
+        let chain_id = self.config.vrf.chain_id;
+        let block_hash_bytes = block_hash.as_bytes();
+        let miner_compressed = self.miner_keypair.get_public_key().compress();
+
+        let vrf_result = if let Some(ref vrf_mgr) = self.vrf_key_manager {
+            vrf_mgr.sign(
+                chain_id,
+                block_hash_bytes,
+                &miner_compressed,
+                &self.miner_keypair,
+            )
+        } else {
+            return;
+        };
+
+        if let Ok(vrf_data) = vrf_result {
+            let pub_key_bytes = vrf_data.public_key.to_bytes();
+            let proof_bytes = vrf_data.proof.to_bytes();
+            let sig_bytes = vrf_data.binding_signature.to_bytes();
+
+            // VrfOutput: copy bytes into fixed-size array
+            let output_slice = vrf_data.output.as_bytes();
+            let mut output_bytes = [0u8; 32];
+            let copy_len = output_slice.len().min(32);
+            output_bytes[..copy_len].copy_from_slice(&output_slice[..copy_len]);
+
+            let block_vrf = BlockVrfData::new(pub_key_bytes, output_bytes, proof_bytes, sig_bytes);
+            self.block_vrf_data.insert(self.topoheight, block_vrf);
+        }
+    }
+
+    /// Process scheduled executions at the given topoheight.
+    fn process_scheduled_at_topoheight(&mut self, topo: u64) {
+        let executions = match self.scheduled_queue.remove(&topo) {
+            Some(mut execs) => {
+                // Sort by priority: offer_amount DESC, registration_topoheight ASC, hash ASC
+                execs.sort_by(|a, b| {
+                    b.offer_amount
+                        .cmp(&a.offer_amount)
+                        .then(a.registration_topoheight.cmp(&b.registration_topoheight))
+                        .then(a.hash.cmp(&b.hash))
+                });
+                execs
+            }
+            None => return,
+        };
+
+        let mut gas_used_total: u64 = 0;
+        let mut executed_count: usize = 0;
+        let mut deferred: Vec<ScheduledExecution> = Vec::new();
+
+        for mut exec in executions {
+            // Check block capacity
+            if executed_count >= MAX_SCHEDULED_EXECUTIONS_PER_BLOCK {
+                // Defer remaining
+                if exec.defer() {
+                    exec.status = ScheduledExecutionStatus::Expired;
+                    self.scheduled_results
+                        .insert(exec.hash.clone(), (ScheduledExecutionStatus::Expired, topo));
+                } else {
+                    deferred.push(exec);
+                }
+                continue;
+            }
+
+            // Check gas budget
+            let gas_needed = exec.max_gas.min(MAX_SCHEDULED_EXECUTION_GAS_PER_BLOCK);
+            if gas_used_total.saturating_add(gas_needed) > MAX_SCHEDULED_EXECUTION_GAS_PER_BLOCK {
+                // Defer due to gas
+                if exec.defer() {
+                    exec.status = ScheduledExecutionStatus::Expired;
+                    self.scheduled_results
+                        .insert(exec.hash.clone(), (ScheduledExecutionStatus::Expired, topo));
+                } else {
+                    deferred.push(exec);
+                }
+                continue;
+            }
+
+            // Execute (simplified: mark as Executed)
+            gas_used_total = gas_used_total.saturating_add(gas_needed);
+            executed_count = executed_count.saturating_add(1);
+
+            // Pay 70% of offer to miner_address
+            if exec.offer_amount > 0 {
+                let miner_reward = exec.offer_amount.saturating_mul(70) / 100;
+                if let Some(ref miner_addr) = self.miner_address {
+                    let miner_addr = miner_addr.clone();
+                    if let Ok(miner_balance) = self.blockchain.get_balance_sync(&miner_addr) {
+                        let _ = self.blockchain.force_set_balance_sync(
+                            &miner_addr,
+                            miner_balance.saturating_add(miner_reward),
+                        );
+                    }
+                }
+            }
+
+            exec.status = ScheduledExecutionStatus::Executed;
+            self.scheduled_results.insert(
+                exec.hash.clone(),
+                (ScheduledExecutionStatus::Executed, topo),
+            );
+        }
+
+        // Re-insert deferred executions at topo + 1
+        if !deferred.is_empty() {
+            self.scheduled_queue
+                .entry(topo.saturating_add(1))
+                .or_default()
+                .extend(deferred);
+        }
+    }
 
     /// Validate a transaction before execution.
     async fn validate_transaction(&self, tx: &TestTransaction) -> Option<TransactionError> {
@@ -1132,11 +1439,18 @@ impl BlockWarp for ChainClient {
 
         for _ in 0..n {
             self.clock.sleep(Duration::from_millis(BLOCK_TIME_MS)).await;
-            self.blockchain
+            let block = self
+                .blockchain
                 .mine_block()
                 .await
                 .map_err(|e| WarpError::BlockCreationFailed(e.to_string()))?;
             self.topoheight = self.topoheight.saturating_add(1);
+
+            // Produce VRF data if configured
+            self.produce_vrf_for_block(&block.hash);
+
+            // Process scheduled executions at this topoheight
+            self.process_scheduled_at_topoheight(self.topoheight);
         }
 
         Ok(self.topoheight)

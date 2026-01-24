@@ -76,6 +76,8 @@ pub struct TestBlock {
     pub pruning_point: Hash,
     /// Selected parent hash (for pruning point calculation)
     pub selected_parent: Hash,
+    /// VRF data for this block (None if VRF not configured)
+    pub vrf_data: Option<tos_common::block::BlockVrfData>,
 }
 
 /// Pruning depth constant (matches daemon/src/config.rs PRUNING_DEPTH)
@@ -185,6 +187,7 @@ impl TestBlockchain {
             reward: 0,
             pruning_point: genesis_hash.clone(),
             selected_parent: genesis_hash.clone(), // Genesis has no parent
+            vrf_data: None,
         };
 
         Ok(Self {
@@ -396,6 +399,7 @@ impl TestBlockchain {
             reward: BLOCK_REWARD,
             pruning_point,
             selected_parent,
+            vrf_data: None,
         };
 
         // Update blockchain state
@@ -713,6 +717,11 @@ impl TestBlockchain {
 
     /// Force-set account balance (test-only, bypasses normal transaction flow).
     pub async fn force_set_balance(&self, address: &Hash, balance: u64) -> Result<()> {
+        self.force_set_balance_sync(address, balance)
+    }
+
+    /// Force-set account balance (synchronous version).
+    pub fn force_set_balance_sync(&self, address: &Hash, balance: u64) -> Result<()> {
         let mut accounts = self.accounts.write();
         let account = accounts.entry(address.clone()).or_insert(AccountState {
             balance: 0,
@@ -720,6 +729,12 @@ impl TestBlockchain {
         });
         account.balance = balance;
         Ok(())
+    }
+
+    /// Get account balance (synchronous version).
+    pub fn get_balance_sync(&self, address: &Hash) -> Result<u64> {
+        let accounts = self.accounts.read();
+        Ok(accounts.get(address).map(|a| a.balance).unwrap_or(0))
     }
 
     /// Force-set account nonce (test-only, bypasses normal transaction flow).
@@ -731,6 +746,11 @@ impl TestBlockchain {
         });
         account.nonce = nonce;
         Ok(())
+    }
+
+    /// Get direct access to blockchain counters.
+    pub fn counters(&self) -> &Arc<RwLock<BlockchainCounters>> {
+        &self.counters
     }
 }
 
@@ -1255,6 +1275,7 @@ mod tests {
             reward: 50_000,
             pruning_point: genesis_hash.clone(),
             selected_parent: genesis_hash,
+            vrf_data: None,
         };
 
         blockchain.receive_block(block).await.unwrap();
@@ -1276,6 +1297,7 @@ mod tests {
             reward: 50_000,
             pruning_point: genesis_hash.clone(),
             selected_parent: genesis_hash,
+            vrf_data: None,
         };
 
         let result = blockchain.receive_block(block).await;
@@ -1298,6 +1320,7 @@ mod tests {
             reward: 50_000,
             pruning_point: genesis_hash.clone(),
             selected_parent: genesis_hash,
+            vrf_data: None,
         };
 
         blockchain.receive_block(block.clone()).await.unwrap();
@@ -2447,6 +2470,7 @@ mod tests {
             reward: 50_000_000_000,
             pruning_point: genesis_hash.clone(),
             selected_parent: genesis_hash,
+            vrf_data: None,
         };
 
         blockchain.receive_block(block).await.unwrap();
@@ -2489,6 +2513,7 @@ mod tests {
             reward: 50_000_000_000,
             pruning_point: genesis_hash.clone(),
             selected_parent: genesis_hash,
+            vrf_data: None,
         };
 
         blockchain.receive_block(block).await.unwrap();
@@ -2697,6 +2722,7 @@ mod tests {
             reward: mined_block.reward,
             pruning_point: genesis_hash.clone(),
             selected_parent: genesis_hash,
+            vrf_data: None,
         };
         blockchain2.receive_block(received_block).await.unwrap();
 
@@ -2879,6 +2905,7 @@ mod tests {
             reward: 50_000_000_000,
             pruning_point: genesis_hash.clone(),
             selected_parent: genesis_hash,
+            vrf_data: None,
         };
 
         let result = blockchain.receive_block(block).await;
@@ -2902,6 +2929,7 @@ mod tests {
             reward: 50_000_000_000,
             pruning_point: genesis_hash.clone(),
             selected_parent: genesis_hash,
+            vrf_data: None,
         };
 
         blockchain.receive_block(block.clone()).await.unwrap();
@@ -3095,6 +3123,7 @@ mod tests {
             reward: 50_000_000_000,
             pruning_point: genesis_hash.clone(),
             selected_parent: genesis_hash,
+            vrf_data: None,
         };
 
         let result = blockchain.receive_block(block).await;
@@ -3166,6 +3195,7 @@ mod tests {
             reward: 50_000_000_000,
             pruning_point: genesis_hash.clone(),
             selected_parent: genesis_hash,
+            vrf_data: None,
         };
 
         // Block with invalid transaction should be rejected
