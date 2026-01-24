@@ -145,35 +145,212 @@ mod tests {
     // ========================================================================
 
     #[tokio::test]
-    #[ignore = "Requires VRF injection into contract execution context"]
     async fn contract_reads_vrf_random() {
-        // Deploy vrf-reader.so contract
-        // Call it -> it reads vrf_random() and stores result
-        // Assert: Stored value is 32 bytes and matches block VRF derive
+        let secret_hex = test_vrf_secret_hex();
+        let config = ChainClientConfig::default()
+            .with_account(GenesisAccount::new(sample_hash(1), 1_000_000))
+            .with_vrf(VrfConfig {
+                secret_key_hex: Some(secret_hex),
+                chain_id: 3,
+            });
+
+        let mut client = ChainClient::start(config).await.unwrap();
+        client.mine_empty_block().await.unwrap(); // topo 1, produces VRF
+
+        // Deploy vrf_random.so
+        let bytecode = include_bytes!("../../tests/fixtures/vrf_random.so");
+        let contract = client.deploy_contract(bytecode).await.unwrap();
+
+        // Call contract (entry_id 0 = default, no params)
+        let result = client
+            .call_contract(&contract, 0, vec![], vec![], 1_000_000)
+            .await
+            .unwrap();
+        assert!(result.tx_result.success, "Contract call should succeed");
+
+        // Read stored vrf_random from contract storage
+        let stored = client
+            .get_contract_storage(&contract, b"vrf_random")
+            .await
+            .unwrap();
+        assert!(stored.is_some(), "vrf_random should be stored");
+        let random_bytes = stored.unwrap();
+        assert_eq!(random_bytes.len(), 32, "vrf_random should be 32 bytes");
+        assert_ne!(
+            random_bytes,
+            vec![0u8; 32],
+            "vrf_random should not be zeros"
+        );
+
+        // Verify it matches the derivation formula
+        let pre_output = client
+            .get_contract_storage(&contract, b"vrf_pre_output")
+            .await
+            .unwrap()
+            .unwrap();
+        let block_hash_stored = client
+            .get_contract_storage(&contract, b"vrf_block_hash")
+            .await
+            .unwrap()
+            .unwrap();
+
+        let mut derive_input = Vec::new();
+        derive_input.extend_from_slice(b"TOS-VRF-DERIVE");
+        derive_input.extend_from_slice(&pre_output);
+        derive_input.extend_from_slice(&block_hash_stored);
+        let expected = tos_common::crypto::hash(&derive_input);
+        assert_eq!(random_bytes, expected.as_bytes().to_vec());
     }
 
     #[tokio::test]
-    #[ignore = "Requires VRF injection into contract execution context"]
     async fn contract_reads_vrf_public_key() {
-        // Deploy vrf-reader.so contract
-        // Call it -> it reads vrf_public_key() and stores result
-        // Assert: Stored value matches configured VRF public key
+        let secret_hex = test_vrf_secret_hex();
+        let config = ChainClientConfig::default()
+            .with_account(GenesisAccount::new(sample_hash(1), 1_000_000))
+            .with_vrf(VrfConfig {
+                secret_key_hex: Some(secret_hex),
+                chain_id: 3,
+            });
+
+        let mut client = ChainClient::start(config).await.unwrap();
+        client.mine_empty_block().await.unwrap();
+
+        let bytecode = include_bytes!("../../tests/fixtures/vrf_random.so");
+        let contract = client.deploy_contract(bytecode).await.unwrap();
+        let result = client
+            .call_contract(&contract, 0, vec![], vec![], 1_000_000)
+            .await
+            .unwrap();
+        assert!(result.tx_result.success);
+
+        let stored_pk = client
+            .get_contract_storage(&contract, b"vrf_public_key")
+            .await
+            .unwrap();
+        assert!(stored_pk.is_some());
+        let pk_bytes = stored_pk.unwrap();
+        assert_eq!(pk_bytes.len(), 32);
+
+        // Should match the VRF key manager's public key
+        let vrf_data = client.get_block_vrf_data(1).unwrap();
+        assert_eq!(pk_bytes, vrf_data.public_key.to_vec());
     }
 
     #[tokio::test]
-    #[ignore = "Requires VRF injection into contract execution context"]
     async fn same_block_same_vrf_for_all_txs() {
-        // Submit 3 contract calls in same block
-        // Each reads vrf_random()
-        // Assert: All 3 get the same value
+        let secret_hex = test_vrf_secret_hex();
+        let config = ChainClientConfig::default()
+            .with_account(GenesisAccount::new(sample_hash(1), 1_000_000))
+            .with_vrf(VrfConfig {
+                secret_key_hex: Some(secret_hex),
+                chain_id: 3,
+            });
+
+        let mut client = ChainClient::start(config).await.unwrap();
+        client.mine_empty_block().await.unwrap();
+
+        let bytecode = include_bytes!("../../tests/fixtures/vrf_random.so");
+        let contract = client.deploy_contract(bytecode).await.unwrap();
+
+        // Call 3 times in same block context
+        let r1 = client
+            .call_contract(&contract, 0, vec![], vec![], 1_000_000)
+            .await
+            .unwrap();
+        assert!(r1.tx_result.success);
+        let vrf1 = client
+            .get_contract_storage(&contract, b"vrf_random")
+            .await
+            .unwrap()
+            .unwrap();
+
+        let r2 = client
+            .call_contract(&contract, 0, vec![], vec![], 1_000_000)
+            .await
+            .unwrap();
+        assert!(r2.tx_result.success);
+        let vrf2 = client
+            .get_contract_storage(&contract, b"vrf_random")
+            .await
+            .unwrap()
+            .unwrap();
+
+        let r3 = client
+            .call_contract(&contract, 0, vec![], vec![], 1_000_000)
+            .await
+            .unwrap();
+        assert!(r3.tx_result.success);
+        let vrf3 = client
+            .get_contract_storage(&contract, b"vrf_random")
+            .await
+            .unwrap()
+            .unwrap();
+
+        // All should read the same VRF (same block)
+        assert_eq!(vrf1, vrf2, "Same block VRF should be identical");
+        assert_eq!(vrf2, vrf3, "Same block VRF should be identical");
     }
 
     #[tokio::test]
-    #[ignore = "Requires VRF injection into contract execution context"]
     async fn multiple_contracts_read_same_vrf() {
-        // Deploy 3 different contracts
-        // All call vrf_random() in same block
-        // Assert: All read same VRF output
+        let secret_hex = test_vrf_secret_hex();
+        let config = ChainClientConfig::default()
+            .with_account(GenesisAccount::new(sample_hash(1), 1_000_000))
+            .with_vrf(VrfConfig {
+                secret_key_hex: Some(secret_hex),
+                chain_id: 3,
+            });
+
+        let mut client = ChainClient::start(config).await.unwrap();
+        client.mine_empty_block().await.unwrap();
+
+        let bytecode = include_bytes!("../../tests/fixtures/vrf_random.so");
+
+        // Deploy same bytecode at 3 different addresses
+        let c1 = Hash::new([0x01; 32]);
+        let c2 = Hash::new([0x02; 32]);
+        let c3 = Hash::new([0x03; 32]);
+        client.deploy_contract_at(&c1, bytecode).await.unwrap();
+        client.deploy_contract_at(&c2, bytecode).await.unwrap();
+        client.deploy_contract_at(&c3, bytecode).await.unwrap();
+
+        // Call each
+        let r1 = client
+            .call_contract(&c1, 0, vec![], vec![], 1_000_000)
+            .await
+            .unwrap();
+        assert!(r1.tx_result.success);
+        let r2 = client
+            .call_contract(&c2, 0, vec![], vec![], 1_000_000)
+            .await
+            .unwrap();
+        assert!(r2.tx_result.success);
+        let r3 = client
+            .call_contract(&c3, 0, vec![], vec![], 1_000_000)
+            .await
+            .unwrap();
+        assert!(r3.tx_result.success);
+
+        // All should have same vrf_random
+        let v1 = client
+            .get_contract_storage(&c1, b"vrf_random")
+            .await
+            .unwrap()
+            .unwrap();
+        let v2 = client
+            .get_contract_storage(&c2, b"vrf_random")
+            .await
+            .unwrap()
+            .unwrap();
+        let v3 = client
+            .get_contract_storage(&c3, b"vrf_random")
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(v1, v2);
+        assert_eq!(v2, v3);
+        assert_eq!(v1.len(), 32);
     }
 
     // ========================================================================

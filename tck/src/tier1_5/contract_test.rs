@@ -473,11 +473,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_contract_call() {
-        let bytecode = vec![0x00, 0x61, 0x73, 0x6d];
+        let bytecode = include_bytes!("../../tests/fixtures/counter.so");
 
-        let mut ctx = ContractTest::new("my_contract", &bytecode).start().await;
+        let mut ctx = ContractTest::new("my_contract", bytecode).start().await;
 
-        let result = ctx.call(0x01, vec![1, 2, 3]).await.unwrap();
+        let result = ctx.call(0x00, vec![]).await.unwrap();
         assert!(result.success);
         assert!(ctx.last_success());
     }
@@ -545,33 +545,32 @@ mod tests {
 
     #[tokio::test]
     async fn test_all_results_tracking() {
-        let bytecode = vec![0x00, 0x61, 0x73, 0x6d];
+        let bytecode = include_bytes!("../../tests/fixtures/counter.so");
 
-        let mut ctx = ContractTest::new("my_contract", &bytecode).start().await;
+        let mut ctx = ContractTest::new("my_contract", bytecode).start().await;
 
-        ctx.call(0x01, vec![]).await.unwrap();
-        ctx.call(0x02, vec![]).await.unwrap();
-        ctx.call(0x03, vec![]).await.unwrap();
+        ctx.call(0x00, vec![]).await.unwrap();
+        ctx.call(0x00, vec![]).await.unwrap();
+        ctx.call(0x00, vec![]).await.unwrap();
 
         assert_eq!(ctx.all_results().len(), 3);
     }
 
     #[tokio::test]
     async fn test_last_inspection_methods() {
-        let bytecode = vec![0x00, 0x61, 0x73, 0x6d];
+        let bytecode = include_bytes!("../../tests/fixtures/counter.so");
 
-        let mut ctx = ContractTest::new("my_contract", &bytecode).start().await;
+        let mut ctx = ContractTest::new("my_contract", bytecode).start().await;
 
-        ctx.call(0x01, vec![]).await.unwrap();
+        ctx.call(0x00, vec![]).await.unwrap();
 
         assert!(ctx.last_success());
         assert!(ctx.last_error().is_none());
         assert!(ctx.last_events().is_empty());
         assert!(ctx.last_return_data().is_empty());
-        assert!(ctx.last_log_messages().is_empty());
         // call_contract now produces an InnerCall tracing the contract invocation
         assert_eq!(ctx.last_inner_calls().len(), 1);
-        assert_eq!(ctx.last_inner_calls()[0].entry_id, 0x01);
+        assert_eq!(ctx.last_inner_calls()[0].entry_id, 0x00);
         assert!(ctx.last_gas_used() > 0);
     }
 }

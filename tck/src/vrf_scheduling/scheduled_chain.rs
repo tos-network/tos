@@ -582,11 +582,31 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "Requires contract panic simulation"]
     async fn failed_execution_status() {
-        // Schedule execution that will revert (contract panics)
+        let scheduler = sample_hash(1);
+        let miner = sample_hash(99);
+
+        let config = ChainClientConfig::default()
+            .with_account(GenesisAccount::new(scheduler.clone(), 10_000_000))
+            .with_account(GenesisAccount::new(miner.clone(), 0))
+            .with_miner(miner);
+
+        let mut client = ChainClient::start(config).await.unwrap();
+
+        // Deploy invalid bytecode (will fail to execute)
+        let bad_bytecode = vec![0xFFu8; 64]; // Not valid ELF
+        let contract = client.deploy_contract(&bad_bytecode).await.unwrap();
+
+        // Schedule execution
+        let exec = make_exec(contract, 3, 1_000, 50_000, 0, scheduler);
+        let exec_hash = client.schedule_execution(exec).await.unwrap();
+
         // Warp to target
-        // Assert: status = Failed, miner still gets reward
+        client.warp_blocks(3).await.unwrap();
+
+        // Status should be Failed (bad bytecode causes execution error)
+        let (status, _) = client.get_scheduled_status(&exec_hash).unwrap();
+        assert_eq!(status, ScheduledExecutionStatus::Failed);
     }
 
     // ========================================================================
@@ -604,11 +624,48 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "Requires VRF + scheduled execution integration"]
     async fn scheduled_can_read_vrf() {
-        // Schedule contract that reads vrf_random()
+        use tos_daemon::vrf::VrfKeyManager;
+
+        use crate::tier1_5::VrfConfig;
+
+        let scheduler = sample_hash(0xBB);
+        let mgr = VrfKeyManager::new();
+        let secret_hex = mgr.secret_key_hex();
+        let config = ChainClientConfig::default()
+            .with_account(GenesisAccount::new(scheduler.clone(), 10_000_000))
+            .with_vrf(VrfConfig {
+                secret_key_hex: Some(secret_hex),
+                chain_id: 3,
+            });
+
+        let mut client = ChainClient::start(config).await.unwrap();
+
+        // Deploy VRF reader contract
+        let bytecode = include_bytes!("../../tests/fixtures/vrf_random.so");
+        let contract = client.deploy_contract(bytecode).await.unwrap();
+
+        // Schedule execution at topo 5
+        let exec = make_exec(contract.clone(), 5, 1_000, 1_000_000, 0, scheduler);
+        let hash = client.schedule_execution(exec).await.unwrap();
+
         // Warp to target
-        // Assert: Contract read the block's VRF output correctly
+        client.warp_to_topoheight(5).await.unwrap();
+
+        // Check status
+        let (status, _) = client.get_scheduled_status(&hash).unwrap();
+        assert_eq!(status, ScheduledExecutionStatus::Executed);
+
+        // Contract should have stored VRF data
+        let stored = client
+            .get_contract_storage(&contract, b"vrf_random")
+            .await
+            .unwrap();
+        assert!(
+            stored.is_some(),
+            "Scheduled execution should have stored VRF random"
+        );
+        assert_eq!(stored.unwrap().len(), 32);
     }
 
     // ========================================================================

@@ -16,13 +16,16 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use tokio::sync::RwLock;
-use tos_common::block::{compute_vrf_binding_message, compute_vrf_input, BlockVrfData};
+use tos_common::asset::AssetData;
+use tos_common::block::{compute_vrf_binding_message, compute_vrf_input, BlockVrfData, TopoHeight};
 use tos_common::contract::{
-    ScheduledExecution, ScheduledExecutionStatus, MAX_SCHEDULED_EXECUTIONS_PER_BLOCK,
-    MAX_SCHEDULED_EXECUTION_GAS_PER_BLOCK, MAX_SCHEDULING_HORIZON,
+    ContractCache, ContractProvider, ContractStorage, ScheduledExecution, ScheduledExecutionStatus,
+    ValueCell, MAX_SCHEDULED_EXECUTIONS_PER_BLOCK, MAX_SCHEDULED_EXECUTION_GAS_PER_BLOCK,
+    MAX_SCHEDULING_HORIZON,
 };
-use tos_common::crypto::{Hash, KeyPair, Signature};
-use tos_daemon::vrf::{VrfKeyManager, VrfOutput, VrfProof, VrfPublicKey};
+use tos_common::crypto::{Hash, KeyPair, PublicKey, Signature};
+use tos_daemon::tako_integration::TakoExecutor;
+use tos_daemon::vrf::{VrfData, VrfKeyManager, VrfOutput, VrfProof, VrfPublicKey};
 
 use crate::orchestrator::{Clock, PausedClock};
 use crate::tier1_component::{TestBlockchain, TestBlockchainBuilder, TestTransaction};
@@ -181,6 +184,151 @@ pub struct ChainClient {
     scheduled_results: HashMap<Hash, (ScheduledExecutionStatus, u64)>,
     /// Miner address for reward tracking
     miner_address: Option<Hash>,
+    /// Contract bytecodes: contract_hash -> ELF bytecode
+    contract_bytecodes: HashMap<Hash, Vec<u8>>,
+    /// Contract storage: (contract_hash, key_bytes) -> value_bytes
+    contract_storage: HashMap<(Hash, Vec<u8>), Vec<u8>>,
+    /// Block hashes by topoheight (for contract execution context)
+    block_hashes: HashMap<u64, Hash>,
+}
+
+/// In-memory contract provider for ChainClient contract execution.
+struct InMemoryContractProvider {
+    /// Contract storage: (contract_hash, key_bytes) -> value_bytes
+    storage: HashMap<(Hash, Vec<u8>), Vec<u8>>,
+    /// Contract bytecodes for CPI load_contract_module
+    bytecodes: HashMap<Hash, Vec<u8>>,
+    /// Current topoheight
+    topoheight: u64,
+}
+
+impl ContractStorage for InMemoryContractProvider {
+    fn load_data(
+        &self,
+        contract: &Hash,
+        key: &ValueCell,
+        _topoheight: TopoHeight,
+    ) -> Result<Option<(TopoHeight, Option<ValueCell>)>, anyhow::Error> {
+        let key_bytes = key
+            .as_bytes()
+            .map_err(|e| anyhow::anyhow!("{}", e))?
+            .clone();
+        match self.storage.get(&(contract.clone(), key_bytes)) {
+            Some(value) => Ok(Some((
+                self.topoheight,
+                Some(ValueCell::Bytes(value.clone())),
+            ))),
+            None => Ok(None),
+        }
+    }
+
+    fn load_data_latest_topoheight(
+        &self,
+        contract: &Hash,
+        key: &ValueCell,
+        _topoheight: TopoHeight,
+    ) -> Result<Option<TopoHeight>, anyhow::Error> {
+        let key_bytes = key
+            .as_bytes()
+            .map_err(|e| anyhow::anyhow!("{}", e))?
+            .clone();
+        if self.storage.contains_key(&(contract.clone(), key_bytes)) {
+            Ok(Some(self.topoheight))
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn has_data(
+        &self,
+        contract: &Hash,
+        key: &ValueCell,
+        _topoheight: TopoHeight,
+    ) -> Result<bool, anyhow::Error> {
+        let key_bytes = key
+            .as_bytes()
+            .map_err(|e| anyhow::anyhow!("{}", e))?
+            .clone();
+        Ok(self.storage.contains_key(&(contract.clone(), key_bytes)))
+    }
+
+    fn has_contract(
+        &self,
+        contract: &Hash,
+        _topoheight: TopoHeight,
+    ) -> Result<bool, anyhow::Error> {
+        Ok(self.bytecodes.contains_key(contract))
+    }
+}
+
+impl ContractProvider for InMemoryContractProvider {
+    fn get_contract_balance_for_asset(
+        &self,
+        _contract: &Hash,
+        _asset: &Hash,
+        _topoheight: TopoHeight,
+    ) -> Result<Option<(TopoHeight, u64)>, anyhow::Error> {
+        Ok(None)
+    }
+
+    fn get_account_balance_for_asset(
+        &self,
+        _key: &PublicKey,
+        _asset: &Hash,
+        _topoheight: TopoHeight,
+    ) -> Result<Option<(TopoHeight, u64)>, anyhow::Error> {
+        Ok(None)
+    }
+
+    fn asset_exists(&self, asset: &Hash, _topoheight: TopoHeight) -> Result<bool, anyhow::Error> {
+        Ok(*asset == Hash::zero())
+    }
+
+    fn load_asset_data(
+        &self,
+        _asset: &Hash,
+        _topoheight: TopoHeight,
+    ) -> Result<Option<(TopoHeight, AssetData)>, anyhow::Error> {
+        Ok(None)
+    }
+
+    fn load_asset_supply(
+        &self,
+        _asset: &Hash,
+        _topoheight: TopoHeight,
+    ) -> Result<Option<(TopoHeight, u64)>, anyhow::Error> {
+        Ok(None)
+    }
+
+    fn account_exists(
+        &self,
+        _key: &PublicKey,
+        _topoheight: TopoHeight,
+    ) -> Result<bool, anyhow::Error> {
+        Ok(false)
+    }
+
+    fn load_contract_module(
+        &self,
+        contract: &Hash,
+        _topoheight: TopoHeight,
+    ) -> Result<Option<Vec<u8>>, anyhow::Error> {
+        Ok(self.bytecodes.get(contract).cloned())
+    }
+}
+
+/// Convert BlockVrfData (raw bytes) to VrfData (typed structs) for executor.
+fn block_vrf_to_executor_vrf(block_vrf: &BlockVrfData) -> Option<VrfData> {
+    let public_key = VrfPublicKey::from_bytes(&block_vrf.public_key).ok()?;
+    let output = VrfOutput::from_bytes(&block_vrf.output).ok()?;
+    let proof = VrfProof::from_bytes(&block_vrf.proof).ok()?;
+    let binding_signature = Signature::from_bytes(&block_vrf.binding_signature).ok()?;
+    Some(VrfData {
+        public_key,
+        output,
+        proof,
+        binding_signature,
+    })
 }
 
 impl ChainClient {
@@ -217,6 +365,16 @@ impl ChainClient {
 
         let miner_keypair = KeyPair::new();
 
+        // Register genesis contracts
+        let mut contract_bytecodes = HashMap::new();
+        let mut contract_storage = HashMap::new();
+        for gc in &config.genesis_contracts {
+            contract_bytecodes.insert(gc.address.clone(), gc.bytecode.clone());
+            for (key, value) in &gc.storage {
+                contract_storage.insert((gc.address.clone(), key.clone()), value.clone());
+            }
+        }
+
         Ok(Self {
             blockchain,
             clock,
@@ -233,6 +391,9 @@ impl ChainClient {
             scheduled_queue: BTreeMap::new(),
             scheduled_results: HashMap::new(),
             miner_address,
+            contract_bytecodes,
+            contract_storage,
+            block_hashes: HashMap::new(),
         })
     }
 
@@ -559,10 +720,10 @@ impl ChainClient {
         contract: &Hash,
         key: &[u8],
     ) -> Result<Option<Vec<u8>>, TransactionError> {
-        // TestBlockchain doesn't have contract storage yet,
-        // return None for undeployed contracts
-        let _ = (contract, key);
-        Ok(None)
+        Ok(self
+            .contract_storage
+            .get(&(contract.clone(), key.to_vec()))
+            .cloned())
     }
 
     /// Get contract storage and deserialize with borsh.
@@ -625,11 +786,11 @@ impl ChainClient {
     /// Force-set a contract storage entry.
     pub async fn force_set_contract_storage(
         &mut self,
-        _contract: &Hash,
-        _key: Vec<u8>,
-        _value: Vec<u8>,
+        contract: &Hash,
+        key: Vec<u8>,
+        value: Vec<u8>,
     ) -> Result<(), WarpError> {
-        // Contract storage override - placeholder until contract VM is integrated
+        self.contract_storage.insert((contract.clone(), key), value);
         Ok(())
     }
 
@@ -637,22 +798,27 @@ impl ChainClient {
 
     /// Deploy a contract and return its address hash.
     pub async fn deploy_contract(&mut self, bytecode: &[u8]) -> Result<Hash, TransactionError> {
-        // Generate contract address from bytecode hash
-        let code_hash = Hash::new({
-            let mut hasher = [0u8; 32];
-            for (i, byte) in bytecode.iter().enumerate() {
-                hasher[i % 32] ^= byte;
-            }
-            hasher
-        });
-        // In real implementation, this would store bytecode and initialize the contract
+        let code_hash = tos_common::crypto::hash(bytecode);
+        self.contract_bytecodes
+            .insert(code_hash.clone(), bytecode.to_vec());
         Ok(code_hash)
+    }
+
+    /// Deploy a contract at a specific address (for testing multiple instances of same code).
+    pub async fn deploy_contract_at(
+        &mut self,
+        address: &Hash,
+        bytecode: &[u8],
+    ) -> Result<(), TransactionError> {
+        self.contract_bytecodes
+            .insert(address.clone(), bytecode.to_vec());
+        Ok(())
     }
 
     /// Call a deployed contract entry point.
     ///
-    /// Submits a contract call transaction, mines a block, and returns
-    /// the structured result with gas breakdown.
+    /// Executes the contract via TakoExecutor with VRF context injection,
+    /// applies state changes, and returns the structured result with gas breakdown.
     pub async fn call_contract(
         &mut self,
         contract: &Hash,
@@ -661,34 +827,105 @@ impl ChainClient {
         deposits: Vec<CallDeposit>,
         max_gas: u64,
     ) -> Result<ContractCallResult, WarpError> {
-        let _ = (&deposits, max_gas); // reserved for future contract VM integration
+        // Load bytecode
+        let bytecode = self
+            .contract_bytecodes
+            .get(contract)
+            .ok_or_else(|| WarpError::StateTransition(format!("contract not found: {}", contract)))?
+            .clone();
+
+        // Build provider from current state
+        let provider = self.build_contract_provider();
+
+        // Build VRF data if available for current block
+        let vrf_data = self
+            .block_vrf_data
+            .get(&self.topoheight)
+            .and_then(block_vrf_to_executor_vrf);
+
+        let miner_compressed = self.miner_keypair.get_public_key().compress();
+        let miner_pk_bytes: [u8; 32] = *miner_compressed.as_bytes();
+
+        // Build input_data: entry_id (2 bytes LE) + params
+        let mut input_data = Vec::with_capacity(2usize.saturating_add(params.len()));
+        input_data.extend_from_slice(&entry_id.to_le_bytes());
+        input_data.extend_from_slice(&params);
+
         let tx_hash = self.generate_tx_hash(contract, self.topoheight);
-        let gas_used = max_gas.min(1000); // simplified gas estimation
+        let block_hash = self
+            .block_hashes
+            .get(&self.topoheight)
+            .cloned()
+            .unwrap_or_else(Hash::zero);
+
+        // Execute contract
+        let exec_result = TakoExecutor::execute_with_vrf(
+            &bytecode,
+            &provider,
+            self.topoheight,
+            contract,
+            &block_hash,
+            self.topoheight,
+            self.topoheight.saturating_mul(15),
+            &tx_hash,
+            contract, // sender = contract for simplicity
+            &input_data,
+            Some(max_gas),
+            None,
+            vrf_data.as_ref(),
+            Some(&miner_pk_bytes),
+        );
+
+        let (success, gas_used, log_messages, return_data, exit_code, error_msg) = match exec_result
+        {
+            Ok(r) => {
+                self.apply_contract_cache(contract, &r.cache);
+                let ok = r.return_value == 0;
+                let err = if ok {
+                    None
+                } else {
+                    Some(format!("contract returned non-zero: {}", r.return_value))
+                };
+                (
+                    ok,
+                    r.compute_units_used,
+                    r.log_messages,
+                    r.return_data.unwrap_or_default(),
+                    r.return_value as u32,
+                    err,
+                )
+            }
+            Err(e) => (false, 0u64, vec![], vec![], 1u32, Some(format!("{:?}", e))),
+        };
 
         let tx_result = TxResult {
-            success: true,
+            success,
             tx_hash,
-            block_hash: None,
+            block_hash: Some(block_hash),
             topoheight: Some(self.topoheight),
-            error: None,
+            error: error_msg.map(|msg| TransactionError::ContractError {
+                contract: contract.clone(),
+                exit_code,
+                message: msg,
+            }),
             gas_used,
             gas_refunded: 0,
-            exit_code: Some(0),
+            exit_code: Some(exit_code),
             events: vec![],
-            log_messages: vec![],
+            log_messages,
             inner_calls: vec![InnerCall {
                 caller: Hash::zero(),
                 callee: contract.clone(),
                 entry_id,
-                data: params.clone(),
+                data: params,
                 deposits: deposits.clone(),
                 gas_used,
-                success: true,
+                success,
                 depth: 0,
-                return_data: vec![],
+                return_data: return_data.clone(),
                 events: vec![],
             }],
-            return_data: vec![],
+            return_data,
             new_nonce: 0,
         };
 
@@ -815,6 +1052,8 @@ impl ChainClient {
             .await
             .map_err(|e| WarpError::BlockCreationFailed(e.to_string()))?;
         self.topoheight = self.topoheight.saturating_add(1);
+        self.block_hashes
+            .insert(self.topoheight, block.hash.clone());
         self.clock.sleep(Duration::from_millis(BLOCK_TIME_MS)).await;
 
         // Produce VRF data if configured
@@ -1370,8 +1609,62 @@ impl ChainClient {
                 continue;
             }
 
-            // Execute (simplified: mark as Executed)
-            gas_used_total = gas_used_total.saturating_add(gas_needed);
+            // Attempt contract execution if bytecode exists
+            let exec_status =
+                if let Some(bytecode) = self.contract_bytecodes.get(&exec.contract).cloned() {
+                    let provider = InMemoryContractProvider {
+                        storage: self.contract_storage.clone(),
+                        bytecodes: self.contract_bytecodes.clone(),
+                        topoheight: topo,
+                    };
+
+                    let vrf_data = self
+                        .block_vrf_data
+                        .get(&topo)
+                        .and_then(block_vrf_to_executor_vrf);
+                    let miner_compressed = self.miner_keypair.get_public_key().compress();
+                    let miner_pk: [u8; 32] = *miner_compressed.as_bytes();
+                    let block_hash = self
+                        .block_hashes
+                        .get(&topo)
+                        .cloned()
+                        .unwrap_or_else(|| tos_common::crypto::hash(&topo.to_le_bytes()));
+
+                    let result = TakoExecutor::execute_with_vrf(
+                        &bytecode,
+                        &provider,
+                        topo,
+                        &exec.contract,
+                        &block_hash,
+                        topo,
+                        topo.saturating_mul(15),
+                        &exec.hash,
+                        &exec.scheduler_contract,
+                        &exec.input_data,
+                        Some(exec.max_gas),
+                        None,
+                        vrf_data.as_ref(),
+                        Some(&miner_pk),
+                    );
+
+                    match result {
+                        Ok(r) => {
+                            gas_used_total = gas_used_total.saturating_add(r.compute_units_used);
+                            self.apply_contract_cache(&exec.contract, &r.cache);
+                            if r.return_value == 0 {
+                                ScheduledExecutionStatus::Executed
+                            } else {
+                                ScheduledExecutionStatus::Failed
+                            }
+                        }
+                        Err(_) => ScheduledExecutionStatus::Failed,
+                    }
+                } else {
+                    // No bytecode found - keep original stub behavior
+                    gas_used_total = gas_used_total.saturating_add(gas_needed);
+                    ScheduledExecutionStatus::Executed
+                };
+
             executed_count = executed_count.saturating_add(1);
 
             // Pay 70% of offer to miner_address
@@ -1388,11 +1681,9 @@ impl ChainClient {
                 }
             }
 
-            exec.status = ScheduledExecutionStatus::Executed;
-            self.scheduled_results.insert(
-                exec.hash.clone(),
-                (ScheduledExecutionStatus::Executed, topo),
-            );
+            exec.status = exec_status;
+            self.scheduled_results
+                .insert(exec.hash.clone(), (exec_status, topo));
         }
 
         // Re-insert deferred executions at topo + 1
@@ -1506,6 +1797,35 @@ impl ChainClient {
         bytes[24..32].copy_from_slice(&nonce_bytes);
         Hash::new(bytes)
     }
+
+    /// Build an InMemoryContractProvider from current state.
+    fn build_contract_provider(&self) -> InMemoryContractProvider {
+        InMemoryContractProvider {
+            storage: self.contract_storage.clone(),
+            bytecodes: self.contract_bytecodes.clone(),
+            topoheight: self.topoheight,
+        }
+    }
+
+    /// Apply ContractCache writes to in-memory contract storage.
+    fn apply_contract_cache(&mut self, contract: &Hash, cache: &ContractCache) {
+        for (key_cell, (_versioned, value_opt)) in &cache.storage {
+            if let Ok(key_bytes) = key_cell.as_bytes() {
+                match value_opt {
+                    Some(val_cell) => {
+                        if let Ok(val_bytes) = val_cell.as_bytes() {
+                            self.contract_storage
+                                .insert((contract.clone(), key_bytes.clone()), val_bytes.clone());
+                        }
+                    }
+                    None => {
+                        self.contract_storage
+                            .remove(&(contract.clone(), key_bytes.clone()));
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[async_trait]
@@ -1526,6 +1846,8 @@ impl BlockWarp for ChainClient {
                 .await
                 .map_err(|e| WarpError::BlockCreationFailed(e.to_string()))?;
             self.topoheight = self.topoheight.saturating_add(1);
+            self.block_hashes
+                .insert(self.topoheight, block.hash.clone());
 
             // Produce VRF data if configured
             self.produce_vrf_for_block(&block.hash);

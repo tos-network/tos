@@ -285,9 +285,10 @@ mod tests {
     fn test_registry_active_at() {
         let registry = FeatureRegistry::tos_defaults();
 
-        // Before any activation
+        // At height 0, only VRF_BLOCK_DATA is active (activation_height=0)
         let active = registry.active_at(0);
-        assert!(active.is_empty());
+        assert_eq!(active.len(), 1);
+        assert_eq!(active[0].id, "vrf_block_data");
 
         // After TAKO v2 activation (500_000)
         let active = registry.active_at(500_001);

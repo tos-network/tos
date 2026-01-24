@@ -10,15 +10,46 @@
 
 #[cfg(test)]
 mod tests {
-    #[allow(unused_imports)]
+    use tos_common::contract::{
+        ScheduledExecution, ScheduledExecutionKind, ScheduledExecutionStatus,
+    };
     use tos_common::crypto::Hash;
+    use tos_daemon::vrf::VrfKeyManager;
+
+    use crate::tier1_5::{
+        chain_client_config::GenesisAccount, BlockWarp, ChainClient, ChainClientConfig, VrfConfig,
+    };
+
+    fn sample_hash(byte: u8) -> Hash {
+        Hash::new([byte; 32])
+    }
+
+    fn make_exec(
+        contract: Hash,
+        target_topo: u64,
+        offer: u64,
+        max_gas: u64,
+        registration_topo: u64,
+        scheduler: Hash,
+    ) -> ScheduledExecution {
+        ScheduledExecution::new_offercall(
+            contract,
+            0,
+            vec![],
+            max_gas,
+            offer,
+            scheduler,
+            ScheduledExecutionKind::TopoHeight(target_topo),
+            registration_topo,
+        )
+    }
 
     // ========================================================================
     // VRF-Driven Execution Path Tests
     // ========================================================================
 
     #[tokio::test]
-    #[ignore = "Requires VRF + scheduled execution integration in ChainClient"]
+    #[ignore = "Requires custom branching contract"]
     async fn vrf_randomness_determines_execution() {
         // Deploy contract that:
         //   - Reads vrf_random()
@@ -30,13 +61,53 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "Requires VRF + scheduled execution integration in ChainClient"]
     async fn vrf_random_consistent_in_scheduled() {
-        // Schedule contract that reads and stores vrf_random()
-        // Warp to target (execution happens)
-        // Query stored value
-        // Also query block's VRF output directly
-        // Assert: stored vrf_random = BLAKE3("TOS-VRF-DERIVE" || block_output || block_hash)
+        let scheduler = sample_hash(0xBB);
+        let mgr = VrfKeyManager::new();
+        let secret_hex = mgr.secret_key_hex();
+        let config = ChainClientConfig::default()
+            .with_account(GenesisAccount::new(scheduler.clone(), 10_000_000))
+            .with_vrf(VrfConfig {
+                secret_key_hex: Some(secret_hex),
+                chain_id: 3,
+            });
+
+        let mut client = ChainClient::start(config).await.unwrap();
+
+        let bytecode = include_bytes!("../../tests/fixtures/vrf_random.so");
+        let contract = client.deploy_contract(bytecode).await.unwrap();
+
+        // Schedule at topo 10
+        let exec = make_exec(contract.clone(), 10, 1_000, 1_000_000, 0, scheduler);
+        client.schedule_execution(exec).await.unwrap();
+
+        // Warp to target
+        client.warp_to_topoheight(10).await.unwrap();
+
+        // Get stored VRF random
+        let stored_random = client
+            .get_contract_storage(&contract, b"vrf_random")
+            .await
+            .unwrap()
+            .unwrap();
+        let pre_output = client
+            .get_contract_storage(&contract, b"vrf_pre_output")
+            .await
+            .unwrap()
+            .unwrap();
+        let block_hash = client
+            .get_contract_storage(&contract, b"vrf_block_hash")
+            .await
+            .unwrap()
+            .unwrap();
+
+        // Verify derivation: hash("TOS-VRF-DERIVE" || pre_output || block_hash)
+        let mut input = Vec::new();
+        input.extend_from_slice(b"TOS-VRF-DERIVE");
+        input.extend_from_slice(&pre_output);
+        input.extend_from_slice(&block_hash);
+        let expected = tos_common::crypto::hash(&input);
+        assert_eq!(stored_random, expected.as_bytes().to_vec());
     }
 
     // ========================================================================
@@ -85,12 +156,32 @@ mod tests {
     // ========================================================================
 
     #[tokio::test]
-    #[ignore = "Requires FeatureSet VRF deactivation + scheduling"]
     async fn vrf_unavailable_in_scheduled() {
-        // Setup: VRF feature deactivated
-        // Schedule execution that calls vrf_random()
+        let scheduler = sample_hash(0xBB);
+        // NO VRF configured (no secret key)
+        let config = ChainClientConfig::default()
+            .with_account(GenesisAccount::new(scheduler.clone(), 10_000_000));
+
+        let mut client = ChainClient::start(config).await.unwrap();
+
+        let bytecode = include_bytes!("../../tests/fixtures/vrf_random.so");
+        let contract = client.deploy_contract(bytecode).await.unwrap();
+
+        // Schedule execution
+        let exec = make_exec(contract, 5, 1_000, 1_000_000, 0, scheduler);
+        let hash = client.schedule_execution(exec).await.unwrap();
+
         // Warp to target
-        // Assert: Execution fails (VRF not available), status = Failed
+        client.warp_to_topoheight(5).await.unwrap();
+
+        // When VRF is unavailable, the contract's vrf_random() call will fail,
+        // causing the contract to return non-zero (error code 1), resulting in Failed status
+        let (status, _) = client.get_scheduled_status(&hash).unwrap();
+        assert_eq!(
+            status,
+            ScheduledExecutionStatus::Failed,
+            "Execution should fail when VRF is unavailable"
+        );
     }
 
     // ========================================================================
