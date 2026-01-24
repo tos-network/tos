@@ -104,6 +104,9 @@ pub mod test_utils;
 /// BlockDAG consensus testing (tip selection, ordering, invariants)
 pub mod blockdag;
 
+/// Transaction processing tests (block assembly, verify/apply phases)
+pub mod transaction;
+
 // =============================================================================
 // TCK-Specific Modules (New)
 // =============================================================================
