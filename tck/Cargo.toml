@@ -29,6 +29,7 @@ serde_yaml = "0.9"
 # Utilities
 rand = "0.8"
 parking_lot = "0.12"
+bytes = "1"
 tempfile = "3.8"
 chrono = { version = "0.4", features = ["serde"] }
 textwrap = "0.16"
@@ -75,6 +76,9 @@ proptest = "1.4"
 tokio-test = "0.4"
 env_logger = "0.11"
 criterion = "0.5"
+reqwest = { version = "0.11", features = ["json", "rustls-tls"] }
+sha2 = "0.10"
+tokio-tungstenite = "0.21"
 
 [features]
 default = ["tier1", "tier2"]
@@ -89,6 +93,10 @@ formal = []                   # Formal verification support
 full = ["tier1", "tier2", "tier3", "tier4", "conformance"]
 
 # Benchmarks (to be added)
-# [[bench]]
-# name = "blockchain_bench"
-# harness = false
+[[bench]]
+name = "tps_benchmark"
+harness = false
+
+[[bench]]
+name = "block_benchmark"
+harness = false

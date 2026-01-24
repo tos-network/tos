@@ -12,7 +12,7 @@ use tos_common::{
     crypto::{Hash, PublicKey},
     network::Network,
     time::{get_current_time_in_seconds, TimestampSeconds},
-    transaction::{MultiSigPayload, Transaction},
+    transaction::{MultiSigPayload, Transaction, TransactionType},
 };
 use tos_kernel::Environment;
 
@@ -154,7 +154,29 @@ impl Mempool {
             self.mainnet,
         );
         let tx_cache = TxCache::new(storage, self, self.disable_zkp_cache);
+        let is_register_arbiter = matches!(tx.get_data(), TransactionType::RegisterArbiter(_));
+        let is_create_escrow = matches!(tx.get_data(), TransactionType::CreateEscrow(_));
+        if is_register_arbiter {
+            eprintln!(
+                "mempool: verify start register_arbiter nonce={} topoheight={}",
+                tx.get_nonce(),
+                topoheight
+            );
+        }
+        if is_create_escrow {
+            eprintln!(
+                "mempool: verify start create_escrow nonce={} topoheight={}",
+                tx.get_nonce(),
+                topoheight
+            );
+        }
         tx.verify(&hash, &mut state, &tx_cache).await?;
+        if is_register_arbiter {
+            eprintln!("mempool: verify done register_arbiter");
+        }
+        if is_create_escrow {
+            eprintln!("mempool: verify done create_escrow");
+        }
 
         state.consume_energy_for_transaction(&tx).await?;
         state.apply_energy_payload(&tx).await?;

@@ -971,17 +971,49 @@ impl Transaction {
         tx_hash: &'a Hash,
         state: &mut B,
     ) -> Result<(), VerificationError<E>> {
+        let is_register_arbiter = matches!(self.data, TransactionType::RegisterArbiter(_));
+        let is_create_escrow = matches!(self.data, TransactionType::CreateEscrow(_));
+        if is_register_arbiter {
+            eprintln!(
+                "verify_dynamic_parts: start register_arbiter tx_hash={:?}",
+                tx_hash
+            );
+        }
+        if is_create_escrow {
+            eprintln!(
+                "verify_dynamic_parts: start create_escrow tx_hash={:?}",
+                tx_hash
+            );
+        }
         // Balance simplification: No decompression needed for plaintext balances
 
         if log::log_enabled!(log::Level::Trace) {
             trace!("Pre-verifying transaction on state");
         }
+        if is_register_arbiter {
+            eprintln!(
+                "verify_dynamic_parts: before state.pre_verify_tx register_arbiter tx_hash={:?}",
+                tx_hash
+            );
+        }
         state
             .pre_verify_tx(self)
             .await
             .map_err(VerificationError::State)?;
+        if is_register_arbiter {
+            eprintln!(
+                "verify_dynamic_parts: after state.pre_verify_tx register_arbiter tx_hash={:?}",
+                tx_hash
+            );
+        }
 
         // Atomically check and update nonce to prevent TOCTOU race condition
+        if is_register_arbiter {
+            eprintln!(
+                "verify_dynamic_parts: before cas register_arbiter nonce={} tx_hash={:?}",
+                self.nonce, tx_hash
+            );
+        }
         let success = state
             .compare_and_swap_nonce(
                 &self.source,
@@ -990,6 +1022,12 @@ impl Transaction {
             )
             .await
             .map_err(VerificationError::State)?;
+        if is_register_arbiter {
+            eprintln!(
+                "verify_dynamic_parts: after cas register_arbiter success={} tx_hash={:?}",
+                success, tx_hash
+            );
+        }
 
         if !success {
             // CAS failed, get current nonce for error reporting
@@ -1334,8 +1372,20 @@ impl Transaction {
                 }
             }
             TransactionType::CreateEscrow(payload) => {
+                if is_create_escrow {
+                    eprintln!(
+                        "pre_verify: before verify_create_escrow tx_hash={:?}",
+                        tx_hash
+                    );
+                }
                 escrow::verify_create_escrow(payload, &self.source)
                     .map_err(|e| VerificationError::AnyError(anyhow!(e)))?;
+                if is_create_escrow {
+                    eprintln!(
+                        "pre_verify: after verify_create_escrow tx_hash={:?}",
+                        tx_hash
+                    );
+                }
             }
             TransactionType::DepositEscrow(payload) => {
                 let escrow_account = state
@@ -1799,7 +1849,25 @@ impl Transaction {
                 }
             }
             TransactionType::RegisterArbiter(payload) => {
+                if is_register_arbiter {
+                    eprintln!(
+                        "verify_dynamic_parts: before verify_register_arbiter tx_hash={:?}",
+                        tx_hash
+                    );
+                }
                 arbitration::verify_register_arbiter(payload)?;
+                if is_register_arbiter {
+                    eprintln!(
+                        "verify_dynamic_parts: after verify_register_arbiter tx_hash={:?}",
+                        tx_hash
+                    );
+                }
+                if is_register_arbiter {
+                    eprintln!(
+                        "verify_dynamic_parts: before get_arbiter tx_hash={:?}",
+                        tx_hash
+                    );
+                }
                 if state
                     .get_arbiter(&self.source)
                     .await
@@ -1807,6 +1875,12 @@ impl Transaction {
                     .is_some()
                 {
                     return Err(VerificationError::ArbiterAlreadyRegistered);
+                }
+                if is_register_arbiter {
+                    eprintln!(
+                        "verify_dynamic_parts: after get_arbiter tx_hash={:?}",
+                        tx_hash
+                    );
                 }
             }
             TransactionType::UpdateArbiter(payload) => {
@@ -1924,6 +1998,12 @@ impl Transaction {
         // SECURITY FIX: Verify sender has sufficient balance for all spending
         // Calculate total spending per asset
         // Use references to original Hash values in transaction (they live for 'a)
+        if is_create_escrow {
+            eprintln!(
+                "pre_verify: building spending_per_asset create_escrow tx_hash={:?}",
+                tx_hash
+            );
+        }
         let mut spending_per_asset: IndexMap<Hash, u64> = IndexMap::new();
 
         match &self.data {
@@ -2178,6 +2258,14 @@ impl Transaction {
         // This ensures mempool verification reduces cached balances, preventing
         // users from submitting sequential transactions that total more than their funds
         for (asset_hash, total_spending) in &spending_per_asset {
+            if is_create_escrow {
+                eprintln!(
+                    "pre_verify: before get_sender_balance create_escrow tx_hash={:?} asset={:?} spending={}",
+                    tx_hash,
+                    asset_hash,
+                    total_spending
+                );
+            }
             // Use transaction's reference for balance check (pre-transaction state)
             let current_balance = state
                 .get_sender_balance(
@@ -2187,6 +2275,12 @@ impl Transaction {
                 )
                 .await
                 .map_err(VerificationError::State)?;
+            if is_create_escrow {
+                eprintln!(
+                    "pre_verify: after get_sender_balance create_escrow tx_hash={:?} balance={}",
+                    tx_hash, current_balance
+                );
+            }
 
             if *current_balance < *total_spending {
                 return Err(VerificationError::InsufficientFunds {
@@ -2969,6 +3063,14 @@ impl Transaction {
         tx_hash: &'a Hash,
         state: &mut B,
     ) -> Result<(), VerificationError<E>> {
+        let is_register_arbiter = matches!(self.data, TransactionType::RegisterArbiter(_));
+        let is_create_escrow = matches!(self.data, TransactionType::CreateEscrow(_));
+        if is_register_arbiter {
+            eprintln!("pre_verify: start register_arbiter tx_hash={:?}", tx_hash);
+        }
+        if is_create_escrow {
+            eprintln!("pre_verify: start create_escrow tx_hash={:?}", tx_hash);
+        }
         if log::log_enabled!(log::Level::Trace) {
             trace!("Pre-verifying transaction");
         }
@@ -3020,12 +3122,48 @@ impl Transaction {
         if log::log_enabled!(log::Level::Trace) {
             trace!("Pre-verifying transaction on state");
         }
+        if is_register_arbiter {
+            eprintln!(
+                "pre_verify: before state.pre_verify_tx register_arbiter tx_hash={:?}",
+                tx_hash
+            );
+        }
+        if is_create_escrow {
+            eprintln!(
+                "pre_verify: before state.pre_verify_tx create_escrow tx_hash={:?}",
+                tx_hash
+            );
+        }
         state
             .pre_verify_tx(self)
             .await
             .map_err(VerificationError::State)?;
+        if is_register_arbiter {
+            eprintln!(
+                "pre_verify: after state.pre_verify_tx register_arbiter tx_hash={:?}",
+                tx_hash
+            );
+        }
+        if is_create_escrow {
+            eprintln!(
+                "pre_verify: after state.pre_verify_tx create_escrow tx_hash={:?}",
+                tx_hash
+            );
+        }
 
         // Atomically check and update nonce to prevent TOCTOU race condition
+        if is_register_arbiter {
+            eprintln!(
+                "pre_verify: before cas register_arbiter nonce={} tx_hash={:?}",
+                self.nonce, tx_hash
+            );
+        }
+        if is_create_escrow {
+            eprintln!(
+                "pre_verify: before cas create_escrow nonce={} tx_hash={:?}",
+                self.nonce, tx_hash
+            );
+        }
         let success = state
             .compare_and_swap_nonce(
                 &self.source,
@@ -3034,6 +3172,18 @@ impl Transaction {
             )
             .await
             .map_err(VerificationError::State)?;
+        if is_register_arbiter {
+            eprintln!(
+                "pre_verify: after cas register_arbiter success={} tx_hash={:?}",
+                success, tx_hash
+            );
+        }
+        if is_create_escrow {
+            eprintln!(
+                "pre_verify: after cas create_escrow success={} tx_hash={:?}",
+                success, tx_hash
+            );
+        }
 
         if !success {
             // CAS failed, get current nonce for error reporting
@@ -3799,7 +3949,19 @@ impl Transaction {
                 }
             }
             TransactionType::RegisterArbiter(payload) => {
+                if is_register_arbiter {
+                    eprintln!(
+                        "pre_verify: before verify_register_arbiter tx_hash={:?}",
+                        tx_hash
+                    );
+                }
                 arbitration::verify_register_arbiter(payload)?;
+                if is_register_arbiter {
+                    eprintln!(
+                        "pre_verify: after verify_register_arbiter tx_hash={:?}",
+                        tx_hash
+                    );
+                }
             }
             TransactionType::UpdateArbiter(payload) => {
                 arbitration::verify_update_arbiter(payload)?;
@@ -3830,6 +3992,18 @@ impl Transaction {
         }
 
         // 0.b Verify Signature (Agent accounts can use controller or session keys)
+        if is_register_arbiter {
+            eprintln!(
+                "pre_verify: before resolve_agent_auth register_arbiter tx_hash={:?}",
+                tx_hash
+            );
+        }
+        if is_create_escrow {
+            eprintln!(
+                "pre_verify: before resolve_agent_auth create_escrow tx_hash={:?}",
+                tx_hash
+            );
+        }
         let source_decompressed = self
             .source
             .decompress()
@@ -3838,13 +4012,63 @@ impl Transaction {
         let agent_auth = self
             .resolve_agent_auth(state, &bytes, &source_decompressed)
             .await?;
+        if is_register_arbiter {
+            eprintln!(
+                "pre_verify: after resolve_agent_auth register_arbiter tx_hash={:?} agent_auth={}",
+                tx_hash,
+                agent_auth.is_some()
+            );
+        }
+        if is_create_escrow {
+            eprintln!(
+                "pre_verify: after resolve_agent_auth create_escrow tx_hash={:?} agent_auth={}",
+                tx_hash,
+                agent_auth.is_some()
+            );
+        }
 
         if let Some(auth) = agent_auth.as_ref() {
+            if is_register_arbiter {
+                eprintln!(
+                    "pre_verify: before enforce_agent_rules register_arbiter tx_hash={:?}",
+                    tx_hash
+                );
+            }
+            if is_create_escrow {
+                eprintln!(
+                    "pre_verify: before enforce_agent_rules create_escrow tx_hash={:?}",
+                    tx_hash
+                );
+            }
             self.enforce_agent_rules(state, auth).await?;
+            if is_register_arbiter {
+                eprintln!(
+                    "pre_verify: after enforce_agent_rules register_arbiter tx_hash={:?}",
+                    tx_hash
+                );
+            }
+            if is_create_escrow {
+                eprintln!(
+                    "pre_verify: after enforce_agent_rules create_escrow tx_hash={:?}",
+                    tx_hash
+                );
+            }
         }
 
         // 0.c Verify multisig (owner-only for agent accounts)
         if let Some(auth) = agent_auth.as_ref() {
+            if is_register_arbiter {
+                eprintln!(
+                    "pre_verify: in multisig(agent) register_arbiter tx_hash={:?}",
+                    tx_hash
+                );
+            }
+            if is_create_escrow {
+                eprintln!(
+                    "pre_verify: in multisig(agent) create_escrow tx_hash={:?}",
+                    tx_hash
+                );
+            }
             if auth.is_owner() {
                 if let Some(config) = state
                     .get_multisig_state(&self.source)
@@ -3886,39 +4110,81 @@ impl Transaction {
             } else if self.get_multisig().is_some() {
                 return Err(VerificationError::AgentAccountUnauthorized);
             }
-        } else if let Some(config) = state
-            .get_multisig_state(&self.source)
-            .await
-            .map_err(VerificationError::State)?
-        {
-            let Some(multisig) = self.get_multisig() else {
-                return Err(VerificationError::MultiSigNotFound);
-            };
-
-            if (config.threshold as usize) != multisig.len()
-                || multisig.len() > MAX_MULTISIG_PARTICIPANTS
-            {
-                return Err(VerificationError::MultiSigParticipants);
+        } else {
+            if is_register_arbiter {
+                eprintln!(
+                    "pre_verify: before get_multisig_state(non-agent) register_arbiter tx_hash={:?}",
+                    tx_hash
+                );
             }
-
-            let multisig_bytes = self.get_multisig_signing_bytes();
-            let hash = hash(&multisig_bytes);
-            for sig in multisig.get_signatures() {
-                let index = sig.id as usize;
-                let Some(key) = config.participants.get_index(index) else {
-                    return Err(VerificationError::MultiSigParticipants);
+            if is_create_escrow {
+                eprintln!(
+                    "pre_verify: before get_multisig_state(non-agent) create_escrow tx_hash={:?}",
+                    tx_hash
+                );
+            }
+            let config = state
+                .get_multisig_state(&self.source)
+                .await
+                .map_err(VerificationError::State)?;
+            if is_register_arbiter {
+                eprintln!(
+                    "pre_verify: after get_multisig_state(non-agent) register_arbiter tx_hash={:?} has_config={}",
+                    tx_hash,
+                    config.is_some()
+                );
+            }
+            if is_create_escrow {
+                eprintln!(
+                    "pre_verify: after get_multisig_state(non-agent) create_escrow tx_hash={:?} has_config={}",
+                    tx_hash,
+                    config.is_some()
+                );
+            }
+            if let Some(config) = config {
+                if is_register_arbiter {
+                    eprintln!(
+                        "pre_verify: in multisig(non-agent) register_arbiter tx_hash={:?}",
+                        tx_hash
+                    );
+                }
+                if is_create_escrow {
+                    eprintln!(
+                        "pre_verify: in multisig(non-agent) create_escrow tx_hash={:?}",
+                        tx_hash
+                    );
+                }
+                let Some(multisig) = self.get_multisig() else {
+                    return Err(VerificationError::MultiSigNotFound);
                 };
 
-                let decompressed = key.decompress().map_err(ProofVerificationError::from)?;
-                if !sig.signature.verify(hash.as_bytes(), &decompressed) {
-                    if log::log_enabled!(log::Level::Debug) {
-                        debug!("Multisig signature verification failed for participant {index}");
-                    }
-                    return Err(VerificationError::InvalidSignature);
+                if (config.threshold as usize) != multisig.len()
+                    || multisig.len() > MAX_MULTISIG_PARTICIPANTS
+                {
+                    return Err(VerificationError::MultiSigParticipants);
                 }
+
+                let multisig_bytes = self.get_multisig_signing_bytes();
+                let hash = hash(&multisig_bytes);
+                for sig in multisig.get_signatures() {
+                    let index = sig.id as usize;
+                    let Some(key) = config.participants.get_index(index) else {
+                        return Err(VerificationError::MultiSigParticipants);
+                    };
+
+                    let decompressed = key.decompress().map_err(ProofVerificationError::from)?;
+                    if !sig.signature.verify(hash.as_bytes(), &decompressed) {
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!(
+                                "Multisig signature verification failed for participant {index}"
+                            );
+                        }
+                        return Err(VerificationError::InvalidSignature);
+                    }
+                }
+            } else if self.get_multisig().is_some() {
+                return Err(VerificationError::MultiSigNotConfigured);
             }
-        } else if self.get_multisig().is_some() {
-            return Err(VerificationError::MultiSigNotConfigured);
         }
 
         if let TransactionType::AgentAccount(payload) = &self.data {
@@ -3945,6 +4211,12 @@ impl Transaction {
             trace!("Processing transfers with plaintext amounts");
         }
 
+        if is_create_escrow {
+            eprintln!(
+                "pre_verify: before post-multisig match create_escrow tx_hash={:?}",
+                tx_hash
+            );
+        }
         // NOTE: Transfer verification is implemented below in the spending_per_asset logic (lines 700-709)
         // where all transfer amounts are accumulated and verified against sender balances.
         match &self.data {
@@ -4078,6 +4350,12 @@ impl Transaction {
             | TransactionType::CommitJurorVote(_) => {
                 // Arbiter registry txs handled in arbitration module
             }
+        }
+        if is_create_escrow {
+            eprintln!(
+                "pre_verify: after post-multisig match create_escrow tx_hash={:?}",
+                tx_hash
+            );
         }
 
         // With plaintext balances, we don't need Bulletproofs range proofs

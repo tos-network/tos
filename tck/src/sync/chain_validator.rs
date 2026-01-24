@@ -1,232 +1,255 @@
+// Layer 1: Blockchain Storage & Genesis State Tests
+//
+// Tests the actual blockchain storage providers:
+// - Genesis block state (height, topoheight)
+// - Storage trait method access (DagOrderProvider, DifficultyProvider)
+// - Block execution order tracking
+// - Blocks at height retrieval
+// - Cumulative difficulty for genesis
+
 #[cfg(test)]
 mod tests {
-    use super::super::mock::*;
+    use std::sync::Arc;
+    use tempdir::TempDir;
+    use tos_common::difficulty::CumulativeDifficulty;
+    use tos_common::network::Network;
+    use tos_daemon::core::blockchain::Blockchain;
+    use tos_daemon::core::config::Config;
+    use tos_daemon::core::storage::{
+        BlockExecutionOrderProvider, BlocksAtHeightProvider, DagOrderProvider, DifficultyProvider,
+        RocksStorage,
+    };
 
-    fn make_test_block(index: u64, difficulty: Difficulty, tips_count: usize) -> BlockMetadata {
-        let mut hash = [0u8; 32];
-        hash[0..8].copy_from_slice(&index.to_le_bytes());
-
-        let tips: Vec<Hash> = (0..tips_count)
-            .map(|t| {
-                let mut tip_hash = [0u8; 32];
-                let tip_val = index.saturating_sub(1).saturating_add(t as u64);
-                tip_hash[0..8].copy_from_slice(&tip_val.to_le_bytes());
-                tip_hash
-            })
-            .collect();
-
-        BlockMetadata {
-            hash,
-            topoheight: index,
-            height: index,
-            difficulty,
-            cumulative_difficulty: index * difficulty,
-            tips,
-            txs: Vec::new(),
-        }
+    async fn make_blockchain() -> (Arc<Blockchain<RocksStorage>>, TempDir) {
+        let temp_dir = TempDir::new("tck_chain_validator").unwrap();
+        let config: Config = serde_json::from_value(serde_json::json!({
+            "rpc": { "getwork": {}, "prometheus": {} },
+            "p2p": { "proxy": {} },
+            "rocksdb": {}
+        }))
+        .unwrap();
+        let storage = RocksStorage::new(
+            &temp_dir.path().to_string_lossy(),
+            Network::Devnet,
+            &config.rocksdb,
+        );
+        let blockchain = Blockchain::new(config, Network::Devnet, storage)
+            .await
+            .expect("create blockchain");
+        (blockchain, temp_dir)
     }
 
-    #[test]
-    fn empty_validator_has_higher_cd_returns_error() {
-        let validator = MockChainValidator::new();
-        let result = validator.has_higher_cumulative_difficulty(100);
-        assert_eq!(result, Err("No blocks in validator"));
+    // ─────────────────────────────────────────────────────────────────────────
+    // Blockchain genesis state verification
+    // ─────────────────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_blockchain_has_genesis_block() {
+        let (blockchain, _dir) = make_blockchain().await;
+
+        // Verify blockchain was initialized with genesis
+        let height = blockchain.get_height();
+        assert_eq!(height, 0, "Genesis block should be at height 0");
+
+        let topo = blockchain.get_topo_height();
+        assert_eq!(topo, 0, "Genesis topoheight should be 0");
     }
 
-    #[test]
-    fn single_block_cumulative_difficulty_equals_block_difficulty() {
-        let mut validator = MockChainValidator::new();
-        let block = make_test_block(1, 500, 1);
-        validator.insert_block(block).unwrap();
+    #[tokio::test]
+    async fn test_blockchain_genesis_hash_retrievable() {
+        let (blockchain, _dir) = make_blockchain().await;
 
-        assert_eq!(validator.cumulative_difficulty, 500);
+        let storage = blockchain.get_storage().read().await;
+        let genesis_hash = storage.get_hash_at_topo_height(0).await;
+        assert!(
+            genesis_hash.is_ok(),
+            "Should be able to retrieve genesis hash"
+        );
+
+        let header = storage
+            .get_block_header_by_hash(&genesis_hash.unwrap())
+            .await;
+        assert!(header.is_ok(), "Should be able to retrieve genesis header");
     }
 
-    #[test]
-    fn multiple_blocks_cumulative_difficulty_sums_correctly() {
-        let mut validator = MockChainValidator::new();
+    #[tokio::test]
+    async fn test_blockchain_genesis_cumulative_difficulty() {
+        let (blockchain, _dir) = make_blockchain().await;
 
-        validator.insert_block(make_test_block(1, 100, 1)).unwrap();
-        validator.insert_block(make_test_block(2, 200, 1)).unwrap();
-        validator.insert_block(make_test_block(3, 300, 1)).unwrap();
+        let storage = blockchain.get_storage().read().await;
+        let genesis_hash = storage
+            .get_hash_at_topo_height(0)
+            .await
+            .expect("genesis hash");
+        let cum_diff = storage
+            .get_cumulative_difficulty_for_block_hash(&genesis_hash)
+            .await;
+        assert!(
+            cum_diff.is_ok(),
+            "Genesis should have cumulative difficulty"
+        );
 
-        assert_eq!(validator.cumulative_difficulty, 600); // 100 + 200 + 300
+        let diff = cum_diff.unwrap();
+        // Genesis cumulative difficulty should be > 0
+        assert!(
+            diff > CumulativeDifficulty::from(0u64),
+            "Genesis cumulative difficulty should be positive"
+        );
     }
 
-    #[test]
-    fn higher_cd_than_current_chain_returns_true() {
-        let mut validator = MockChainValidator::new();
-        validator.insert_block(make_test_block(1, 1000, 1)).unwrap();
+    #[tokio::test]
+    async fn test_blockchain_genesis_header_has_height_zero() {
+        let (blockchain, _dir) = make_blockchain().await;
 
-        let current_chain_cd: CumulativeDifficulty = 500;
-        let result = validator.has_higher_cumulative_difficulty(current_chain_cd);
-        assert_eq!(result, Ok(true));
+        let storage = blockchain.get_storage().read().await;
+        let genesis_hash = storage
+            .get_hash_at_topo_height(0)
+            .await
+            .expect("genesis hash");
+        let header = storage
+            .get_block_header_by_hash(&genesis_hash)
+            .await
+            .expect("genesis header");
+
+        assert_eq!(header.get_height(), 0, "Genesis header height should be 0");
     }
 
-    #[test]
-    fn lower_cd_than_current_chain_returns_false() {
-        let mut validator = MockChainValidator::new();
-        validator.insert_block(make_test_block(1, 100, 1)).unwrap();
+    #[tokio::test]
+    async fn test_blockchain_genesis_height_lookup() {
+        let (blockchain, _dir) = make_blockchain().await;
 
-        let current_chain_cd: CumulativeDifficulty = 500;
-        let result = validator.has_higher_cumulative_difficulty(current_chain_cd);
-        assert_eq!(result, Ok(false));
+        let storage = blockchain.get_storage().read().await;
+        let genesis_hash = storage
+            .get_hash_at_topo_height(0)
+            .await
+            .expect("genesis hash");
+
+        let height = storage
+            .get_height_for_block_hash(&genesis_hash)
+            .await
+            .expect("genesis height");
+        assert_eq!(height, 0, "Genesis height lookup should return 0");
     }
 
-    #[test]
-    fn equal_cd_returns_false() {
-        let mut validator = MockChainValidator::new();
-        validator.insert_block(make_test_block(1, 500, 1)).unwrap();
+    // ─────────────────────────────────────────────────────────────────────────
+    // Storage provider traits
+    // ─────────────────────────────────────────────────────────────────────────
 
-        let current_chain_cd: CumulativeDifficulty = 500;
-        let result = validator.has_higher_cumulative_difficulty(current_chain_cd);
-        // Equal means NOT higher, so returns false (keep current chain)
-        assert_eq!(result, Ok(false));
+    #[tokio::test]
+    async fn test_storage_block_execution_order() {
+        let (blockchain, _dir) = make_blockchain().await;
+
+        let storage = blockchain.get_storage().read().await;
+        let genesis_hash = storage
+            .get_hash_at_topo_height(0)
+            .await
+            .expect("genesis hash");
+
+        // Genesis should have a position in the block execution order
+        let position = storage.get_block_position_in_order(&genesis_hash).await;
+        assert!(
+            position.is_ok(),
+            "Genesis should have execution order position"
+        );
     }
 
-    #[test]
-    fn duplicate_block_insertion_returns_error() {
-        let mut validator = MockChainValidator::new();
-        let block = make_test_block(1, 100, 1);
-        validator.insert_block(block.clone()).unwrap();
+    #[tokio::test]
+    async fn test_storage_has_block_in_execution_order() {
+        let (blockchain, _dir) = make_blockchain().await;
 
-        let result = validator.insert_block(block);
-        assert_eq!(result, Err("Block already in chain"));
+        let storage = blockchain.get_storage().read().await;
+        let genesis_hash = storage
+            .get_hash_at_topo_height(0)
+            .await
+            .expect("genesis hash");
+
+        let has_order = storage
+            .has_block_position_in_order(&genesis_hash)
+            .await
+            .expect("check execution order");
+        assert!(has_order, "Genesis should be in execution order");
     }
 
-    #[test]
-    fn block_with_empty_tips_rejected() {
-        let mut validator = MockChainValidator::new();
-        let block = BlockMetadata {
-            hash: [1u8; 32],
-            topoheight: 1,
-            height: 1,
-            difficulty: 100,
-            cumulative_difficulty: 100,
-            tips: Vec::new(), // 0 tips - invalid
-            txs: Vec::new(),
-        };
+    #[tokio::test]
+    async fn test_storage_blocks_at_height() {
+        let (blockchain, _dir) = make_blockchain().await;
 
-        let result = validator.insert_block(block);
-        assert_eq!(result, Err("Invalid tips count"));
+        let storage = blockchain.get_storage().read().await;
+        let blocks = storage.get_blocks_at_height(0).await;
+        assert!(blocks.is_ok());
+
+        let block_set = blocks.unwrap();
+        assert_eq!(
+            block_set.len(),
+            1,
+            "Should have exactly one block at height 0 (genesis)"
+        );
     }
 
-    #[test]
-    fn block_with_too_many_tips_rejected() {
-        let mut validator = MockChainValidator::new();
-        let block = BlockMetadata {
-            hash: [1u8; 32],
-            topoheight: 1,
-            height: 1,
-            difficulty: 100,
-            cumulative_difficulty: 100,
-            tips: vec![[2u8; 32], [3u8; 32], [4u8; 32], [5u8; 32]], // 4 tips > TIPS_LIMIT(3)
-            txs: Vec::new(),
-        };
+    #[tokio::test]
+    async fn test_storage_no_blocks_at_height_one() {
+        let (blockchain, _dir) = make_blockchain().await;
 
-        let result = validator.insert_block(block);
-        assert_eq!(result, Err("Invalid tips count"));
+        let storage = blockchain.get_storage().read().await;
+        let has_blocks = storage.has_blocks_at_height(1).await;
+        assert!(has_blocks.is_ok());
+        assert!(
+            !has_blocks.unwrap(),
+            "Should have no blocks at height 1 on fresh blockchain"
+        );
     }
 
-    #[test]
-    fn block_with_one_tip_accepted() {
-        let mut validator = MockChainValidator::new();
-        let block = make_test_block(1, 100, 1);
-        let result = validator.insert_block(block);
-        assert!(result.is_ok());
+    #[tokio::test]
+    async fn test_storage_genesis_is_topologically_ordered() {
+        let (blockchain, _dir) = make_blockchain().await;
+
+        let storage = blockchain.get_storage().read().await;
+        let genesis_hash = storage
+            .get_hash_at_topo_height(0)
+            .await
+            .expect("genesis hash");
+
+        let is_ordered = storage
+            .is_block_topological_ordered(&genesis_hash)
+            .await
+            .expect("check topo order");
+        assert!(is_ordered, "Genesis block should be topologically ordered");
     }
 
-    #[test]
-    fn block_with_exactly_tips_limit_accepted() {
-        let mut validator = MockChainValidator::new();
-        // TIPS_LIMIT = 3
-        let block = make_test_block(1, 100, TIPS_LIMIT);
-        assert_eq!(block.tips.len(), 3);
-        let result = validator.insert_block(block);
-        assert!(result.is_ok());
+    #[tokio::test]
+    async fn test_storage_nonexistent_hash_not_ordered() {
+        let (blockchain, _dir) = make_blockchain().await;
+
+        let storage = blockchain.get_storage().read().await;
+        let fake_hash = tos_common::crypto::Hash::new([0xAB; 32]);
+
+        let is_ordered = storage
+            .is_block_topological_ordered(&fake_hash)
+            .await
+            .expect("check topo order");
+        assert!(!is_ordered, "Nonexistent hash should not be ordered");
     }
 
-    #[test]
-    fn validator_accumulates_blocks_in_order() {
-        let mut validator = MockChainValidator::new();
+    #[tokio::test]
+    async fn test_storage_genesis_past_blocks() {
+        let (blockchain, _dir) = make_blockchain().await;
 
-        for i in 1..=10 {
-            validator.insert_block(make_test_block(i, 100, 1)).unwrap();
-        }
+        let storage = blockchain.get_storage().read().await;
+        let genesis_hash = storage
+            .get_hash_at_topo_height(0)
+            .await
+            .expect("genesis hash");
 
-        assert_eq!(validator.blocks.len(), 10);
-        // Blocks should be in insertion order
-        for (idx, block) in validator.blocks.iter().enumerate() {
-            assert_eq!(block.topoheight, (idx as u64) + 1);
-        }
-    }
+        let past_blocks = storage
+            .get_past_blocks_for_block_hash(&genesis_hash)
+            .await
+            .expect("genesis past blocks");
 
-    #[test]
-    fn height_validation_from_tips() {
-        let mut validator = MockChainValidator::new();
-
-        // Block at height 5 should reference tips from lower heights
-        let block = BlockMetadata {
-            hash: [10u8; 32],
-            topoheight: 5,
-            height: 5,
-            difficulty: 100,
-            cumulative_difficulty: 500,
-            tips: vec![[4u8; 32]], // tip referencing "block 4"
-            txs: Vec::new(),
-        };
-
-        let result = validator.insert_block(block);
-        assert!(result.is_ok());
-        assert_eq!(validator.blocks[0].height, 5);
-    }
-
-    #[test]
-    fn tips_existence_verification() {
-        let mut validator = MockChainValidator::new();
-
-        // Insert a block with specific tip hashes
-        let tip_hash = [42u8; 32];
-        let block = BlockMetadata {
-            hash: [1u8; 32],
-            topoheight: 1,
-            height: 1,
-            difficulty: 100,
-            cumulative_difficulty: 100,
-            tips: vec![tip_hash],
-            txs: Vec::new(),
-        };
-
-        validator.insert_block(block).unwrap();
-
-        // Verify the tips are preserved
-        assert_eq!(validator.blocks[0].tips.len(), 1);
-        assert_eq!(validator.blocks[0].tips[0], tip_hash);
-    }
-
-    #[test]
-    fn cumulative_difficulty_accumulation_across_100_blocks() {
-        let mut validator = MockChainValidator::new();
-        let difficulty_per_block: Difficulty = 150;
-
-        for i in 1..=100 {
-            validator
-                .insert_block(make_test_block(i, difficulty_per_block, 1))
-                .unwrap();
-        }
-
-        assert_eq!(validator.cumulative_difficulty, 100 * difficulty_per_block);
-        assert_eq!(validator.cumulative_difficulty, 15000);
-    }
-
-    #[test]
-    fn validator_block_count_matches_insertions() {
-        let mut validator = MockChainValidator::new();
-
-        for i in 1..=37 {
-            validator.insert_block(make_test_block(i, 100, 1)).unwrap();
-        }
-
-        assert_eq!(validator.blocks.len(), 37);
+        // Genesis block should have no past blocks (it's the first block)
+        assert!(
+            past_blocks.is_empty(),
+            "Genesis should have no past blocks, got {}",
+            past_blocks.len()
+        );
     }
 }

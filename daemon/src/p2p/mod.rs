@@ -5,7 +5,7 @@ pub mod packet;
 pub mod peer_list;
 
 mod chain_sync;
-mod encryption;
+pub mod encryption;
 mod tracker;
 
 use anyhow::Context;

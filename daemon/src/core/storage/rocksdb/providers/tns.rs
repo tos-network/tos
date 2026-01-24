@@ -13,6 +13,7 @@ use log::trace;
 use tos_common::{
     block::TopoHeight,
     crypto::{Hash, PublicKey},
+    serializer::RawBytes,
 };
 
 #[async_trait]
@@ -209,7 +210,7 @@ impl TnsProvider for RocksStorage {
 
         // Iterate with prefix for the recipient
         let prefix = recipient_name_hash.as_bytes().to_vec();
-        for result in self.iter::<Vec<u8>, StoredEphemeralMessage>(
+        for result in self.iter::<RawBytes, StoredEphemeralMessage>(
             Column::TnsEphemeralMessages,
             IteratorMode::WithPrefix(&prefix, Direction::Forward),
         )? {
@@ -263,7 +264,7 @@ impl TnsProvider for RocksStorage {
 
         // Iterate with prefix for the recipient, only counting non-expired messages
         let prefix = recipient_name_hash.as_bytes().to_vec();
-        for result in self.iter::<Vec<u8>, StoredEphemeralMessage>(
+        for result in self.iter::<RawBytes, StoredEphemeralMessage>(
             Column::TnsEphemeralMessages,
             IteratorMode::WithPrefix(&prefix, Direction::Forward),
         )? {

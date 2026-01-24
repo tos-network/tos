@@ -113,6 +113,9 @@ pub mod p2p;
 /// Data Sync & Reorg testing (FastSync, chain sync, validation, DAG reorg, snapshots, pruning)
 pub mod sync;
 
+/// Performance benchmark helpers (used by `tck/benches`)
+pub mod bench;
+
 // =============================================================================
 // TCK-Specific Modules (New)
 // =============================================================================
