@@ -116,6 +116,9 @@ pub mod sync;
 /// Performance benchmark helpers (used by `tck/benches`)
 pub mod bench;
 
+/// VRF & Scheduling tests (Phase 16)
+pub mod vrf_scheduling;
+
 // =============================================================================
 // TCK-Specific Modules (New)
 // =============================================================================
