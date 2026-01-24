@@ -53,6 +53,7 @@ cargo build --release
 
 - [Build Guide](BUILD.md) - Detailed build instructions
 - [Docker Guide](DOCKER.md) - Docker deployment guide
+- [ProtonMail-Style Encryption Note](docs/protonmail-style-encryption.md) - Design considerations for address-based encrypted messaging
 
 ## Contributing
 
