@@ -101,6 +101,9 @@ pub mod doc_test_helpers;
 /// Test utilities for AI-generated tests (TestEnv, helpers)
 pub mod test_utils;
 
+/// BlockDAG consensus testing (tip selection, ordering, invariants)
+pub mod blockdag;
+
 // =============================================================================
 // TCK-Specific Modules (New)
 // =============================================================================
