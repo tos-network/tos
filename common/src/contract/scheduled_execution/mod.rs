@@ -31,7 +31,8 @@ pub use status::*;
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ScheduledExecution {
     /// The unique hash representing this scheduled execution
-    /// Computed as blake3(contract || topoheight || registration_topoheight || chunk_id)
+    /// Computed as blake3(contract || kind || registration_topoheight || chunk_id || scheduler_contract)
+    /// Including scheduler_contract ensures each scheduler has unique hash for same contract/target
     pub hash: Hash,
     /// Contract hash of the module to execute
     pub contract: Hash,
@@ -88,8 +89,14 @@ impl ScheduledExecution {
         kind: ScheduledExecutionKind,
         registration_topoheight: TopoHeight,
     ) -> Self {
-        // Compute unique hash for this execution
-        let hash = Self::compute_hash(&contract, &kind, registration_topoheight, chunk_id);
+        // Compute unique hash for this execution (includes scheduler_contract to prevent collisions)
+        let hash = Self::compute_hash(
+            &contract,
+            &kind,
+            registration_topoheight,
+            chunk_id,
+            &scheduler_contract,
+        );
 
         Self {
             hash,
@@ -109,11 +116,16 @@ impl ScheduledExecution {
     }
 
     /// Compute deterministic hash for a scheduled execution
+    ///
+    /// Hash includes scheduler_contract to ensure each scheduler has a unique hash
+    /// for the same contract/target, preventing hash collision attacks where one
+    /// scheduler could overwrite another's execution.
     pub fn compute_hash(
         contract: &Hash,
         kind: &ScheduledExecutionKind,
         registration_topoheight: TopoHeight,
         chunk_id: u16,
+        scheduler_contract: &Hash,
     ) -> Hash {
         use blake3::Hasher;
         let mut hasher = Hasher::new();
@@ -129,6 +141,7 @@ impl ScheduledExecution {
         }
         hasher.update(&registration_topoheight.to_be_bytes());
         hasher.update(&chunk_id.to_be_bytes());
+        hasher.update(scheduler_contract.as_bytes());
         let result = hasher.finalize();
         Hash::new(*result.as_bytes())
     }
@@ -176,7 +189,7 @@ impl hash::Hash for ScheduledExecution {
     fn hash<H: hash::Hasher>(&self, state: &mut H) {
         // Use the unique execution hash, not the contract hash
         // Each scheduled execution has a unique hash computed from
-        // contract + kind + registration_topoheight + chunk_id
+        // contract + kind + registration_topoheight + chunk_id + scheduler_contract
         self.hash.hash(state);
     }
 }

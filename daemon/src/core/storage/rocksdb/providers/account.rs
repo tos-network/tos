@@ -316,8 +316,9 @@ impl RocksStorage {
                 key.as_address(self.is_mainnet())
             );
         }
-        // This will read just the id
-        self.load_optional_from_disk(Column::Account, key.as_bytes())
+        // Read full account to avoid Option<T> mis-decoding for account id 0.
+        self.load_optional_from_disk::<_, Account>(Column::Account, key.as_bytes())
+            .map(|account| account.map(|account| account.id))
     }
 
     pub(super) fn get_account_key_from_id(

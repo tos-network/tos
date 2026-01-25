@@ -1,0 +1,66 @@
+fixture:
+  name: "concurrent_transactions"
+  version: "1.0"
+  description: "Multiple senders in same block"
+  tier: [1, 2, 3]
+
+setup:
+  accounts:
+    alice:
+      balance: "5_000 TOS"
+      nonce: 0
+    bob:
+      balance: "5_000 TOS"
+      nonce: 0
+    charlie:
+      balance: "0 TOS"
+      nonce: 0
+
+transactions:
+  - step: 1
+    name: "Alice sends to Charlie"
+    type: transfer
+    from: alice
+    to: charlie
+    amount: "1_000 TOS"
+    fee: "10 TOS"
+    expect_status: success
+
+  - step: 2
+    name: "Bob sends to Charlie"
+    type: transfer
+    from: bob
+    to: charlie
+    amount: "2_000 TOS"
+    fee: "10 TOS"
+    expect_status: success
+
+  - step: 3
+    name: "Alice sends again"
+    type: transfer
+    from: alice
+    to: charlie
+    amount: "500 TOS"
+    fee: "10 TOS"
+    expect_status: success
+
+  - step: 4
+    type: mine_block
+
+expected:
+  accounts:
+    alice:
+      balance: "3_480 TOS"
+      nonce: 2
+    bob:
+      balance: "2_990 TOS"
+      nonce: 1
+    charlie:
+      balance: "3_500 TOS"
+      nonce: 0
+
+invariants:
+  - balance_conservation:
+      total_supply_change: "-30 TOS"
+  - nonce_monotonicity: true
+  - no_negative_balances: true

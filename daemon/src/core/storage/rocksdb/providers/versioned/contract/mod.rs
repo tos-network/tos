@@ -1,7 +1,6 @@
 mod asset_ext;
 mod balance;
 mod data;
-mod supply;
 
 use async_trait::async_trait;
 use log::trace;

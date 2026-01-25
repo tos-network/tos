@@ -1,0 +1,53 @@
+fixture:
+  name: "multi_transfer"
+  version: "1.0"
+  description: "Multiple sequential transfers between three accounts"
+  tier: [1, 2]
+
+setup:
+  accounts:
+    alice:
+      balance: "100000 TOS"
+      nonce: 0
+    bob:
+      balance: "50000 TOS"
+      nonce: 0
+    charlie:
+      balance: "0 TOS"
+      nonce: 0
+
+steps:
+  - transaction:
+      from: alice
+      to: bob
+      amount: "10000 TOS"
+      fee: "10 TOS"
+      expected_result: success
+  - transaction:
+      from: bob
+      to: charlie
+      amount: "25000 TOS"
+      fee: "10 TOS"
+      expected_result: success
+  - transaction:
+      from: alice
+      to: charlie
+      amount: "5000 TOS"
+      fee: "10 TOS"
+      expected_result: success
+
+expected_state:
+  alice:
+    balance: "84980 TOS"
+    nonce: 2
+  bob:
+    balance: "34990 TOS"
+    nonce: 1
+  charlie:
+    balance: "30000 TOS"
+
+invariants:
+  - balance_conservation:
+      total_supply_change: "-30 TOS"
+  - nonce_monotonicity: true
+  - no_negative_balances: true

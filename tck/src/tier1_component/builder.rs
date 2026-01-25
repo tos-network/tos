@@ -9,6 +9,31 @@ use anyhow::Result;
 use std::sync::Arc;
 use tos_common::crypto::Hash;
 
+/// VRF configuration for TestBlockchain
+#[derive(Debug, Clone, Default)]
+pub struct VrfConfig {
+    /// Hex-encoded VRF secret key (None = no VRF)
+    pub secret_key_hex: Option<String>,
+    /// Chain ID for VRF binding signature (default: 3 = devnet)
+    pub chain_id: u64,
+}
+
+impl VrfConfig {
+    /// Create a new VRF config with a secret key
+    pub fn new(secret_key_hex: String) -> Self {
+        Self {
+            secret_key_hex: Some(secret_key_hex),
+            chain_id: 3, // devnet default
+        }
+    }
+
+    /// Set chain ID
+    pub fn with_chain_id(mut self, chain_id: u64) -> Self {
+        self.chain_id = chain_id;
+        self
+    }
+}
+
 /// Builder for TestBlockchain instances
 ///
 /// # Example
@@ -28,6 +53,8 @@ pub struct TestBlockchainBuilder {
     funded_accounts: Vec<(Hash, u64)>,
     default_balance: u64,
     seed: Option<u64>,
+    /// VRF configuration (None = no VRF production)
+    vrf_config: Option<VrfConfig>,
 }
 
 impl TestBlockchainBuilder {
@@ -38,6 +65,7 @@ impl TestBlockchainBuilder {
             funded_accounts: Vec::new(),
             default_balance: 1_000_000_000_000, // 1000 TOS in nanoTOS
             seed: None,
+            vrf_config: None,
         }
     }
 
@@ -124,6 +152,83 @@ impl TestBlockchainBuilder {
         self
     }
 
+    /// Configure VRF with a hex-encoded secret key
+    ///
+    /// When VRF is configured, `mine_block()` will produce VRF data
+    /// that can be used for contract VRF syscalls.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let builder = TestBlockchainBuilder::new()
+    ///     .with_vrf_key("0123456789abcdef...");
+    /// ```
+    pub fn with_vrf_key(mut self, secret_hex: &str) -> Self {
+        let config = self.vrf_config.get_or_insert(VrfConfig {
+            secret_key_hex: None,
+            chain_id: 3,
+        });
+        config.secret_key_hex = Some(secret_hex.to_string());
+        self
+    }
+
+    /// Configure VRF with full VrfConfig
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let config = VrfConfig::new(secret_hex).with_chain_id(1);
+    /// let builder = TestBlockchainBuilder::new()
+    ///     .with_vrf_config(config);
+    /// ```
+    pub fn with_vrf_config(mut self, config: VrfConfig) -> Self {
+        self.vrf_config = Some(config);
+        self
+    }
+
+    /// Configure VRF with a randomly generated key
+    ///
+    /// Generates a new random VRF keypair for this blockchain.
+    /// Useful for tests that need VRF but don't need deterministic keys.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let builder = TestBlockchainBuilder::new()
+    ///     .with_random_vrf_key();
+    /// ```
+    pub fn with_random_vrf_key(mut self) -> Self {
+        use tos_daemon::vrf::VrfKeyManager;
+        let manager = VrfKeyManager::new();
+        let secret_hex = manager.secret_key_hex();
+        let config = self.vrf_config.get_or_insert(VrfConfig {
+            secret_key_hex: None,
+            chain_id: 3,
+        });
+        config.secret_key_hex = Some(secret_hex);
+        self
+    }
+
+    /// Set chain ID for VRF binding signature
+    ///
+    /// Default is 3 (devnet). Use this to override for other networks.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let builder = TestBlockchainBuilder::new()
+    ///     .with_vrf_key(secret)
+    ///     .with_chain_id(1); // testnet
+    /// ```
+    pub fn with_chain_id(mut self, chain_id: u64) -> Self {
+        let config = self.vrf_config.get_or_insert(VrfConfig {
+            secret_key_hex: None,
+            chain_id: 3,
+        });
+        config.chain_id = chain_id;
+        self
+    }
+
     /// Build the TestBlockchain instance
     ///
     /// # Errors
@@ -153,8 +258,8 @@ impl TestBlockchainBuilder {
             self.funded_accounts
         };
 
-        // Create blockchain
-        TestBlockchain::new(clock, temp_db, funded_accounts)
+        // Create blockchain with optional VRF config
+        TestBlockchain::new(clock, temp_db, funded_accounts, self.vrf_config)
     }
 
     /// Generate a test public key from an ID

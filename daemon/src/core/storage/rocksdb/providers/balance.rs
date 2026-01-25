@@ -115,7 +115,8 @@ impl BalanceProvider for RocksStorage {
                 trace!("load latest version available");
             }
             // skip the topoheight from the key, load the last topoheight
-            self.load_optional_from_disk(Column::Balances, &versioned_key[8..24])?
+            let topo = self.load_optional_from_disk(Column::Balances, &versioned_key[8..24])?;
+            topo
         };
 
         // Iterate over our linked list of versions
@@ -301,6 +302,17 @@ impl BalanceProvider for RocksStorage {
                 Self::get_versioned_account_balance_key(account_id, asset_id, topoheight);
             let (prev_topo, balance_type): (Option<u64>, BalanceType) =
                 self.load_from_disk(Column::VersionedBalances, &versioned_key)?;
+            if prev_topo == Some(topoheight) {
+                if log::log_enabled!(log::Level::Warn) {
+                    log::warn!(
+                        "Detected self-referential balance pointer for {} asset {} at topoheight {}",
+                        key.as_address(self.is_mainnet()),
+                        asset_id,
+                        topoheight
+                    );
+                }
+                break;
+            }
 
             if topoheight <= maximum_topoheight && balance_type.contains_output() {
                 if log::log_enabled!(log::Level::Trace) {

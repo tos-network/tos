@@ -1,0 +1,35 @@
+template:
+  name: "two_party"
+  description: "Template for two-party transfer scenarios"
+  version: "1.0"
+
+parameters:
+  sender_balance:
+    type: amount
+    default: "100000 TOS"
+  receiver_balance:
+    type: amount
+    default: "0 TOS"
+  transfer_amount:
+    type: amount
+    required: true
+  fee:
+    type: amount
+    default: "10 TOS"
+
+setup:
+  accounts:
+    sender:
+      balance: "{{sender_balance}}"
+      nonce: 0
+    receiver:
+      balance: "{{receiver_balance}}"
+      nonce: 0
+
+steps:
+  - transaction:
+      from: sender
+      to: receiver
+      amount: "{{transfer_amount}}"
+      fee: "{{fee}}"
+      expected_result: success

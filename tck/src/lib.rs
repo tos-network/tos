@@ -67,11 +67,26 @@ pub mod orchestrator;
 /// Tier 1: Component-level testing (in-process, no RPC/P2P)
 pub mod tier1_component;
 
+/// Tier 1 DAG: Component-level DAG testing
+pub mod tier1_component_dag;
+
 /// Tier 2: Integration testing (single daemon + RPC)
 pub mod tier2_integration;
 
+/// Tier 2 DAG: Integration testing for DAG components
+pub mod tier2_integration_dag;
+
+/// Tier 1.5: ChainClient direct blockchain access (between component and integration)
+pub mod tier1_5;
+
 /// Tier 3: E2E testing (multi-node networks)
 pub mod tier3_e2e;
+
+/// Tier 3 DAG: E2E testing for DAG networks
+pub mod tier3_e2e_dag;
+
+/// Transaction Fixture Testing Framework (declarative YAML-based tests)
+pub mod fixtures;
 
 /// Tier 4: Chaos & property-based testing
 #[cfg(feature = "chaos")]
@@ -94,6 +109,24 @@ pub mod doc_test_helpers;
 
 /// Test utilities for AI-generated tests (TestEnv, helpers)
 pub mod test_utils;
+
+/// BlockDAG consensus testing (tip selection, ordering, invariants)
+pub mod blockdag;
+
+/// Transaction processing tests (block assembly, verify/apply phases)
+pub mod transaction;
+
+/// P2P protocol testing (connection lifecycle, encryption, peer management)
+pub mod p2p;
+
+/// Data Sync & Reorg testing (FastSync, chain sync, validation, DAG reorg, snapshots, pruning)
+pub mod sync;
+
+/// Performance benchmark helpers (used by `tck/benches`)
+pub mod bench;
+
+/// VRF & Scheduling tests (Phase 16)
+pub mod vrf_scheduling;
 
 // =============================================================================
 // TCK-Specific Modules (New)
@@ -138,6 +171,18 @@ pub mod formal;
 // Re-export commonly used types at crate root
 pub use orchestrator::{Clock, DeterministicTestEnv, PausedClock, SystemClock, TestRng};
 pub use tier1_component::{TestBlockchain, TestBlockchainBuilder};
+
+// Re-export Tier 1.5 types
+pub use tier1_5::{
+    BlockWarp, ChainClient, ChainClientConfig, ConfirmationDepth, ContractTest,
+    ContractTestContext, FeatureSet, SimulationResult, TransactionError, TxResult,
+};
+
+// Re-export fixtures types
+pub use fixtures::{
+    create_backend, execute_fixture, parse_fixture, run_fixture_on_backend, FixtureBackend,
+    FixtureResult, Tier,
+};
 
 // Re-export conformance types
 pub use conformance::{Category, ConformanceRunner, ConformanceSpec, TestReport, TestStatus};

@@ -12,7 +12,81 @@
 use super::{Hash, NodeRpc};
 use anyhow::{bail, Result};
 use std::collections::HashSet;
+use std::sync::Arc;
 use tokio::time::{sleep, timeout, Duration};
+
+/// Type alias for progress callback functions.
+pub type ProgressCallback = Arc<dyn Fn(&str) + Send + Sync>;
+
+/// Configurable wait parameters for polling operations.
+///
+/// Provides fine-grained control over timeouts, polling intervals,
+/// and optional progress callbacks for long-running waits.
+///
+/// # Example
+///
+/// ```ignore
+/// let config = WaitConfig::new(Duration::from_secs(30))
+///     .with_poll_interval(Duration::from_millis(200))
+///     .with_progress(|msg| println!("Progress: {}", msg));
+///
+/// wait_all_tips_equal_with_config(&nodes, &config).await?;
+/// ```
+#[derive(Clone)]
+pub struct WaitConfig {
+    /// Maximum time to wait before timing out
+    pub timeout: Duration,
+    /// Interval between polls (default: 500ms)
+    pub poll_interval: Duration,
+    /// Optional progress callback invoked on each poll iteration
+    pub progress_callback: Option<ProgressCallback>,
+}
+
+impl WaitConfig {
+    /// Create a new WaitConfig with the given timeout and default poll interval.
+    pub fn new(timeout: Duration) -> Self {
+        Self {
+            timeout,
+            poll_interval: Duration::from_millis(500),
+            progress_callback: None,
+        }
+    }
+
+    /// Set the poll interval.
+    pub fn with_poll_interval(mut self, interval: Duration) -> Self {
+        self.poll_interval = interval;
+        self
+    }
+
+    /// Set a progress callback that is invoked on each poll iteration.
+    pub fn with_progress<F: Fn(&str) + Send + Sync + 'static>(mut self, callback: F) -> Self {
+        self.progress_callback = Some(Arc::new(callback));
+        self
+    }
+
+    /// Report progress if a callback is configured.
+    fn report_progress(&self, message: &str) {
+        if let Some(ref cb) = self.progress_callback {
+            cb(message);
+        }
+    }
+}
+
+impl std::fmt::Debug for WaitConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WaitConfig")
+            .field("timeout", &self.timeout)
+            .field("poll_interval", &self.poll_interval)
+            .field("has_progress_callback", &self.progress_callback.is_some())
+            .finish()
+    }
+}
+
+impl Default for WaitConfig {
+    fn default() -> Self {
+        Self::new(Duration::from_secs(10))
+    }
+}
 
 /// Wait for all nodes' tips to converge to the same set of block hashes.
 ///
@@ -213,6 +287,275 @@ pub async fn wait_all_heights_equal<N: NodeRpc>(
     })?
 }
 
+/// Wait for a node to produce at least `count` new blocks beyond the current height.
+///
+/// # Arguments
+///
+/// * `node` - The node to monitor
+/// * `count` - Number of new blocks to wait for
+/// * `config` - Wait configuration
+///
+/// # Returns
+///
+/// * `Ok(u64)` - The new tip height after blocks were produced
+/// * `Err(_)` - Timeout or node error
+///
+/// # Example
+///
+/// ```ignore
+/// let new_height = wait_for_new_blocks(
+///     &node,
+///     3,
+///     &WaitConfig::new(Duration::from_secs(10)),
+/// ).await?;
+/// assert!(new_height >= initial_height + 3);
+/// ```
+pub async fn wait_for_new_blocks<N: NodeRpc>(
+    node: &N,
+    count: u64,
+    config: &WaitConfig,
+) -> Result<u64> {
+    if count == 0 {
+        return node.get_tip_height().await;
+    }
+
+    let initial_height = node.get_tip_height().await?;
+    let target_height = initial_height.saturating_add(count);
+
+    timeout(config.timeout, async {
+        loop {
+            match node.get_tip_height().await {
+                Ok(height) if height >= target_height => {
+                    return Ok(height);
+                }
+                Ok(height) => {
+                    config.report_progress(&format!(
+                        "Waiting for blocks: {}/{} (current height: {})",
+                        height.saturating_sub(initial_height),
+                        count,
+                        height
+                    ));
+                }
+                Err(e) => {
+                    if log::log_enabled!(log::Level::Debug) {
+                        log::debug!("Failed to get height: {}", e);
+                    }
+                }
+            }
+            sleep(config.poll_interval).await;
+        }
+    })
+    .await
+    .map_err(|_| {
+        anyhow::anyhow!(
+            "Timeout waiting for {} new blocks (target height: {}) after {:?}",
+            count,
+            target_height,
+            config.timeout
+        )
+    })?
+}
+
+/// Wait for a specific transaction to be confirmed at a target height.
+///
+/// This function polls the node until the tip height reaches a height
+/// sufficient to confirm the transaction at the required depth.
+///
+/// # Arguments
+///
+/// * `node` - The node to query
+/// * `tx_hash` - The transaction hash (for logging)
+/// * `required_height` - The height at which the TX is considered confirmed
+/// * `config` - Wait configuration
+///
+/// # Returns
+///
+/// * `Ok(())` - Transaction reached the required confirmation height
+/// * `Err(_)` - Timeout or node error
+pub async fn wait_for_tx_confirmed<N: NodeRpc>(
+    node: &N,
+    tx_hash: &Hash,
+    required_height: u64,
+    config: &WaitConfig,
+) -> Result<()> {
+    timeout(config.timeout, async {
+        loop {
+            match node.get_tip_height().await {
+                Ok(height) if height >= required_height => {
+                    if log::log_enabled!(log::Level::Debug) {
+                        log::debug!(
+                            "Transaction {} confirmed at height {} (required: {})",
+                            tx_hash,
+                            height,
+                            required_height
+                        );
+                    }
+                    return Ok(());
+                }
+                Ok(height) => {
+                    config.report_progress(&format!(
+                        "Waiting for tx {} confirmation: height {}/{}",
+                        tx_hash, height, required_height
+                    ));
+                }
+                Err(e) => {
+                    if log::log_enabled!(log::Level::Debug) {
+                        log::debug!(
+                            "Failed to get height while waiting for tx {}: {}",
+                            tx_hash,
+                            e
+                        );
+                    }
+                }
+            }
+            sleep(config.poll_interval).await;
+        }
+    })
+    .await
+    .map_err(|_| {
+        anyhow::anyhow!(
+            "Timeout waiting for tx {} to be confirmed at height {} after {:?}",
+            tx_hash,
+            required_height,
+            config.timeout
+        )
+    })?
+}
+
+/// Wait for a node to sync to a target height.
+///
+/// Useful for testing bootstrap sync and late-joining nodes that need
+/// to catch up to the rest of the network.
+///
+/// # Arguments
+///
+/// * `node` - The node to monitor
+/// * `target_height` - The height to wait for
+/// * `config` - Wait configuration
+///
+/// # Returns
+///
+/// * `Ok(())` - Node reached the target height
+/// * `Err(_)` - Timeout or node error
+///
+/// # Example
+///
+/// ```ignore
+/// // Wait for bootstrap node to sync to height 100
+/// wait_for_sync_complete(
+///     &bootstrap_node,
+///     100,
+///     &WaitConfig::new(Duration::from_secs(60))
+///         .with_poll_interval(Duration::from_secs(1)),
+/// ).await?;
+/// ```
+pub async fn wait_for_sync_complete<N: NodeRpc>(
+    node: &N,
+    target_height: u64,
+    config: &WaitConfig,
+) -> Result<()> {
+    timeout(config.timeout, async {
+        loop {
+            match node.get_tip_height().await {
+                Ok(height) if height >= target_height => {
+                    if log::log_enabled!(log::Level::Debug) {
+                        log::debug!(
+                            "Sync complete: reached height {} (target: {})",
+                            height,
+                            target_height
+                        );
+                    }
+                    return Ok(());
+                }
+                Ok(height) => {
+                    config.report_progress(&format!(
+                        "Syncing: height {}/{} ({:.1}%)",
+                        height,
+                        target_height,
+                        if target_height > 0 {
+                            (height as f64 / target_height as f64) * 100.0
+                        } else {
+                            100.0
+                        }
+                    ));
+                }
+                Err(e) => {
+                    if log::log_enabled!(log::Level::Debug) {
+                        log::debug!("Failed to get height during sync: {}", e);
+                    }
+                }
+            }
+            sleep(config.poll_interval).await;
+        }
+    })
+    .await
+    .map_err(|_| {
+        anyhow::anyhow!(
+            "Timeout waiting for sync to height {} after {:?}",
+            target_height,
+            config.timeout
+        )
+    })?
+}
+
+/// Wait for all nodes' tips to converge, with configurable wait parameters.
+///
+/// This is the configurable version of `wait_all_tips_equal` that uses
+/// `WaitConfig` for fine-grained control over polling behavior.
+pub async fn wait_all_tips_equal_with_config<N: NodeRpc>(
+    nodes: &[N],
+    config: &WaitConfig,
+) -> Result<()> {
+    if nodes.is_empty() {
+        bail!("No nodes provided to wait_all_tips_equal_with_config");
+    }
+
+    timeout(config.timeout, async {
+        let mut iteration = 0u64;
+        loop {
+            iteration = iteration.saturating_add(1);
+            let mut all_tips = Vec::new();
+            for node in nodes {
+                match node.get_tips().await {
+                    Ok(tips) => all_tips.push(tips),
+                    Err(_) => {
+                        sleep(config.poll_interval).await;
+                        continue;
+                    }
+                }
+            }
+
+            if all_tips.len() != nodes.len() {
+                sleep(config.poll_interval).await;
+                continue;
+            }
+
+            let tip_sets: Vec<HashSet<Hash>> = all_tips
+                .iter()
+                .map(|tips| tips.iter().cloned().collect())
+                .collect();
+
+            // Single node trivially converges; multiple nodes must all agree
+            if tip_sets.len() <= 1 || tip_sets.windows(2).all(|w| w[0] == w[1]) {
+                return Ok(());
+            }
+
+            config.report_progress(&format!(
+                "Waiting for tip convergence (iteration {})",
+                iteration
+            ));
+            sleep(config.poll_interval).await;
+        }
+    })
+    .await
+    .map_err(|_| {
+        anyhow::anyhow!(
+            "Timeout waiting for tips to converge after {:?}",
+            config.timeout
+        )
+    })?
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 #[allow(clippy::expect_used)]
@@ -364,6 +707,121 @@ mod tests {
 
         let nodes = [node1, node2, node3];
         let result = wait_all_heights_equal(&nodes, Duration::from_secs(2)).await;
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_wait_config_builder() {
+        let config =
+            WaitConfig::new(Duration::from_secs(30)).with_poll_interval(Duration::from_millis(200));
+        assert_eq!(config.timeout, Duration::from_secs(30));
+        assert_eq!(config.poll_interval, Duration::from_millis(200));
+        assert!(config.progress_callback.is_none());
+    }
+
+    #[test]
+    fn test_wait_config_with_progress() {
+        let called = Arc::new(Mutex::new(false));
+        let called_clone = called.clone();
+
+        let config = WaitConfig::new(Duration::from_secs(5)).with_progress(move |_msg| {
+            // In a real scenario, we'd track calls
+            let _ = &called_clone;
+        });
+        assert!(config.progress_callback.is_some());
+    }
+
+    #[test]
+    fn test_wait_config_default() {
+        let config = WaitConfig::default();
+        assert_eq!(config.timeout, Duration::from_secs(10));
+        assert_eq!(config.poll_interval, Duration::from_millis(500));
+    }
+
+    #[tokio::test]
+    async fn test_wait_for_new_blocks() {
+        let node = MockNode::new(vec![], 5);
+        let node_height = node.height.clone();
+
+        // Spawn a task to increment height after 100ms
+        tokio::spawn(async move {
+            sleep(Duration::from_millis(100)).await;
+            *node_height.lock().await = 8;
+        });
+
+        let config =
+            WaitConfig::new(Duration::from_secs(2)).with_poll_interval(Duration::from_millis(50));
+        let result = wait_for_new_blocks(&node, 3, &config).await;
+        assert!(result.is_ok());
+        assert!(result.unwrap() >= 8);
+    }
+
+    #[tokio::test]
+    async fn test_wait_for_new_blocks_zero() {
+        let node = MockNode::new(vec![], 10);
+        let config = WaitConfig::new(Duration::from_secs(1));
+        let result = wait_for_new_blocks(&node, 0, &config).await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), 10);
+    }
+
+    #[tokio::test]
+    async fn test_wait_for_sync_complete() {
+        let node = MockNode::new(vec![], 50);
+        let node_height = node.height.clone();
+
+        // Spawn a task to reach target height
+        tokio::spawn(async move {
+            sleep(Duration::from_millis(100)).await;
+            *node_height.lock().await = 100;
+        });
+
+        let config =
+            WaitConfig::new(Duration::from_secs(2)).with_poll_interval(Duration::from_millis(50));
+        let result = wait_for_sync_complete(&node, 100, &config).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_wait_for_sync_complete_timeout() {
+        let node = MockNode::new(vec![], 50);
+        // Node never reaches target height
+        let config = WaitConfig::new(Duration::from_millis(200))
+            .with_poll_interval(Duration::from_millis(50));
+        let result = wait_for_sync_complete(&node, 1000, &config).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Timeout"));
+    }
+
+    #[tokio::test]
+    async fn test_wait_for_tx_confirmed() {
+        let node = MockNode::new(vec![], 5);
+        let node_height = node.height.clone();
+
+        tokio::spawn(async move {
+            sleep(Duration::from_millis(100)).await;
+            *node_height.lock().await = 10;
+        });
+
+        let tx_hash = create_test_hash(42);
+        let config =
+            WaitConfig::new(Duration::from_secs(2)).with_poll_interval(Duration::from_millis(50));
+        let result = wait_for_tx_confirmed(&node, &tx_hash, 10, &config).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_wait_all_tips_equal_with_config() {
+        let common_tips = vec![create_test_hash(1), create_test_hash(2)];
+        let nodes = [
+            MockNode::new(common_tips.clone(), 100),
+            MockNode::new(common_tips.clone(), 100),
+            MockNode::new(common_tips.clone(), 100),
+        ];
+
+        let config =
+            WaitConfig::new(Duration::from_secs(1)).with_poll_interval(Duration::from_millis(50));
+        let result = wait_all_tips_equal_with_config(&nodes[..], &config).await;
         assert!(result.is_ok());
     }
 }

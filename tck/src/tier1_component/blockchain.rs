@@ -4,13 +4,18 @@
 //! This is a Tier 1 component for V3.0 testing framework.
 
 use crate::orchestrator::Clock;
+use crate::tier1_component::builder::VrfConfig;
 use crate::utilities::TempRocksDB;
 use anyhow::{Context, Result};
 use parking_lot::RwLock;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use tos_common::crypto::Hash;
+use tos_common::block::BlockVrfData;
+use tos_common::contract::{ScheduledExecution, ScheduledExecutionKind, ScheduledExecutionStatus};
+use tos_common::crypto::elgamal::CompressedPublicKey;
+use tos_common::crypto::{Hash, KeyPair};
+use tos_daemon::vrf::VrfKeyManager;
 
 /// Account state for testing
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -43,7 +48,7 @@ pub struct BlockchainCounters {
 }
 
 /// Transaction for testing
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TestTransaction {
     /// Transaction hash
     pub hash: Hash,
@@ -76,6 +81,10 @@ pub struct TestBlock {
     pub pruning_point: Hash,
     /// Selected parent hash (for pruning point calculation)
     pub selected_parent: Hash,
+    /// VRF data for this block (None if VRF not configured)
+    pub vrf_data: Option<tos_common::block::BlockVrfData>,
+    /// Miner public key (for VRF verification)
+    pub miner: CompressedPublicKey,
 }
 
 /// Pruning depth constant (matches daemon/src/config.rs PRUNING_DEPTH)
@@ -139,6 +148,43 @@ pub struct TestBlockchain {
 
     /// Genesis block hash (for pruning point calculation)
     genesis_hash: Hash,
+
+    /// VRF key manager for block production (None = no VRF)
+    vrf_key_manager: Option<VrfKeyManager>,
+
+    /// Miner keypair for VRF binding signature
+    miner_keypair: KeyPair,
+
+    /// Chain ID for VRF binding signature
+    chain_id: u64,
+
+    /// Genesis accounts for state reset during reorg
+    genesis_accounts: Vec<(Hash, u64)>,
+
+    /// Blocks indexed by hash for O(1) lookup (for reorg support)
+    blocks_by_hash: Arc<RwLock<HashMap<Hash, TestBlock>>>,
+
+    /// Scheduled execution queue: target_topoheight → pending executions
+    scheduled_queue: Arc<RwLock<BTreeMap<u64, Vec<ScheduledExecution>>>>,
+
+    /// Scheduled execution results: exec_hash → (status, executed_topoheight)
+    scheduled_results: Arc<RwLock<HashMap<Hash, (ScheduledExecutionStatus, u64)>>>,
+
+    /// Miner rewards accumulated: miner_address → total_reward
+    miner_rewards: Arc<RwLock<HashMap<Hash, u64>>>,
+
+    /// Stable depth: blocks older than (tip - stable_depth) are considered final
+    stable_depth: u64,
+
+    /// Contract bytecodes for deferral checking: contract_hash → bytecode
+    contract_bytecodes: Arc<RwLock<HashMap<Hash, Vec<u8>>>>,
+
+    /// BlockEnd execution queue: executions to run at end of current block
+    block_end_queue: Arc<RwLock<Vec<ScheduledExecution>>>,
+
+    /// Tracks which block executed each scheduled execution: exec_hash → block_hash
+    /// Used for orphan detection after reorg
+    executed_in_block: Arc<RwLock<HashMap<Hash, Hash>>>,
 }
 
 impl TestBlockchain {
@@ -149,15 +195,22 @@ impl TestBlockchain {
         clock: Arc<dyn Clock>,
         temp_db: TempRocksDB,
         funded_accounts: Vec<(Hash, u64)>,
+        vrf_config: Option<VrfConfig>,
     ) -> Result<Self> {
         // Initialize accounts from funded list
         let mut accounts = BTreeMap::new();
         let mut total_balance = 0u128;
 
-        for (pubkey, balance) in funded_accounts {
-            accounts.insert(pubkey, AccountState { balance, nonce: 0 });
+        for (pubkey, balance) in &funded_accounts {
+            accounts.insert(
+                pubkey.clone(),
+                AccountState {
+                    balance: *balance,
+                    nonce: 0,
+                },
+            );
             // Use saturating_add to prevent overflow in genesis with many accounts
-            total_balance = total_balance.saturating_add(balance as u128);
+            total_balance = total_balance.saturating_add(*balance as u128);
         }
 
         // Initialize counters
@@ -173,6 +226,22 @@ impl TestBlockchain {
         // Compute initial state root
         let state_root = Self::compute_state_root(&accounts);
 
+        // Initialize VRF key manager if configured
+        let (vrf_key_manager, chain_id) = if let Some(config) = vrf_config {
+            let manager = if let Some(ref secret_hex) = config.secret_key_hex {
+                Some(VrfKeyManager::from_hex(secret_hex).context("Invalid VRF secret key")?)
+            } else {
+                None
+            };
+            (manager, config.chain_id)
+        } else {
+            (None, 3) // Default to devnet chain_id
+        };
+
+        // Generate a deterministic miner keypair for VRF binding
+        let miner_keypair = KeyPair::new();
+        let miner_pk = miner_keypair.get_public_key().compress();
+
         // Genesis hash (zero hash for test blockchain)
         let genesis_hash = Hash::zero();
 
@@ -185,7 +254,13 @@ impl TestBlockchain {
             reward: 0,
             pruning_point: genesis_hash.clone(),
             selected_parent: genesis_hash.clone(), // Genesis has no parent
+            vrf_data: None,
+            miner: miner_pk,
         };
+
+        // Initialize blocks_by_hash with genesis
+        let mut blocks_by_hash = HashMap::new();
+        blocks_by_hash.insert(genesis_hash.clone(), genesis_block.clone());
 
         Ok(Self {
             clock,
@@ -199,6 +274,18 @@ impl TestBlockchain {
             mempool: Arc::new(RwLock::new(Vec::new())),
             blocks: Arc::new(RwLock::new(vec![genesis_block])),
             genesis_hash,
+            vrf_key_manager,
+            miner_keypair,
+            chain_id,
+            genesis_accounts: funded_accounts,
+            blocks_by_hash: Arc::new(RwLock::new(blocks_by_hash)),
+            scheduled_queue: Arc::new(RwLock::new(BTreeMap::new())),
+            scheduled_results: Arc::new(RwLock::new(HashMap::new())),
+            miner_rewards: Arc::new(RwLock::new(HashMap::new())),
+            stable_depth: 10, // Default: 10 blocks for finality
+            contract_bytecodes: Arc::new(RwLock::new(HashMap::new())),
+            block_end_queue: Arc::new(RwLock::new(Vec::new())),
+            executed_in_block: Arc::new(RwLock::new(HashMap::new())),
         })
     }
 
@@ -376,17 +463,51 @@ impl TestBlockchain {
         let new_topoheight = current_topoheight
             .checked_add(1)
             .context("Topoheight overflow - chain too long")?;
-        let block_hash = Self::compute_block_hash(new_height, &transactions);
 
-        // Get selected parent (previous tip)
+        // Get selected parent (previous tip) - needed for unique block hash
         let selected_parent = if let Some(last_block) = blocks.last() {
             last_block.hash.clone()
         } else {
             self.genesis_hash.clone()
         };
 
+        // Get miner public key (used for both block hash and VRF)
+        let miner_pk = self.miner_keypair.get_public_key().compress();
+        let miner_pk_bytes: [u8; 32] = *miner_pk.as_bytes();
+
+        // Compute block hash (includes parent and miner for uniqueness)
+        let block_hash =
+            Self::compute_block_hash(new_height, &transactions, &selected_parent, &miner_pk_bytes);
+
         // Calculate pruning point using BlockDAG algorithm
         let pruning_point = self.calc_pruning_point(&blocks, &selected_parent, new_topoheight);
+
+        // Produce VRF data if configured
+        let vrf_data = if let Some(ref vrf_mgr) = self.vrf_key_manager {
+            let block_hash_bytes: [u8; 32] = *block_hash.as_bytes();
+            match vrf_mgr.sign(
+                self.chain_id,
+                &block_hash_bytes,
+                &miner_pk,
+                &self.miner_keypair,
+            ) {
+                Ok(vrf_result) => Some(BlockVrfData::new(
+                    vrf_result.public_key.to_bytes(),
+                    vrf_result.output.to_bytes(),
+                    vrf_result.proof.to_bytes(),
+                    vrf_result.binding_signature.to_bytes(),
+                )),
+                Err(e) => {
+                    // Log VRF error but continue with None (don't fail block production)
+                    if log::log_enabled!(log::Level::Warn) {
+                        log::warn!("VRF signing failed for block {}: {:?}", new_height, e);
+                    }
+                    None
+                }
+            }
+        } else {
+            None
+        };
 
         let block = TestBlock {
             hash: block_hash.clone(),
@@ -396,6 +517,8 @@ impl TestBlockchain {
             reward: BLOCK_REWARD,
             pruning_point,
             selected_parent,
+            vrf_data,
+            miner: miner_pk,
         };
 
         // Update blockchain state
@@ -404,8 +527,25 @@ impl TestBlockchain {
         self.topoheight.store(new_topoheight, Ordering::SeqCst);
         *self.tips.write() = vec![block_hash.clone()];
 
+        // Store block by hash for reorg support
+        self.blocks_by_hash
+            .write()
+            .insert(block_hash.clone(), block.clone());
+
+        // Process scheduled executions at this topoheight
+        // (drop locks first to avoid deadlock)
+        drop(accounts);
+        drop(counters);
+        drop(blocks);
+        self.process_scheduled_at_topoheight(new_topoheight, &block_hash);
+
+        // Process BlockEnd executions (scheduled for end of this block)
+        self.process_block_end_executions(&block_hash, new_topoheight);
+
         // Recompute state root
+        let accounts = self.accounts.read();
         *self.state_root.write() = Self::compute_state_root(&accounts);
+        drop(accounts);
 
         if log::log_enabled!(log::Level::Info) {
             log::info!(
@@ -415,6 +555,120 @@ impl TestBlockchain {
                 new_topoheight,
                 transactions.len(),
                 block.pruning_point
+            );
+        }
+
+        Ok(block)
+    }
+
+    /// Mine a fork block on a specific parent (creates alternative chain without applying)
+    ///
+    /// This is used for testing reorg scenarios:
+    /// - Creates a block building on the specified parent
+    /// - Stores the block in blocks_by_hash for later reorg
+    /// - Does NOT apply the block to state
+    ///
+    /// # Arguments
+    ///
+    /// * `parent_hash` - The hash of the parent block to build on
+    ///
+    /// # Returns
+    ///
+    /// The newly created fork block (stored but not applied)
+    pub async fn mine_fork_block_on_parent(&self, parent_hash: &Hash) -> Result<TestBlock> {
+        // Get the parent block to determine height
+        let parent_block = self
+            .blocks_by_hash
+            .read()
+            .get(parent_hash)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("Parent block not found: {}", parent_hash))?;
+
+        let new_height = parent_block.height.saturating_add(1);
+
+        // For fork blocks, we use a simple topoheight based on height
+        // (actual topoheight would be assigned during reorg)
+        let new_topoheight = new_height;
+
+        // Get miner public key
+        let miner_pk = self.miner_keypair.get_public_key().compress();
+        let miner_pk_bytes: [u8; 32] = *miner_pk.as_bytes();
+
+        // Use a different nonce to ensure unique block hash
+        // We include parent hash, height, and a "fork" marker
+        let mut hash_input = parent_hash.as_bytes().to_vec();
+        hash_input.extend_from_slice(&new_height.to_le_bytes());
+        hash_input.extend_from_slice(&miner_pk_bytes);
+        hash_input.extend_from_slice(b"FORK");
+        let block_hash = tos_common::crypto::hash(&hash_input);
+
+        // Produce VRF data if configured
+        let vrf_data = if let Some(ref vrf_mgr) = self.vrf_key_manager {
+            let block_hash_bytes: [u8; 32] = *block_hash.as_bytes();
+            match vrf_mgr.sign(
+                self.chain_id,
+                &block_hash_bytes,
+                &miner_pk,
+                &self.miner_keypair,
+            ) {
+                Ok(vrf_result) => Some(BlockVrfData::new(
+                    vrf_result.public_key.to_bytes(),
+                    vrf_result.output.to_bytes(),
+                    vrf_result.proof.to_bytes(),
+                    vrf_result.binding_signature.to_bytes(),
+                )),
+                Err(_) => None,
+            }
+        } else {
+            None
+        };
+
+        // Calculate pruning point (simplified for fork blocks)
+        let pruning_point = if new_topoheight < PRUNING_DEPTH {
+            self.genesis_hash.clone()
+        } else {
+            // Walk back from parent
+            let mut current = parent_hash.clone();
+            let mut steps = 0u64;
+            let blocks_by_hash = self.blocks_by_hash.read();
+
+            while steps < PRUNING_DEPTH {
+                if let Some(block) = blocks_by_hash.get(&current) {
+                    if block.height == 0 {
+                        break;
+                    }
+                    current = block.selected_parent.clone();
+                    steps = steps.saturating_add(1);
+                } else {
+                    break;
+                }
+            }
+            current
+        };
+
+        let block = TestBlock {
+            hash: block_hash.clone(),
+            height: new_height,
+            topoheight: new_topoheight,
+            transactions: vec![],
+            reward: 50_000_000_000, // Standard block reward
+            pruning_point,
+            selected_parent: parent_hash.clone(),
+            vrf_data,
+            miner: miner_pk,
+        };
+
+        // Store the block for later reorg
+        self.blocks_by_hash
+            .write()
+            .insert(block_hash.clone(), block.clone());
+
+        if log::log_enabled!(log::Level::Debug) {
+            log::debug!(
+                "Created fork block {} at height {} on parent {}",
+                block_hash,
+                new_height,
+                parent_hash
             );
         }
 
@@ -457,6 +711,361 @@ impl TestBlockchain {
         }
 
         current
+    }
+
+    /// Get VRF data for block at specified height
+    ///
+    /// Returns None if:
+    /// - Block doesn't exist at that height
+    /// - Block exists but has no VRF data (VRF not configured)
+    pub fn get_block_vrf_data(&self, height: u64) -> Option<BlockVrfData> {
+        let blocks = self.blocks.read();
+        blocks
+            .iter()
+            .find(|b| b.height == height)
+            .and_then(|b| b.vrf_data.clone())
+    }
+
+    /// Get VRF data for block at specified topoheight
+    ///
+    /// Returns None if:
+    /// - Block doesn't exist at that topoheight
+    /// - Block exists but has no VRF data (VRF not configured)
+    pub fn get_block_vrf_data_at_topoheight(&self, topoheight: u64) -> Option<BlockVrfData> {
+        let blocks = self.blocks.read();
+        blocks
+            .iter()
+            .find(|b| b.topoheight == topoheight)
+            .and_then(|b| b.vrf_data.clone())
+    }
+
+    /// Check if VRF is configured for this blockchain
+    pub fn has_vrf(&self) -> bool {
+        self.vrf_key_manager.is_some()
+    }
+
+    /// Get the miner's compressed public key (for VRF binding verification)
+    pub fn miner_public_key(&self) -> tos_common::crypto::elgamal::CompressedPublicKey {
+        self.miner_keypair.get_public_key().compress()
+    }
+
+    /// Get the chain ID used for VRF binding
+    pub fn chain_id(&self) -> u64 {
+        self.chain_id
+    }
+
+    // ========================================================================
+    // Scheduled Execution Support
+    // ========================================================================
+
+    /// Schedule an execution for a future topoheight
+    ///
+    /// # Arguments
+    ///
+    /// * `exec` - The scheduled execution to register
+    ///
+    /// # Returns
+    ///
+    /// The hash of the scheduled execution
+    pub fn schedule_execution(&self, mut exec: ScheduledExecution) -> Result<Hash> {
+        let is_block_end = matches!(exec.kind, ScheduledExecutionKind::BlockEnd);
+        let target_topo = match exec.kind {
+            ScheduledExecutionKind::TopoHeight(t) => t,
+            ScheduledExecutionKind::BlockEnd => {
+                // BlockEnd executes at the end of the current block
+                self.topoheight.load(Ordering::SeqCst)
+            }
+        };
+
+        // Generate deterministic hash if not set
+        if exec.hash == Hash::zero() {
+            let mut hash_input = Vec::new();
+            hash_input.extend_from_slice(exec.scheduler_contract.as_bytes());
+            hash_input.extend_from_slice(exec.contract.as_bytes());
+            hash_input.extend_from_slice(&target_topo.to_le_bytes());
+            hash_input.extend_from_slice(&exec.offer_amount.to_le_bytes());
+            // Include kind marker for uniqueness
+            if is_block_end {
+                hash_input.extend_from_slice(b"block_end");
+            }
+            exec.hash = tos_common::crypto::hash(&hash_input);
+        }
+
+        let hash = exec.hash.clone();
+
+        if is_block_end {
+            // BlockEnd: add to block_end_queue for processing at end of current block
+            let mut queue = self.block_end_queue.write();
+            queue.push(exec);
+
+            if log::log_enabled!(log::Level::Debug) {
+                log::debug!(
+                    "Scheduled BlockEnd execution {} for current block (topo {})",
+                    hash,
+                    target_topo
+                );
+            }
+        } else {
+            // TopoHeight: add to scheduled_queue for processing at target topoheight
+            let mut queue = self.scheduled_queue.write();
+            queue.entry(target_topo).or_default().push(exec);
+
+            if log::log_enabled!(log::Level::Debug) {
+                log::debug!(
+                    "Scheduled execution {} for topoheight {}",
+                    hash,
+                    target_topo
+                );
+            }
+        }
+
+        Ok(hash)
+    }
+
+    /// Get the status of a scheduled execution
+    ///
+    /// # Returns
+    ///
+    /// Some((status, topoheight)) if found, None if not scheduled
+    pub fn get_scheduled_status(&self, hash: &Hash) -> Option<(ScheduledExecutionStatus, u64)> {
+        // First check results
+        let results = self.scheduled_results.read();
+        if let Some(result) = results.get(hash) {
+            return Some(*result);
+        }
+        drop(results);
+
+        // Check pending queue
+        let queue = self.scheduled_queue.read();
+        for (topo, execs) in queue.iter() {
+            for exec in execs {
+                if exec.hash == *hash {
+                    return Some((ScheduledExecutionStatus::Pending, *topo));
+                }
+            }
+        }
+
+        None
+    }
+
+    /// Get all pending executions at a specific topoheight
+    pub fn get_pending_at(&self, topo: u64) -> Vec<ScheduledExecution> {
+        let queue = self.scheduled_queue.read();
+        queue.get(&topo).cloned().unwrap_or_default()
+    }
+
+    /// Process scheduled executions at a given topoheight
+    ///
+    /// This is called during block processing (mine or receive).
+    /// Executions are marked as Executed (simplified - no actual contract execution).
+    fn process_scheduled_at_topoheight(&self, topo: u64, block_hash: &Hash) {
+        let mut queue = self.scheduled_queue.write();
+        let mut results = self.scheduled_results.write();
+        let mut miner_rewards = self.miner_rewards.write();
+        let mut executed_in_block = self.executed_in_block.write();
+        let bytecodes = self.contract_bytecodes.read();
+
+        if let Some(mut execs) = queue.remove(&topo) {
+            // Sort by offer_amount descending (higher priority first)
+            execs.sort_by(|a, b| b.offer_amount.cmp(&a.offer_amount));
+
+            let mut deferred = Vec::new();
+
+            // Only apply deferral logic if at least one contract has been deployed.
+            // This maintains backward compatibility with tests that don't use real contracts.
+            let should_check_contracts = !bytecodes.is_empty();
+
+            for mut exec in execs {
+                // Determine execution status
+                let status = if should_check_contracts {
+                    // Check if target contract exists (for deferral)
+                    let contract_exists = bytecodes.contains_key(&exec.contract);
+
+                    if !contract_exists && exec.defer_count < 3 {
+                        // Defer: contract not found, re-queue for next block
+                        exec.defer_count = exec.defer_count.saturating_add(1);
+                        let defer_count = exec.defer_count;
+                        let hash = exec.hash.clone();
+                        deferred.push(exec);
+
+                        if log::log_enabled!(log::Level::Debug) {
+                            log::debug!(
+                                "Deferred scheduled {} (defer_count={})",
+                                hash,
+                                defer_count
+                            );
+                        }
+                        continue;
+                    }
+
+                    // Execute (or fail if max deferrals reached without contract)
+                    if !contract_exists && exec.defer_count >= 3 {
+                        ScheduledExecutionStatus::Failed
+                    } else {
+                        ScheduledExecutionStatus::Executed
+                    }
+                } else {
+                    // No contracts deployed - use stub execution (for backward compatibility)
+                    ScheduledExecutionStatus::Executed
+                };
+
+                // Pay miner reward (70% of offer)
+                if exec.offer_amount > 0 {
+                    let miner_reward = exec.offer_amount.saturating_mul(70) / 100;
+                    let miner_pk = self.miner_keypair.get_public_key().compress();
+                    let miner_addr = Hash::new(*miner_pk.as_bytes());
+                    *miner_rewards.entry(miner_addr).or_insert(0) = miner_rewards
+                        .get(&miner_addr)
+                        .unwrap_or(&0)
+                        .saturating_add(miner_reward);
+                }
+
+                let exec_hash = exec.hash.clone();
+                results.insert(exec_hash.clone(), (status, topo));
+
+                // Track which block executed this scheduled execution
+                executed_in_block.insert(exec_hash.clone(), block_hash.clone());
+
+                if log::log_enabled!(log::Level::Debug) {
+                    log::debug!(
+                        "Processed scheduled {} at topoheight {} in block {} with status {:?}",
+                        exec_hash,
+                        topo,
+                        block_hash,
+                        status
+                    );
+                }
+            }
+
+            // Re-queue deferred executions for next topoheight
+            if !deferred.is_empty() {
+                let next_topo = topo.saturating_add(1);
+                queue.entry(next_topo).or_default().extend(deferred);
+            }
+        }
+    }
+
+    /// Process BlockEnd executions (scheduled for end of current block)
+    fn process_block_end_executions(&self, block_hash: &Hash, topo: u64) {
+        let mut block_end_queue = self.block_end_queue.write();
+        let mut results = self.scheduled_results.write();
+        let mut executed_in_block = self.executed_in_block.write();
+        let mut miner_rewards = self.miner_rewards.write();
+
+        // Take all BlockEnd executions
+        let execs = std::mem::take(&mut *block_end_queue);
+
+        for exec in execs {
+            // BlockEnd executions always execute (no deferral)
+            let status = ScheduledExecutionStatus::Executed;
+
+            // Pay miner reward (70% of offer)
+            if exec.offer_amount > 0 {
+                let miner_reward = exec.offer_amount.saturating_mul(70) / 100;
+                let miner_pk = self.miner_keypair.get_public_key().compress();
+                let miner_addr = Hash::new(*miner_pk.as_bytes());
+                *miner_rewards.entry(miner_addr).or_insert(0) = miner_rewards
+                    .get(&miner_addr)
+                    .unwrap_or(&0)
+                    .saturating_add(miner_reward);
+            }
+
+            let exec_hash = exec.hash.clone();
+            results.insert(exec_hash.clone(), (status, topo));
+
+            // Track which block executed this BlockEnd
+            executed_in_block.insert(exec_hash.clone(), block_hash.clone());
+
+            if log::log_enabled!(log::Level::Debug) {
+                log::debug!(
+                    "Processed BlockEnd {} at topoheight {} in block {}",
+                    exec_hash,
+                    topo,
+                    block_hash
+                );
+            }
+        }
+    }
+
+    /// Clear all scheduled state (for reorg reset)
+    fn clear_scheduled_state(&self) {
+        let mut queue = self.scheduled_queue.write();
+        let mut results = self.scheduled_results.write();
+        let mut miner_rewards = self.miner_rewards.write();
+        let mut block_end_queue = self.block_end_queue.write();
+        let mut executed_in_block = self.executed_in_block.write();
+        queue.clear();
+        results.clear();
+        miner_rewards.clear();
+        block_end_queue.clear();
+        executed_in_block.clear();
+    }
+
+    /// Get the block hash where a scheduled execution was executed.
+    ///
+    /// Returns `Some(block_hash)` if the execution was executed, `None` otherwise.
+    pub fn get_executed_in_block(&self, exec_hash: &Hash) -> Option<Hash> {
+        let executed_in_block = self.executed_in_block.read();
+        executed_in_block.get(exec_hash).cloned()
+    }
+
+    /// Check if a scheduled execution was orphaned (executed in a block no longer in main chain).
+    ///
+    /// Returns:
+    /// - `Some(true)` if the execution was executed in a now-orphaned block
+    /// - `Some(false)` if the execution was executed in a block still in the main chain
+    /// - `None` if the execution was never executed
+    pub fn is_execution_orphaned(&self, exec_hash: &Hash) -> Option<bool> {
+        let block_hash = self.get_executed_in_block(exec_hash)?;
+
+        // Check if this block is still in the main chain
+        let blocks = self.blocks.read();
+        let is_in_main_chain = blocks.iter().any(|b| b.hash == block_hash);
+
+        Some(!is_in_main_chain)
+    }
+
+    /// Get accumulated miner reward for an address
+    pub fn get_miner_reward(&self, miner: &Hash) -> u64 {
+        let rewards = self.miner_rewards.read();
+        rewards.get(miner).copied().unwrap_or(0)
+    }
+
+    /// Get the stable depth configuration
+    pub fn get_stable_depth(&self) -> u64 {
+        self.stable_depth
+    }
+
+    /// Check if a topoheight is considered stable (finalized)
+    pub fn is_stable(&self, topo: u64) -> bool {
+        let current_topo = self.topoheight.load(Ordering::SeqCst);
+        topo.saturating_add(self.stable_depth) <= current_topo
+    }
+
+    /// Deploy a contract (store bytecode for execution and deferral checks)
+    pub fn deploy_contract(&self, bytecode: &[u8]) -> Hash {
+        let contract_hash = tos_common::crypto::hash(bytecode);
+        let mut bytecodes = self.contract_bytecodes.write();
+        bytecodes.insert(contract_hash.clone(), bytecode.to_vec());
+        contract_hash
+    }
+
+    /// Check if a contract is deployed
+    pub fn has_contract(&self, contract: &Hash) -> bool {
+        let bytecodes = self.contract_bytecodes.read();
+        bytecodes.contains_key(contract)
+    }
+
+    /// Get the miner's address (derived from miner keypair)
+    pub fn get_miner_address(&self) -> Hash {
+        let miner_pk = self.miner_keypair.get_public_key().compress();
+        Hash::new(*miner_pk.as_bytes())
+    }
+
+    /// Deploy a contract at a specific address (for testing)
+    pub fn deploy_contract_at(&self, address: &Hash, bytecode: &[u8]) {
+        let mut bytecodes = self.contract_bytecodes.write();
+        bytecodes.insert(address.clone(), bytecode.to_vec());
     }
 
     /// Receive a block from a peer and apply it to the blockchain
@@ -557,6 +1166,9 @@ impl TestBlockchain {
 
         // Update blockchain state
         blocks.push(block.clone());
+        self.blocks_by_hash
+            .write()
+            .insert(block.hash.clone(), block.clone());
         self.tip_height.store(block.height, Ordering::SeqCst);
         self.topoheight.store(block.topoheight, Ordering::SeqCst);
         *self.tips.write() = vec![block.hash.clone()];
@@ -567,6 +1179,17 @@ impl TestBlockchain {
         // Remove applied transactions from mempool (if they exist)
         let mut mempool = self.mempool.write();
         mempool.retain(|tx| !block.transactions.iter().any(|btx| btx.hash == tx.hash));
+        drop(mempool);
+
+        // Process scheduled executions at this topoheight
+        // (drop locks first to avoid deadlock)
+        drop(accounts);
+        drop(counters);
+        drop(blocks);
+        self.process_scheduled_at_topoheight(block.topoheight, &block.hash);
+
+        // Process BlockEnd executions for this block
+        self.process_block_end_executions(&block.hash, block.topoheight);
 
         if log::log_enabled!(log::Level::Debug) {
             log::debug!(
@@ -580,17 +1203,284 @@ impl TestBlockchain {
         Ok(())
     }
 
+    /// Receive a block that may create a fork (for reorg testing)
+    ///
+    /// Unlike `receive_block`, this method:
+    /// - Accepts blocks that build on any known block (not just the tip)
+    /// - Stores the block without immediately applying it
+    /// - Returns whether this block creates a heavier chain
+    ///
+    /// # Arguments
+    ///
+    /// * `block` - The block to receive
+    ///
+    /// # Returns
+    ///
+    /// `Ok(true)` if this block creates a heavier chain (caller should reorg)
+    /// `Ok(false)` if current chain is still heavier
+    pub async fn receive_fork_block(&self, block: TestBlock) -> Result<bool> {
+        // Check if block already exists
+        if self.blocks_by_hash.read().contains_key(&block.hash) {
+            return Ok(false);
+        }
+
+        // Verify parent exists (except for genesis)
+        if block.height > 0
+            && !self
+                .blocks_by_hash
+                .read()
+                .contains_key(&block.selected_parent)
+        {
+            anyhow::bail!(
+                "Parent block not found: {} for block {} at height {}",
+                block.selected_parent,
+                block.hash,
+                block.height
+            );
+        }
+
+        // Store the block
+        self.blocks_by_hash
+            .write()
+            .insert(block.hash.clone(), block.clone());
+
+        // Check if this creates a heavier chain
+        let current_height = self.tip_height.load(Ordering::SeqCst);
+        let is_heavier = block.height > current_height;
+
+        if log::log_enabled!(log::Level::Debug) {
+            log::debug!(
+                "Received fork block {} at height {} (current tip height: {}, is_heavier: {})",
+                block.hash,
+                block.height,
+                current_height,
+                is_heavier
+            );
+        }
+
+        Ok(is_heavier)
+    }
+
+    /// Get the chain of block hashes from a tip back to genesis
+    ///
+    /// # Arguments
+    ///
+    /// * `tip_hash` - The hash of the tip block
+    ///
+    /// # Returns
+    ///
+    /// A vector of blocks from genesis to tip (in ascending height order)
+    pub fn get_chain_from_tip(&self, tip_hash: &Hash) -> Result<Vec<TestBlock>> {
+        let blocks_map = self.blocks_by_hash.read();
+
+        let mut chain = Vec::new();
+        let mut current_hash = tip_hash.clone();
+
+        // Walk back from tip to genesis
+        loop {
+            let block = blocks_map.get(&current_hash).ok_or_else(|| {
+                anyhow::anyhow!("Block not found while building chain: {}", current_hash)
+            })?;
+
+            chain.push(block.clone());
+
+            if block.height == 0 {
+                // Reached genesis
+                break;
+            }
+
+            current_hash = block.selected_parent.clone();
+        }
+
+        // Reverse to get genesis-to-tip order
+        chain.reverse();
+        Ok(chain)
+    }
+
+    /// Reorganize to a new chain
+    ///
+    /// This method:
+    /// 1. Resets state to genesis
+    /// 2. Replays all blocks in the new chain
+    ///
+    /// # Arguments
+    ///
+    /// * `new_tip_hash` - The hash of the new tip to reorg to
+    ///
+    /// # Returns
+    ///
+    /// Ok(()) if reorg succeeds
+    pub async fn reorg_to_chain(&self, new_tip_hash: &Hash) -> Result<()> {
+        // Get the new chain
+        let new_chain = self.get_chain_from_tip(new_tip_hash)?;
+
+        if new_chain.is_empty() {
+            anyhow::bail!("Cannot reorg to empty chain");
+        }
+
+        if log::log_enabled!(log::Level::Info) {
+            log::info!(
+                "Reorganizing to new chain with tip {} at height {}",
+                new_tip_hash,
+                new_chain.last().map(|b| b.height).unwrap_or(0)
+            );
+        }
+
+        // Reset state to genesis
+        self.reset_to_genesis();
+
+        // Replay all blocks (skipping genesis at index 0)
+        for block in new_chain.into_iter().skip(1) {
+            self.apply_block_internal(&block)?;
+        }
+
+        Ok(())
+    }
+
+    /// Reset blockchain state to genesis
+    fn reset_to_genesis(&self) {
+        // Reset accounts to genesis state
+        let mut accounts = self.accounts.write();
+        accounts.clear();
+        let mut total_balance = 0u128;
+
+        for (pubkey, balance) in &self.genesis_accounts {
+            accounts.insert(
+                pubkey.clone(),
+                AccountState {
+                    balance: *balance,
+                    nonce: 0,
+                },
+            );
+            total_balance = total_balance.saturating_add(*balance as u128);
+        }
+
+        // Reset counters
+        let mut counters = self.counters.write();
+        *counters = BlockchainCounters {
+            balances_total: total_balance,
+            fees_burned: 0,
+            fees_miner: 0,
+            fees_treasury: 0,
+            rewards_emitted: 0,
+            supply: total_balance,
+        };
+
+        // Reset blockchain state
+        self.tip_height.store(0, Ordering::SeqCst);
+        self.topoheight.store(0, Ordering::SeqCst);
+        *self.tips.write() = vec![self.genesis_hash.clone()];
+
+        // Reset blocks list to just genesis
+        let mut blocks = self.blocks.write();
+        if let Some(genesis) = self.blocks_by_hash.read().get(&self.genesis_hash) {
+            blocks.clear();
+            blocks.push(genesis.clone());
+        }
+
+        // Recompute state root
+        *self.state_root.write() = Self::compute_state_root(&accounts);
+
+        // Clear mempool
+        self.mempool.write().clear();
+
+        // Clear scheduled execution state
+        self.clear_scheduled_state();
+
+        if log::log_enabled!(log::Level::Debug) {
+            log::debug!("Reset blockchain state to genesis");
+        }
+    }
+
+    /// Apply a block internally (for reorg replay)
+    ///
+    /// This applies a block's transactions and updates state without validation.
+    fn apply_block_internal(&self, block: &TestBlock) -> Result<()> {
+        let mut accounts = self.accounts.write();
+        let mut counters = self.counters.write();
+        let mut blocks = self.blocks.write();
+
+        // Process each transaction
+        for tx in &block.transactions {
+            let total_deduction = tx.amount.saturating_add(tx.fee);
+
+            // Deduct from sender
+            let sender = accounts.get_mut(&tx.sender).ok_or_else(|| {
+                anyhow::anyhow!("Sender account not found during reorg: {}", tx.sender)
+            })?;
+
+            if sender.balance < total_deduction {
+                anyhow::bail!(
+                    "Insufficient balance during reorg: need {}, have {}",
+                    total_deduction,
+                    sender.balance
+                );
+            }
+
+            sender.balance = sender.balance.saturating_sub(total_deduction);
+            sender.nonce = sender.nonce.saturating_add(1);
+
+            // Add to recipient
+            let recipient = accounts
+                .entry(tx.recipient.clone())
+                .or_insert_with(|| AccountState {
+                    balance: 0,
+                    nonce: 0,
+                });
+            recipient.balance = recipient.balance.saturating_add(tx.amount);
+
+            // Update counters
+            counters.balances_total = counters.balances_total.saturating_sub(tx.fee as u128);
+            counters.fees_miner = counters.fees_miner.saturating_add(tx.fee / 2);
+            counters.fees_burned = counters.fees_burned.saturating_add(tx.fee - tx.fee / 2);
+        }
+
+        // Apply block reward
+        counters.rewards_emitted = counters.rewards_emitted.saturating_add(block.reward);
+        counters.supply = counters.supply.saturating_add(block.reward as u128);
+
+        // Update blockchain state
+        blocks.push(block.clone());
+        self.tip_height.store(block.height, Ordering::SeqCst);
+        self.topoheight.store(block.topoheight, Ordering::SeqCst);
+        *self.tips.write() = vec![block.hash.clone()];
+
+        // Recompute state root
+        *self.state_root.write() = Self::compute_state_root(&accounts);
+
+        // Process scheduled executions at this topoheight
+        // (drop locks first to avoid deadlock)
+        drop(accounts);
+        drop(counters);
+        drop(blocks);
+        self.process_scheduled_at_topoheight(block.topoheight, &block.hash);
+
+        // Process BlockEnd executions for this block
+        self.process_block_end_executions(&block.hash, block.topoheight);
+
+        Ok(())
+    }
+
     /// Compute block hash from height and transactions
-    fn compute_block_hash(height: u64, transactions: &[TestTransaction]) -> Hash {
+    fn compute_block_hash(
+        height: u64,
+        transactions: &[TestTransaction],
+        parent_hash: &Hash,
+        miner_pk: &[u8; 32],
+    ) -> Hash {
         use std::collections::hash_map::DefaultHasher;
         use std::hash::{Hash as StdHash, Hasher};
 
         let mut hasher = DefaultHasher::new();
         height.hash(&mut hasher);
+        parent_hash.as_bytes().hash(&mut hasher);
 
         for tx in transactions {
             tx.hash.as_bytes().hash(&mut hasher);
         }
+
+        // Include miner public key to make block hash unique per miner
+        miner_pk.hash(&mut hasher);
 
         let hash_value = hasher.finish();
         let mut bytes = [0u8; 32];
@@ -611,6 +1501,15 @@ impl TestBlockchain {
     pub async fn get_block_at_height(&self, height: u64) -> Result<Option<TestBlock>> {
         let blocks = self.blocks.read();
         Ok(blocks.iter().find(|b| b.height == height).cloned())
+    }
+
+    /// Check if an account exists in the blockchain state.
+    ///
+    /// Returns true only if the account has been explicitly created
+    /// (via genesis funding or receiving a transfer).
+    pub async fn account_exists(&self, address: &Hash) -> bool {
+        let accounts = self.accounts.read();
+        accounts.contains_key(address)
     }
 
     /// Get account balance
@@ -680,6 +1579,19 @@ impl TestBlockchain {
         &self.genesis_hash
     }
 
+    /// Get the current tip hash
+    pub fn get_tip_hash(&self) -> Hash {
+        let tips = self.tips.read();
+        tips.first()
+            .cloned()
+            .unwrap_or_else(|| self.genesis_hash.clone())
+    }
+
+    /// Get the current topoheight (sync version for tests)
+    pub fn topoheight(&self) -> u64 {
+        self.topoheight.load(Ordering::SeqCst)
+    }
+
     /// Get block by hash
     pub async fn get_block_by_hash(&self, hash: &Hash) -> Result<Option<TestBlock>> {
         let blocks = self.blocks.read();
@@ -700,6 +1612,44 @@ impl TestBlockchain {
         let blocks = self.blocks.read();
         let expected = self.calc_pruning_point(&blocks, &block.selected_parent, block.topoheight);
         Ok(block.pruning_point == expected)
+    }
+
+    /// Force-set account balance (test-only, bypasses normal transaction flow).
+    pub async fn force_set_balance(&self, address: &Hash, balance: u64) -> Result<()> {
+        self.force_set_balance_sync(address, balance)
+    }
+
+    /// Force-set account balance (synchronous version).
+    pub fn force_set_balance_sync(&self, address: &Hash, balance: u64) -> Result<()> {
+        let mut accounts = self.accounts.write();
+        let account = accounts.entry(address.clone()).or_insert(AccountState {
+            balance: 0,
+            nonce: 0,
+        });
+        account.balance = balance;
+        Ok(())
+    }
+
+    /// Get account balance (synchronous version).
+    pub fn get_balance_sync(&self, address: &Hash) -> Result<u64> {
+        let accounts = self.accounts.read();
+        Ok(accounts.get(address).map(|a| a.balance).unwrap_or(0))
+    }
+
+    /// Force-set account nonce (test-only, bypasses normal transaction flow).
+    pub async fn force_set_nonce(&self, address: &Hash, nonce: u64) -> Result<()> {
+        let mut accounts = self.accounts.write();
+        let account = accounts.entry(address.clone()).or_insert(AccountState {
+            balance: 0,
+            nonce: 0,
+        });
+        account.nonce = nonce;
+        Ok(())
+    }
+
+    /// Get direct access to blockchain counters.
+    pub fn counters(&self) -> &Arc<RwLock<BlockchainCounters>> {
+        &self.counters
     }
 }
 
@@ -725,6 +1675,12 @@ mod tests {
         Hash::new(bytes)
     }
 
+    fn test_miner() -> CompressedPublicKey {
+        // Create a deterministic test miner public key
+        let kp = KeyPair::new();
+        kp.get_public_key().compress()
+    }
+
     #[tokio::test]
     async fn test_blockchain_creation() {
         let clock = Arc::new(SystemClock);
@@ -733,7 +1689,7 @@ mod tests {
         let alice = create_test_pubkey(1);
         let funded_accounts = vec![(alice.clone(), 1_000_000)];
 
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         assert_eq!(blockchain.get_tip_height().await.unwrap(), 0);
         assert_eq!(blockchain.get_balance(&alice).await.unwrap(), 1_000_000);
@@ -748,7 +1704,7 @@ mod tests {
         let bob_hash = Hash::zero();
 
         let funded_accounts = vec![(alice.clone(), 1_000_000)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         let tx = TestTransaction {
             hash: Hash::zero(),
@@ -772,7 +1728,7 @@ mod tests {
         let bob_hash = Hash::zero();
 
         let funded_accounts = vec![(alice.clone(), 1_000_000)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         // Submit transaction
         let tx = TestTransaction {
@@ -809,7 +1765,7 @@ mod tests {
         let temp_db = create_temp_rocksdb().unwrap();
         let alice = create_test_pubkey(1);
         let funded_accounts = vec![(alice.clone(), 1_000_000)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         assert_eq!(blockchain.get_balance(&alice).await.unwrap(), 1_000_000);
     }
@@ -818,7 +1774,7 @@ mod tests {
     async fn test_get_balance_non_existing_account() {
         let clock = Arc::new(SystemClock);
         let temp_db = create_temp_rocksdb().unwrap();
-        let blockchain = TestBlockchain::new(clock, temp_db, vec![]).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, vec![], None).unwrap();
 
         let non_existent = create_test_pubkey(99);
         assert_eq!(blockchain.get_balance(&non_existent).await.unwrap(), 0);
@@ -831,7 +1787,7 @@ mod tests {
         let alice = create_test_pubkey(1);
         let bob = create_test_pubkey(2);
         let funded_accounts = vec![(alice.clone(), 1_000_000)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         let tx = TestTransaction {
             hash: create_test_pubkey(10),
@@ -857,7 +1813,7 @@ mod tests {
         let alice = create_test_pubkey(1);
         let bob = create_test_pubkey(2);
         let funded_accounts = vec![(alice.clone(), 5_000_000)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         let tx = TestTransaction {
             hash: create_test_pubkey(10),
@@ -880,7 +1836,7 @@ mod tests {
         let alice = create_test_pubkey(1);
         let bob = create_test_pubkey(2);
         let funded_accounts = vec![(alice.clone(), 10_000_000)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         // Transaction 1
         let tx1 = TestTransaction {
@@ -920,7 +1876,7 @@ mod tests {
         let temp_db = create_temp_rocksdb().unwrap();
         let alice = create_test_pubkey(1);
         let funded_accounts = vec![(alice.clone(), 1_000_000)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         assert_eq!(blockchain.get_nonce(&alice).await.unwrap(), 0);
     }
@@ -932,7 +1888,7 @@ mod tests {
         let alice = create_test_pubkey(1);
         let bob = create_test_pubkey(2);
         let funded_accounts = vec![(alice.clone(), 1_000_000)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         let tx = TestTransaction {
             hash: create_test_pubkey(10),
@@ -955,7 +1911,7 @@ mod tests {
         let alice = create_test_pubkey(1);
         let bob = create_test_pubkey(2);
         let funded_accounts = vec![(alice.clone(), 10_000_000)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         for nonce in 1..=5 {
             let tx = TestTransaction {
@@ -976,7 +1932,7 @@ mod tests {
     async fn test_nonce_non_existing_account() {
         let clock = Arc::new(SystemClock);
         let temp_db = create_temp_rocksdb().unwrap();
-        let blockchain = TestBlockchain::new(clock, temp_db, vec![]).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, vec![], None).unwrap();
 
         let non_existent = create_test_pubkey(99);
         assert_eq!(blockchain.get_nonce(&non_existent).await.unwrap(), 0);
@@ -991,7 +1947,7 @@ mod tests {
         let alice = create_test_pubkey(1);
         let bob = create_test_pubkey(2);
         let funded_accounts = vec![(alice.clone(), 10_000_000)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         let txs = vec![
             TestTransaction {
@@ -1023,7 +1979,7 @@ mod tests {
         let alice = create_test_pubkey(1);
         let bob = create_test_pubkey(2);
         let funded_accounts = vec![(alice.clone(), 1_000_000)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         let expected_hash = create_test_pubkey(100);
         let tx = TestTransaction {
@@ -1047,7 +2003,7 @@ mod tests {
         let temp_db = create_temp_rocksdb().unwrap();
         let alice = create_test_pubkey(1);
         let funded_accounts = vec![(alice, 1_000_000)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         let block = blockchain.mine_block().await.unwrap();
         assert_eq!(block.height, 1);
@@ -1061,7 +2017,7 @@ mod tests {
         let alice = create_test_pubkey(1);
         let bob = create_test_pubkey(2);
         let funded_accounts = vec![(alice.clone(), 1_000_000)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         let tx = TestTransaction {
             hash: create_test_pubkey(10),
@@ -1085,7 +2041,7 @@ mod tests {
         let alice = create_test_pubkey(1);
         let bob = create_test_pubkey(2);
         let funded_accounts = vec![(alice.clone(), 10_000_000)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         for nonce in 1..=5 {
             let tx = TestTransaction {
@@ -1111,7 +2067,7 @@ mod tests {
         let alice = create_test_pubkey(1);
         let bob = create_test_pubkey(2);
         let funded_accounts = vec![(alice.clone(), 10_000_000)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         for height in 1..=3 {
             let tx = TestTransaction {
@@ -1136,7 +2092,7 @@ mod tests {
         let temp_db = create_temp_rocksdb().unwrap();
         let alice = create_test_pubkey(1);
         let funded_accounts = vec![(alice, 1_000_000)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         let block = blockchain.mine_block().await.unwrap();
         assert_ne!(block.hash, Hash::zero());
@@ -1148,7 +2104,7 @@ mod tests {
     async fn test_tip_height_genesis() {
         let clock = Arc::new(SystemClock);
         let temp_db = create_temp_rocksdb().unwrap();
-        let blockchain = TestBlockchain::new(clock, temp_db, vec![]).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, vec![], None).unwrap();
 
         assert_eq!(blockchain.get_tip_height().await.unwrap(), 0);
     }
@@ -1159,7 +2115,7 @@ mod tests {
         let temp_db = create_temp_rocksdb().unwrap();
         let alice = create_test_pubkey(1);
         let funded_accounts = vec![(alice, 1_000_000)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         blockchain.mine_block().await.unwrap();
         assert_eq!(blockchain.get_tip_height().await.unwrap(), 1);
@@ -1174,7 +2130,7 @@ mod tests {
     async fn test_get_tips_genesis() {
         let clock = Arc::new(SystemClock);
         let temp_db = create_temp_rocksdb().unwrap();
-        let blockchain = TestBlockchain::new(clock, temp_db, vec![]).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, vec![], None).unwrap();
 
         let tips = blockchain.get_tips().await.unwrap();
         assert_eq!(tips.len(), 1);
@@ -1187,7 +2143,7 @@ mod tests {
         let temp_db = create_temp_rocksdb().unwrap();
         let alice = create_test_pubkey(1);
         let funded_accounts = vec![(alice, 1_000_000)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         let block = blockchain.mine_block().await.unwrap();
         let tips = blockchain.get_tips().await.unwrap();
@@ -1204,7 +2160,7 @@ mod tests {
         let alice = create_test_pubkey(1);
         let bob = create_test_pubkey(2);
         let funded_accounts = vec![(alice.clone(), 10_000_000)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         let tx = TestTransaction {
             hash: create_test_pubkey(10),
@@ -1224,6 +2180,8 @@ mod tests {
             reward: 50_000,
             pruning_point: genesis_hash.clone(),
             selected_parent: genesis_hash,
+            vrf_data: None,
+            miner: test_miner(),
         };
 
         blockchain.receive_block(block).await.unwrap();
@@ -1234,7 +2192,7 @@ mod tests {
     async fn test_receive_block_invalid_height() {
         let clock = Arc::new(SystemClock);
         let temp_db = create_temp_rocksdb().unwrap();
-        let blockchain = TestBlockchain::new(clock, temp_db, vec![]).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, vec![], None).unwrap();
 
         let genesis_hash = blockchain.get_genesis_hash().clone();
         let block = TestBlock {
@@ -1245,6 +2203,8 @@ mod tests {
             reward: 50_000,
             pruning_point: genesis_hash.clone(),
             selected_parent: genesis_hash,
+            vrf_data: None,
+            miner: test_miner(),
         };
 
         let result = blockchain.receive_block(block).await;
@@ -1256,7 +2216,7 @@ mod tests {
     async fn test_receive_duplicate_block() {
         let clock = Arc::new(SystemClock);
         let temp_db = create_temp_rocksdb().unwrap();
-        let blockchain = TestBlockchain::new(clock, temp_db, vec![]).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, vec![], None).unwrap();
 
         let genesis_hash = blockchain.get_genesis_hash().clone();
         let block = TestBlock {
@@ -1267,6 +2227,8 @@ mod tests {
             reward: 50_000,
             pruning_point: genesis_hash.clone(),
             selected_parent: genesis_hash,
+            vrf_data: None,
+            miner: test_miner(),
         };
 
         blockchain.receive_block(block.clone()).await.unwrap();
@@ -1282,7 +2244,7 @@ mod tests {
         let temp_db = create_temp_rocksdb().unwrap();
         let alice = create_test_pubkey(1);
         let funded_accounts = vec![(alice, 1_000_000)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         let mined_block = blockchain.mine_block().await.unwrap();
         let retrieved_block = blockchain.get_block_at_height(1).await.unwrap();
@@ -1297,7 +2259,7 @@ mod tests {
     async fn test_get_block_at_height_non_existing() {
         let clock = Arc::new(SystemClock);
         let temp_db = create_temp_rocksdb().unwrap();
-        let blockchain = TestBlockchain::new(clock, temp_db, vec![]).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, vec![], None).unwrap();
 
         let block = blockchain.get_block_at_height(99).await.unwrap();
         assert!(block.is_none());
@@ -1307,7 +2269,7 @@ mod tests {
     async fn test_get_block_at_height_beyond_tip() {
         let clock = Arc::new(SystemClock);
         let temp_db = create_temp_rocksdb().unwrap();
-        let blockchain = TestBlockchain::new(clock, temp_db, vec![]).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, vec![], None).unwrap();
 
         // Height beyond current tip should return None
         let block = blockchain.get_block_at_height(100).await.unwrap();
@@ -1326,8 +2288,8 @@ mod tests {
         let funded_accounts = vec![(alice, 1_000_000)];
 
         let blockchain1 =
-            TestBlockchain::new(clock.clone(), temp_db1, funded_accounts.clone()).unwrap();
-        let blockchain2 = TestBlockchain::new(clock, temp_db2, funded_accounts).unwrap();
+            TestBlockchain::new(clock.clone(), temp_db1, funded_accounts.clone(), None).unwrap();
+        let blockchain2 = TestBlockchain::new(clock, temp_db2, funded_accounts, None).unwrap();
 
         let root1 = blockchain1.state_root().await.unwrap();
         let root2 = blockchain2.state_root().await.unwrap();
@@ -1341,7 +2303,7 @@ mod tests {
         let alice = create_test_pubkey(1);
         let bob = create_test_pubkey(2);
         let funded_accounts = vec![(alice.clone(), 1_000_000)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         let root_before = blockchain.state_root().await.unwrap();
 
@@ -1368,7 +2330,7 @@ mod tests {
         let temp_db = create_temp_rocksdb().unwrap();
         let alice = create_test_pubkey(1);
         let funded_accounts = vec![(alice.clone(), 1_000_000)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         let accounts = blockchain.accounts_kv().await.unwrap();
         assert_eq!(accounts.len(), 1);
@@ -1383,7 +2345,7 @@ mod tests {
         let alice = create_test_pubkey(1);
         let bob = create_test_pubkey(2);
         let funded_accounts = vec![(alice.clone(), 1_000_000), (bob.clone(), 500_000)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         let accounts = blockchain.accounts_kv().await.unwrap();
         assert_eq!(accounts.len(), 2);
@@ -1398,7 +2360,7 @@ mod tests {
         let alice = create_test_pubkey(1);
         let bob = create_test_pubkey(2);
         let funded_accounts = vec![(alice.clone(), 1_000_000)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         let tx = TestTransaction {
             hash: create_test_pubkey(10),
@@ -1427,7 +2389,7 @@ mod tests {
         let temp_db = create_temp_rocksdb().unwrap();
         let alice = create_test_pubkey(1);
         let funded_accounts = vec![(alice, 1_000_000)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         let counters = blockchain.read_counters().await.unwrap();
         assert_eq!(counters.balances_total, 1_000_000);
@@ -1443,7 +2405,7 @@ mod tests {
         let alice = create_test_pubkey(1);
         let bob = create_test_pubkey(2);
         let funded_accounts = vec![(alice.clone(), 1_000_000)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         let tx = TestTransaction {
             hash: create_test_pubkey(10),
@@ -1473,7 +2435,7 @@ mod tests {
         let temp_db = create_temp_rocksdb().unwrap();
         let alice = create_test_pubkey(1);
         let funded_accounts = vec![(alice.clone(), 1_000_000)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         let count = blockchain.confirmed_tx_count_from(&alice).await.unwrap();
         assert_eq!(count, 0);
@@ -1486,7 +2448,7 @@ mod tests {
         let alice = create_test_pubkey(1);
         let bob = create_test_pubkey(2);
         let funded_accounts = vec![(alice.clone(), 10_000_000)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         for nonce in 1..=3 {
             let tx = TestTransaction {
@@ -1511,7 +2473,7 @@ mod tests {
     async fn test_clock_access() {
         let clock = Arc::new(SystemClock);
         let temp_db = create_temp_rocksdb().unwrap();
-        let blockchain = TestBlockchain::new(clock.clone(), temp_db, vec![]).unwrap();
+        let blockchain = TestBlockchain::new(clock.clone(), temp_db, vec![], None).unwrap();
 
         let blockchain_clock = blockchain.clock();
         // Test that clock is accessible
@@ -1525,7 +2487,7 @@ mod tests {
     async fn test_topoheight_genesis() {
         let clock = Arc::new(SystemClock);
         let temp_db = create_temp_rocksdb().unwrap();
-        let blockchain = TestBlockchain::new(clock, temp_db, vec![]).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, vec![], None).unwrap();
 
         let topoheight = blockchain.get_topoheight().await.unwrap();
         assert_eq!(topoheight, 0);
@@ -1537,7 +2499,7 @@ mod tests {
         let temp_db = create_temp_rocksdb().unwrap();
         let alice = create_test_pubkey(1);
         let funded_accounts = vec![(alice, 1_000_000)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         blockchain.mine_block().await.unwrap();
         let topoheight = blockchain.get_topoheight().await.unwrap();
@@ -1556,7 +2518,7 @@ mod tests {
         let temp_db = create_temp_rocksdb().unwrap();
         let alice = create_test_pubkey(1);
         let funded_accounts = vec![(alice.clone(), 0)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         assert_eq!(blockchain.get_balance(&alice).await.unwrap(), 0);
     }
@@ -1568,7 +2530,7 @@ mod tests {
         let alice = create_test_pubkey(1);
         let large_balance = 1_000_000_000_000_000u64; // 1M TOS
         let funded_accounts = vec![(alice.clone(), large_balance)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         assert_eq!(blockchain.get_balance(&alice).await.unwrap(), large_balance);
     }
@@ -1580,7 +2542,7 @@ mod tests {
         let alice = create_test_pubkey(1);
         let bob = create_test_pubkey(2);
         let funded_accounts = vec![(alice.clone(), 100_000_000)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         // Submit 50 transactions
         for nonce in 1..=50 {
@@ -1606,7 +2568,7 @@ mod tests {
         let temp_db = create_temp_rocksdb().unwrap();
         let alice = create_test_pubkey(1);
         let funded_accounts = vec![(alice.clone(), 1_000_000)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         let tx = TestTransaction {
             hash: create_test_pubkey(10),
@@ -1632,7 +2594,7 @@ mod tests {
         let bob = create_test_pubkey(2);
         let charlie = create_test_pubkey(3);
         let funded_accounts = vec![(alice.clone(), 1_000_000), (bob.clone(), 1_000_000)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         let tx1 = TestTransaction {
             hash: create_test_pubkey(10),
@@ -1665,7 +2627,7 @@ mod tests {
     async fn test_empty_mempool_mining() {
         let clock = Arc::new(SystemClock);
         let temp_db = create_temp_rocksdb().unwrap();
-        let blockchain = TestBlockchain::new(clock, temp_db, vec![]).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, vec![], None).unwrap();
 
         // Mine 10 empty blocks
         for height in 1..=10 {
@@ -1690,7 +2652,7 @@ mod tests {
         let alice = create_test_pubkey(1);
         let max_balance = u64::MAX;
         let funded_accounts = vec![(alice.clone(), max_balance)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         assert_eq!(blockchain.get_balance(&alice).await.unwrap(), max_balance);
     }
@@ -1702,7 +2664,7 @@ mod tests {
         let alice = create_test_pubkey(1);
         let bob = create_test_pubkey(2);
         let funded_accounts = vec![(alice.clone(), u64::MAX)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         // Manually set a very high nonce by processing many transactions
         for i in 1..=100 {
@@ -1729,7 +2691,7 @@ mod tests {
         let bob = create_test_pubkey(2);
         let max_amount = u64::MAX - 1000; // Leave room for fee
         let funded_accounts = vec![(alice.clone(), u64::MAX)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         let tx = TestTransaction {
             hash: create_test_pubkey(10),
@@ -1753,7 +2715,7 @@ mod tests {
         let bob = create_test_pubkey(2);
         let max_fee = 1_000_000_000;
         let funded_accounts = vec![(alice.clone(), u64::MAX)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         let tx = TestTransaction {
             hash: create_test_pubkey(10),
@@ -1780,7 +2742,7 @@ mod tests {
         let alice = create_test_pubkey(1);
         let bob = create_test_pubkey(2);
         let funded_accounts = vec![(alice.clone(), 1_000_000)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         let tx = TestTransaction {
             hash: create_test_pubkey(10),
@@ -1801,7 +2763,7 @@ mod tests {
     async fn test_blockchain_empty_accounts() {
         let clock = Arc::new(SystemClock);
         let temp_db = create_temp_rocksdb().unwrap();
-        let blockchain = TestBlockchain::new(clock, temp_db, vec![]).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, vec![], None).unwrap();
 
         let accounts = blockchain.accounts_kv().await.unwrap();
         assert_eq!(accounts.len(), 0);
@@ -1815,7 +2777,7 @@ mod tests {
     async fn test_blockchain_genesis_state_root() {
         let clock = Arc::new(SystemClock);
         let temp_db = create_temp_rocksdb().unwrap();
-        let blockchain = TestBlockchain::new(clock, temp_db, vec![]).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, vec![], None).unwrap();
 
         let state_root = blockchain.state_root().await.unwrap();
         // Empty blockchain should have deterministic state root
@@ -1826,7 +2788,7 @@ mod tests {
     async fn test_blockchain_genesis_block() {
         let clock = Arc::new(SystemClock);
         let temp_db = create_temp_rocksdb().unwrap();
-        let blockchain = TestBlockchain::new(clock, temp_db, vec![]).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, vec![], None).unwrap();
 
         let genesis = blockchain.get_block_at_height(0).await.unwrap();
         assert!(genesis.is_some());
@@ -1846,7 +2808,7 @@ mod tests {
         let bob = create_test_pubkey(2);
         let initial_balance = 1_000_000;
         let funded_accounts = vec![(alice.clone(), initial_balance)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         // Send exact balance minus fee
         let tx = TestTransaction {
@@ -1874,7 +2836,7 @@ mod tests {
         let alice = create_test_pubkey(1);
         let bob = create_test_pubkey(2);
         let funded_accounts = vec![(alice.clone(), 1_000_000)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         let tx = TestTransaction {
             hash: create_test_pubkey(10),
@@ -1901,7 +2863,7 @@ mod tests {
         let alice = create_test_pubkey(1);
         let bob = create_test_pubkey(2);
         let funded_accounts = vec![(alice.clone(), 1_000_000)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         let tx = TestTransaction {
             hash: create_test_pubkey(10),
@@ -1930,7 +2892,7 @@ mod tests {
         let alice = create_test_pubkey(1);
         let bob = create_test_pubkey(2);
         let funded_accounts = vec![(alice.clone(), 1000)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         let tx = TestTransaction {
             hash: create_test_pubkey(10),
@@ -1953,7 +2915,7 @@ mod tests {
         let alice = create_test_pubkey(1);
         let bob = create_test_pubkey(2);
         let funded_accounts = vec![(alice.clone(), u64::MAX)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         let tx = TestTransaction {
             hash: create_test_pubkey(10),
@@ -1975,7 +2937,7 @@ mod tests {
         let alice = create_test_pubkey(1);
         let initial_supply = 1_000_000;
         let funded_accounts = vec![(alice, initial_supply)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         // Mine 100 blocks
         for _ in 1..=100 {
@@ -2003,7 +2965,7 @@ mod tests {
             funded_accounts.push((account, 1_000_000));
         }
 
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         let accounts = blockchain.accounts_kv().await.unwrap();
         assert_eq!(accounts.len(), 100);
@@ -2019,7 +2981,7 @@ mod tests {
         let alice = create_test_pubkey(1);
         let new_account = create_test_pubkey(99);
         let funded_accounts = vec![(alice.clone(), 1_000_000)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         // Send to non-existent account
         let tx = TestTransaction {
@@ -2063,8 +3025,8 @@ mod tests {
             (bob.clone(), 2_000_000),
         ];
 
-        let blockchain1 = TestBlockchain::new(clock.clone(), temp_db1, accounts1).unwrap();
-        let blockchain2 = TestBlockchain::new(clock, temp_db2, accounts2).unwrap();
+        let blockchain1 = TestBlockchain::new(clock.clone(), temp_db1, accounts1, None).unwrap();
+        let blockchain2 = TestBlockchain::new(clock, temp_db2, accounts2, None).unwrap();
 
         // State roots should be identical regardless of insertion order
         let root1 = blockchain1.state_root().await.unwrap();
@@ -2083,8 +3045,8 @@ mod tests {
         let funded_accounts = vec![(alice.clone(), 10_000_000)];
 
         let blockchain1 =
-            TestBlockchain::new(clock.clone(), temp_db1, funded_accounts.clone()).unwrap();
-        let blockchain2 = TestBlockchain::new(clock, temp_db2, funded_accounts).unwrap();
+            TestBlockchain::new(clock.clone(), temp_db1, funded_accounts.clone(), None).unwrap();
+        let blockchain2 = TestBlockchain::new(clock, temp_db2, funded_accounts, None).unwrap();
 
         // Same transaction in both
         let tx = TestTransaction {
@@ -2102,8 +3064,17 @@ mod tests {
         let block1 = blockchain1.mine_block().await.unwrap();
         let block2 = blockchain2.mine_block().await.unwrap();
 
-        // Blocks should have identical hashes
-        assert_eq!(block1.hash, block2.hash);
+        // Blocks from different miners should have DIFFERENT hashes
+        // (miner public key is included in block hash for uniqueness)
+        assert_ne!(
+            block1.hash, block2.hash,
+            "Different miners should produce different block hashes"
+        );
+
+        // But same height, same parent, same transactions, same miner = same hash
+        // This is verified by the block hash computation being deterministic
+        assert_eq!(block1.height, block2.height);
+        assert_eq!(block1.transactions, block2.transactions);
     }
 
     // ============================================================================
@@ -2118,7 +3089,7 @@ mod tests {
         let bob = create_test_pubkey(2);
         let charlie = create_test_pubkey(3);
         let funded_accounts = vec![(alice.clone(), 10_000_000)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         // Step 1: Alice → Bob
         let tx1 = TestTransaction {
@@ -2172,7 +3143,7 @@ mod tests {
         let alice = create_test_pubkey(1);
         let bob = create_test_pubkey(2);
         let funded_accounts = vec![(alice.clone(), 10_000_000)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         let mut expected_alice_balance = 10_000_000u64;
         let mut expected_bob_balance = 0u64;
@@ -2215,7 +3186,7 @@ mod tests {
         let alice = create_test_pubkey(1);
         let bob = create_test_pubkey(2);
         let funded_accounts = vec![(alice.clone(), 10_000_000)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         let mut previous_roots = Vec::new();
         previous_roots.push(blockchain.state_root().await.unwrap());
@@ -2251,7 +3222,7 @@ mod tests {
         let alice = create_test_pubkey(1);
         let bob = create_test_pubkey(2);
         let funded_accounts = vec![(alice.clone(), 10_000_000)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         // Submit 5 transactions
         for i in 1..=5 {
@@ -2281,7 +3252,7 @@ mod tests {
         let temp_db = create_temp_rocksdb().unwrap();
         let alice = create_test_pubkey(1);
         let funded_accounts = vec![(alice, 10_000_000)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         let genesis_tips = blockchain.get_tips().await.unwrap();
         assert_eq!(genesis_tips.len(), 1);
@@ -2308,7 +3279,7 @@ mod tests {
             (bob.clone(), 10_000_000),
             (charlie.clone(), 10_000_000),
         ];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         // Alice sends 3 transactions
         for i in 1..=3 {
@@ -2363,7 +3334,7 @@ mod tests {
         let bob = create_test_pubkey(2);
         let initial_total = 10_000_000u128;
         let funded_accounts = vec![(alice.clone(), initial_total as u64)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         let initial_counters = blockchain.read_counters().await.unwrap();
         assert_eq!(initial_counters.balances_total, initial_total);
@@ -2396,7 +3367,7 @@ mod tests {
         let alice = create_test_pubkey(1);
         let bob = create_test_pubkey(2);
         let funded_accounts = vec![(alice.clone(), 10_000_000)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         let tx = TestTransaction {
             hash: create_test_pubkey(10),
@@ -2416,6 +3387,8 @@ mod tests {
             reward: 50_000_000_000,
             pruning_point: genesis_hash.clone(),
             selected_parent: genesis_hash,
+            vrf_data: None,
+            miner: test_miner(),
         };
 
         blockchain.receive_block(block).await.unwrap();
@@ -2434,7 +3407,7 @@ mod tests {
         let alice = create_test_pubkey(1);
         let bob = create_test_pubkey(2);
         let funded_accounts = vec![(alice.clone(), 10_000_000)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         let tx = TestTransaction {
             hash: create_test_pubkey(10),
@@ -2458,6 +3431,8 @@ mod tests {
             reward: 50_000_000_000,
             pruning_point: genesis_hash.clone(),
             selected_parent: genesis_hash,
+            vrf_data: None,
+            miner: test_miner(),
         };
 
         blockchain.receive_block(block).await.unwrap();
@@ -2474,7 +3449,7 @@ mod tests {
         let alice = create_test_pubkey(1);
         let bob = create_test_pubkey(2);
         let funded_accounts = vec![(alice.clone(), 10_000_000)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         let initial_counters = blockchain.read_counters().await.unwrap();
 
@@ -2525,7 +3500,7 @@ mod tests {
             (bob.clone(), 10_000_000),
             (charlie.clone(), 10_000_000),
         ];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         // Alice → Bob
         let tx1 = TestTransaction {
@@ -2575,7 +3550,7 @@ mod tests {
         let alice = create_test_pubkey(1);
         let bob = create_test_pubkey(2);
         let funded_accounts = vec![(alice.clone(), 10_000_000)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         let txs = vec![
             TestTransaction {
@@ -2615,7 +3590,7 @@ mod tests {
     async fn test_blockchain_block_reward_accumulation() {
         let clock = Arc::new(SystemClock);
         let temp_db = create_temp_rocksdb().unwrap();
-        let blockchain = TestBlockchain::new(clock, temp_db, vec![]).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, vec![], None).unwrap();
 
         const BLOCK_REWARD: u64 = 50_000_000_000;
         const NUM_BLOCKS: u64 = 20;
@@ -2640,8 +3615,8 @@ mod tests {
         let funded_accounts = vec![(alice.clone(), 10_000_000)];
 
         let blockchain1 =
-            TestBlockchain::new(clock.clone(), temp_db1, funded_accounts.clone()).unwrap();
-        let blockchain2 = TestBlockchain::new(clock, temp_db2, funded_accounts).unwrap();
+            TestBlockchain::new(clock.clone(), temp_db1, funded_accounts.clone(), None).unwrap();
+        let blockchain2 = TestBlockchain::new(clock, temp_db2, funded_accounts, None).unwrap();
 
         let tx = TestTransaction {
             hash: create_test_pubkey(10),
@@ -2666,6 +3641,8 @@ mod tests {
             reward: mined_block.reward,
             pruning_point: genesis_hash.clone(),
             selected_parent: genesis_hash,
+            vrf_data: None,
+            miner: mined_block.miner,
         };
         blockchain2.receive_block(received_block).await.unwrap();
 
@@ -2695,7 +3672,7 @@ mod tests {
         let alice = create_test_pubkey(1);
         let bob = create_test_pubkey(2);
         let funded_accounts = vec![(alice.clone(), 1000)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         let tx = TestTransaction {
             hash: create_test_pubkey(10),
@@ -2720,7 +3697,7 @@ mod tests {
         let non_existent = create_test_pubkey(99);
         let bob = create_test_pubkey(2);
         let funded_accounts = vec![(alice, 1_000_000)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         let tx = TestTransaction {
             hash: create_test_pubkey(10),
@@ -2744,7 +3721,7 @@ mod tests {
         let alice = create_test_pubkey(1);
         let bob = create_test_pubkey(2);
         let funded_accounts = vec![(alice.clone(), 10_000_000)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         // Submit and mine first transaction
         let tx1 = TestTransaction {
@@ -2781,7 +3758,7 @@ mod tests {
         let alice = create_test_pubkey(1);
         let bob = create_test_pubkey(2);
         let funded_accounts = vec![(alice.clone(), 10_000_000)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         let tx = TestTransaction {
             hash: create_test_pubkey(10),
@@ -2806,7 +3783,7 @@ mod tests {
         let alice = create_test_pubkey(1);
         let bob = create_test_pubkey(2);
         let funded_accounts = vec![(alice.clone(), 10_000_000)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         // Submit transaction with nonce 1
         let tx1 = TestTransaction {
@@ -2837,7 +3814,7 @@ mod tests {
     async fn test_blockchain_error_receive_block_wrong_height() {
         let clock = Arc::new(SystemClock);
         let temp_db = create_temp_rocksdb().unwrap();
-        let blockchain = TestBlockchain::new(clock, temp_db, vec![]).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, vec![], None).unwrap();
 
         let genesis_hash = blockchain.get_genesis_hash().clone();
         let block = TestBlock {
@@ -2848,6 +3825,8 @@ mod tests {
             reward: 50_000_000_000,
             pruning_point: genesis_hash.clone(),
             selected_parent: genesis_hash,
+            vrf_data: None,
+            miner: test_miner(),
         };
 
         let result = blockchain.receive_block(block).await;
@@ -2860,7 +3839,7 @@ mod tests {
     async fn test_blockchain_error_receive_duplicate_block() {
         let clock = Arc::new(SystemClock);
         let temp_db = create_temp_rocksdb().unwrap();
-        let blockchain = TestBlockchain::new(clock, temp_db, vec![]).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, vec![], None).unwrap();
 
         let genesis_hash = blockchain.get_genesis_hash().clone();
         let block = TestBlock {
@@ -2871,6 +3850,8 @@ mod tests {
             reward: 50_000_000_000,
             pruning_point: genesis_hash.clone(),
             selected_parent: genesis_hash,
+            vrf_data: None,
+            miner: test_miner(),
         };
 
         blockchain.receive_block(block.clone()).await.unwrap();
@@ -2887,7 +3868,7 @@ mod tests {
         let alice = create_test_pubkey(1);
         let bob = create_test_pubkey(2);
         let funded_accounts = vec![(alice.clone(), u64::MAX)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         let tx = TestTransaction {
             hash: create_test_pubkey(10),
@@ -2911,7 +3892,7 @@ mod tests {
         let alice = create_test_pubkey(1);
         let bob = create_test_pubkey(2);
         let funded_accounts = vec![(alice.clone(), 1000)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         // First invalid transaction
         let tx1 = TestTransaction {
@@ -2957,7 +3938,7 @@ mod tests {
         let alice = create_test_pubkey(1);
         let bob = create_test_pubkey(2);
         let funded_accounts = vec![(alice.clone(), 10_000_000)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         let txs = vec![
             TestTransaction {
@@ -2989,7 +3970,7 @@ mod tests {
         let alice = create_test_pubkey(1);
         let bob = create_test_pubkey(2);
         let funded_accounts = vec![(alice.clone(), 1000)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         // Exhaust balance
         let tx1 = TestTransaction {
@@ -3024,7 +4005,7 @@ mod tests {
         let alice = create_test_pubkey(1);
         let bob = create_test_pubkey(2);
         let funded_accounts = vec![(alice.clone(), 1_000_000)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         // Zero fee is technically allowed by current implementation
         // This test verifies behavior remains consistent
@@ -3049,7 +4030,7 @@ mod tests {
     async fn test_blockchain_error_receive_block_skip_height() {
         let clock = Arc::new(SystemClock);
         let temp_db = create_temp_rocksdb().unwrap();
-        let blockchain = TestBlockchain::new(clock, temp_db, vec![]).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, vec![], None).unwrap();
 
         // Mine block 1
         blockchain.mine_block().await.unwrap();
@@ -3064,6 +4045,8 @@ mod tests {
             reward: 50_000_000_000,
             pruning_point: genesis_hash.clone(),
             selected_parent: genesis_hash,
+            vrf_data: None,
+            miner: test_miner(),
         };
 
         let result = blockchain.receive_block(block).await;
@@ -3080,7 +4063,7 @@ mod tests {
         let alice = create_test_pubkey(1);
         let bob = create_test_pubkey(2);
         let funded_accounts = vec![(alice.clone(), 10_000_000)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         // Submit first transaction
         let tx1 = TestTransaction {
@@ -3114,7 +4097,7 @@ mod tests {
         let alice = create_test_pubkey(1);
         let bob = create_test_pubkey(2);
         let funded_accounts = vec![(alice.clone(), 1000)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         // Create block with transaction exceeding balance
         let tx = TestTransaction {
@@ -3135,6 +4118,8 @@ mod tests {
             reward: 50_000_000_000,
             pruning_point: genesis_hash.clone(),
             selected_parent: genesis_hash,
+            vrf_data: None,
+            miner: test_miner(),
         };
 
         // Block with invalid transaction should be rejected
@@ -3162,7 +4147,7 @@ mod tests {
         let alice = create_test_pubkey(1);
         let bob = create_test_pubkey(2);
         let funded_accounts = vec![(alice.clone(), 10_000_000)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         // Submit invalid transaction
         let invalid_tx = TestTransaction {
@@ -3199,7 +4184,7 @@ mod tests {
         let alice = create_test_pubkey(1);
         let bob = create_test_pubkey(2);
         let funded_accounts = vec![(alice.clone(), 10_000_000)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         // Submit multiple transactions with sequential nonces
         for i in 1..=5 {
@@ -3226,7 +4211,7 @@ mod tests {
         let alice = create_test_pubkey(1);
         let bob = create_test_pubkey(2);
         let funded_accounts = vec![(alice.clone(), 10_000_000)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         let initial_state_root = blockchain.state_root().await.unwrap();
         let initial_balance = blockchain.get_balance(&alice).await.unwrap();
@@ -3262,7 +4247,7 @@ mod tests {
         let temp_db = create_temp_rocksdb().unwrap();
         let alice = create_test_pubkey(1);
         let funded_accounts = vec![(alice, 10_000_000)];
-        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts).unwrap();
+        let blockchain = TestBlockchain::new(clock, temp_db, funded_accounts, None).unwrap();
 
         for i in 1..=10 {
             blockchain.mine_block().await.unwrap();

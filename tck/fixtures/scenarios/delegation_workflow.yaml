@@ -1,0 +1,80 @@
+fixture:
+  name: "delegation_workflow"
+  version: "1.0"
+  description: "Tests delegation and undelegation with multiple validators"
+  tier: [1, 2]
+
+setup:
+  accounts:
+    delegator:
+      balance: "200_000 TOS"
+      nonce: 0
+      frozen_balance: "100_000 TOS"
+    validator_a:
+      balance: "500_000 TOS"
+      nonce: 0
+    validator_b:
+      balance: "300_000 TOS"
+      nonce: 0
+
+transactions:
+  - step: 1
+    name: "Delegate to validator A"
+    type: delegate
+    from: delegator
+    to: validator_a
+    amount: "40_000 TOS"
+    fee: "10 TOS"
+    expect_status: success
+
+  - step: 2
+    name: "Delegate to validator B"
+    type: delegate
+    from: delegator
+    to: validator_b
+    amount: "30_000 TOS"
+    fee: "10 TOS"
+    expect_status: success
+
+  - step: 3
+    name: "Over-delegate should fail"
+    type: delegate
+    from: delegator
+    to: validator_a
+    amount: "50_000 TOS"
+    fee: "10 TOS"
+    expect_status: error
+    expect_error: "delegation_exceeds_frozen"
+
+  - step: 4
+    name: "Undelegate from validator A"
+    type: undelegate
+    from: delegator
+    to: validator_a
+    amount: "20_000 TOS"
+    fee: "10 TOS"
+    expect_status: success
+
+  - step: 5
+    type: mine_block
+
+expected:
+  accounts:
+    delegator:
+      nonce: 4
+      frozen_balance: "100_000 TOS"
+      delegations_out:
+        validator_a: "20_000 TOS"
+        validator_b: "30_000 TOS"
+    validator_a:
+      delegations_in:
+        delegator: "20_000 TOS"
+    validator_b:
+      delegations_in:
+        delegator: "30_000 TOS"
+
+invariants:
+  - delegation_bounds:
+      account: delegator
+      max_delegation: "100_000 TOS"
+  - nonce_monotonicity: true

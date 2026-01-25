@@ -1,0 +1,44 @@
+template:
+  name: "energy_staking"
+  description: "Template for freeze/delegate/undelegate scenarios"
+  version: "1.0"
+
+parameters:
+  initial_balance:
+    type: amount
+    default: "100000 TOS"
+  freeze_amount:
+    type: amount
+    default: "50000 TOS"
+  delegate_amount:
+    type: amount
+    default: "25000 TOS"
+  fee:
+    type: amount
+    default: "10 TOS"
+
+setup:
+  accounts:
+    staker:
+      balance: "{{initial_balance}}"
+      nonce: 0
+      frozen_balance: "0 TOS"
+    validator:
+      balance: "1000000 TOS"
+      nonce: 0
+      frozen_balance: "500000 TOS"
+
+steps:
+  - transaction:
+      type: freeze
+      from: staker
+      amount: "{{freeze_amount}}"
+      fee: "{{fee}}"
+      expected_result: success
+  - transaction:
+      type: delegate
+      from: staker
+      to: validator
+      amount: "{{delegate_amount}}"
+      fee: "{{fee}}"
+      expected_result: success

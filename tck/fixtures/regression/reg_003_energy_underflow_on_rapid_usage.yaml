@@ -1,0 +1,51 @@
+fixture:
+  name: "reg_003_energy_underflow_on_rapid_usage"
+  version: "1.0"
+  description: "Regression: Energy usage cannot exceed energy limit"
+  tier: [1]
+
+setup:
+  network:
+    total_energy_weight: "10_000_000 TOS"
+    total_energy_limit: 18_400_000_000
+
+  accounts:
+    user:
+      balance: "100_000 TOS"
+      nonce: 0
+      frozen_balance: "10_000 TOS"
+      energy:
+        limit: 18_400
+        usage: 18_000
+        available: 400
+
+transactions:
+  - step: 1
+    name: "Attempt transfer when energy nearly exhausted"
+    type: transfer
+    from: user
+    to: user
+    amount: "0 TOS"
+    fee: "10 TOS"
+    expect_status: success
+
+  - step: 2
+    name: "Advance time for energy recovery"
+    type: advance_time
+    duration: "6h"
+
+  - step: 3
+    name: "Transfer after energy recovery"
+    type: transfer
+    from: user
+    to: user
+    amount: "100 TOS"
+    fee: "10 TOS"
+    expect_status: success
+
+  - step: 4
+    type: mine_block
+
+invariants:
+  - energy_weight_consistency: true
+  - no_negative_balances: true

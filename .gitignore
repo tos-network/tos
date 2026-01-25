@@ -59,3 +59,6 @@ wallet_history.csv
 
 # ignore the testnet monitor plist file
 scripts/com.tos.testnet-monitor.plist
+
+# TCK test private keys (test-only, not for production)
+tck/vrf_private_key.hex

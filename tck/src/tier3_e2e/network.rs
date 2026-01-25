@@ -52,7 +52,7 @@
 //! ```
 
 use crate::orchestrator::{Clock, PausedClock};
-use crate::tier1_component::TestBlockchainBuilder;
+use crate::tier1_component::{TestBlockchainBuilder, VrfConfig};
 use crate::tier2_integration::{Hash, NodeRpc, TestDaemon};
 use crate::tier3_e2e::waiters::*;
 use anyhow::{Context, Result};
@@ -60,6 +60,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::time::Duration;
+use tos_daemon::vrf::VrfKeyManager;
 
 /// Network topology defining connectivity between nodes
 #[derive(Debug, Clone, Default)]
@@ -70,6 +71,12 @@ pub enum NetworkTopology {
 
     /// Nodes form a ring (0→1→2→...→N→0)
     Ring,
+
+    /// Star topology: all nodes connect through a central hub node
+    Star {
+        /// Index of the center node that connects to all others
+        center: usize,
+    },
 
     /// Custom topology defined by adjacency list
     /// Map: node_id → list of connected peer node_ids
@@ -110,6 +117,66 @@ impl NodeHandle {
     /// Check if this node is connected to another node
     pub fn is_connected_to(&self, peer_id: usize) -> bool {
         self.peers.contains(&peer_id)
+    }
+
+    /// Get VRF data for block at specific height
+    pub fn get_block_vrf_data(&self, height: u64) -> Option<tos_common::block::BlockVrfData> {
+        self.daemon.get_block_vrf_data(height)
+    }
+
+    /// Get VRF data for block at specific topoheight
+    pub fn get_block_vrf_data_at_topoheight(
+        &self,
+        topoheight: u64,
+    ) -> Option<tos_common::block::BlockVrfData> {
+        self.daemon.get_block_vrf_data_at_topoheight(topoheight)
+    }
+
+    /// Check if VRF is configured for this node
+    pub fn has_vrf(&self) -> bool {
+        self.daemon.has_vrf()
+    }
+
+    /// Schedule an execution for a future topoheight
+    pub fn schedule_execution(
+        &self,
+        exec: tos_common::contract::ScheduledExecution,
+    ) -> Result<Hash> {
+        self.daemon.schedule_execution(exec)
+    }
+
+    /// Get the status of a scheduled execution
+    pub fn get_scheduled_status(
+        &self,
+        hash: &Hash,
+    ) -> Option<(tos_common::contract::ScheduledExecutionStatus, u64)> {
+        self.daemon.get_scheduled_status(hash)
+    }
+
+    /// Get all pending executions at a specific topoheight
+    pub fn get_pending_at(&self, topo: u64) -> Vec<tos_common::contract::ScheduledExecution> {
+        self.daemon.get_pending_at(topo)
+    }
+
+    /// Receive a block that may create a fork (for reorg testing)
+    pub async fn receive_fork_block(
+        &self,
+        block: crate::tier1_component::TestBlock,
+    ) -> Result<bool> {
+        self.daemon.receive_fork_block(block).await
+    }
+
+    /// Reorganize to a new chain tip
+    pub async fn reorg_to_chain(&self, new_tip_hash: &Hash) -> Result<()> {
+        self.daemon.reorg_to_chain(new_tip_hash).await
+    }
+
+    /// Get the chain of blocks from a tip
+    pub fn get_chain_from_tip(
+        &self,
+        tip_hash: &Hash,
+    ) -> Result<Vec<crate::tier1_component::TestBlock>> {
+        self.daemon.get_chain_from_tip(tip_hash)
     }
 }
 
@@ -507,6 +574,205 @@ impl LocalTosNetwork {
         Ok(hash)
     }
 
+    /// Add a new node to the network (late joiner)
+    ///
+    /// The new node will:
+    /// 1. Be created with the same genesis state as other nodes
+    /// 2. Sync blocks from an existing node
+    /// 3. Verify VRF proofs during sync (if source node has VRF)
+    ///
+    /// # Arguments
+    ///
+    /// * `sync_from_node` - Node ID to sync blocks from
+    /// * `vrf_key` - Optional VRF secret key hex for the new node
+    ///
+    /// # Returns
+    ///
+    /// The ID of the newly added node
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let network = LocalTosNetworkBuilder::new()
+    ///     .with_nodes(2)
+    ///     .build()
+    ///     .await?;
+    ///
+    /// // Mine some blocks on node 0
+    /// for _ in 0..5 {
+    ///     network.mine_and_propagate(0).await?;
+    /// }
+    ///
+    /// // Add a late-joining node that syncs from node 0
+    /// let new_node_id = network.add_node(0, None).await?;
+    ///
+    /// // New node should have synced all 5 blocks
+    /// assert_eq!(network.node(new_node_id).get_tip_height().await?, 5);
+    /// ```
+    pub async fn add_node(
+        &mut self,
+        sync_from_node: usize,
+        vrf_key: Option<String>,
+    ) -> Result<usize> {
+        let new_node_id = self.nodes.len();
+
+        // Build blockchain with same genesis state
+        let mut builder =
+            TestBlockchainBuilder::new().with_clock(self.clock.clone() as Arc<dyn Clock>);
+
+        // Add genesis accounts (same as other nodes)
+        for (addr, balance) in self.genesis_accounts.values() {
+            builder = builder.with_funded_account(addr.clone(), *balance);
+        }
+
+        // Add VRF config if provided
+        if let Some(ref vrf_secret_hex) = vrf_key {
+            let vrf_config = VrfConfig::new(vrf_secret_hex.clone()).with_chain_id(3); // devnet
+            builder = builder.with_vrf_config(vrf_config);
+        }
+
+        let blockchain = builder
+            .build()
+            .await
+            .with_context(|| format!("Failed to build blockchain for node {}", new_node_id))?;
+
+        // Create daemon
+        let daemon = TestDaemon::new(blockchain, self.clock.clone() as Arc<dyn Clock>);
+
+        // Build peer list based on topology (connect to all existing nodes in full mesh)
+        let peers: Vec<usize> = match &self.topology {
+            NetworkTopology::FullMesh => (0..new_node_id).collect(),
+            NetworkTopology::Ring => {
+                // Connect to last node and first node
+                if new_node_id > 0 {
+                    vec![new_node_id - 1, 0]
+                } else {
+                    vec![]
+                }
+            }
+            NetworkTopology::Star { center } => vec![*center],
+            NetworkTopology::Custom(_) => vec![sync_from_node], // Just connect to sync source
+        };
+
+        // Create node handle
+        let node = NodeHandle {
+            id: new_node_id,
+            daemon,
+            clock: self.clock.clone(),
+            peers: peers.clone(),
+        };
+
+        self.nodes.push(node);
+
+        // Update existing nodes' peer lists for full mesh
+        if matches!(self.topology, NetworkTopology::FullMesh) {
+            for existing_node in &mut self.nodes[..new_node_id] {
+                existing_node.peers.push(new_node_id);
+            }
+        }
+
+        // Sync blocks from source node
+        let source_height = self.nodes[sync_from_node].get_tip_height().await?;
+
+        if source_height > 0 {
+            if log::log_enabled!(log::Level::Info) {
+                log::info!(
+                    "Node {} syncing {} blocks from node {}",
+                    new_node_id,
+                    source_height,
+                    sync_from_node
+                );
+            }
+
+            // Get blocks from source and apply to new node
+            for height in 1..=source_height {
+                let block = self.nodes[sync_from_node]
+                    .daemon
+                    .get_block_at_height(height)
+                    .await?
+                    .with_context(|| {
+                        format!("Block at height {} not found on source node", height)
+                    })?;
+
+                // Verify VRF if source node has VRF data for this block
+                if let Some(vrf_data) = self.nodes[sync_from_node].get_block_vrf_data(height) {
+                    // Verify VRF proof during sync
+                    let is_valid = self.verify_vrf_proof(&vrf_data, &block.hash, &block.miner);
+                    if !is_valid {
+                        anyhow::bail!(
+                            "VRF verification failed for block {} at height {}",
+                            block.hash,
+                            height
+                        );
+                    }
+
+                    if log::log_enabled!(log::Level::Debug) {
+                        log::debug!(
+                            "Node {} verified VRF for block {} at height {}",
+                            new_node_id,
+                            block.hash,
+                            height
+                        );
+                    }
+                }
+
+                // Apply block to new node
+                self.nodes[new_node_id]
+                    .daemon
+                    .receive_block(block)
+                    .await
+                    .with_context(|| format!("Failed to apply block at height {}", height))?;
+            }
+
+            if log::log_enabled!(log::Level::Info) {
+                log::info!(
+                    "Node {} sync complete, now at height {}",
+                    new_node_id,
+                    source_height
+                );
+            }
+        }
+
+        Ok(new_node_id)
+    }
+
+    /// Verify VRF proof for a block
+    ///
+    /// Returns true if the VRF proof is valid for the given block hash and miner.
+    fn verify_vrf_proof(
+        &self,
+        vrf_data: &tos_common::block::BlockVrfData,
+        block_hash: &Hash,
+        miner: &tos_common::crypto::elgamal::CompressedPublicKey,
+    ) -> bool {
+        use tos_common::block::compute_vrf_input;
+        use tos_daemon::vrf::{VrfOutput, VrfProof, VrfPublicKey};
+
+        // Parse VRF components
+        let public_key = match VrfPublicKey::from_bytes(&vrf_data.public_key) {
+            Ok(pk) => pk,
+            Err(_) => return false,
+        };
+
+        let proof = match VrfProof::from_bytes(&vrf_data.proof) {
+            Ok(p) => p,
+            Err(_) => return false,
+        };
+
+        let output = match VrfOutput::from_bytes(&vrf_data.output) {
+            Ok(o) => o,
+            Err(_) => return false,
+        };
+
+        // Compute VRF input with miner identity binding
+        // vrf_input = BLAKE3("TOS-VRF-INPUT-v1" || block_hash || miner_public_key)
+        let block_hash_bytes: [u8; 32] = *block_hash.as_bytes();
+        let vrf_input = compute_vrf_input(&block_hash_bytes, miner);
+
+        // Verify the proof (returns Result<(), VrfError>)
+        public_key.verify(&vrf_input, &output, &proof).is_ok()
+    }
+
     /// Shutdown network
     ///
     /// Stops all nodes gracefully.
@@ -536,6 +802,13 @@ pub struct LocalTosNetworkBuilder {
 
     /// Clock seed (for deterministic testing)
     seed: Option<u64>,
+
+    /// Per-node VRF secret keys (hex strings)
+    /// If fewer keys than nodes, remaining nodes have no VRF
+    vrf_keys: Vec<String>,
+
+    /// Chain ID for VRF binding (default: 3 = devnet)
+    chain_id: u64,
 }
 
 impl LocalTosNetworkBuilder {
@@ -547,6 +820,8 @@ impl LocalTosNetworkBuilder {
             genesis_accounts: HashMap::new(),
             default_balance: 0,
             seed: None,
+            vrf_keys: Vec::new(),
+            chain_id: 3, // devnet default
         }
     }
 
@@ -595,6 +870,40 @@ impl LocalTosNetworkBuilder {
         self
     }
 
+    /// Set VRF keys for nodes
+    ///
+    /// Keys are assigned in order. If fewer keys than nodes, remaining
+    /// nodes will not have VRF configured.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// builder.with_vrf_keys(vec![
+    ///     "abcd1234...".to_string(),
+    ///     "efgh5678...".to_string(),
+    /// ]);
+    /// ```
+    pub fn with_vrf_keys(mut self, keys: Vec<String>) -> Self {
+        self.vrf_keys = keys;
+        self
+    }
+
+    /// Generate random VRF keys for all nodes
+    ///
+    /// Each node will get a unique randomly generated VRF keypair.
+    pub fn with_random_vrf_keys(mut self) -> Self {
+        self.vrf_keys = (0..self.node_count)
+            .map(|_| VrfKeyManager::new().secret_key_hex())
+            .collect();
+        self
+    }
+
+    /// Set chain ID for VRF binding (default: 3 = devnet)
+    pub fn with_chain_id(mut self, chain_id: u64) -> Self {
+        self.chain_id = chain_id;
+        self
+    }
+
     /// Build the network
     ///
     /// Creates all nodes, initializes their blockchains with genesis state,
@@ -625,6 +934,13 @@ impl LocalTosNetworkBuilder {
             // Add genesis accounts
             for (addr, balance) in genesis_accounts_map.values() {
                 builder = builder.with_funded_account(addr.clone(), *balance);
+            }
+
+            // Add VRF config if this node has a VRF key
+            if let Some(vrf_secret_hex) = self.vrf_keys.get(node_id) {
+                let vrf_config =
+                    VrfConfig::new(vrf_secret_hex.clone()).with_chain_id(self.chain_id);
+                builder = builder.with_vrf_config(vrf_config);
             }
 
             let blockchain = builder
@@ -686,6 +1002,20 @@ impl LocalTosNetworkBuilder {
                     let next = (i + 1) % self.node_count;
                     let prev = if i == 0 { self.node_count - 1 } else { i - 1 };
                     map.insert(i, vec![prev, next]);
+                }
+                map
+            }
+
+            NetworkTopology::Star { center } => {
+                // Center node connects to all others, others connect only to center
+                let mut map = HashMap::new();
+                let center_peers: Vec<usize> =
+                    (0..self.node_count).filter(|&j| j != *center).collect();
+                map.insert(*center, center_peers);
+                for i in 0..self.node_count {
+                    if i != *center {
+                        map.insert(i, vec![*center]);
+                    }
                 }
                 map
             }
@@ -848,6 +1178,35 @@ mod tests {
         // Node 2 should connect to 1 and 3
         assert!(network.node(2).is_connected_to(1));
         assert!(network.node(2).is_connected_to(3));
+    }
+
+    #[tokio::test]
+    async fn test_star_topology() {
+        let network = LocalTosNetworkBuilder::new()
+            .with_nodes(5)
+            .with_topology(NetworkTopology::Star { center: 0 })
+            .build()
+            .await
+            .unwrap();
+
+        // Center node (0) should connect to all other nodes
+        assert_eq!(network.node(0).peers().len(), 4);
+        assert!(network.node(0).is_connected_to(1));
+        assert!(network.node(0).is_connected_to(2));
+        assert!(network.node(0).is_connected_to(3));
+        assert!(network.node(0).is_connected_to(4));
+
+        // Non-center nodes should only connect to center
+        for i in 1..5 {
+            assert_eq!(network.node(i).peers().len(), 1);
+            assert!(network.node(i).is_connected_to(0));
+            // Non-center nodes should NOT directly connect to each other
+            for j in 1..5 {
+                if i != j {
+                    assert!(!network.node(i).is_connected_to(j));
+                }
+            }
+        }
     }
 
     #[tokio::test]

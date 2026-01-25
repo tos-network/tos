@@ -1,0 +1,34 @@
+templates:
+  whale:
+    balance: "1_000_000 TOS"
+    frozen_balance: "500_000 TOS"
+    nonce: 0
+    energy:
+      limit: 920_000_000
+      usage: 0
+      available: 920_000_000
+
+  regular_user:
+    balance: "10_000 TOS"
+    frozen_balance: "0 TOS"
+    nonce: 0
+
+  empty_account:
+    balance: "0 TOS"
+    nonce: 0
+
+  validator:
+    balance: "100_000 TOS"
+    frozen_balance: "80_000 TOS"
+    nonce: 0
+    energy:
+      limit: 14_720_000_000
+      usage: 0
+      available: 14_720_000_000
+
+  funded_uno_holder:
+    balance: "50_000 TOS"
+    nonce: 0
+    uno_balances:
+      GOLD: 10_000
+      SILVER: 50_000

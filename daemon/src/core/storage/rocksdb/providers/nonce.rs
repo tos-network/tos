@@ -87,10 +87,22 @@ impl NonceProvider for RocksStorage {
             );
         }
         let account_id = self.get_account_id(key)?;
-        self.load_from_disk(
-            Column::VersionedNonces,
-            &Self::get_versioned_account_key(account_id, topoheight),
-        )
+        let key_bytes = Self::get_versioned_account_key(account_id, topoheight);
+        match self.load_from_disk(Column::VersionedNonces, &key_bytes) {
+            Ok(version) => Ok(version),
+            Err(BlockchainError::NotFoundOnDisk(_)) if topoheight == 0 => {
+                // Genesis accounts may not have explicit nonce records; default to 0
+                // This is expected for accounts created at genesis block
+                if log::log_enabled!(log::Level::Debug) {
+                    log::debug!(
+                        "No nonce at topoheight 0 for account {}, using default nonce=0 (genesis account)",
+                        key.as_address(self.is_mainnet())
+                    );
+                }
+                Ok(VersionedNonce::new(0, None))
+            }
+            Err(err) => Err(err),
+        }
     }
 
     // Get the nonce under or equal topoheight requested for an account
@@ -110,9 +122,6 @@ impl NonceProvider for RocksStorage {
         // Check if the account has a nonce at the requested topoheight
         // otherwise, we will use the pointer to the last topoheight
         let Some(nonce_topoheight) = account.nonce_pointer else {
-            if log::log_enabled!(log::Level::Trace) {
-                trace!("no nonce pointer found for account");
-            }
             return Ok(None);
         };
 
@@ -147,11 +156,39 @@ impl NonceProvider for RocksStorage {
                         maximum_topoheight
                     );
                 }
-                let version = self.load_from_disk(Column::VersionedNonces, &versioned_key)?;
+                let version = match self.load_from_disk(Column::VersionedNonces, &versioned_key) {
+                    Ok(version) => version,
+                    Err(BlockchainError::NotFoundOnDisk(_)) => {
+                        // Data corruption: pointer exists but versioned data is missing
+                        if log::log_enabled!(log::Level::Warn) {
+                            log::warn!(
+                                "Nonce pointer exists at topo {} for account {} but versioned data is missing - possible corruption",
+                                topo,
+                                key.as_address(self.is_mainnet())
+                            );
+                        }
+                        return Ok(None);
+                    }
+                    Err(err) => return Err(err),
+                };
                 return Ok(Some((topo, version)));
             }
 
-            next_topo = self.load_from_disk(Column::VersionedNonces, &versioned_key)?;
+            next_topo = match self.load_from_disk(Column::VersionedNonces, &versioned_key) {
+                Ok(next) => next,
+                Err(BlockchainError::NotFoundOnDisk(_)) => {
+                    // Data corruption: linked list broken - pointer exists but data is missing
+                    if log::log_enabled!(log::Level::Warn) {
+                        log::warn!(
+                            "Nonce chain broken at topo {} for account {} - possible corruption",
+                            topo,
+                            key.as_address(self.is_mainnet())
+                        );
+                    }
+                    return Ok(None);
+                }
+                Err(err) => return Err(err),
+            };
         }
 
         Ok(None)
@@ -174,6 +211,9 @@ impl NonceProvider for RocksStorage {
             );
         }
         let mut account = self.get_or_create_account_type(key)?;
+        if account.registered_at.is_none() {
+            account.registered_at = Some(topoheight);
+        }
         account.nonce_pointer = Some(topoheight);
 
         self.insert_into_disk(

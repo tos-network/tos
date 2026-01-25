@@ -1,0 +1,33 @@
+fixture:
+  name: "simple_transfer"
+  version: "1.0"
+  description: "Basic TOS transfer between two accounts"
+  tier: [1, 2]
+
+setup:
+  accounts:
+    alice:
+      balance: "10000 TOS"
+      nonce: 0
+    bob:
+      balance: "0 TOS"
+      nonce: 0
+
+steps:
+  - transaction:
+      from: alice
+      to: bob
+      amount: "5000 TOS"
+      fee: "10 TOS"
+      expected_result: success
+
+expected_state:
+  alice:
+    balance: "4990 TOS"
+    nonce: 1
+  bob:
+    balance: "5000 TOS"
+
+invariants:
+  - balance_conservation:
+      total_supply_change: "-10 TOS"

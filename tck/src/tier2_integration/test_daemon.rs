@@ -135,6 +135,41 @@ impl TestDaemon {
         self.blockchain.receive_block(block).await
     }
 
+    /// Receive a block that may create a fork (for reorg testing)
+    ///
+    /// # Arguments
+    ///
+    /// * `block` - The block to receive
+    ///
+    /// # Returns
+    ///
+    /// `Ok(true)` if this block creates a heavier chain
+    pub async fn receive_fork_block(
+        &self,
+        block: crate::tier1_component::TestBlock,
+    ) -> Result<bool> {
+        self.ensure_running()?;
+        self.blockchain.receive_fork_block(block).await
+    }
+
+    /// Reorganize to a new chain tip
+    ///
+    /// # Arguments
+    ///
+    /// * `new_tip_hash` - The hash of the new tip to reorg to
+    pub async fn reorg_to_chain(&self, new_tip_hash: &Hash) -> Result<()> {
+        self.ensure_running()?;
+        self.blockchain.reorg_to_chain(new_tip_hash).await
+    }
+
+    /// Get the chain of blocks from a tip back to genesis
+    pub fn get_chain_from_tip(
+        &self,
+        tip_hash: &Hash,
+    ) -> Result<Vec<crate::tier1_component::TestBlock>> {
+        self.blockchain.get_chain_from_tip(tip_hash)
+    }
+
     /// Get block at specific height (RPC-like interface)
     ///
     /// This allows peers to request blocks for synchronization.
@@ -204,6 +239,82 @@ impl TestDaemon {
     pub async fn get_nonce(&self, address: &Hash) -> Result<u64> {
         self.ensure_running()?;
         self.blockchain.get_nonce(address).await
+    }
+
+    /// Get VRF data for block at specific height
+    ///
+    /// # Arguments
+    ///
+    /// * `height` - The block height to query VRF for
+    ///
+    /// # Returns
+    ///
+    /// VRF data if the block exists and has VRF data, None otherwise
+    pub fn get_block_vrf_data(&self, height: u64) -> Option<tos_common::block::BlockVrfData> {
+        self.blockchain.get_block_vrf_data(height)
+    }
+
+    /// Get VRF data for block at specific topoheight
+    ///
+    /// # Arguments
+    ///
+    /// * `topoheight` - The topoheight to query VRF for
+    ///
+    /// # Returns
+    ///
+    /// VRF data if the block exists and has VRF data, None otherwise
+    pub fn get_block_vrf_data_at_topoheight(
+        &self,
+        topoheight: u64,
+    ) -> Option<tos_common::block::BlockVrfData> {
+        self.blockchain.get_block_vrf_data_at_topoheight(topoheight)
+    }
+
+    /// Check if VRF is configured for this daemon's blockchain
+    pub fn has_vrf(&self) -> bool {
+        self.blockchain.has_vrf()
+    }
+
+    // ========================================================================
+    // Scheduled Execution Support
+    // ========================================================================
+
+    /// Schedule an execution for a future topoheight
+    ///
+    /// # Arguments
+    ///
+    /// * `exec` - The scheduled execution to register
+    ///
+    /// # Returns
+    ///
+    /// The hash of the scheduled execution
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if daemon is not running
+    pub fn schedule_execution(
+        &self,
+        exec: tos_common::contract::ScheduledExecution,
+    ) -> Result<Hash> {
+        self.ensure_running()?;
+        self.blockchain.schedule_execution(exec)
+    }
+
+    /// Get the status of a scheduled execution
+    ///
+    /// # Returns
+    ///
+    /// Some((status, topoheight)) if found, None if not scheduled
+    pub fn get_scheduled_status(
+        &self,
+        hash: &Hash,
+    ) -> Option<(tos_common::contract::ScheduledExecutionStatus, u64)> {
+        self.blockchain.get_scheduled_status(hash)
+    }
+
+    /// Get all pending executions at a specific topoheight
+    pub fn get_pending_at(&self, topo: u64) -> Vec<tos_common::contract::ScheduledExecution> {
+        self.blockchain.get_pending_at(topo)
     }
 
     // ========================================================================

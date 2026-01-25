@@ -1,0 +1,41 @@
+fixture:
+  name: "nonce_ordering"
+  version: "1.0"
+  description: "Verifies nonce ordering enforcement"
+  tier: [1, 2]
+
+setup:
+  accounts:
+    alice:
+      balance: "100000 TOS"
+      nonce: 0
+    bob:
+      balance: "0 TOS"
+      nonce: 0
+
+steps:
+  - transaction:
+      from: alice
+      to: bob
+      amount: "1000 TOS"
+      fee: "10 TOS"
+      nonce: 1
+      expected_result: success
+  - transaction:
+      from: alice
+      to: bob
+      amount: "1000 TOS"
+      fee: "10 TOS"
+      nonce: 5
+      expected_result: failure
+      expected_error: "invalid_nonce"
+
+expected_state:
+  alice:
+    balance: "98990 TOS"
+    nonce: 1
+  bob:
+    balance: "1000 TOS"
+
+invariants:
+  - nonce_monotonicity: true

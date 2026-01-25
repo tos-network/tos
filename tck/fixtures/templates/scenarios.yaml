@@ -1,0 +1,39 @@
+templates:
+  basic_transfer:
+    params: [sender, receiver, amount]
+    transactions:
+      - type: transfer
+        from: "{{sender}}"
+        to: "{{receiver}}"
+        amount: "{{amount}}"
+        fee: "10 TOS"
+        expect_status: success
+      - type: mine_block
+
+  funded_uno_setup:
+    params: [owner, asset, amount]
+    transactions:
+      - type: uno_transfer
+        from: "{{owner}}"
+        to: "{{owner}}"
+        asset: "{{asset}}"
+        amount: "{{amount}}"
+        fee: "10 TOS"
+        expect_status: success
+      - type: mine_block
+
+  freeze_and_delegate:
+    params: [delegator, validator, freeze_amount, delegate_amount]
+    transactions:
+      - type: freeze
+        from: "{{delegator}}"
+        amount: "{{freeze_amount}}"
+        fee: "10 TOS"
+        expect_status: success
+      - type: delegate
+        from: "{{delegator}}"
+        to: "{{validator}}"
+        amount: "{{delegate_amount}}"
+        fee: "10 TOS"
+        expect_status: success
+      - type: mine_block

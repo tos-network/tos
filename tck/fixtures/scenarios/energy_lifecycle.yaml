@@ -1,0 +1,83 @@
+fixture:
+  name: "energy_lifecycle"
+  version: "1.0"
+  description: "Tests complete energy lifecycle: freeze, delegate, undelegate, unfreeze"
+  tier: [1, 2]
+
+setup:
+  network:
+    total_energy_weight: "10_000_000 TOS"
+    total_energy_limit: 18_400_000_000
+
+  accounts:
+    alice:
+      balance: "100_000 TOS"
+      nonce: 0
+      frozen_balance: "0 TOS"
+      energy:
+        limit: 0
+        usage: 0
+    bob:
+      balance: "50_000 TOS"
+      nonce: 0
+
+transactions:
+  - step: 1
+    name: "Alice freezes TOS for energy"
+    type: freeze
+    from: alice
+    amount: "50_000 TOS"
+    fee: "10 TOS"
+    expect_status: success
+
+  - step: 2
+    name: "Alice delegates energy to Bob"
+    type: delegate
+    from: alice
+    to: bob
+    amount: "20_000 TOS"
+    fee: "10 TOS"
+    expect_status: success
+
+  - step: 3
+    name: "Alice undelegates from Bob"
+    type: undelegate
+    from: alice
+    to: bob
+    amount: "10_000 TOS"
+    fee: "10 TOS"
+    expect_status: success
+
+  - step: 4
+    name: "Alice unfreezes some TOS"
+    type: unfreeze
+    from: alice
+    amount: "20_000 TOS"
+    fee: "10 TOS"
+    expect_status: success
+
+  - step: 5
+    type: mine_block
+
+expected:
+  accounts:
+    alice:
+      balance: "69_960 TOS"
+      nonce: 4
+      frozen_balance: "30_000 TOS"
+      delegations_out:
+        bob: "10_000 TOS"
+    bob:
+      balance: "50_000 TOS"
+      nonce: 0
+      delegations_in:
+        alice: "10_000 TOS"
+
+invariants:
+  - balance_conservation:
+      total_supply_change: "-40 TOS"
+  - nonce_monotonicity: true
+  - energy_weight_consistency: true
+  - delegation_bounds:
+      account: alice
+      max_delegation: "30_000 TOS"

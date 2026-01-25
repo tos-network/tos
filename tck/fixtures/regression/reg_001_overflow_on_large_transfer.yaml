@@ -1,0 +1,45 @@
+fixture:
+  name: "reg_001_overflow_on_large_transfer"
+  version: "1.0"
+  description: "Regression: Overflow prevention on near-max u64 transfer amounts"
+  tier: [1]
+
+setup:
+  accounts:
+    attacker:
+      balance: "18_446_744_073_709_551_600 TOS"
+      nonce: 0
+    victim:
+      balance: "100 TOS"
+      nonce: 0
+
+transactions:
+  - step: 1
+    name: "Attempt overflow transfer"
+    type: transfer
+    from: attacker
+    to: victim
+    amount: "18_446_744_073_709_551_600 TOS"
+    fee: "100 TOS"
+    expect_status: error
+    expect_error: "overflow"
+
+  - step: 2
+    name: "Normal transfer should still work"
+    type: transfer
+    from: attacker
+    to: victim
+    amount: "1_000 TOS"
+    fee: "10 TOS"
+    expect_status: success
+
+  - step: 3
+    type: mine_block
+
+expected:
+  accounts:
+    victim:
+      balance: "1_100 TOS"
+
+invariants:
+  - no_negative_balances: true

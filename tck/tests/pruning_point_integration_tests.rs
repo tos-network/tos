@@ -182,6 +182,8 @@ async fn test_invalid_pruning_point_rejection() -> Result<()> {
         reward: 50_000_000_000,
         pruning_point: Hash::zero(), // Invalid!
         selected_parent: last_block.hash.clone(),
+        vrf_data: None,
+        miner: last_block.miner.clone(),
     };
 
     let result = blockchain.receive_block(invalid_block_zero).await;
@@ -203,6 +205,8 @@ async fn test_invalid_pruning_point_rejection() -> Result<()> {
         reward: 50_000_000_000,
         pruning_point: create_test_pubkey(255), // Invalid random hash!
         selected_parent: last_block.hash.clone(),
+        vrf_data: None,
+        miner: last_block.miner.clone(),
     };
 
     let result = blockchain.receive_block(invalid_block_random).await;
@@ -221,6 +225,8 @@ async fn test_invalid_pruning_point_rejection() -> Result<()> {
         reward: 50_000_000_000,
         pruning_point: genesis_hash, // Should not be genesis at this height!
         selected_parent: last_block.hash.clone(),
+        vrf_data: None,
+        miner: last_block.miner.clone(),
     };
 
     let result = blockchain.receive_block(invalid_block_genesis).await;
@@ -372,6 +378,8 @@ async fn test_miner_block_pruning_point() -> Result<()> {
         reward: 50_000_000_000,
         pruning_point: create_test_pubkey(199), // Wrong pruning_point!
         selected_parent: last_block.hash.clone(),
+        vrf_data: None,
+        miner: last_block.miner.clone(),
     };
 
     let result = blockchain.receive_block(bad_miner_block).await;
@@ -459,6 +467,8 @@ async fn test_p2p_block_pruning_point() -> Result<()> {
         reward: 50_000_000_000,
         pruning_point: Hash::zero(), // Invalid!
         selected_parent: last_block.hash.clone(),
+        vrf_data: None,
+        miner: last_block.miner.clone(),
     };
 
     let result = node_b.receive_block(invalid_block).await;

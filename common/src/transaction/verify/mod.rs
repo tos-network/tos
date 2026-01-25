@@ -3886,39 +3886,43 @@ impl Transaction {
             } else if self.get_multisig().is_some() {
                 return Err(VerificationError::AgentAccountUnauthorized);
             }
-        } else if let Some(config) = state
-            .get_multisig_state(&self.source)
-            .await
-            .map_err(VerificationError::State)?
-        {
-            let Some(multisig) = self.get_multisig() else {
-                return Err(VerificationError::MultiSigNotFound);
-            };
-
-            if (config.threshold as usize) != multisig.len()
-                || multisig.len() > MAX_MULTISIG_PARTICIPANTS
-            {
-                return Err(VerificationError::MultiSigParticipants);
-            }
-
-            let multisig_bytes = self.get_multisig_signing_bytes();
-            let hash = hash(&multisig_bytes);
-            for sig in multisig.get_signatures() {
-                let index = sig.id as usize;
-                let Some(key) = config.participants.get_index(index) else {
-                    return Err(VerificationError::MultiSigParticipants);
+        } else {
+            let config = state
+                .get_multisig_state(&self.source)
+                .await
+                .map_err(VerificationError::State)?;
+            if let Some(config) = config {
+                let Some(multisig) = self.get_multisig() else {
+                    return Err(VerificationError::MultiSigNotFound);
                 };
 
-                let decompressed = key.decompress().map_err(ProofVerificationError::from)?;
-                if !sig.signature.verify(hash.as_bytes(), &decompressed) {
-                    if log::log_enabled!(log::Level::Debug) {
-                        debug!("Multisig signature verification failed for participant {index}");
-                    }
-                    return Err(VerificationError::InvalidSignature);
+                if (config.threshold as usize) != multisig.len()
+                    || multisig.len() > MAX_MULTISIG_PARTICIPANTS
+                {
+                    return Err(VerificationError::MultiSigParticipants);
                 }
+
+                let multisig_bytes = self.get_multisig_signing_bytes();
+                let hash = hash(&multisig_bytes);
+                for sig in multisig.get_signatures() {
+                    let index = sig.id as usize;
+                    let Some(key) = config.participants.get_index(index) else {
+                        return Err(VerificationError::MultiSigParticipants);
+                    };
+
+                    let decompressed = key.decompress().map_err(ProofVerificationError::from)?;
+                    if !sig.signature.verify(hash.as_bytes(), &decompressed) {
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!(
+                                "Multisig signature verification failed for participant {index}"
+                            );
+                        }
+                        return Err(VerificationError::InvalidSignature);
+                    }
+                }
+            } else if self.get_multisig().is_some() {
+                return Err(VerificationError::MultiSigNotConfigured);
             }
-        } else if self.get_multisig().is_some() {
-            return Err(VerificationError::MultiSigNotConfigured);
         }
 
         if let TransactionType::AgentAccount(payload) = &self.data {
@@ -5027,13 +5031,12 @@ impl Transaction {
             TransactionType::Transfers(transfers) => {
                 for transfer in transfers {
                     // Update receiver balance with plain u64 amount
-                    let current_balance = state
-                        .get_receiver_balance(
-                            Cow::Borrowed(transfer.get_destination()),
-                            Cow::Borrowed(transfer.get_asset()),
-                        )
-                        .await
-                        .map_err(VerificationError::State)?;
+                    let current_balance = Box::pin(state.get_receiver_balance(
+                        Cow::Borrowed(transfer.get_destination()),
+                        Cow::Borrowed(transfer.get_asset()),
+                    ))
+                    .await
+                    .map_err(VerificationError::State)?;
 
                     // Balance simplification: Add plain u64 amount to receiver's balance
                     let plain_amount = transfer.get_amount();
@@ -7488,7 +7491,7 @@ impl Transaction {
             }
         }
 
-        self.apply(tx_hash, state).await
+        Box::pin(self.apply(tx_hash, state)).await
     }
 
     /// Verify only that the final sender balance is the expected one for each commitment

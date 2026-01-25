@@ -1,0 +1,81 @@
+fixture:
+  name: "reg_004_uno_balance_mismatch_after_sync"
+  version: "1.0"
+  description: "Regression: UNO balances must remain consistent after multiple transfers"
+  tier: [1, 2]
+
+setup:
+  assets:
+    - id: TOKEN_A
+      name: "Token A"
+      supply: "1_000_000"
+      decimals: 8
+
+  accounts:
+    issuer:
+      balance: "100_000 TOS"
+      nonce: 0
+      uno_balances:
+        TOKEN_A: 10_000
+    user_a:
+      balance: "50_000 TOS"
+      nonce: 0
+      uno_balances:
+        TOKEN_A: 0
+    user_b:
+      balance: "50_000 TOS"
+      nonce: 0
+      uno_balances:
+        TOKEN_A: 0
+
+transactions:
+  - step: 1
+    name: "Issuer distributes tokens to user_a"
+    type: uno_transfer
+    from: issuer
+    to: user_a
+    asset: TOKEN_A
+    amount: "3_000"
+    fee: "10 TOS"
+    expect_status: success
+
+  - step: 2
+    name: "Issuer distributes tokens to user_b"
+    type: uno_transfer
+    from: issuer
+    to: user_b
+    asset: TOKEN_A
+    amount: "2_000"
+    fee: "10 TOS"
+    expect_status: success
+
+  - step: 3
+    name: "user_a transfers to user_b"
+    type: uno_transfer
+    from: user_a
+    to: user_b
+    asset: TOKEN_A
+    amount: "1_000"
+    fee: "10 TOS"
+    expect_status: success
+
+  - step: 4
+    type: mine_block
+
+expected:
+  accounts:
+    issuer:
+      uno_balances:
+        TOKEN_A: 5_000
+    user_a:
+      uno_balances:
+        TOKEN_A: 2_000
+    user_b:
+      uno_balances:
+        TOKEN_A: 3_000
+
+invariants:
+  - uno_supply_conservation:
+      asset: TOKEN_A
+      total: 10_000
+  - no_negative_balances: true

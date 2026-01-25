@@ -40,7 +40,7 @@ impl VersionedBalanceProvider for RocksStorage {
     }
 
     // delete versioned balances below topoheight
-    // Difference is, if we have
+    // Special handling: only delete versions below an output balance to preserve history
     async fn delete_versioned_balances_below_topoheight(
         &mut self,
         topoheight: TopoHeight,

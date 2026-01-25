@@ -426,8 +426,10 @@ impl RocksStorage {
             trace!("load from disk internal {:?}", column);
         }
 
-        self.load_optional_from_disk(column, key)?
-            .ok_or(BlockchainError::NotFoundOnDisk(DiskContext::LoadData))
+        match self.load_optional_from_disk(column, key)? {
+            Some(value) => Ok(value),
+            None => Err(BlockchainError::NotFoundOnDisk(DiskContext::LoadData)),
+        }
     }
 
     pub fn get_size_from_disk<K: AsRef<[u8]>>(

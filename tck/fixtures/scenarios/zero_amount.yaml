@@ -1,0 +1,34 @@
+fixture:
+  name: "zero_amount_transfer"
+  version: "1.0"
+  description: "Zero-amount transfer should be rejected"
+  tier: [1]
+
+setup:
+  accounts:
+    alice:
+      balance: "10000 TOS"
+      nonce: 0
+    bob:
+      balance: "0 TOS"
+      nonce: 0
+
+steps:
+  - transaction:
+      from: alice
+      to: bob
+      amount: "0 TOS"
+      fee: "10 TOS"
+      expected_result: failure
+      expected_error: "zero_amount"
+
+expected_state:
+  alice:
+    balance: "10000 TOS"
+    nonce: 0
+  bob:
+    balance: "0 TOS"
+
+invariants:
+  - balance_conservation:
+      total_supply_change: "0 TOS"

@@ -1,0 +1,30 @@
+template:
+  name: "multi_party"
+  description: "Template for multi-party transfer chains"
+  version: "1.0"
+
+parameters:
+  num_parties:
+    type: integer
+    default: 3
+  initial_balance:
+    type: amount
+    default: "100000 TOS"
+  transfer_amount:
+    type: amount
+    default: "10000 TOS"
+  fee:
+    type: amount
+    default: "10 TOS"
+
+setup:
+  accounts:
+    party_0:
+      balance: "{{initial_balance}}"
+      nonce: 0
+    party_1:
+      balance: "{{initial_balance}}"
+      nonce: 0
+    party_2:
+      balance: "{{initial_balance}}"
+      nonce: 0

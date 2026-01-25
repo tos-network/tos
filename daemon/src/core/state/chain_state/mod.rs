@@ -373,9 +373,12 @@ impl<'a, S: Storage> ChainState<'a, S> {
                     );
                 }
 
-                let mut version = storage
-                    .get_nonce_at_exact_topoheight(key, scan_topo)
-                    .await?;
+                let mut version = match storage.get_nonce_at_exact_topoheight(key, scan_topo).await
+                {
+                    Ok(version) => version,
+                    Err(BlockchainError::NotFoundOnDisk(_)) => continue,
+                    Err(err) => return Err(err),
+                };
                 version.set_previous_topoheight(Some(scan_topo));
 
                 let multisig = storage
@@ -429,6 +432,9 @@ impl<'a, S: Storage> ChainState<'a, S> {
         }
 
         // Account truly does not exist
+        // Note: We intentionally do NOT create accounts with nonce=0 just because they have
+        // balances but no registration. This could mask data corruption and enable replay attacks.
+        // Accounts must be properly registered through normal transaction flow.
         if log::log_enabled!(log::Level::Debug) {
             debug!(
                 "Account {} not found: all checks failed",
