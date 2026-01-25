@@ -18,7 +18,9 @@ use tos_common::arbitration::{
 use tos_common::block::BlockVersion;
 use tos_common::config::FEE_PER_KB;
 use tos_common::config::{COIN_VALUE, MIN_ARBITER_STAKE, TOS_ASSET};
-use tos_common::crypto::{hash, Address, AddressType, Hash, KeyPair, PublicKey, Signature};
+use tos_common::crypto::{
+    hash, Address, AddressType, Hash, Hashable, KeyPair, PublicKey, Signature,
+};
 use tos_common::escrow::{
     ArbitrationConfig, ArbitrationMode, DisputeInfo, EscrowAccount, EscrowState,
 };
@@ -607,6 +609,217 @@ async fn test_fullstack_json_rpc_negative_cases() {
         .await
         .expect("json response");
     assert_eq!(extract_error_code(&resp), -32602);
+
+    test_server.server.stop().await;
+}
+
+#[test]
+fn test_fullstack_tx_inclusion_and_receipt_parity() {
+    const STACK_SIZE: usize = 16 * 1024 * 1024;
+    std::thread::Builder::new()
+        .name("tck-fullstack-tx-receipt".to_string())
+        .stack_size(STACK_SIZE)
+        .spawn(|| {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("build runtime");
+            rt.block_on(run_fullstack_tx_inclusion_and_receipt_parity());
+        })
+        .expect("spawn fullstack tx receipt thread")
+        .join()
+        .expect("join fullstack tx receipt thread");
+}
+
+async fn run_fullstack_tx_inclusion_and_receipt_parity() {
+    let test_server = start_rpc_server().await;
+    let client = reqwest::Client::new();
+
+    let blockchain = test_server.server.get_rpc_handler().get_data().clone();
+    let sender = KeyPair::new();
+    let recipient = KeyPair::new();
+    let sender_pubkey = sender.get_public_key().compress();
+    let recipient_pubkey = recipient.get_public_key().compress();
+
+    ensure_account_ready(
+        &blockchain,
+        &test_server.miner_keypair,
+        &sender_pubkey,
+        TEST_FUNDING_BALANCE,
+    )
+    .await;
+
+    let chain_id = u8::try_from(blockchain.get_network().chain_id()).expect("chain id fits u8");
+    let topoheight = blockchain.get_topo_height();
+    let (reference_hash, nonce) = {
+        let storage = blockchain.get_storage().read().await;
+        let (reference_hash, _) = storage
+            .get_block_header_at_topoheight(topoheight)
+            .await
+            .expect("get reference header");
+        let nonce = storage
+            .get_nonce_at_maximum_topoheight(&sender_pubkey, topoheight)
+            .await
+            .expect("get sender nonce")
+            .map(|(_, v)| v.get_nonce())
+            .unwrap_or(0);
+        (reference_hash, nonce)
+    };
+    let reference = Reference {
+        topoheight,
+        hash: reference_hash,
+    };
+    let payload = TransferPayload::new(TOS_ASSET, recipient_pubkey.clone(), COIN_VALUE, None);
+    let draft = UnsignedTransaction::new_with_fee_type(
+        TxVersion::T1,
+        chain_id,
+        sender_pubkey.clone(),
+        TransactionType::Transfers(vec![payload.clone()]),
+        0,
+        FeeType::TOS,
+        nonce,
+        reference.clone(),
+    );
+    let draft_tx = draft.finalize(&sender);
+    let required_fee = {
+        let storage = blockchain.get_storage().read().await;
+        estimate_required_tx_fees(&*storage, topoheight, &draft_tx, BlockVersion::Nobunaga)
+            .await
+            .expect("estimate transfer fee")
+    };
+    let unsigned = UnsignedTransaction::new_with_fee_type(
+        TxVersion::T1,
+        chain_id,
+        sender_pubkey.clone(),
+        TransactionType::Transfers(vec![payload]),
+        required_fee,
+        FeeType::TOS,
+        nonce,
+        reference,
+    );
+    let tx = unsigned.finalize(&sender);
+    let tx_hash = tx.hash();
+    let tx_hash_hex = tx_hash.to_hex();
+
+    let req = json!({
+        "jsonrpc": "2.0",
+        "id": 80,
+        "method": "submit_transaction",
+        "params": { "data": tx.to_hex() }
+    });
+    let resp = client
+        .post(format!("{}/json_rpc", test_server.base_url))
+        .json(&req)
+        .send()
+        .await
+        .expect("submit_transaction request")
+        .json::<serde_json::Value>()
+        .await
+        .expect("submit_transaction response");
+    assert!(resp
+        .get("result")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false));
+
+    let req = json!({
+        "jsonrpc": "2.0",
+        "id": 81,
+        "method": "get_transaction",
+        "params": { "hash": tx_hash_hex.as_str() }
+    });
+    let resp = client
+        .post(format!("{}/json_rpc", test_server.base_url))
+        .json(&req)
+        .send()
+        .await
+        .expect("get_transaction mempool request")
+        .json::<serde_json::Value>()
+        .await
+        .expect("get_transaction mempool response");
+    let tx_result = resp.get("result").expect("get_transaction result");
+    assert_eq!(
+        tx_result.get("hash").and_then(|v| v.as_str()),
+        Some(tx_hash_hex.as_str())
+    );
+    assert_eq!(
+        tx_result.get("in_mempool").and_then(|v| v.as_bool()),
+        Some(true)
+    );
+    assert!(
+        tx_result.get("executed_in_block").is_none()
+            || tx_result.get("executed_in_block").unwrap().is_null()
+    );
+
+    mine_block_in_chain(&blockchain, &test_server.miner_pubkey).await;
+    let (block_hash, block_topoheight) = {
+        let storage = blockchain.get_storage().read().await;
+        let topoheight = blockchain.get_topo_height();
+        let (block_hash, _) = storage
+            .get_block_header_at_topoheight(topoheight)
+            .await
+            .expect("get block header");
+        (block_hash, topoheight)
+    };
+    let block_hash_hex = block_hash.to_hex();
+
+    let req = json!({
+        "jsonrpc": "2.0",
+        "id": 82,
+        "method": "get_transaction",
+        "params": { "hash": tx_hash_hex.as_str() }
+    });
+    let resp = client
+        .post(format!("{}/json_rpc", test_server.base_url))
+        .json(&req)
+        .send()
+        .await
+        .expect("get_transaction included request")
+        .json::<serde_json::Value>()
+        .await
+        .expect("get_transaction included response");
+    let tx_result = resp.get("result").expect("get_transaction included result");
+    assert_eq!(
+        tx_result.get("in_mempool").and_then(|v| v.as_bool()),
+        Some(false)
+    );
+    assert_eq!(
+        tx_result.get("executed_in_block").and_then(|v| v.as_str()),
+        Some(block_hash_hex.as_str())
+    );
+    let blocks = tx_result.get("blocks").and_then(|v| v.as_array());
+    let contains_block = blocks
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str())
+                .any(|hash| hash == block_hash_hex)
+        })
+        .unwrap_or(false);
+    assert!(contains_block, "blocks should include execution block");
+
+    let req = json!({
+        "jsonrpc": "2.0",
+        "id": 83,
+        "method": "get_transaction_executor",
+        "params": { "hash": tx_hash_hex.as_str() }
+    });
+    let resp = client
+        .post(format!("{}/json_rpc", test_server.base_url))
+        .json(&req)
+        .send()
+        .await
+        .expect("get_transaction_executor request")
+        .json::<serde_json::Value>()
+        .await
+        .expect("get_transaction_executor response");
+    let executor = resp.get("result").expect("executor result");
+    assert_eq!(
+        executor.get("block_hash").and_then(|v| v.as_str()),
+        Some(block_hash_hex.as_str())
+    );
+    assert_eq!(
+        executor.get("block_topoheight").and_then(|v| v.as_u64()),
+        Some(block_topoheight)
+    );
 
     test_server.server.stop().await;
 }
