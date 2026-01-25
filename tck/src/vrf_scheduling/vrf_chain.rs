@@ -596,4 +596,390 @@ mod tests {
             assert!(vrf.is_some(), "VRF missing at topo {}", topo);
         }
     }
+
+    // ========================================================================
+    // VRF Prediction Market Contract Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn prediction_market_create_and_query() {
+        let secret_hex = test_vrf_secret_hex();
+        let config = ChainClientConfig::default()
+            .with_account(GenesisAccount::new(sample_hash(1), 1_000_000))
+            .with_vrf(VrfConfig {
+                secret_key_hex: Some(secret_hex),
+                chain_id: 3,
+            });
+
+        let mut client = ChainClient::start(config).await.unwrap();
+        client.mine_empty_block().await.unwrap();
+
+        // Deploy prediction market contract
+        let bytecode = include_bytes!("../../tests/fixtures/vrf_prediction.so");
+        let contract = client.deploy_contract(bytecode).await.unwrap();
+
+        // Create market with 50% threshold (128)
+        // Command: 0x01 (create), threshold=128
+        let create_params = vec![0x01u8, 128u8];
+        let result = client
+            .call_contract(&contract, 0, create_params, vec![], 1_000_000)
+            .await
+            .unwrap();
+        assert!(result.tx_result.success, "Create market should succeed");
+
+        // Verify market status is OPEN (1)
+        let status = client
+            .get_contract_storage(&contract, b"status")
+            .await
+            .unwrap()
+            .expect("status should be stored");
+        assert_eq!(status, vec![1u8], "Market should be open");
+
+        // Verify threshold is 128
+        let threshold = client
+            .get_contract_storage(&contract, b"threshold")
+            .await
+            .unwrap()
+            .expect("threshold should be stored");
+        assert_eq!(threshold, vec![128u8], "Threshold should be 128");
+
+        // Query market (command 0x00)
+        let query_result = client
+            .call_contract(&contract, 0, vec![0x00], vec![], 1_000_000)
+            .await
+            .unwrap();
+        assert!(query_result.tx_result.success, "Query should succeed");
+    }
+
+    #[tokio::test]
+    async fn prediction_market_place_bets() {
+        let secret_hex = test_vrf_secret_hex();
+        let config = ChainClientConfig::default()
+            .with_account(GenesisAccount::new(sample_hash(1), 1_000_000))
+            .with_vrf(VrfConfig {
+                secret_key_hex: Some(secret_hex),
+                chain_id: 3,
+            });
+
+        let mut client = ChainClient::start(config).await.unwrap();
+        client.mine_empty_block().await.unwrap();
+
+        let bytecode = include_bytes!("../../tests/fixtures/vrf_prediction.so");
+        let contract = client.deploy_contract(bytecode).await.unwrap();
+
+        // Create market
+        let result = client
+            .call_contract(&contract, 0, vec![0x01, 128], vec![], 1_000_000)
+            .await
+            .unwrap();
+        assert!(result.tx_result.success);
+
+        // Place YES bet: command=0x02, amount=1000 (u64 little-endian)
+        let mut yes_params = vec![0x02u8];
+        yes_params.extend_from_slice(&1000u64.to_le_bytes());
+        let result = client
+            .call_contract(&contract, 0, yes_params, vec![], 1_000_000)
+            .await
+            .unwrap();
+        assert!(result.tx_result.success, "YES bet should succeed");
+
+        // Place NO bet: command=0x03, amount=500
+        let mut no_params = vec![0x03u8];
+        no_params.extend_from_slice(&500u64.to_le_bytes());
+        let result = client
+            .call_contract(&contract, 0, no_params, vec![], 1_000_000)
+            .await
+            .unwrap();
+        assert!(result.tx_result.success, "NO bet should succeed");
+
+        // Verify pools
+        let yes_pool = client
+            .get_contract_storage(&contract, b"yes_pool")
+            .await
+            .unwrap()
+            .expect("yes_pool should be stored");
+        assert_eq!(
+            u64::from_le_bytes(yes_pool.try_into().unwrap()),
+            1000,
+            "YES pool should be 1000"
+        );
+
+        let no_pool = client
+            .get_contract_storage(&contract, b"no_pool")
+            .await
+            .unwrap()
+            .expect("no_pool should be stored");
+        assert_eq!(
+            u64::from_le_bytes(no_pool.try_into().unwrap()),
+            500,
+            "NO pool should be 500"
+        );
+    }
+
+    #[tokio::test]
+    async fn prediction_market_resolve_with_vrf() {
+        let secret_hex = test_vrf_secret_hex();
+        let config = ChainClientConfig::default()
+            .with_account(GenesisAccount::new(sample_hash(1), 1_000_000))
+            .with_vrf(VrfConfig {
+                secret_key_hex: Some(secret_hex),
+                chain_id: 3,
+            });
+
+        let mut client = ChainClient::start(config).await.unwrap();
+        client.mine_empty_block().await.unwrap();
+
+        let bytecode = include_bytes!("../../tests/fixtures/vrf_prediction.so");
+        let contract = client.deploy_contract(bytecode).await.unwrap();
+
+        // Create market with 50% threshold
+        client
+            .call_contract(&contract, 0, vec![0x01, 128], vec![], 1_000_000)
+            .await
+            .unwrap();
+
+        // Place some bets
+        let mut yes_params = vec![0x02u8];
+        yes_params.extend_from_slice(&100u64.to_le_bytes());
+        client
+            .call_contract(&contract, 0, yes_params, vec![], 1_000_000)
+            .await
+            .unwrap();
+
+        // Resolve market: command=0x04
+        let result = client
+            .call_contract(&contract, 0, vec![0x04], vec![], 1_000_000)
+            .await
+            .unwrap();
+        assert!(result.tx_result.success, "Resolve should succeed");
+
+        // Verify market is resolved (status=2)
+        let status = client
+            .get_contract_storage(&contract, b"status")
+            .await
+            .unwrap()
+            .expect("status should be stored");
+        assert_eq!(status, vec![2u8], "Market should be resolved");
+
+        // Verify VRF data was stored
+        let vrf_random = client
+            .get_contract_storage(&contract, b"vrf_random")
+            .await
+            .unwrap()
+            .expect("vrf_random should be stored");
+        assert_eq!(vrf_random.len(), 32);
+
+        let vrf_byte = client
+            .get_contract_storage(&contract, b"vrf_byte")
+            .await
+            .unwrap()
+            .expect("vrf_byte should be stored");
+        assert_eq!(vrf_byte.len(), 1);
+
+        // Verify outcome matches VRF logic: YES if vrf_byte < threshold (128)
+        let outcome = client
+            .get_contract_storage(&contract, b"outcome")
+            .await
+            .unwrap()
+            .expect("outcome should be stored");
+        let expected_outcome = if vrf_byte[0] < 128 { 1u8 } else { 0u8 };
+        assert_eq!(
+            outcome,
+            vec![expected_outcome],
+            "Outcome should match VRF threshold logic: vrf_byte={}, threshold=128",
+            vrf_byte[0]
+        );
+    }
+
+    #[tokio::test]
+    async fn prediction_market_cannot_bet_after_resolve() {
+        let secret_hex = test_vrf_secret_hex();
+        let config = ChainClientConfig::default()
+            .with_account(GenesisAccount::new(sample_hash(1), 1_000_000))
+            .with_vrf(VrfConfig {
+                secret_key_hex: Some(secret_hex),
+                chain_id: 3,
+            });
+
+        let mut client = ChainClient::start(config).await.unwrap();
+        client.mine_empty_block().await.unwrap();
+
+        let bytecode = include_bytes!("../../tests/fixtures/vrf_prediction.so");
+        let contract = client.deploy_contract(bytecode).await.unwrap();
+
+        // Create and resolve market
+        client
+            .call_contract(&contract, 0, vec![0x01, 128], vec![], 1_000_000)
+            .await
+            .unwrap();
+        client
+            .call_contract(&contract, 0, vec![0x04], vec![], 1_000_000)
+            .await
+            .unwrap();
+
+        // Try to place bet after resolve - should fail with exit code 3
+        let mut yes_params = vec![0x02u8];
+        yes_params.extend_from_slice(&100u64.to_le_bytes());
+        let result = client
+            .call_contract(&contract, 0, yes_params, vec![], 1_000_000)
+            .await
+            .unwrap();
+        assert!(!result.tx_result.success, "Bet after resolve should fail");
+        assert_eq!(
+            result.tx_result.exit_code,
+            Some(3),
+            "Exit code should be 3 (market not open)"
+        );
+    }
+
+    #[tokio::test]
+    async fn prediction_market_cannot_create_twice() {
+        let secret_hex = test_vrf_secret_hex();
+        let config = ChainClientConfig::default()
+            .with_account(GenesisAccount::new(sample_hash(1), 1_000_000))
+            .with_vrf(VrfConfig {
+                secret_key_hex: Some(secret_hex),
+                chain_id: 3,
+            });
+
+        let mut client = ChainClient::start(config).await.unwrap();
+        client.mine_empty_block().await.unwrap();
+
+        let bytecode = include_bytes!("../../tests/fixtures/vrf_prediction.so");
+        let contract = client.deploy_contract(bytecode).await.unwrap();
+
+        // Create market first time
+        let result = client
+            .call_contract(&contract, 0, vec![0x01, 128], vec![], 1_000_000)
+            .await
+            .unwrap();
+        assert!(result.tx_result.success);
+
+        // Try to create again - should fail with exit code 1
+        let result = client
+            .call_contract(&contract, 0, vec![0x01, 200], vec![], 1_000_000)
+            .await
+            .unwrap();
+        assert!(!result.tx_result.success, "Second create should fail");
+        assert_eq!(
+            result.tx_result.exit_code,
+            Some(1),
+            "Exit code should be 1 (market already exists)"
+        );
+    }
+
+    #[tokio::test]
+    async fn prediction_market_high_threshold_favors_yes() {
+        // With threshold=255, vrf_byte < 255 almost always true -> YES wins
+        let secret_hex = test_vrf_secret_hex();
+        let config = ChainClientConfig::default()
+            .with_account(GenesisAccount::new(sample_hash(1), 1_000_000))
+            .with_vrf(VrfConfig {
+                secret_key_hex: Some(secret_hex),
+                chain_id: 3,
+            });
+
+        let mut client = ChainClient::start(config).await.unwrap();
+        client.mine_empty_block().await.unwrap();
+
+        let bytecode = include_bytes!("../../tests/fixtures/vrf_prediction.so");
+        let contract = client.deploy_contract(bytecode).await.unwrap();
+
+        // Create market with threshold=255 (almost always YES)
+        client
+            .call_contract(&contract, 0, vec![0x01, 255], vec![], 1_000_000)
+            .await
+            .unwrap();
+
+        // Resolve
+        client
+            .call_contract(&contract, 0, vec![0x04], vec![], 1_000_000)
+            .await
+            .unwrap();
+
+        let vrf_byte = client
+            .get_contract_storage(&contract, b"vrf_byte")
+            .await
+            .unwrap()
+            .unwrap();
+        let outcome = client
+            .get_contract_storage(&contract, b"outcome")
+            .await
+            .unwrap()
+            .unwrap();
+
+        // With threshold=255, only vrf_byte=255 gives NO
+        if vrf_byte[0] < 255 {
+            assert_eq!(outcome, vec![1u8], "YES should win when vrf_byte < 255");
+        } else {
+            assert_eq!(outcome, vec![0u8], "NO wins only when vrf_byte = 255");
+        }
+    }
+
+    // ========================================================================
+    // VRF Lottery Contract Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn contract_lottery_selects_winner() {
+        let secret_hex = test_vrf_secret_hex();
+        let config = ChainClientConfig::default()
+            .with_account(GenesisAccount::new(sample_hash(1), 1_000_000))
+            .with_vrf(VrfConfig {
+                secret_key_hex: Some(secret_hex),
+                chain_id: 3,
+            });
+
+        let mut client = ChainClient::start(config).await.unwrap();
+        client.mine_empty_block().await.unwrap();
+
+        // Deploy vrf_lottery.so
+        let bytecode = include_bytes!("../../tests/fixtures/vrf_lottery.so");
+        let contract = client.deploy_contract(bytecode).await.unwrap();
+
+        // Call lottery contract
+        let result = client
+            .call_contract(&contract, 0, vec![], vec![], 1_000_000)
+            .await
+            .unwrap();
+        assert!(result.tx_result.success, "Lottery contract should succeed");
+
+        // Verify winner was selected
+        let winner_idx = client
+            .get_contract_storage(&contract, b"winner_index")
+            .await
+            .unwrap()
+            .expect("winner_index should be stored");
+        assert_eq!(winner_idx.len(), 1);
+        let idx = winner_idx[0];
+        assert!(idx < 4, "Winner index should be 0-3, got {}", idx);
+
+        // Verify winner name matches index
+        let winner_name = client
+            .get_contract_storage(&contract, b"winner")
+            .await
+            .unwrap()
+            .expect("winner should be stored");
+        let expected_names = [b"Alice".as_slice(), b"Bob", b"Carol", b"Dave"];
+        assert_eq!(
+            winner_name, expected_names[idx as usize],
+            "Winner name should match index"
+        );
+
+        // Verify VRF random was stored
+        let vrf_random = client
+            .get_contract_storage(&contract, b"vrf_random")
+            .await
+            .unwrap()
+            .expect("vrf_random should be stored");
+        assert_eq!(vrf_random.len(), 32);
+        assert_ne!(vrf_random, vec![0u8; 32], "VRF random should not be zeros");
+
+        // Verify winner_index matches VRF: winner_index = random[0] % 4
+        assert_eq!(
+            idx,
+            vrf_random[0] % 4,
+            "Winner index should be VRF random[0] % 4"
+        );
+    }
 }

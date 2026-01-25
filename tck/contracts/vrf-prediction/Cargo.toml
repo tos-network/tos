@@ -1,0 +1,15 @@
+[package]
+name = "vrf-prediction"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+
+[dependencies]
+tako-sdk.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[profile.release]
+opt-level = 3
+lto = true

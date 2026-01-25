@@ -447,6 +447,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "vrf-branching"
+version = "0.1.0"
+dependencies = [
+ "tako-sdk",
+]
+
+[[package]]
+name = "vrf-lottery"
+version = "0.1.0"
+dependencies = [
+ "tako-sdk",
+]
+
+[[package]]
+name = "vrf-prediction"
+version = "0.1.0"
+dependencies = [
+ "tako-sdk",
+]
+
+[[package]]
 name = "vrf-random"
 version = "0.1.0"
 dependencies = [

@@ -53,6 +53,10 @@ CONTRACTS=(
     "erc1155-openzeppelin"
     "ownable"
     "pausable"
+    "vrf-branching"
+    "vrf-lottery"
+    "vrf-prediction"
+    "vrf-random"
 )
 
 # Parse arguments

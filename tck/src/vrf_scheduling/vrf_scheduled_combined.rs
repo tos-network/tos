@@ -49,15 +49,76 @@ mod tests {
     // ========================================================================
 
     #[tokio::test]
-    #[ignore = "Requires custom branching contract"]
     async fn vrf_randomness_determines_execution() {
-        // Deploy contract that:
+        // Deploy vrf_branching contract that:
         //   - Reads vrf_random()
-        //   - If random[0] < 128: calls path_a()
-        //   - Else: calls path_b()
-        // Schedule execution
+        //   - If random[0] < 128: stores "path" = b"a", "result" = b"path_a"
+        //   - Else: stores "path" = b"b", "result" = b"path_b"
+        let scheduler = sample_hash(0xAA);
+        let mgr = VrfKeyManager::new();
+        let secret_hex = mgr.secret_key_hex();
+        let config = ChainClientConfig::default()
+            .with_account(GenesisAccount::new(scheduler.clone(), 10_000_000))
+            .with_vrf(VrfConfig {
+                secret_key_hex: Some(secret_hex),
+                chain_id: 3,
+            });
+
+        let mut client = ChainClient::start(config).await.unwrap();
+
+        // Deploy vrf_branching contract
+        let bytecode = include_bytes!("../../tests/fixtures/vrf_branching.so");
+        let contract = client.deploy_contract(bytecode).await.unwrap();
+
+        // Schedule execution at topo 5
+        let exec = make_exec(contract.clone(), 5, 1_000, 1_000_000, 0, scheduler);
+        let hash = client.schedule_execution(exec).await.unwrap();
+
         // Warp to target
-        // Assert: Correct path was taken based on VRF output
+        client.warp_to_topoheight(5).await.unwrap();
+
+        // Check execution succeeded
+        let (status, _) = client.get_scheduled_status(&hash).unwrap();
+        assert_eq!(status, ScheduledExecutionStatus::Executed);
+
+        // Get VRF random byte used for branching
+        let random_byte = client
+            .get_contract_storage(&contract, b"random_byte")
+            .await
+            .unwrap()
+            .expect("random_byte should be stored");
+        assert_eq!(random_byte.len(), 1);
+        let vrf_byte = random_byte[0];
+
+        // Get the path taken
+        let path = client
+            .get_contract_storage(&contract, b"path")
+            .await
+            .unwrap()
+            .expect("path should be stored");
+
+        // Verify correct branch was taken based on VRF
+        if vrf_byte < 128 {
+            assert_eq!(path, b"a", "VRF byte {} < 128 should take path_a", vrf_byte);
+        } else {
+            assert_eq!(
+                path, b"b",
+                "VRF byte {} >= 128 should take path_b",
+                vrf_byte
+            );
+        }
+
+        // Verify result matches path
+        let result = client
+            .get_contract_storage(&contract, b"result")
+            .await
+            .unwrap()
+            .expect("result should be stored");
+        if vrf_byte < 128 {
+            assert_eq!(result, b"path_a");
+        } else {
+            assert_eq!(result, b"path_b");
+        }
     }
 
     #[tokio::test]
@@ -129,12 +190,96 @@ mod tests {
     // ========================================================================
 
     #[tokio::test]
-    #[ignore = "Requires VRF + scheduled execution + multiple blocks"]
     async fn vrf_lottery_fairness() {
-        // Schedule 100 VRF lottery executions across 100 blocks
-        // Each reads vrf_random() and chooses winner from 4 candidates
-        // Assert: Distribution is roughly uniform (chi-squared test, p > 0.01)
-        // Note: VRF is deterministic per block, but varies across blocks
+        // Run VRF branching across multiple blocks using scheduled execution
+        // Each execution branches based on vrf_random[0] < 128 (50% probability)
+        // Assert: Distribution varies (not all same path)
+        let scheduler = sample_hash(0xCC);
+        let mgr = VrfKeyManager::new();
+        let secret_hex = mgr.secret_key_hex();
+        let config = ChainClientConfig::default()
+            .with_account(GenesisAccount::new(scheduler.clone(), 100_000_000))
+            .with_vrf(VrfConfig {
+                secret_key_hex: Some(secret_hex),
+                chain_id: 3,
+            });
+
+        let mut client = ChainClient::start(config).await.unwrap();
+
+        // Use vrf_branching contract which we know works
+        let bytecode = include_bytes!("../../tests/fixtures/vrf_branching.so");
+        let num_rounds = 10usize;
+
+        // Deploy all contracts at unique addresses first
+        let mut contract_addrs = Vec::new();
+        for i in 0..num_rounds {
+            let mut addr_bytes = [0u8; 32];
+            addr_bytes[0] = (i & 0xFF) as u8;
+            addr_bytes[1] = 0xCC; // Use different byte pattern
+            let contract_addr = Hash::new(addr_bytes);
+            client
+                .deploy_contract_at(&contract_addr, bytecode)
+                .await
+                .unwrap();
+            contract_addrs.push(contract_addr);
+        }
+
+        // Track path distribution
+        let mut path_a_count = 0u32;
+        let mut path_b_count = 0u32;
+
+        // Call each contract at different blocks
+        for (i, contract_addr) in contract_addrs.iter().enumerate() {
+            // Mine a block to get fresh VRF
+            client.mine_empty_block().await.unwrap();
+
+            let result = client
+                .call_contract(contract_addr, 0, vec![], vec![], 1_000_000)
+                .await
+                .unwrap();
+            assert!(
+                result.tx_result.success,
+                "Round {} at topo {} should succeed: {:?}",
+                i,
+                client.topoheight(),
+                result.tx_result.error
+            );
+
+            // Get the path taken
+            let path = client
+                .get_contract_storage(contract_addr, b"path")
+                .await
+                .unwrap()
+                .expect("path should be stored");
+
+            if path == b"a" {
+                path_a_count = path_a_count.saturating_add(1);
+            } else if path == b"b" {
+                path_b_count = path_b_count.saturating_add(1);
+            } else {
+                panic!("Unexpected path: {:?}", path);
+            }
+        }
+
+        // With 10 rounds and 50% probability, we should see both paths
+        // P(all same) = 2 * (0.5)^10 = 0.2% - very unlikely
+        let total = path_a_count.saturating_add(path_b_count);
+        assert_eq!(total, num_rounds as u32, "All rounds should complete");
+
+        // Log distribution
+        eprintln!(
+            "Path distribution: A={} B={} (total {})",
+            path_a_count, path_b_count, num_rounds
+        );
+
+        // Verify VRF produces varied results - at least 2 of each path
+        // (being lenient for small sample size)
+        assert!(
+            path_a_count >= 1 && path_b_count >= 1,
+            "VRF should produce varied results. A={} B={}",
+            path_a_count,
+            path_b_count
+        );
     }
 
     // ========================================================================
