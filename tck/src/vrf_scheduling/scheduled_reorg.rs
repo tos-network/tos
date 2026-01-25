@@ -10,6 +10,7 @@ mod tests {
     };
     use tos_common::crypto::Hash;
 
+    use crate::tier1_component::TestBlockchainBuilder;
     use crate::tier2_integration::NodeRpc;
     use crate::tier3_e2e::LocalTosNetworkBuilder;
 
@@ -800,10 +801,130 @@ mod tests {
     // ========================================================================
 
     #[tokio::test]
-    #[ignore = "Requires LocalTosNetwork with BlockEnd + orphan handling"]
     async fn block_end_in_forked_block() {
-        // Schedule BlockEnd execution in a block that becomes orphaned
-        // Assert: BlockEnd does NOT execute on the main chain
+        // Schedule BlockEnd execution in a block that later becomes orphaned
+        // Assert: BlockEnd execution is orphaned after reorg
+
+        // Build a TestBlockchain with initial balance
+        let blockchain = TestBlockchainBuilder::new()
+            .with_funded_account(Hash::new([0xAA; 32]), 1_000_000_000)
+            .build()
+            .await
+            .expect("build blockchain");
+
+        // Mine block 1 - this will be our fork point
+        blockchain.mine_block().await.expect("mine block 1");
+        let fork_point = blockchain.get_tip_hash();
+        assert_eq!(blockchain.topoheight(), 1);
+
+        // Schedule a BlockEnd execution (will execute at end of next mined block)
+        let scheduler = Hash::new([0xBB; 32]);
+        let target_contract = Hash::new([0xCC; 32]);
+        let exec = ScheduledExecution::new_offercall(
+            target_contract,
+            0,
+            vec![],
+            100_000,
+            1_000,
+            scheduler,
+            ScheduledExecutionKind::BlockEnd,
+            0,
+        );
+        let exec_hash = blockchain
+            .schedule_execution(exec)
+            .expect("schedule BlockEnd");
+
+        // Mine block 2 - BlockEnd should execute here
+        blockchain.mine_block().await.expect("mine block 2");
+        assert_eq!(blockchain.topoheight(), 2);
+
+        // Verify BlockEnd was executed
+        let (status, exec_topo) = blockchain
+            .get_scheduled_status(&exec_hash)
+            .expect("status should exist");
+        assert_eq!(
+            status,
+            ScheduledExecutionStatus::Executed,
+            "BlockEnd should be executed"
+        );
+        assert_eq!(exec_topo, 2, "BlockEnd should execute at topoheight 2");
+
+        // Verify execution is NOT orphaned (yet)
+        let is_orphaned = blockchain.is_execution_orphaned(&exec_hash);
+        assert_eq!(
+            is_orphaned,
+            Some(false),
+            "Execution should not be orphaned yet"
+        );
+
+        // Create a fork from block 1 (fork_point)
+        // We need to mine 2 blocks on the fork to make it heavier (height 3 vs height 2)
+        let fork_block_1 = blockchain
+            .mine_fork_block_on_parent(&fork_point)
+            .await
+            .expect("mine fork block 1");
+        let fork_block_2 = blockchain
+            .mine_fork_block_on_parent(&fork_block_1.hash)
+            .await
+            .expect("mine fork block 2");
+
+        // The fork is now heavier (height 3 vs height 2)
+        assert_eq!(fork_block_2.height, 3);
+
+        // Reorg to the fork
+        blockchain
+            .reorg_to_chain(&fork_block_2.hash)
+            .await
+            .expect("reorg to fork");
+
+        // Verify we're on the new chain
+        assert_eq!(blockchain.get_tip_hash(), fork_block_2.hash);
+        assert_eq!(blockchain.topoheight(), 3);
+
+        // The BlockEnd execution should now be orphaned
+        // After reorg, scheduled state is cleared and replayed
+        // Since the BlockEnd was scheduled after block 1 and block 2 is now orphaned,
+        // the execution should either be orphaned or not exist in the new chain
+        let is_orphaned = blockchain.is_execution_orphaned(&exec_hash);
+        // After reorg, state is cleared, so the execution record may not exist
+        // or it should be marked as orphaned
+        match is_orphaned {
+            Some(true) => {
+                // Execution exists but is orphaned - this is the expected case
+                // if we track executed_in_block across reorg
+            }
+            None => {
+                // Execution record was cleared during reorg - this is also valid
+                // The important thing is that the execution is NOT marked as
+                // successfully executed on the new chain
+            }
+            Some(false) => {
+                // This would be a bug - the execution's block is no longer in main chain
+                panic!("BlockEnd execution should be orphaned or cleared after reorg");
+            }
+        }
+
+        // Also verify the execution status is cleared or not Executed on new chain
+        // After reorg, scheduled state is reset, so the execution may not exist
+        let status_after = blockchain.get_scheduled_status(&exec_hash);
+        match status_after {
+            Some((ScheduledExecutionStatus::Executed, _)) => {
+                // If it's still Executed, verify it was re-executed on the new chain
+                // (which shouldn't happen since BlockEnd was scheduled after fork point)
+                panic!("BlockEnd should not be Executed on the new chain");
+            }
+            Some((status, _)) => {
+                // Any other status is acceptable (Pending, Deferred, etc.)
+                assert_ne!(
+                    status,
+                    ScheduledExecutionStatus::Executed,
+                    "Should not be Executed on new chain"
+                );
+            }
+            None => {
+                // Execution record cleared - this is valid behavior
+            }
+        }
     }
 
     // ========================================================================

@@ -58,6 +58,7 @@ CONTRACTS=(
     "vrf-prediction"
     "vrf-random"
     "scheduler"
+    "scheduler-cascade"
 )
 
 # Parse arguments

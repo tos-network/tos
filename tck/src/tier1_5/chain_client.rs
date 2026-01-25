@@ -2355,6 +2355,8 @@ impl ChainClient {
             // Attempt contract execution if bytecode exists
             let exec_status =
                 if let Some(bytecode) = self.contract_bytecodes.get(&exec.contract).cloned() {
+                    use tos_daemon::tako_integration::SVMFeatureSet;
+
                     let provider = InMemoryContractProvider {
                         storage: self.contract_storage.clone(),
                         bytecodes: self.contract_bytecodes.clone(),
@@ -2378,7 +2380,15 @@ impl ChainClient {
                     full_input.extend_from_slice(&exec.chunk_id.to_le_bytes());
                     full_input.extend_from_slice(&exec.input_data);
 
-                    let result = TakoExecutor::execute_with_vrf(
+                    // Create scheduling provider to enable cascade scheduling via offer_call
+                    let mut scheduling_provider = ChainClientSchedulingProvider::new(
+                        &mut self.scheduled_queue,
+                        &self.scheduled_results,
+                        topo,
+                        exec.contract.clone(),
+                    );
+
+                    let result = TakoExecutor::execute_with_all_providers(
                         &bytecode,
                         &provider,
                         topo,
@@ -2390,9 +2400,13 @@ impl ChainClient {
                         &exec.scheduler_contract,
                         &full_input,
                         Some(exec.max_gas),
-                        None,
+                        &SVMFeatureSet::production(),
+                        None, // No referral provider
+                        None, // No NFT provider
+                        true, // Contract asset syscalls enabled
                         vrf_data.as_ref(),
                         Some(&miner_pk),
+                        Some(&mut scheduling_provider), // Enable cascade scheduling
                     );
 
                     match result {

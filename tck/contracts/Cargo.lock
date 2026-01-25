@@ -274,6 +274,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "scheduler-cascade"
+version = "0.1.0"
+dependencies = [
+ "tako-sdk",
+]
+
+[[package]]
 name = "sdk-demo"
 version = "0.1.0"
 dependencies = [

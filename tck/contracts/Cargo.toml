@@ -57,6 +57,7 @@ members = [
     "vesting-access-control-token",
     "vesting-wallet",
     "scheduler",
+    "scheduler-cascade",
     "vrf-branching",
     "vrf-lottery",
     "vrf-prediction",

@@ -67,14 +67,23 @@ pub mod orchestrator;
 /// Tier 1: Component-level testing (in-process, no RPC/P2P)
 pub mod tier1_component;
 
+/// Tier 1 DAG: Component-level DAG testing
+pub mod tier1_component_dag;
+
 /// Tier 2: Integration testing (single daemon + RPC)
 pub mod tier2_integration;
+
+/// Tier 2 DAG: Integration testing for DAG components
+pub mod tier2_integration_dag;
 
 /// Tier 1.5: ChainClient direct blockchain access (between component and integration)
 pub mod tier1_5;
 
 /// Tier 3: E2E testing (multi-node networks)
 pub mod tier3_e2e;
+
+/// Tier 3 DAG: E2E testing for DAG networks
+pub mod tier3_e2e_dag;
 
 /// Transaction Fixture Testing Framework (declarative YAML-based tests)
 pub mod fixtures;

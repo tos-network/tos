@@ -531,13 +531,147 @@ mod tests {
     // ========================================================================
 
     #[tokio::test]
-    #[ignore = "Requires offer_call syscall + VRF in scheduled context"]
     async fn cascade_scheduling_with_vrf() {
         // Contract A scheduled at topo=50
         // A reads vrf_random(), uses it to schedule Contract B at topo=60
         // Warp to 50: A executes, schedules B
         // Warp to 60: B executes
         // Assert: Both executions deterministic (A's VRF determines B's schedule)
+
+        let scheduler = sample_hash(0xAA);
+        let mgr = VrfKeyManager::new();
+        let secret_hex = mgr.secret_key_hex();
+        let config = ChainClientConfig::default()
+            .with_account(GenesisAccount::new(scheduler.clone(), 100_000_000))
+            .with_vrf(VrfConfig {
+                secret_key_hex: Some(secret_hex),
+                chain_id: 3,
+            });
+
+        let mut client = ChainClient::start(config).await.unwrap();
+
+        // Deploy scheduler-cascade contract (serves as both Contract A and B)
+        let bytecode = include_bytes!("../../tests/fixtures/scheduler_cascade.so");
+        let contract_a = client.deploy_contract(bytecode).await.unwrap();
+
+        // Deploy a second instance at a different address for Contract B
+        let contract_b = Hash::new([0xBB; 32]);
+        client
+            .deploy_contract_at(&contract_b, bytecode)
+            .await
+            .unwrap();
+
+        // Mine a block to produce VRF data at topo 1 (needed for scheduling)
+        client.mine_empty_block().await.unwrap();
+        assert_eq!(client.topoheight(), 1);
+
+        // Prepare input for cascade_schedule (entry 0):
+        // - target_contract (32 bytes): contract_b
+        // - target_topo (8 bytes LE): 60
+        let mut input_data = Vec::with_capacity(40);
+        input_data.extend_from_slice(contract_b.as_bytes());
+        input_data.extend_from_slice(&60u64.to_le_bytes());
+
+        // Schedule Contract A at topo=50 with cascade_schedule entry (0)
+        let exec_a = ScheduledExecution::new_offercall(
+            contract_a.clone(),
+            0, // entry 0 = cascade_schedule
+            input_data,
+            500_000,
+            1_000,
+            scheduler.clone(),
+            ScheduledExecutionKind::TopoHeight(50),
+            client.topoheight(),
+        );
+        let hash_a = client.schedule_execution(exec_a).await.unwrap();
+
+        // Warp to topo 50 - Contract A should execute and schedule Contract B
+        client.warp_to_topoheight(50).await.unwrap();
+
+        // Verify Contract A executed
+        let (status_a, topo_a) = client.get_scheduled_status(&hash_a).unwrap();
+        assert_eq!(
+            status_a,
+            ScheduledExecutionStatus::Executed,
+            "Contract A should have executed at topo 50"
+        );
+        assert_eq!(topo_a, 50);
+
+        // Verify Contract A stored its VRF
+        let scheduler_vrf = client
+            .get_contract_storage(&contract_a, b"scheduler_vrf")
+            .await
+            .unwrap();
+        assert!(
+            scheduler_vrf.is_some(),
+            "Contract A should have stored scheduler_vrf"
+        );
+        let vrf_a = scheduler_vrf.unwrap();
+        assert_eq!(vrf_a.len(), 32, "VRF should be 32 bytes");
+        assert_ne!(vrf_a, vec![0u8; 32], "VRF should not be zeros");
+
+        // Verify Contract A stored the target info
+        let stored_target = client
+            .get_contract_storage(&contract_a, b"target_contract")
+            .await
+            .unwrap();
+        assert!(stored_target.is_some(), "Target contract should be stored");
+        assert_eq!(stored_target.unwrap(), contract_b.as_bytes().to_vec());
+
+        // Warp to topo 60 - Contract B should execute
+        client.warp_to_topoheight(60).await.unwrap();
+
+        // Verify Contract B executed (check execution count)
+        let exec_count = client
+            .get_contract_storage(&contract_b, b"cascade_exec_count")
+            .await
+            .unwrap();
+        assert!(
+            exec_count.is_some(),
+            "Contract B should have stored execution count"
+        );
+        let count = u64::from_le_bytes(
+            exec_count
+                .unwrap()
+                .try_into()
+                .expect("count should be 8 bytes"),
+        );
+        assert_eq!(count, 1, "Contract B should have executed once");
+
+        // Verify Contract B stored its VRF
+        let target_vrf = client
+            .get_contract_storage(&contract_b, b"target_vrf")
+            .await
+            .unwrap();
+        assert!(
+            target_vrf.is_some(),
+            "Contract B should have stored target_vrf"
+        );
+        let vrf_b = target_vrf.unwrap();
+        assert_eq!(vrf_b.len(), 32, "Target VRF should be 32 bytes");
+        assert_ne!(vrf_b, vec![0u8; 32], "Target VRF should not be zeros");
+
+        // Verify Contract B received the caller's VRF as input
+        let caller_vrf = client
+            .get_contract_storage(&contract_b, b"caller_vrf")
+            .await
+            .unwrap();
+        assert!(
+            caller_vrf.is_some(),
+            "Contract B should have stored caller_vrf"
+        );
+        assert_eq!(
+            caller_vrf.unwrap(),
+            vrf_a,
+            "Caller VRF should match Contract A's VRF"
+        );
+
+        // VRF values at different topoheights should be different
+        // (topo 50 vs topo 60 have different block hashes)
+        assert_ne!(
+            vrf_a, vrf_b,
+            "VRF at topo 50 should differ from VRF at topo 60"
+        );
     }
 
     // ========================================================================

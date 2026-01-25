@@ -47,6 +47,9 @@ tck/
 │   ├── tier1_component/          # Tier 1: In-memory blockchain simulation
 │   │   ├── blockchain.rs         # TestBlockchain
 │   │   └── builder.rs            # TestBlockchainBuilder
+│   ├── tier1_component_dag/      # Tier 1 DAG: Multi-tip DAG test chain
+│   │   ├── blockchain.rs         # TestBlockchainDag
+│   │   └── builder.rs            # TestBlockchainDagBuilder
 │   │
 │   ├── tier1_5/                  # Tier 1.5: Direct chain access (no network)
 │   │   ├── chain_client.rs       # ChainClient (fast TX processing)
@@ -60,6 +63,8 @@ tck/
 │   │   ├── test_daemon.rs        # TestDaemon
 │   │   ├── rpc_helpers.rs        # RPC abstraction
 │   │   └── waiters.rs            # Async coordination
+│   ├── tier2_integration_dag/    # Tier 2 DAG: DAG daemon wrapper
+│   │   └── test_daemon.rs        # TestDaemonDag
 │   │
 │   ├── tier3_e2e/                # Tier 3: Multi-node cluster
 │   │   ├── cluster.rs            # LocalCluster
@@ -67,6 +72,8 @@ tck/
 │   │   ├── partition.rs          # PartitionController
 │   │   ├── verification.rs       # Cross-node state verification
 │   │   └── waiters.rs            # Poll/wait utilities
+│   ├── tier3_e2e_dag/            # Tier 3 DAG: Multi-node DAG network
+│   │   └── network.rs            # LocalTosNetworkDag
 │   │
 │   ├── tier4_chaos/              # Tier 4: Chaos & property-based
 │   │   └── property_tests.rs     # proptest strategies

@@ -178,6 +178,13 @@ pub struct TestBlockchain {
 
     /// Contract bytecodes for deferral checking: contract_hash → bytecode
     contract_bytecodes: Arc<RwLock<HashMap<Hash, Vec<u8>>>>,
+
+    /// BlockEnd execution queue: executions to run at end of current block
+    block_end_queue: Arc<RwLock<Vec<ScheduledExecution>>>,
+
+    /// Tracks which block executed each scheduled execution: exec_hash → block_hash
+    /// Used for orphan detection after reorg
+    executed_in_block: Arc<RwLock<HashMap<Hash, Hash>>>,
 }
 
 impl TestBlockchain {
@@ -277,6 +284,8 @@ impl TestBlockchain {
             miner_rewards: Arc::new(RwLock::new(HashMap::new())),
             stable_depth: 10, // Default: 10 blocks for finality
             contract_bytecodes: Arc::new(RwLock::new(HashMap::new())),
+            block_end_queue: Arc::new(RwLock::new(Vec::new())),
+            executed_in_block: Arc::new(RwLock::new(HashMap::new())),
         })
     }
 
@@ -528,7 +537,10 @@ impl TestBlockchain {
         drop(accounts);
         drop(counters);
         drop(blocks);
-        self.process_scheduled_at_topoheight(new_topoheight);
+        self.process_scheduled_at_topoheight(new_topoheight, &block_hash);
+
+        // Process BlockEnd executions (scheduled for end of this block)
+        self.process_block_end_executions(&block_hash, new_topoheight);
 
         // Recompute state root
         let accounts = self.accounts.read();
@@ -543,6 +555,120 @@ impl TestBlockchain {
                 new_topoheight,
                 transactions.len(),
                 block.pruning_point
+            );
+        }
+
+        Ok(block)
+    }
+
+    /// Mine a fork block on a specific parent (creates alternative chain without applying)
+    ///
+    /// This is used for testing reorg scenarios:
+    /// - Creates a block building on the specified parent
+    /// - Stores the block in blocks_by_hash for later reorg
+    /// - Does NOT apply the block to state
+    ///
+    /// # Arguments
+    ///
+    /// * `parent_hash` - The hash of the parent block to build on
+    ///
+    /// # Returns
+    ///
+    /// The newly created fork block (stored but not applied)
+    pub async fn mine_fork_block_on_parent(&self, parent_hash: &Hash) -> Result<TestBlock> {
+        // Get the parent block to determine height
+        let parent_block = self
+            .blocks_by_hash
+            .read()
+            .get(parent_hash)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("Parent block not found: {}", parent_hash))?;
+
+        let new_height = parent_block.height.saturating_add(1);
+
+        // For fork blocks, we use a simple topoheight based on height
+        // (actual topoheight would be assigned during reorg)
+        let new_topoheight = new_height;
+
+        // Get miner public key
+        let miner_pk = self.miner_keypair.get_public_key().compress();
+        let miner_pk_bytes: [u8; 32] = *miner_pk.as_bytes();
+
+        // Use a different nonce to ensure unique block hash
+        // We include parent hash, height, and a "fork" marker
+        let mut hash_input = parent_hash.as_bytes().to_vec();
+        hash_input.extend_from_slice(&new_height.to_le_bytes());
+        hash_input.extend_from_slice(&miner_pk_bytes);
+        hash_input.extend_from_slice(b"FORK");
+        let block_hash = tos_common::crypto::hash(&hash_input);
+
+        // Produce VRF data if configured
+        let vrf_data = if let Some(ref vrf_mgr) = self.vrf_key_manager {
+            let block_hash_bytes: [u8; 32] = *block_hash.as_bytes();
+            match vrf_mgr.sign(
+                self.chain_id,
+                &block_hash_bytes,
+                &miner_pk,
+                &self.miner_keypair,
+            ) {
+                Ok(vrf_result) => Some(BlockVrfData::new(
+                    vrf_result.public_key.to_bytes(),
+                    vrf_result.output.to_bytes(),
+                    vrf_result.proof.to_bytes(),
+                    vrf_result.binding_signature.to_bytes(),
+                )),
+                Err(_) => None,
+            }
+        } else {
+            None
+        };
+
+        // Calculate pruning point (simplified for fork blocks)
+        let pruning_point = if new_topoheight < PRUNING_DEPTH {
+            self.genesis_hash.clone()
+        } else {
+            // Walk back from parent
+            let mut current = parent_hash.clone();
+            let mut steps = 0u64;
+            let blocks_by_hash = self.blocks_by_hash.read();
+
+            while steps < PRUNING_DEPTH {
+                if let Some(block) = blocks_by_hash.get(&current) {
+                    if block.height == 0 {
+                        break;
+                    }
+                    current = block.selected_parent.clone();
+                    steps = steps.saturating_add(1);
+                } else {
+                    break;
+                }
+            }
+            current
+        };
+
+        let block = TestBlock {
+            hash: block_hash.clone(),
+            height: new_height,
+            topoheight: new_topoheight,
+            transactions: vec![],
+            reward: 50_000_000_000, // Standard block reward
+            pruning_point,
+            selected_parent: parent_hash.clone(),
+            vrf_data,
+            miner: miner_pk,
+        };
+
+        // Store the block for later reorg
+        self.blocks_by_hash
+            .write()
+            .insert(block_hash.clone(), block.clone());
+
+        if log::log_enabled!(log::Level::Debug) {
+            log::debug!(
+                "Created fork block {} at height {} on parent {}",
+                block_hash,
+                new_height,
+                parent_hash
             );
         }
 
@@ -642,10 +768,12 @@ impl TestBlockchain {
     ///
     /// The hash of the scheduled execution
     pub fn schedule_execution(&self, mut exec: ScheduledExecution) -> Result<Hash> {
+        let is_block_end = matches!(exec.kind, ScheduledExecutionKind::BlockEnd);
         let target_topo = match exec.kind {
             ScheduledExecutionKind::TopoHeight(t) => t,
             ScheduledExecutionKind::BlockEnd => {
-                anyhow::bail!("BlockEnd scheduling not supported in TestBlockchain");
+                // BlockEnd executes at the end of the current block
+                self.topoheight.load(Ordering::SeqCst)
             }
         };
 
@@ -656,19 +784,39 @@ impl TestBlockchain {
             hash_input.extend_from_slice(exec.contract.as_bytes());
             hash_input.extend_from_slice(&target_topo.to_le_bytes());
             hash_input.extend_from_slice(&exec.offer_amount.to_le_bytes());
+            // Include kind marker for uniqueness
+            if is_block_end {
+                hash_input.extend_from_slice(b"block_end");
+            }
             exec.hash = tos_common::crypto::hash(&hash_input);
         }
 
         let hash = exec.hash.clone();
-        let mut queue = self.scheduled_queue.write();
-        queue.entry(target_topo).or_default().push(exec);
 
-        if log::log_enabled!(log::Level::Debug) {
-            log::debug!(
-                "Scheduled execution {} for topoheight {}",
-                hash,
-                target_topo
-            );
+        if is_block_end {
+            // BlockEnd: add to block_end_queue for processing at end of current block
+            let mut queue = self.block_end_queue.write();
+            queue.push(exec);
+
+            if log::log_enabled!(log::Level::Debug) {
+                log::debug!(
+                    "Scheduled BlockEnd execution {} for current block (topo {})",
+                    hash,
+                    target_topo
+                );
+            }
+        } else {
+            // TopoHeight: add to scheduled_queue for processing at target topoheight
+            let mut queue = self.scheduled_queue.write();
+            queue.entry(target_topo).or_default().push(exec);
+
+            if log::log_enabled!(log::Level::Debug) {
+                log::debug!(
+                    "Scheduled execution {} for topoheight {}",
+                    hash,
+                    target_topo
+                );
+            }
         }
 
         Ok(hash)
@@ -710,10 +858,11 @@ impl TestBlockchain {
     ///
     /// This is called during block processing (mine or receive).
     /// Executions are marked as Executed (simplified - no actual contract execution).
-    fn process_scheduled_at_topoheight(&self, topo: u64) {
+    fn process_scheduled_at_topoheight(&self, topo: u64, block_hash: &Hash) {
         let mut queue = self.scheduled_queue.write();
         let mut results = self.scheduled_results.write();
         let mut miner_rewards = self.miner_rewards.write();
+        let mut executed_in_block = self.executed_in_block.write();
         let bytecodes = self.contract_bytecodes.read();
 
         if let Some(mut execs) = queue.remove(&topo) {
@@ -771,13 +920,18 @@ impl TestBlockchain {
                         .saturating_add(miner_reward);
                 }
 
-                results.insert(exec.hash.clone(), (status, topo));
+                let exec_hash = exec.hash.clone();
+                results.insert(exec_hash.clone(), (status, topo));
+
+                // Track which block executed this scheduled execution
+                executed_in_block.insert(exec_hash.clone(), block_hash.clone());
 
                 if log::log_enabled!(log::Level::Debug) {
                     log::debug!(
-                        "Processed scheduled {} at topoheight {} with status {:?}",
-                        exec.hash,
+                        "Processed scheduled {} at topoheight {} in block {} with status {:?}",
+                        exec_hash,
                         topo,
+                        block_hash,
                         status
                     );
                 }
@@ -791,14 +945,84 @@ impl TestBlockchain {
         }
     }
 
+    /// Process BlockEnd executions (scheduled for end of current block)
+    fn process_block_end_executions(&self, block_hash: &Hash, topo: u64) {
+        let mut block_end_queue = self.block_end_queue.write();
+        let mut results = self.scheduled_results.write();
+        let mut executed_in_block = self.executed_in_block.write();
+        let mut miner_rewards = self.miner_rewards.write();
+
+        // Take all BlockEnd executions
+        let execs = std::mem::take(&mut *block_end_queue);
+
+        for exec in execs {
+            // BlockEnd executions always execute (no deferral)
+            let status = ScheduledExecutionStatus::Executed;
+
+            // Pay miner reward (70% of offer)
+            if exec.offer_amount > 0 {
+                let miner_reward = exec.offer_amount.saturating_mul(70) / 100;
+                let miner_pk = self.miner_keypair.get_public_key().compress();
+                let miner_addr = Hash::new(*miner_pk.as_bytes());
+                *miner_rewards.entry(miner_addr).or_insert(0) = miner_rewards
+                    .get(&miner_addr)
+                    .unwrap_or(&0)
+                    .saturating_add(miner_reward);
+            }
+
+            let exec_hash = exec.hash.clone();
+            results.insert(exec_hash.clone(), (status, topo));
+
+            // Track which block executed this BlockEnd
+            executed_in_block.insert(exec_hash.clone(), block_hash.clone());
+
+            if log::log_enabled!(log::Level::Debug) {
+                log::debug!(
+                    "Processed BlockEnd {} at topoheight {} in block {}",
+                    exec_hash,
+                    topo,
+                    block_hash
+                );
+            }
+        }
+    }
+
     /// Clear all scheduled state (for reorg reset)
     fn clear_scheduled_state(&self) {
         let mut queue = self.scheduled_queue.write();
         let mut results = self.scheduled_results.write();
         let mut miner_rewards = self.miner_rewards.write();
+        let mut block_end_queue = self.block_end_queue.write();
+        let mut executed_in_block = self.executed_in_block.write();
         queue.clear();
         results.clear();
         miner_rewards.clear();
+        block_end_queue.clear();
+        executed_in_block.clear();
+    }
+
+    /// Get the block hash where a scheduled execution was executed.
+    ///
+    /// Returns `Some(block_hash)` if the execution was executed, `None` otherwise.
+    pub fn get_executed_in_block(&self, exec_hash: &Hash) -> Option<Hash> {
+        let executed_in_block = self.executed_in_block.read();
+        executed_in_block.get(exec_hash).cloned()
+    }
+
+    /// Check if a scheduled execution was orphaned (executed in a block no longer in main chain).
+    ///
+    /// Returns:
+    /// - `Some(true)` if the execution was executed in a now-orphaned block
+    /// - `Some(false)` if the execution was executed in a block still in the main chain
+    /// - `None` if the execution was never executed
+    pub fn is_execution_orphaned(&self, exec_hash: &Hash) -> Option<bool> {
+        let block_hash = self.get_executed_in_block(exec_hash)?;
+
+        // Check if this block is still in the main chain
+        let blocks = self.blocks.read();
+        let is_in_main_chain = blocks.iter().any(|b| b.hash == block_hash);
+
+        Some(!is_in_main_chain)
     }
 
     /// Get accumulated miner reward for an address
@@ -962,7 +1186,10 @@ impl TestBlockchain {
         drop(accounts);
         drop(counters);
         drop(blocks);
-        self.process_scheduled_at_topoheight(block.topoheight);
+        self.process_scheduled_at_topoheight(block.topoheight, &block.hash);
+
+        // Process BlockEnd executions for this block
+        self.process_block_end_executions(&block.hash, block.topoheight);
 
         if log::log_enabled!(log::Level::Debug) {
             log::debug!(
@@ -1226,7 +1453,10 @@ impl TestBlockchain {
         drop(accounts);
         drop(counters);
         drop(blocks);
-        self.process_scheduled_at_topoheight(block.topoheight);
+        self.process_scheduled_at_topoheight(block.topoheight, &block.hash);
+
+        // Process BlockEnd executions for this block
+        self.process_block_end_executions(&block.hash, block.topoheight);
 
         Ok(())
     }
@@ -1347,6 +1577,19 @@ impl TestBlockchain {
     /// Get genesis hash
     pub fn get_genesis_hash(&self) -> &Hash {
         &self.genesis_hash
+    }
+
+    /// Get the current tip hash
+    pub fn get_tip_hash(&self) -> Hash {
+        let tips = self.tips.read();
+        tips.first()
+            .cloned()
+            .unwrap_or_else(|| self.genesis_hash.clone())
+    }
+
+    /// Get the current topoheight (sync version for tests)
+    pub fn topoheight(&self) -> u64 {
+        self.topoheight.load(Ordering::SeqCst)
     }
 
     /// Get block by hash

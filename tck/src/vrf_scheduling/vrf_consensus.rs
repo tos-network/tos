@@ -331,13 +331,267 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "Requires LocalTosNetwork with VRF support and contract execution"]
     async fn contract_vrf_consistent_cross_node() {
-        // Deploy vrf-reader contract on all nodes
-        // Node 0 mines a block with a contract call
-        // Wait for propagation
-        // Query contract storage on all nodes
-        // Assert: All nodes show same vrf_random() value
+        use crate::tier3_e2e::LocalTosNetworkBuilder;
+        use std::collections::HashMap;
+        use tos_common::block::BlockVrfData;
+        use tos_common::contract::{ContractCache, ContractProvider, ContractStorage};
+        use tos_common::crypto::{hash, Hash, Signature};
+        use tos_daemon::tako_integration::{SVMFeatureSet, TakoExecutor};
+        use tos_daemon::vrf::{VrfData, VrfOutput, VrfProof, VrfPublicKey};
+        use tos_kernel::ValueCell;
+
+        #[allow(missing_docs)]
+        struct InMemoryContractProvider {
+            storage: HashMap<(Hash, Vec<u8>), Vec<u8>>,
+            bytecodes: HashMap<Hash, Vec<u8>>,
+            topoheight: u64,
+        }
+
+        impl ContractStorage for InMemoryContractProvider {
+            fn load_data(
+                &self,
+                contract: &Hash,
+                key: &ValueCell,
+                _topoheight: tos_common::block::TopoHeight,
+            ) -> Result<Option<(tos_common::block::TopoHeight, Option<ValueCell>)>, anyhow::Error>
+            {
+                let key_bytes = key
+                    .as_bytes()
+                    .map_err(|e| anyhow::anyhow!("{}", e))?
+                    .clone();
+                match self.storage.get(&(contract.clone(), key_bytes)) {
+                    Some(value) => Ok(Some((
+                        self.topoheight,
+                        Some(ValueCell::Bytes(value.clone())),
+                    ))),
+                    None => Ok(None),
+                }
+            }
+
+            fn load_data_latest_topoheight(
+                &self,
+                contract: &Hash,
+                key: &ValueCell,
+                _topoheight: tos_common::block::TopoHeight,
+            ) -> Result<Option<tos_common::block::TopoHeight>, anyhow::Error> {
+                let key_bytes = key
+                    .as_bytes()
+                    .map_err(|e| anyhow::anyhow!("{}", e))?
+                    .clone();
+                if self.storage.contains_key(&(contract.clone(), key_bytes)) {
+                    Ok(Some(self.topoheight))
+                } else {
+                    Ok(None)
+                }
+            }
+
+            fn has_data(
+                &self,
+                contract: &Hash,
+                key: &ValueCell,
+                _topoheight: tos_common::block::TopoHeight,
+            ) -> Result<bool, anyhow::Error> {
+                let key_bytes = key
+                    .as_bytes()
+                    .map_err(|e| anyhow::anyhow!("{}", e))?
+                    .clone();
+                Ok(self.storage.contains_key(&(contract.clone(), key_bytes)))
+            }
+
+            fn has_contract(
+                &self,
+                contract: &Hash,
+                _topoheight: tos_common::block::TopoHeight,
+            ) -> Result<bool, anyhow::Error> {
+                Ok(self.bytecodes.contains_key(contract))
+            }
+        }
+
+        impl ContractProvider for InMemoryContractProvider {
+            fn get_contract_balance_for_asset(
+                &self,
+                _contract: &Hash,
+                _asset: &Hash,
+                _topoheight: tos_common::block::TopoHeight,
+            ) -> Result<Option<(tos_common::block::TopoHeight, u64)>, anyhow::Error> {
+                Ok(None)
+            }
+
+            fn get_account_balance_for_asset(
+                &self,
+                _key: &tos_common::crypto::PublicKey,
+                _asset: &Hash,
+                _topoheight: tos_common::block::TopoHeight,
+            ) -> Result<Option<(tos_common::block::TopoHeight, u64)>, anyhow::Error> {
+                Ok(None)
+            }
+
+            fn asset_exists(
+                &self,
+                asset: &Hash,
+                _topoheight: tos_common::block::TopoHeight,
+            ) -> Result<bool, anyhow::Error> {
+                Ok(*asset == Hash::zero())
+            }
+
+            fn load_asset_data(
+                &self,
+                _asset: &Hash,
+                _topoheight: tos_common::block::TopoHeight,
+            ) -> Result<
+                Option<(tos_common::block::TopoHeight, tos_common::asset::AssetData)>,
+                anyhow::Error,
+            > {
+                Ok(None)
+            }
+
+            fn load_asset_supply(
+                &self,
+                _asset: &Hash,
+                _topoheight: tos_common::block::TopoHeight,
+            ) -> Result<Option<(tos_common::block::TopoHeight, u64)>, anyhow::Error> {
+                Ok(None)
+            }
+
+            fn account_exists(
+                &self,
+                _key: &tos_common::crypto::PublicKey,
+                _topoheight: tos_common::block::TopoHeight,
+            ) -> Result<bool, anyhow::Error> {
+                Ok(false)
+            }
+
+            fn load_contract_module(
+                &self,
+                contract: &Hash,
+                _topoheight: tos_common::block::TopoHeight,
+            ) -> Result<Option<Vec<u8>>, anyhow::Error> {
+                Ok(self.bytecodes.get(contract).cloned())
+            }
+        }
+
+        fn apply_contract_cache(
+            storage: &mut HashMap<(Hash, Vec<u8>), Vec<u8>>,
+            contract: &Hash,
+            cache: &ContractCache,
+        ) {
+            for (key_cell, (_versioned, value_opt)) in &cache.storage {
+                if let Ok(key_bytes) = key_cell.as_bytes() {
+                    match value_opt {
+                        Some(val_cell) => {
+                            if let Ok(val_bytes) = val_cell.as_bytes() {
+                                storage.insert(
+                                    (contract.clone(), key_bytes.clone()),
+                                    val_bytes.clone(),
+                                );
+                            }
+                        }
+                        None => {
+                            storage.remove(&(contract.clone(), key_bytes.clone()));
+                        }
+                    }
+                }
+            }
+        }
+
+        fn block_vrf_to_executor_vrf(block_vrf: &BlockVrfData) -> Option<VrfData> {
+            let public_key = VrfPublicKey::from_bytes(&block_vrf.public_key).ok()?;
+            let output = VrfOutput::from_bytes(&block_vrf.output).ok()?;
+            let proof = VrfProof::from_bytes(&block_vrf.proof).ok()?;
+            let binding_signature = Signature::from_bytes(&block_vrf.binding_signature).ok()?;
+            Some(VrfData {
+                public_key,
+                output,
+                proof,
+                binding_signature,
+            })
+        }
+
+        let network = LocalTosNetworkBuilder::new()
+            .with_nodes(3)
+            .with_random_vrf_keys()
+            .build()
+            .await
+            .expect("Failed to build network");
+
+        // Mine and propagate one block to all nodes.
+        network.mine_and_propagate(0).await.expect("mine");
+
+        let block = network
+            .node(0)
+            .daemon()
+            .get_block_at_height(1)
+            .await
+            .expect("get block")
+            .expect("block exists");
+
+        let vrf_nodes: Vec<BlockVrfData> = (0..3)
+            .map(|i| network.node(i).get_block_vrf_data(1).expect("vrf data"))
+            .collect();
+
+        assert_eq!(vrf_nodes[0].output, vrf_nodes[1].output);
+        assert_eq!(vrf_nodes[1].output, vrf_nodes[2].output);
+
+        let bytecode = include_bytes!("../../tests/fixtures/vrf_random.so");
+        let contract = hash(bytecode);
+        let entry_id: u16 = 0;
+        let mut input_data = Vec::with_capacity(2);
+        input_data.extend_from_slice(&entry_id.to_le_bytes());
+
+        let miner_pk = block.miner;
+        let miner_pk_bytes: [u8; 32] = *miner_pk.as_bytes();
+        let block_hash = block.hash.clone();
+        let block_height = block.height;
+        let topoheight = block.topoheight;
+        let timestamp = topoheight.saturating_mul(15);
+
+        let mut results = Vec::new();
+
+        for block_vrf in vrf_nodes {
+            let mut provider = InMemoryContractProvider {
+                storage: HashMap::new(),
+                bytecodes: HashMap::from([(contract.clone(), bytecode.to_vec())]),
+                topoheight,
+            };
+
+            let vrf = block_vrf_to_executor_vrf(&block_vrf).expect("vrf conversion");
+            let tx_hash = hash(vrf.output.as_bytes());
+            let exec = TakoExecutor::execute_with_all_providers(
+                bytecode,
+                &provider,
+                topoheight,
+                &contract,
+                &block_hash,
+                block_height,
+                timestamp,
+                &tx_hash,
+                &contract,
+                &input_data,
+                Some(1_000_000),
+                &SVMFeatureSet::production(),
+                None,
+                None,
+                true,
+                Some(&vrf),
+                Some(&miner_pk_bytes),
+                None,
+            )
+            .expect("contract execute");
+
+            apply_contract_cache(&mut provider.storage, &contract, &exec.cache);
+
+            let key = b"vrf_random".to_vec();
+            let stored = provider
+                .storage
+                .get(&(contract.clone(), key))
+                .expect("vrf_random stored")
+                .clone();
+            results.push(stored);
+        }
+
+        assert_eq!(results[0], results[1]);
+        assert_eq!(results[1], results[2]);
     }
 
     // ========================================================================
@@ -397,11 +651,66 @@ mod tests {
     // ========================================================================
 
     #[tokio::test]
-    #[ignore = "Requires LocalTosNetwork with VRF support and multi-tip DAG"]
     async fn vrf_with_multi_tip_dag() {
-        // Create situation with 3 tips (3 miners produce blocks simultaneously)
-        // Each tip has its own VRF output
-        // Assert: DAG ordering resolves correctly and VRFs are valid per-tip
+        use crate::tier3_e2e_dag::LocalTosNetworkDagBuilder;
+        use std::collections::HashSet;
+
+        let network = LocalTosNetworkDagBuilder::new()
+            .with_nodes(3)
+            .with_random_vrf_keys()
+            .build()
+            .expect("Failed to build DAG network");
+
+        let genesis_tip = network
+            .node(0)
+            .daemon()
+            .get_tips()
+            .first()
+            .cloned()
+            .expect("genesis tip");
+
+        let _block0 = network
+            .node(0)
+            .daemon()
+            .mine_block_on_tip(&genesis_tip)
+            .expect("mine node0");
+        let block1 = network
+            .node(1)
+            .daemon()
+            .mine_block_on_tip(&genesis_tip)
+            .expect("mine node1");
+        let block2 = network
+            .node(2)
+            .daemon()
+            .mine_block_on_tip(&genesis_tip)
+            .expect("mine node2");
+
+        network
+            .propagate_block_from(1, &block1.hash)
+            .await
+            .expect("propagate node1 -> node0");
+        network
+            .propagate_block_from(2, &block2.hash)
+            .await
+            .expect("propagate node2 -> node0");
+
+        let tips = network.node(0).daemon().get_tips();
+        assert_eq!(tips.len(), 3, "node0 should have 3 tips in DAG");
+
+        let mut vrf_outputs = HashSet::new();
+        for tip in tips {
+            let vrf = network
+                .node(0)
+                .get_block_vrf_data_by_hash(&tip)
+                .expect("vrf data");
+            vrf_outputs.insert(vrf.output);
+        }
+
+        assert_eq!(
+            vrf_outputs.len(),
+            3,
+            "each tip should have a unique VRF output"
+        );
     }
 
     // ========================================================================
