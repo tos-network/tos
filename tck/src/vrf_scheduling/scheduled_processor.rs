@@ -343,31 +343,44 @@ mod tests {
         let kind = ScheduledExecutionKind::TopoHeight(200);
         let reg_topo = 100u64;
         let chunk_id = 0u16;
+        let scheduler = Hash::new([0xAAu8; 32]);
 
-        let hash1 = ScheduledExecution::compute_hash(&contract, &kind, reg_topo, chunk_id);
-        let hash2 = ScheduledExecution::compute_hash(&contract, &kind, reg_topo, chunk_id);
+        let hash1 =
+            ScheduledExecution::compute_hash(&contract, &kind, reg_topo, chunk_id, &scheduler);
+        let hash2 =
+            ScheduledExecution::compute_hash(&contract, &kind, reg_topo, chunk_id, &scheduler);
         assert_eq!(hash1, hash2, "compute_hash must be deterministic");
     }
 
     #[test]
     fn compute_hash_differs_by_contract() {
         let kind = ScheduledExecutionKind::TopoHeight(200);
-        let hash_a = ScheduledExecution::compute_hash(&Hash::new([0x01u8; 32]), &kind, 100, 0);
-        let hash_b = ScheduledExecution::compute_hash(&Hash::new([0x02u8; 32]), &kind, 100, 0);
+        let scheduler = Hash::new([0xAAu8; 32]);
+        let hash_a =
+            ScheduledExecution::compute_hash(&Hash::new([0x01u8; 32]), &kind, 100, 0, &scheduler);
+        let hash_b =
+            ScheduledExecution::compute_hash(&Hash::new([0x02u8; 32]), &kind, 100, 0, &scheduler);
         assert_ne!(hash_a, hash_b);
     }
 
     #[test]
     fn compute_hash_differs_by_kind() {
         let contract = Hash::new([0x01u8; 32]);
+        let scheduler = Hash::new([0xAAu8; 32]);
         let hash_topo = ScheduledExecution::compute_hash(
             &contract,
             &ScheduledExecutionKind::TopoHeight(200),
             100,
             0,
+            &scheduler,
         );
-        let hash_block_end =
-            ScheduledExecution::compute_hash(&contract, &ScheduledExecutionKind::BlockEnd, 100, 0);
+        let hash_block_end = ScheduledExecution::compute_hash(
+            &contract,
+            &ScheduledExecutionKind::BlockEnd,
+            100,
+            0,
+            &scheduler,
+        );
         assert_ne!(hash_topo, hash_block_end);
     }
 
@@ -375,8 +388,9 @@ mod tests {
     fn compute_hash_differs_by_registration_topo() {
         let contract = Hash::new([0x01u8; 32]);
         let kind = ScheduledExecutionKind::TopoHeight(200);
-        let hash_a = ScheduledExecution::compute_hash(&contract, &kind, 100, 0);
-        let hash_b = ScheduledExecution::compute_hash(&contract, &kind, 101, 0);
+        let scheduler = Hash::new([0xAAu8; 32]);
+        let hash_a = ScheduledExecution::compute_hash(&contract, &kind, 100, 0, &scheduler);
+        let hash_b = ScheduledExecution::compute_hash(&contract, &kind, 101, 0, &scheduler);
         assert_ne!(hash_a, hash_b);
     }
 
@@ -384,9 +398,24 @@ mod tests {
     fn compute_hash_differs_by_chunk_id() {
         let contract = Hash::new([0x01u8; 32]);
         let kind = ScheduledExecutionKind::TopoHeight(200);
-        let hash_a = ScheduledExecution::compute_hash(&contract, &kind, 100, 0);
-        let hash_b = ScheduledExecution::compute_hash(&contract, &kind, 100, 1);
+        let scheduler = Hash::new([0xAAu8; 32]);
+        let hash_a = ScheduledExecution::compute_hash(&contract, &kind, 100, 0, &scheduler);
+        let hash_b = ScheduledExecution::compute_hash(&contract, &kind, 100, 1, &scheduler);
         assert_ne!(hash_a, hash_b);
+    }
+
+    #[test]
+    fn compute_hash_differs_by_scheduler() {
+        let contract = Hash::new([0x01u8; 32]);
+        let kind = ScheduledExecutionKind::TopoHeight(200);
+        let scheduler_a = Hash::new([0xAAu8; 32]);
+        let scheduler_b = Hash::new([0xBBu8; 32]);
+        let hash_a = ScheduledExecution::compute_hash(&contract, &kind, 100, 0, &scheduler_a);
+        let hash_b = ScheduledExecution::compute_hash(&contract, &kind, 100, 0, &scheduler_b);
+        assert_ne!(
+            hash_a, hash_b,
+            "different schedulers must produce different hashes"
+        );
     }
 
     // ========================================================================

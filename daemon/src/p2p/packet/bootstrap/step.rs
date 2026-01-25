@@ -2294,6 +2294,7 @@ mod tests {
             &exec.kind,
             exec.registration_topoheight,
             exec.chunk_id,
+            &exec.scheduler_contract,
         );
 
         let response = StepResponse::ContractsExecutions(vec![exec], None);
