@@ -51,7 +51,7 @@ async fn test_get_kyc_batch_empty() {
     let batch = storage
         .read()
         .await
-        .get_kyc_batch(&[user.clone()])
+        .get_kyc_batch(std::slice::from_ref(&user))
         .await
         .unwrap();
 

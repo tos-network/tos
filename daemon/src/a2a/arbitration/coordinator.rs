@@ -480,6 +480,7 @@ async fn submit_verdict_on_chain<S: Storage>(
     const MAX_ATTEMPTS: usize = 3;
     const BASE_BACKOFF_MS: u64 = 200;
 
+    let mut nonce_override: Option<u64> = None;
     for attempt in 0..MAX_ATTEMPTS {
         let (payer_amount, payee_amount) = compute_amounts(&verdict.outcome, escrow.amount);
         let artifact = VerdictArtifact {
@@ -520,10 +521,14 @@ async fn submit_verdict_on_chain<S: Storage>(
             topoheight,
         };
 
-        let nonce = match storage.get_last_nonce(&source).await {
-            Ok((_, versioned)) => versioned.get_nonce().saturating_add(1),
-            Err(BlockchainError::NoNonce(_)) => 0,
-            Err(err) => return Err(ArbitrationError::Transaction(err.to_string())),
+        let nonce = if let Some(nonce) = nonce_override.take() {
+            nonce
+        } else {
+            match storage.get_last_nonce(&source).await {
+                Ok((_, versioned)) => versioned.get_nonce(),
+                Err(BlockchainError::NoNonce(_)) => 0,
+                Err(err) => return Err(ArbitrationError::Transaction(err.to_string())),
+            }
         };
 
         let chain_id = u8::try_from(blockchain.get_network().chain_id())
@@ -545,6 +550,9 @@ async fn submit_verdict_on_chain<S: Storage>(
             Err(BlockchainError::TxAlreadyInMempool(_))
             | Err(BlockchainError::TxAlreadyInBlockchain(_)) => {
                 return Ok(());
+            }
+            Err(BlockchainError::InvalidNonce(_, expected, _)) => {
+                nonce_override = Some(expected);
             }
             Err(err) => {
                 if attempt + 1 == MAX_ATTEMPTS || !should_retry_submit(&err) {

@@ -52,7 +52,6 @@ mod tests {
         let mut bytes = Vec::new();
         let mut writer = Writer::new(&mut bytes);
         h.write(&mut writer);
-        drop(writer);
         bytes
     }
 

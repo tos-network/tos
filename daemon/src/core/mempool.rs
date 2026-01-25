@@ -12,7 +12,7 @@ use tos_common::{
     crypto::{Hash, PublicKey},
     network::Network,
     time::{get_current_time_in_seconds, TimestampSeconds},
-    transaction::{MultiSigPayload, Transaction, TransactionType},
+    transaction::{MultiSigPayload, Transaction},
 };
 use tos_kernel::Environment;
 
@@ -154,29 +154,7 @@ impl Mempool {
             self.mainnet,
         );
         let tx_cache = TxCache::new(storage, self, self.disable_zkp_cache);
-        let is_register_arbiter = matches!(tx.get_data(), TransactionType::RegisterArbiter(_));
-        let is_create_escrow = matches!(tx.get_data(), TransactionType::CreateEscrow(_));
-        if is_register_arbiter {
-            eprintln!(
-                "mempool: verify start register_arbiter nonce={} topoheight={}",
-                tx.get_nonce(),
-                topoheight
-            );
-        }
-        if is_create_escrow {
-            eprintln!(
-                "mempool: verify start create_escrow nonce={} topoheight={}",
-                tx.get_nonce(),
-                topoheight
-            );
-        }
         tx.verify(&hash, &mut state, &tx_cache).await?;
-        if is_register_arbiter {
-            eprintln!("mempool: verify done register_arbiter");
-        }
-        if is_create_escrow {
-            eprintln!("mempool: verify done create_escrow");
-        }
 
         state.consume_energy_for_transaction(&tx).await?;
         state.apply_energy_payload(&tx).await?;
@@ -453,14 +431,46 @@ impl Mempool {
                     key.as_address(self.mainnet)
                 );
             }
-            let nonce = match storage.get_last_nonce(&key).await {
-                Ok((_, version)) => version.get_nonce(),
+            let nonce = match storage
+                .get_nonce_at_maximum_topoheight(&key, topoheight)
+                .await
+            {
+                Ok(Some((_, version))) => version.get_nonce(),
+                Ok(None) => {
+                    if log::log_enabled!(log::Level::Warn) {
+                        warn!(
+                            "No nonce found for owner {} at topoheight {}, deleting whole cache",
+                            key.as_address(self.mainnet),
+                            topoheight
+                        );
+                    }
+
+                    // Delete all txs from this cache
+                    for tx in cache.txs {
+                        if let Some(sorted_tx) = self.txs.remove(&tx) {
+                            deleted_transactions.push((tx, sorted_tx));
+                        } else {
+                            if log::log_enabled!(log::Level::Warn) {
+                                warn!(
+                                    "TX {} not found in mempool while deleting due to nonce error",
+                                    tx
+                                );
+                            }
+                        }
+                    }
+
+                    continue;
+                }
                 Err(e) => {
-                    // We get an error while retrieving the last nonce for this key,
+                    // We get an error while retrieving the nonce for this key,
                     // that means the key is not in storage anymore, so we can delete safely
                     // we just have to skip this iteration so it's not getting re-injected
                     if log::log_enabled!(log::Level::Warn) {
-                        warn!("Error while getting nonce for owner {}, he maybe has no nonce anymore, skipping: {}", key.as_address(self.mainnet), e);
+                        warn!(
+                            "Error while getting nonce for owner {}, he maybe has no nonce anymore, skipping: {}",
+                            key.as_address(self.mainnet),
+                            e
+                        );
                     }
 
                     // Delete all txs from this cache
@@ -523,60 +533,56 @@ impl Mempool {
                 }
 
                 delete_cache = true;
-            } else if nonce > cache.get_min() {
-                // Account nonce is above our min, which means some TXs are processed
-                // We must check the next ones
+            } else {
                 if log::log_enabled!(log::Level::Debug) {
-                    debug!(
-                        "Verifying TXs for owner {} with nonce < {}",
-                        key.as_address(self.mainnet),
-                        nonce
-                    );
+                    debug!("Verifying TXs for owner {}", key.as_address(self.mainnet));
                 }
                 // txs hashes to delete
                 let mut deleted_txs_hashes = IndexSet::with_capacity(cache.txs.len());
 
-                // filter all txs hashes which are not found
-                // or where its nonce is smaller than the new nonce
-                let mut max: Option<u64> = None;
-                let mut min: Option<u64> = None;
+                if nonce > cache.get_min() {
+                    // filter all txs hashes which are not found
+                    // or where its nonce is smaller than the new nonce
+                    let mut max: Option<u64> = None;
+                    let mut min: Option<u64> = None;
 
-                cache.txs.retain(|hash| {
-                    // Delete by default
-                    let mut delete = true;
+                    cache.txs.retain(|hash| {
+                        // Delete by default
+                        let mut delete = true;
 
-                    if let Some(tx) = self.txs.get(hash) {
-                        let tx_nonce = tx.get_tx().get_nonce();
-                        // If TX is still compatible with new nonce, update bounds
-                        if tx_nonce >= nonce {
-                            // Update cache highest bounds
-                            if max.is_none_or(|v| v < tx_nonce) {
-                                max = Some(tx_nonce);
+                        if let Some(tx) = self.txs.get(hash) {
+                            let tx_nonce = tx.get_tx().get_nonce();
+                            // If TX is still compatible with new nonce, update bounds
+                            if tx_nonce >= nonce {
+                                // Update cache highest bounds
+                                if max.is_none_or(|v| v < tx_nonce) {
+                                    max = Some(tx_nonce);
+                                }
+
+                                if min.is_none_or(|v| v > tx_nonce) {
+                                    min = Some(tx_nonce);
+                                }
+                                delete = false;
                             }
-
-                            if min.is_none_or(|v| v > tx_nonce) {
-                                min = Some(tx_nonce);
-                            }
-                            delete = false;
                         }
-                    }
 
-                    // Add hash in list if we delete it
-                    if delete {
-                        deleted_txs_hashes.insert(Arc::clone(hash));
-                    }
-                    !delete
-                });
+                        // Add hash in list if we delete it
+                        if delete {
+                            deleted_txs_hashes.insert(Arc::clone(hash));
+                        }
+                        !delete
+                    });
 
-                // Update cache bounds
-                if let (Some(min), Some(max)) = (min, max) {
-                    if log::log_enabled!(log::Level::Debug) {
-                        debug!("Update cache bounds: [{}-{}]", min, max);
+                    // Update cache bounds
+                    if let (Some(min), Some(max)) = (min, max) {
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("Update cache bounds: [{}-{}]", min, max);
+                        }
+                        cache.min = min;
+                        cache.max = max;
+                    } else {
+                        delete_cache = true;
                     }
-                    cache.min = min;
-                    cache.max = max;
-                } else {
-                    delete_cache = true;
                 }
 
                 // Cache is not empty yet, but we deleted some TXs from it, balances may be out-dated, verify TXs left
@@ -655,13 +661,6 @@ impl Mempool {
                             warn!("TX {} not found in mempool while deleting", hash);
                         }
                     }
-                }
-            } else {
-                if log::log_enabled!(log::Level::Debug) {
-                    debug!(
-                        "{} hasn't changed, skipping it",
-                        key.as_address(self.mainnet)
-                    );
                 }
             }
 

@@ -11,11 +11,11 @@ use tos_common::a2a::{
     TosSignerType, HEADER_VERSION, PROTOCOL_VERSION,
 };
 use tos_common::account::{AgentAccountMeta, SessionKey};
-use tos_common::account::{VersionedBalance, VersionedNonce};
 use tos_common::arbitration::{
     canonical_hash_without_signature, ArbiterAccount, ArbiterStatus, ArbitrationOpen,
     ExpertiseDomain, JurorVote, VoteChoice, VoteRequest, ARBITER_COOLDOWN_TOPOHEIGHT,
 };
+use tos_common::block::BlockVersion;
 use tos_common::config::FEE_PER_KB;
 use tos_common::config::{COIN_VALUE, MIN_ARBITER_STAKE, TOS_ASSET};
 use tos_common::crypto::{hash, Address, AddressType, Hash, KeyPair, PublicKey, Signature};
@@ -34,19 +34,19 @@ use tos_common::transaction::{
     AppealKycPayload, CancelArbiterExitPayload, CreateEscrowPayload, FeeType, Reference,
     RefundEscrowPayload, RegisterArbiterPayload, RegisterNamePayload, ReleaseEscrowPayload,
     RenewKycPayload, RequestArbiterExitPayload, RevokeKycPayload, SetKycPayload, TransactionType,
-    TransferKycPayload, TxVersion,
+    TransferKycPayload, TransferPayload, TxVersion,
 };
 use tos_daemon::a2a;
 use tos_daemon::a2a::arbitration::persistence::load_coordinator_case;
+use tos_daemon::core::blockchain::estimate_required_tx_fees;
 use tos_daemon::core::blockchain::Blockchain;
 use tos_daemon::core::blockchain::BroadcastOption;
 use tos_daemon::core::config::{Config, RocksDBConfig};
 use tos_daemon::core::storage::BlockDagProvider;
 use tos_daemon::core::storage::RocksStorage;
 use tos_daemon::core::storage::{
-    test_message, test_message_id, AccountProvider, AgentAccountProvider, ArbiterProvider,
-    BalanceProvider, CommitteeProvider, EscrowProvider, KycProvider, NonceProvider, StateProvider,
-    TnsProvider,
+    test_message, test_message_id, AgentAccountProvider, ArbiterProvider, BalanceProvider,
+    CommitteeProvider, EscrowProvider, KycProvider, NonceProvider, StateProvider, TnsProvider,
 };
 use tos_daemon::rpc::agent_registry::{RegisterAgentRequest, UpdateAgentRequest};
 use tos_daemon::rpc::DaemonRpcServer;
@@ -55,9 +55,12 @@ use tos_daemon::vrf::WrappedMinerSecret;
 struct TestRpcServer {
     base_url: String,
     server: std::sync::Arc<DaemonRpcServer<RocksStorage>>,
+    miner_keypair: KeyPair,
     miner_pubkey: PublicKey,
     _temp_dir: TempDir,
 }
+
+const TEST_FUNDING_BALANCE: u64 = COIN_VALUE * 10;
 
 fn pick_free_port() -> u16 {
     let mut rng = rand::thread_rng();
@@ -65,28 +68,268 @@ fn pick_free_port() -> u16 {
 }
 
 async fn ensure_account_ready(
-    storage: &mut RocksStorage,
+    blockchain: &Blockchain<RocksStorage>,
+    miner: &KeyPair,
     key: &PublicKey,
-    topoheight: u64,
-    balance: u64,
+    min_balance: u64,
 ) {
-    storage
-        .set_account_registration_topoheight(key, topoheight)
-        .await
-        .expect("register account");
-    storage
-        .set_last_nonce_to(key, topoheight, &VersionedNonce::new(0, Some(topoheight)))
-        .await
-        .expect("init nonce");
-    storage
-        .set_last_balance_to(
-            key,
-            &TOS_ASSET,
+    let miner_pubkey = miner.get_public_key().compress();
+    let chain_id = u8::try_from(blockchain.get_network().chain_id()).expect("chain id fits u8");
+    let max_attempts = if min_balance <= COIN_VALUE * 20 {
+        200usize
+    } else {
+        (min_balance / COIN_VALUE) as usize + 500
+    };
+    let mut attempts = 0usize;
+    'funding: loop {
+        attempts += 1;
+        let topoheight = blockchain.get_topo_height();
+        let balance = {
+            let storage = blockchain.get_storage().read().await;
+            storage
+                .get_balance_at_maximum_topoheight(key, &TOS_ASSET, topoheight)
+                .await
+                .expect("get balance")
+                .map(|(_, v)| v.get_balance())
+                .unwrap_or(0)
+        };
+        if balance >= min_balance {
+            break;
+        }
+        if key == &miner_pubkey {
+            let block = blockchain
+                .mine_block(&miner_pubkey)
+                .await
+                .expect("mine block");
+            blockchain
+                .add_new_block(block, None, BroadcastOption::None, true)
+                .await
+                .expect("add block");
+            if attempts > max_attempts {
+                panic!(
+                    "unable to fund account {} to min balance {}",
+                    key.as_address(false),
+                    min_balance
+                );
+            }
+            continue;
+        }
+        let amount_needed = min_balance.saturating_sub(balance);
+        let topoheight = blockchain.get_topo_height();
+        let (reference_hash, nonce, miner_balance) = {
+            let storage = blockchain.get_storage().read().await;
+            let (reference_hash, _) = storage
+                .get_block_header_at_topoheight(topoheight)
+                .await
+                .expect("get reference header");
+            let nonce = match storage
+                .get_nonce_at_maximum_topoheight(&miner_pubkey, topoheight)
+                .await
+            {
+                Ok(entry) => entry.map(|(_, v)| v.get_nonce()).unwrap_or(0),
+                Err(_) => {
+                    drop(storage);
+                    let block = blockchain
+                        .mine_block(&miner_pubkey)
+                        .await
+                        .expect("mine block");
+                    blockchain
+                        .add_new_block(block, None, BroadcastOption::None, true)
+                        .await
+                        .expect("add block");
+                    if attempts > max_attempts {
+                        panic!(
+                            "unable to fund account {} to min balance {}",
+                            key.as_address(false),
+                            min_balance
+                        );
+                    }
+                    continue 'funding;
+                }
+            };
+            let miner_balance = match storage
+                .get_balance_at_maximum_topoheight(&miner_pubkey, &TOS_ASSET, topoheight)
+                .await
+            {
+                Ok(entry) => entry.map(|(_, v)| v.get_balance()).unwrap_or(0),
+                Err(_) => {
+                    drop(storage);
+                    let block = blockchain
+                        .mine_block(&miner_pubkey)
+                        .await
+                        .expect("mine block");
+                    blockchain
+                        .add_new_block(block, None, BroadcastOption::None, true)
+                        .await
+                        .expect("add block");
+                    if attempts > max_attempts {
+                        panic!(
+                            "unable to fund account {} to min balance {}",
+                            key.as_address(false),
+                            min_balance
+                        );
+                    }
+                    continue 'funding;
+                }
+            };
+            (reference_hash, nonce, miner_balance)
+        };
+        let reference = Reference {
             topoheight,
-            &VersionedBalance::new(balance, Some(topoheight)),
-        )
+            hash: reference_hash,
+        };
+        let payload = TransferPayload::new(TOS_ASSET, key.clone(), amount_needed, None);
+        let draft = UnsignedTransaction::new_with_fee_type(
+            TxVersion::T1,
+            chain_id,
+            miner_pubkey.clone(),
+            TransactionType::Transfers(vec![payload.clone()]),
+            0,
+            FeeType::TOS,
+            nonce,
+            reference.clone(),
+        );
+        let draft_tx = draft.finalize(miner);
+        let required_fee = {
+            let storage = blockchain.get_storage().read().await;
+            estimate_required_tx_fees(&*storage, topoheight, &draft_tx, BlockVersion::Nobunaga)
+                .await
+                .expect("estimate transfer fee")
+        };
+        if miner_balance < amount_needed.saturating_add(required_fee) {
+            let block = blockchain
+                .mine_block(&miner_pubkey)
+                .await
+                .expect("mine block");
+            blockchain
+                .add_new_block(block, None, BroadcastOption::None, true)
+                .await
+                .expect("add block");
+            if attempts > max_attempts {
+                panic!(
+                    "unable to fund account {} to min balance {}",
+                    key.as_address(false),
+                    min_balance
+                );
+            }
+            continue;
+        }
+        let amount = amount_needed;
+        let send_payload = TransferPayload::new(TOS_ASSET, key.clone(), amount, None);
+        let unsigned = UnsignedTransaction::new_with_fee_type(
+            TxVersion::T1,
+            chain_id,
+            miner_pubkey.clone(),
+            TransactionType::Transfers(vec![send_payload]),
+            required_fee,
+            FeeType::TOS,
+            nonce,
+            reference,
+        );
+        let tx = unsigned.finalize(miner);
+        blockchain
+            .add_tx_to_mempool(tx, true)
+            .await
+            .expect("add funding transfer");
+        let block = blockchain
+            .mine_block(&miner_pubkey)
+            .await
+            .expect("mine funding block");
+        blockchain
+            .add_new_block(block, None, BroadcastOption::None, true)
+            .await
+            .expect("add funding block");
+        if attempts > max_attempts {
+            panic!(
+                "unable to fund account {} to min balance {}",
+                key.as_address(false),
+                min_balance
+            );
+        }
+    }
+}
+
+async fn bump_account_nonce(
+    blockchain: &Blockchain<RocksStorage>,
+    miner_pubkey: &PublicKey,
+    sender: &KeyPair,
+) {
+    let sender_pubkey = sender.get_public_key().compress();
+    let chain_id = u8::try_from(blockchain.get_network().chain_id()).expect("chain id fits u8");
+    let topoheight = blockchain.get_topo_height();
+    let (reference_hash, nonce, balance) = {
+        let storage = blockchain.get_storage().read().await;
+        let (reference_hash, _) = storage
+            .get_block_header_at_topoheight(topoheight)
+            .await
+            .expect("get reference header");
+        let nonce = storage
+            .get_nonce_at_maximum_topoheight(&sender_pubkey, topoheight)
+            .await
+            .expect("get sender nonce")
+            .map(|(_, v)| v.get_nonce())
+            .unwrap_or(0);
+        let balance = storage
+            .get_balance_at_maximum_topoheight(&sender_pubkey, &TOS_ASSET, topoheight)
+            .await
+            .expect("get sender balance")
+            .map(|(_, v)| v.get_balance())
+            .unwrap_or(0);
+        (reference_hash, nonce, balance)
+    };
+    let reference = Reference {
+        topoheight,
+        hash: reference_hash,
+    };
+    let amount = 1u64;
+    let draft_payload = TransferPayload::new(TOS_ASSET, miner_pubkey.clone(), amount, None);
+    let draft = UnsignedTransaction::new_with_fee_type(
+        TxVersion::T1,
+        chain_id,
+        sender_pubkey.clone(),
+        TransactionType::Transfers(vec![draft_payload]),
+        0,
+        FeeType::TOS,
+        nonce,
+        reference.clone(),
+    );
+    let draft_tx = draft.finalize(sender);
+    let required_fee = {
+        let storage = blockchain.get_storage().read().await;
+        estimate_required_tx_fees(&*storage, topoheight, &draft_tx, BlockVersion::Nobunaga)
+            .await
+            .expect("estimate transfer fee")
+    };
+    if balance < amount.saturating_add(required_fee) {
+        panic!(
+            "insufficient balance to bump nonce for {}",
+            sender_pubkey.as_address(false)
+        );
+    }
+    let payload = TransferPayload::new(TOS_ASSET, miner_pubkey.clone(), amount, None);
+    let unsigned = UnsignedTransaction::new_with_fee_type(
+        TxVersion::T1,
+        chain_id,
+        sender_pubkey,
+        TransactionType::Transfers(vec![payload]),
+        required_fee,
+        FeeType::TOS,
+        nonce,
+        reference,
+    );
+    let tx = unsigned.finalize(sender);
+    blockchain
+        .add_tx_to_mempool(tx, true)
         .await
-        .expect("fund account");
+        .expect("add nonce bump transfer");
+    let block = blockchain
+        .mine_block(miner_pubkey)
+        .await
+        .expect("mine nonce bump block");
+    blockchain
+        .add_new_block(block, None, BroadcastOption::None, true)
+        .await
+        .expect("add nonce bump block");
 }
 
 async fn start_rpc_server() -> TestRpcServer {
@@ -126,11 +369,7 @@ async fn start_rpc_server() -> TestRpcServer {
             Ok(chain) => chain,
             Err(_) => continue,
         };
-        {
-            let mut storage = blockchain.get_storage().write().await;
-            ensure_account_ready(&mut storage, &miner_pubkey, blockchain.get_topo_height(), 0)
-                .await;
-        }
+        ensure_account_ready(&blockchain, &miner_keypair, &miner_pubkey, 0).await;
         let mut rpc_config = config.rpc.clone();
         rpc_config.disable = false;
         match DaemonRpcServer::new(blockchain, rpc_config).await {
@@ -139,6 +378,7 @@ async fn start_rpc_server() -> TestRpcServer {
                 return TestRpcServer {
                     base_url: format!("http://127.0.0.1:{}", port),
                     server,
+                    miner_keypair,
                     miner_pubkey,
                     _temp_dir: temp_dir,
                 };
@@ -554,7 +794,6 @@ async fn test_fullstack_a2a_registry_roundtrip_with_auth() {
 }
 
 #[tokio::test]
-#[ignore = "BUGS.md: BUG-2026-01-24-005 A2A fullstack timeout"]
 async fn test_fullstack_a2a_tos_signature_auth_and_nonce_replay() {
     let test_server = start_rpc_server().await;
     let client = reqwest::Client::new();
@@ -933,9 +1172,26 @@ async fn test_fullstack_arbitration_rpc_success() {
     test_server.server.stop().await;
 }
 
-#[tokio::test]
-#[ignore = "BUGS.md: BUG-2026-01-24-003 arbitration_open missing result"]
-async fn test_fullstack_arbitration_open_and_vote() {
+#[test]
+fn test_fullstack_arbitration_open_and_vote() {
+    let handle = std::thread::Builder::new()
+        .name("tck-fullstack-arbitration-open".to_string())
+        .stack_size(16 * 1024 * 1024)
+        .spawn(|| {
+            let rt = tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(2)
+                .enable_all()
+                .build()
+                .expect("build tokio runtime");
+            rt.block_on(run_fullstack_arbitration_open_and_vote());
+        })
+        .expect("spawn fullstack arbitration open thread");
+    handle
+        .join()
+        .expect("join fullstack arbitration open thread");
+}
+
+async fn run_fullstack_arbitration_open_and_vote() {
     let test_server = start_rpc_server().await;
     let client = reqwest::Client::new();
     let blockchain = test_server.server.get_rpc_handler().get_data().clone();
@@ -975,7 +1231,7 @@ async fn test_fullstack_arbitration_open_and_vote() {
         name: "arbiter-coordinator".to_string(),
         status: ArbiterStatus::Active,
         expertise: vec![ExpertiseDomain::General],
-        stake_amount: COIN_VALUE * 10,
+        stake_amount: MIN_ARBITER_STAKE,
         fee_basis_points: 50,
         min_escrow_value: 1,
         max_escrow_value: 1_000_000,
@@ -995,7 +1251,7 @@ async fn test_fullstack_arbitration_open_and_vote() {
         name: "arbiter-juror".to_string(),
         status: ArbiterStatus::Active,
         expertise: vec![ExpertiseDomain::General],
-        stake_amount: COIN_VALUE * 10,
+        stake_amount: MIN_ARBITER_STAKE,
         fee_basis_points: 50,
         min_escrow_value: 1,
         max_escrow_value: 1_000_000,
@@ -1069,14 +1325,15 @@ async fn test_fullstack_arbitration_open_and_vote() {
             .await
             .expect("set juror arbiter");
         storage.set_escrow(&escrow).await.expect("set escrow");
-        ensure_account_ready(
-            &mut storage,
-            &coordinator_pubkey,
-            blockchain.get_topo_height(),
-            COIN_VALUE * 1000,
-        )
-        .await;
     }
+    ensure_account_ready(
+        &blockchain,
+        &test_server.miner_keypair,
+        &coordinator_pubkey,
+        TEST_FUNDING_BALANCE,
+    )
+    .await;
+    bump_account_nonce(&blockchain, &miner_pubkey, &coordinator_keypair).await;
 
     let opener = KeyPair::new();
     let now = std::time::SystemTime::now()
@@ -1235,8 +1492,26 @@ async fn test_fullstack_arbitration_open_and_vote() {
     test_server.server.stop().await;
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn test_fullstack_arbiter_exit_and_withdraw_on_chain() {
+#[test]
+fn test_fullstack_arbiter_exit_and_withdraw_on_chain() {
+    let handle = std::thread::Builder::new()
+        .name("tck-fullstack-arbiter-exit-withdraw".to_string())
+        .stack_size(16 * 1024 * 1024)
+        .spawn(|| {
+            let rt = tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(2)
+                .enable_all()
+                .build()
+                .expect("build tokio runtime");
+            rt.block_on(run_fullstack_arbiter_exit_and_withdraw_on_chain());
+        })
+        .expect("spawn fullstack arbiter exit withdraw thread");
+    handle
+        .join()
+        .expect("join fullstack arbiter exit withdraw thread");
+}
+
+async fn run_fullstack_arbiter_exit_and_withdraw_on_chain() {
     let test_server = start_rpc_server().await;
     let client = reqwest::Client::new();
     let blockchain = test_server.server.get_rpc_handler().get_data().clone();
@@ -1244,16 +1519,13 @@ async fn test_fullstack_arbiter_exit_and_withdraw_on_chain() {
     let arbiter = KeyPair::new();
     let arbiter_pubkey = arbiter.get_public_key().compress();
     let arbiter_address = Address::new(false, AddressType::Normal, arbiter_pubkey.clone());
-    {
-        let mut storage = blockchain.get_storage().write().await;
-        ensure_account_ready(
-            &mut storage,
-            &arbiter_pubkey,
-            blockchain.get_topo_height(),
-            MIN_ARBITER_STAKE + COIN_VALUE * 10,
-        )
-        .await;
-    }
+    ensure_account_ready(
+        &blockchain,
+        &test_server.miner_keypair,
+        &arbiter_pubkey,
+        MIN_ARBITER_STAKE + COIN_VALUE * 10,
+    )
+    .await;
     let registered_at = blockchain.get_topo_height();
     let mut arbiter_state = ArbiterAccount {
         public_key: arbiter_pubkey.clone(),
@@ -1358,9 +1630,26 @@ async fn test_fullstack_arbiter_exit_and_withdraw_on_chain() {
     test_server.server.stop().await;
 }
 
-#[tokio::test]
-#[ignore = "BUGS.md: BUG-2026-01-24-002 RegisterArbiter tx.verify hang"]
-async fn test_fullstack_arbiter_exit_cancel_on_chain() {
+#[test]
+fn test_fullstack_arbiter_exit_cancel_on_chain() {
+    let handle = std::thread::Builder::new()
+        .name("tck-fullstack-arbiter-exit-cancel".to_string())
+        .stack_size(16 * 1024 * 1024)
+        .spawn(|| {
+            let rt = tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(2)
+                .enable_all()
+                .build()
+                .expect("build tokio runtime");
+            rt.block_on(run_fullstack_arbiter_exit_cancel_on_chain());
+        })
+        .expect("spawn fullstack arbiter exit cancel thread");
+    handle
+        .join()
+        .expect("join fullstack arbiter exit cancel thread");
+}
+
+async fn run_fullstack_arbiter_exit_cancel_on_chain() {
     let test_server = start_rpc_server().await;
     let client = reqwest::Client::new();
     let blockchain = test_server.server.get_rpc_handler().get_data().clone();
@@ -1370,16 +1659,13 @@ async fn test_fullstack_arbiter_exit_cancel_on_chain() {
     let arbiter_pubkey = arbiter.get_public_key().compress();
     let arbiter_address = Address::new(false, AddressType::Normal, arbiter_pubkey.clone());
 
-    {
-        let mut storage = blockchain.get_storage().write().await;
-        ensure_account_ready(
-            &mut storage,
-            &arbiter_pubkey,
-            blockchain.get_topo_height(),
-            MIN_ARBITER_STAKE + COIN_VALUE * 10,
-        )
-        .await;
-    }
+    ensure_account_ready(
+        &blockchain,
+        &test_server.miner_keypair,
+        &arbiter_pubkey,
+        MIN_ARBITER_STAKE + COIN_VALUE * 10,
+    )
+    .await;
 
     let topoheight = blockchain.get_topo_height();
     let (reference_hash, _) = blockchain
@@ -1481,9 +1767,7 @@ async fn test_fullstack_arbiter_exit_cancel_on_chain() {
     test_server.server.stop().await;
 }
 
-#[tokio::test]
-#[ignore = "BUGS.md: BUG-2026-01-24-007 TNS register name fullstack timeout"]
-async fn test_fullstack_tns_register_name_on_chain() {
+async fn run_fullstack_tns_register_name_on_chain() {
     let test_server = start_rpc_server().await;
     let client = reqwest::Client::new();
     let blockchain = test_server.server.get_rpc_handler().get_data().clone();
@@ -1493,16 +1777,13 @@ async fn test_fullstack_tns_register_name_on_chain() {
     let sender_pubkey = sender.get_public_key().compress();
     let sender_address = Address::new(false, AddressType::Normal, sender_pubkey.clone());
 
-    {
-        let mut storage = blockchain.get_storage().write().await;
-        ensure_account_ready(
-            &mut storage,
-            &sender_pubkey,
-            blockchain.get_topo_height(),
-            COIN_VALUE * 1000,
-        )
-        .await;
-    }
+    ensure_account_ready(
+        &blockchain,
+        &test_server.miner_keypair,
+        &sender_pubkey,
+        TEST_FUNDING_BALANCE,
+    )
+    .await;
 
     let topoheight = blockchain.get_topo_height();
     let (reference_hash, _) = blockchain
@@ -1563,9 +1844,24 @@ async fn test_fullstack_tns_register_name_on_chain() {
     test_server.server.stop().await;
 }
 
-#[tokio::test]
-#[ignore = "BUGS.md: BUG-2026-01-24-008 TNS name rejects transfer attempt fullstack timeout"]
-async fn test_fullstack_tns_name_rejects_transfer_attempt() {
+#[test]
+fn test_fullstack_tns_register_name_on_chain() {
+    let handle = std::thread::Builder::new()
+        .name("tck-fullstack-tns-register".to_string())
+        .stack_size(16 * 1024 * 1024)
+        .spawn(|| {
+            let rt = tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(2)
+                .enable_all()
+                .build()
+                .expect("build tokio runtime");
+            rt.block_on(run_fullstack_tns_register_name_on_chain());
+        })
+        .expect("spawn fullstack tns register thread");
+    handle.join().expect("join fullstack tns register thread");
+}
+
+async fn run_fullstack_tns_name_rejects_transfer_attempt() {
     let test_server = start_rpc_server().await;
     let client = reqwest::Client::new();
     let blockchain = test_server.server.get_rpc_handler().get_data().clone();
@@ -1577,23 +1873,20 @@ async fn test_fullstack_tns_name_rejects_transfer_attempt() {
     let owner2_pubkey = owner2.get_public_key().compress();
     let owner1_address = Address::new(false, AddressType::Normal, owner1_pubkey.clone());
 
-    {
-        let mut storage = blockchain.get_storage().write().await;
-        ensure_account_ready(
-            &mut storage,
-            &owner1_pubkey,
-            blockchain.get_topo_height(),
-            COIN_VALUE * 1000,
-        )
-        .await;
-        ensure_account_ready(
-            &mut storage,
-            &owner2_pubkey,
-            blockchain.get_topo_height(),
-            COIN_VALUE * 1000,
-        )
-        .await;
-    }
+    ensure_account_ready(
+        &blockchain,
+        &test_server.miner_keypair,
+        &owner1_pubkey,
+        TEST_FUNDING_BALANCE,
+    )
+    .await;
+    ensure_account_ready(
+        &blockchain,
+        &test_server.miner_keypair,
+        &owner2_pubkey,
+        TEST_FUNDING_BALANCE,
+    )
+    .await;
 
     let topoheight = blockchain.get_topo_height();
     let (reference_hash, _) = blockchain
@@ -1685,9 +1978,26 @@ async fn test_fullstack_tns_name_rejects_transfer_attempt() {
     test_server.server.stop().await;
 }
 
-#[tokio::test]
-#[ignore = "BUGS.md: BUG-2026-01-24-001 CreateEscrow tx.verify hang"]
-async fn test_fullstack_escrow_create_on_chain() {
+#[test]
+fn test_fullstack_tns_name_rejects_transfer_attempt() {
+    let handle = std::thread::Builder::new()
+        .name("tck-fullstack-tns-rejects-transfer".to_string())
+        .stack_size(16 * 1024 * 1024)
+        .spawn(|| {
+            let rt = tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(2)
+                .enable_all()
+                .build()
+                .expect("build tokio runtime");
+            rt.block_on(run_fullstack_tns_name_rejects_transfer_attempt());
+        })
+        .expect("spawn fullstack tns rejects transfer thread");
+    handle
+        .join()
+        .expect("join fullstack tns rejects transfer thread");
+}
+
+async fn run_fullstack_escrow_create_on_chain() {
     let test_server = start_rpc_server().await;
     let client = reqwest::Client::new();
     let blockchain = test_server.server.get_rpc_handler().get_data().clone();
@@ -1700,16 +2010,13 @@ async fn test_fullstack_escrow_create_on_chain() {
     let payer_address = Address::new(false, AddressType::Normal, payer_pubkey.clone());
     let provider_address = Address::new(false, AddressType::Normal, provider_pubkey.clone());
 
-    {
-        let mut storage = blockchain.get_storage().write().await;
-        ensure_account_ready(
-            &mut storage,
-            &payer_pubkey,
-            blockchain.get_topo_height(),
-            COIN_VALUE * 1000,
-        )
-        .await;
-    }
+    ensure_account_ready(
+        &blockchain,
+        &test_server.miner_keypair,
+        &payer_pubkey,
+        TEST_FUNDING_BALANCE,
+    )
+    .await;
 
     let topoheight = blockchain.get_topo_height();
     let (reference_hash, _) = blockchain
@@ -1753,6 +2060,13 @@ async fn test_fullstack_escrow_create_on_chain() {
         .add_tx_to_mempool(tx, true)
         .await
         .expect("add create escrow tx");
+    ensure_account_ready(
+        &blockchain,
+        &test_server.miner_keypair,
+        &payer_pubkey,
+        TEST_FUNDING_BALANCE,
+    )
+    .await;
     mine_block_in_chain(&blockchain, &miner_pubkey).await;
 
     let req = json!({
@@ -1810,10 +2124,24 @@ async fn test_fullstack_escrow_create_on_chain() {
     test_server.server.stop().await;
 }
 
-#[tokio::test]
-#[ignore = "BUGS.md: BUG-2026-01-24-001 CreateEscrow tx.verify hang"]
-async fn test_fullstack_escrow_release_on_chain() {
-    eprintln!("[escrow_release] start");
+#[test]
+fn test_fullstack_escrow_create_on_chain() {
+    let handle = std::thread::Builder::new()
+        .name("tck-fullstack-escrow-create".to_string())
+        .stack_size(16 * 1024 * 1024)
+        .spawn(|| {
+            let rt = tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(2)
+                .enable_all()
+                .build()
+                .expect("build tokio runtime");
+            rt.block_on(run_fullstack_escrow_create_on_chain());
+        })
+        .expect("spawn fullstack escrow create thread");
+    handle.join().expect("join fullstack escrow create thread");
+}
+
+async fn run_fullstack_escrow_release_on_chain() {
     let test_server = start_rpc_server().await;
     let client = reqwest::Client::new();
     let blockchain = test_server.server.get_rpc_handler().get_data().clone();
@@ -1825,23 +2153,20 @@ async fn test_fullstack_escrow_release_on_chain() {
     let provider_pubkey = provider.get_public_key().compress();
     let payer_address = Address::new(false, AddressType::Normal, payer_pubkey.clone());
 
-    {
-        let mut storage = blockchain.get_storage().write().await;
-        ensure_account_ready(
-            &mut storage,
-            &payer_pubkey,
-            blockchain.get_topo_height(),
-            COIN_VALUE * 1000,
-        )
-        .await;
-        ensure_account_ready(
-            &mut storage,
-            &provider_pubkey,
-            blockchain.get_topo_height(),
-            COIN_VALUE * 1000,
-        )
-        .await;
-    }
+    ensure_account_ready(
+        &blockchain,
+        &test_server.miner_keypair,
+        &payer_pubkey,
+        TEST_FUNDING_BALANCE,
+    )
+    .await;
+    ensure_account_ready(
+        &blockchain,
+        &test_server.miner_keypair,
+        &provider_pubkey,
+        TEST_FUNDING_BALANCE,
+    )
+    .await;
 
     let topoheight = blockchain.get_topo_height();
     let (reference_hash, _) = blockchain
@@ -1997,9 +2322,24 @@ async fn test_fullstack_escrow_release_on_chain() {
     test_server.server.stop().await;
 }
 
-#[tokio::test]
-#[ignore = "BUGS.md: BUG-2026-01-24-001 CreateEscrow tx.verify hang"]
-async fn test_fullstack_escrow_refund_on_chain() {
+#[test]
+fn test_fullstack_escrow_release_on_chain() {
+    let handle = std::thread::Builder::new()
+        .name("tck-fullstack-escrow-release".to_string())
+        .stack_size(16 * 1024 * 1024)
+        .spawn(|| {
+            let rt = tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(2)
+                .enable_all()
+                .build()
+                .expect("build tokio runtime");
+            rt.block_on(run_fullstack_escrow_release_on_chain());
+        })
+        .expect("spawn fullstack escrow release thread");
+    handle.join().expect("join fullstack escrow release thread");
+}
+
+async fn run_fullstack_escrow_refund_on_chain() {
     let test_server = start_rpc_server().await;
     let client = reqwest::Client::new();
     let blockchain = test_server.server.get_rpc_handler().get_data().clone();
@@ -2011,23 +2351,20 @@ async fn test_fullstack_escrow_refund_on_chain() {
     let provider_pubkey = provider.get_public_key().compress();
     let payer_address = Address::new(false, AddressType::Normal, payer_pubkey.clone());
 
-    {
-        let mut storage = blockchain.get_storage().write().await;
-        ensure_account_ready(
-            &mut storage,
-            &payer_pubkey,
-            blockchain.get_topo_height(),
-            COIN_VALUE * 1000,
-        )
-        .await;
-        ensure_account_ready(
-            &mut storage,
-            &provider_pubkey,
-            blockchain.get_topo_height(),
-            COIN_VALUE * 1000,
-        )
-        .await;
-    }
+    ensure_account_ready(
+        &blockchain,
+        &test_server.miner_keypair,
+        &payer_pubkey,
+        TEST_FUNDING_BALANCE,
+    )
+    .await;
+    ensure_account_ready(
+        &blockchain,
+        &test_server.miner_keypair,
+        &provider_pubkey,
+        TEST_FUNDING_BALANCE,
+    )
+    .await;
 
     let topoheight = blockchain.get_topo_height();
     let (reference_hash, _) = blockchain
@@ -2172,9 +2509,41 @@ async fn test_fullstack_escrow_refund_on_chain() {
     test_server.server.stop().await;
 }
 
-#[tokio::test]
-#[ignore = "BUGS.md: BUG-2026-01-24-004 KYC fullstack timeout"]
-async fn test_fullstack_kyc_set_on_chain() {
+#[test]
+fn test_fullstack_escrow_refund_on_chain() {
+    let handle = std::thread::Builder::new()
+        .name("tck-fullstack-escrow-refund".to_string())
+        .stack_size(16 * 1024 * 1024)
+        .spawn(|| {
+            let rt = tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(2)
+                .enable_all()
+                .build()
+                .expect("build tokio runtime");
+            rt.block_on(run_fullstack_escrow_refund_on_chain());
+        })
+        .expect("spawn fullstack escrow refund thread");
+    handle.join().expect("join fullstack escrow refund thread");
+}
+
+#[test]
+fn test_fullstack_kyc_set_on_chain() {
+    let handle = std::thread::Builder::new()
+        .name("tck-fullstack-kyc-set".to_string())
+        .stack_size(16 * 1024 * 1024)
+        .spawn(|| {
+            let rt = tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(2)
+                .enable_all()
+                .build()
+                .expect("build tokio runtime");
+            rt.block_on(run_fullstack_kyc_set_on_chain());
+        })
+        .expect("spawn fullstack kyc set thread");
+    handle.join().expect("join fullstack kyc set thread");
+}
+
+async fn run_fullstack_kyc_set_on_chain() {
     let test_server = start_rpc_server().await;
     let client = reqwest::Client::new();
     let blockchain = test_server.server.get_rpc_handler().get_data().clone();
@@ -2209,14 +2578,14 @@ async fn test_fullstack_kyc_set_on_chain() {
             .import_committee(&committee_id, &committee)
             .await
             .expect("import committee");
-        ensure_account_ready(
-            &mut storage,
-            &member_pubkey,
-            blockchain.get_topo_height(),
-            COIN_VALUE * 1000,
-        )
-        .await;
     }
+    ensure_account_ready(
+        &blockchain,
+        &test_server.miner_keypair,
+        &member_pubkey,
+        TEST_FUNDING_BALANCE,
+    )
+    .await;
 
     let verified_at = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -2304,9 +2673,24 @@ async fn test_fullstack_kyc_set_on_chain() {
     test_server.server.stop().await;
 }
 
-#[tokio::test]
-#[ignore = "BUGS.md: BUG-2026-01-24-004 KYC fullstack timeout"]
-async fn test_fullstack_kyc_revoke_on_chain() {
+#[test]
+fn test_fullstack_kyc_revoke_on_chain() {
+    let handle = std::thread::Builder::new()
+        .name("tck-fullstack-kyc-revoke".to_string())
+        .stack_size(16 * 1024 * 1024)
+        .spawn(|| {
+            let rt = tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(2)
+                .enable_all()
+                .build()
+                .expect("build tokio runtime");
+            rt.block_on(run_fullstack_kyc_revoke_on_chain());
+        })
+        .expect("spawn fullstack kyc revoke thread");
+    handle.join().expect("join fullstack kyc revoke thread");
+}
+
+async fn run_fullstack_kyc_revoke_on_chain() {
     let test_server = start_rpc_server().await;
     let client = reqwest::Client::new();
     let blockchain = test_server.server.get_rpc_handler().get_data().clone();
@@ -2341,14 +2725,14 @@ async fn test_fullstack_kyc_revoke_on_chain() {
             .import_committee(&committee_id, &committee)
             .await
             .expect("import committee");
-        ensure_account_ready(
-            &mut storage,
-            &member_pubkey,
-            blockchain.get_topo_height(),
-            COIN_VALUE * 1000,
-        )
-        .await;
     }
+    ensure_account_ready(
+        &blockchain,
+        &test_server.miner_keypair,
+        &member_pubkey,
+        TEST_FUNDING_BALANCE,
+    )
+    .await;
 
     let verified_at = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -2486,9 +2870,24 @@ async fn test_fullstack_kyc_revoke_on_chain() {
     test_server.server.stop().await;
 }
 
-#[tokio::test]
-#[ignore = "BUGS.md: BUG-2026-01-24-004 KYC fullstack timeout"]
-async fn test_fullstack_kyc_renew_on_chain() {
+#[test]
+fn test_fullstack_kyc_renew_on_chain() {
+    let handle = std::thread::Builder::new()
+        .name("tck-fullstack-kyc-renew".to_string())
+        .stack_size(16 * 1024 * 1024)
+        .spawn(|| {
+            let rt = tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(2)
+                .enable_all()
+                .build()
+                .expect("build tokio runtime");
+            rt.block_on(run_fullstack_kyc_renew_on_chain());
+        })
+        .expect("spawn fullstack kyc renew thread");
+    handle.join().expect("join fullstack kyc renew thread");
+}
+
+async fn run_fullstack_kyc_renew_on_chain() {
     let test_server = start_rpc_server().await;
     let client = reqwest::Client::new();
     let blockchain = test_server.server.get_rpc_handler().get_data().clone();
@@ -2523,14 +2922,14 @@ async fn test_fullstack_kyc_renew_on_chain() {
             .import_committee(&committee_id, &committee)
             .await
             .expect("import committee");
-        ensure_account_ready(
-            &mut storage,
-            &member_pubkey,
-            blockchain.get_topo_height(),
-            COIN_VALUE * 1000,
-        )
-        .await;
     }
+    ensure_account_ready(
+        &blockchain,
+        &test_server.miner_keypair,
+        &member_pubkey,
+        TEST_FUNDING_BALANCE,
+    )
+    .await;
 
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -2672,9 +3071,24 @@ async fn test_fullstack_kyc_renew_on_chain() {
     test_server.server.stop().await;
 }
 
-#[tokio::test]
-#[ignore = "BUGS.md: BUG-2026-01-24-006 KYC transfer fullstack timeout"]
-async fn test_fullstack_kyc_transfer_on_chain() {
+#[test]
+fn test_fullstack_kyc_transfer_on_chain() {
+    let handle = std::thread::Builder::new()
+        .name("tck-fullstack-kyc-transfer".to_string())
+        .stack_size(16 * 1024 * 1024)
+        .spawn(|| {
+            let rt = tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(2)
+                .enable_all()
+                .build()
+                .expect("build tokio runtime");
+            rt.block_on(run_fullstack_kyc_transfer_on_chain());
+        })
+        .expect("spawn fullstack kyc transfer thread");
+    handle.join().expect("join fullstack kyc transfer thread");
+}
+
+async fn run_fullstack_kyc_transfer_on_chain() {
     let test_server = start_rpc_server().await;
     let blockchain = test_server.server.get_rpc_handler().get_data().clone();
     let miner_pubkey = test_server.miner_pubkey.clone();
@@ -2727,14 +3141,14 @@ async fn test_fullstack_kyc_transfer_on_chain() {
             .import_committee(&dest_committee_id, &dest_committee)
             .await
             .expect("import dest committee");
-        ensure_account_ready(
-            &mut storage,
-            &source_member.get_public_key().compress(),
-            blockchain.get_topo_height(),
-            COIN_VALUE * 1000,
-        )
-        .await;
     }
+    ensure_account_ready(
+        &blockchain,
+        &test_server.miner_keypair,
+        &source_member.get_public_key().compress(),
+        TEST_FUNDING_BALANCE,
+    )
+    .await;
 
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -2879,9 +3293,24 @@ async fn test_fullstack_kyc_transfer_on_chain() {
     test_server.server.stop().await;
 }
 
-#[tokio::test]
-#[ignore = "BUGS.md: BUG-2026-01-24-004 KYC fullstack timeout"]
-async fn test_fullstack_kyc_appeal_on_chain() {
+#[test]
+fn test_fullstack_kyc_appeal_on_chain() {
+    let handle = std::thread::Builder::new()
+        .name("tck-fullstack-kyc-appeal".to_string())
+        .stack_size(16 * 1024 * 1024)
+        .spawn(|| {
+            let rt = tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(2)
+                .enable_all()
+                .build()
+                .expect("build tokio runtime");
+            rt.block_on(run_fullstack_kyc_appeal_on_chain());
+        })
+        .expect("spawn fullstack kyc appeal thread");
+    handle.join().expect("join fullstack kyc appeal thread");
+}
+
+async fn run_fullstack_kyc_appeal_on_chain() {
     let test_server = start_rpc_server().await;
     let blockchain = test_server.server.get_rpc_handler().get_data().clone();
     let miner_pubkey = test_server.miner_pubkey.clone();
@@ -2935,21 +3364,21 @@ async fn test_fullstack_kyc_appeal_on_chain() {
             .import_committee(&original_committee_id, &original_committee)
             .await
             .expect("import original committee");
-        ensure_account_ready(
-            &mut storage,
-            &member_pubkey,
-            blockchain.get_topo_height(),
-            COIN_VALUE * 1000,
-        )
-        .await;
-        ensure_account_ready(
-            &mut storage,
-            &user_pubkey,
-            blockchain.get_topo_height(),
-            COIN_VALUE * 1000,
-        )
-        .await;
     }
+    ensure_account_ready(
+        &blockchain,
+        &test_server.miner_keypair,
+        &member_pubkey,
+        TEST_FUNDING_BALANCE,
+    )
+    .await;
+    ensure_account_ready(
+        &blockchain,
+        &test_server.miner_keypair,
+        &user_pubkey,
+        TEST_FUNDING_BALANCE,
+    )
+    .await;
 
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

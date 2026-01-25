@@ -1364,11 +1364,16 @@ impl<S: Storage> P2pServer<S> {
                             key.as_address(self.blockchain.get_network().is_mainnet())
                         );
                     }
+                    let prev_nonce = storage
+                        .get_nonce_at_maximum_topoheight(key, stable_topoheight)
+                        .await?
+                        .and_then(|(_, v)| v.get_previous_topoheight())
+                        .filter(|v| *v < stable_topoheight);
                     storage
                         .set_last_nonce_to(
                             key,
                             stable_topoheight,
-                            &VersionedNonce::new(nonce, None),
+                            &VersionedNonce::new(nonce, prev_nonce),
                         )
                         .await?;
                     if update_registration {
@@ -1404,7 +1409,12 @@ impl<S: Storage> P2pServer<S> {
                             key.as_address(self.blockchain.get_network().is_mainnet())
                         );
                     }
-                    let data = VersionedMultiSig::new(Some(Cow::Owned(multisig)), None);
+                    let prev_multisig = storage
+                        .get_multisig_at_maximum_topoheight_for(key, stable_topoheight)
+                        .await?
+                        .and_then(|(_, v)| v.get_previous_topoheight())
+                        .filter(|v| *v < stable_topoheight);
+                    let data = VersionedMultiSig::new(Some(Cow::Owned(multisig)), prev_multisig);
                     storage
                         .set_last_multisig_to(key, stable_topoheight, data)
                         .await?;

@@ -223,7 +223,7 @@ mod tests {
         }
 
         for i in 0u8..10 {
-            match snap.get(COL_A, &[i]) {
+            match snap.get(COL_A, [i]) {
                 EntryState::Stored(v) => assert_eq!(v.as_ref(), &[i + 100]),
                 other => panic!(
                     "Expected Stored for key {}, got {}",
@@ -246,11 +246,11 @@ mod tests {
         snap.delete(COL_A, Bytes::from(vec![2u8]));
         snap.delete(COL_A, Bytes::from(vec![4u8]));
 
-        assert_eq!(snap.contains(COL_A, &[0u8]), Some(false));
-        assert_eq!(snap.contains(COL_A, &[1u8]), Some(true));
-        assert_eq!(snap.contains(COL_A, &[2u8]), Some(false));
-        assert_eq!(snap.contains(COL_A, &[3u8]), Some(true));
-        assert_eq!(snap.contains(COL_A, &[4u8]), Some(false));
+        assert_eq!(snap.contains(COL_A, [0u8]), Some(false));
+        assert_eq!(snap.contains(COL_A, [1u8]), Some(true));
+        assert_eq!(snap.contains(COL_A, [2u8]), Some(false));
+        assert_eq!(snap.contains(COL_A, [3u8]), Some(true));
+        assert_eq!(snap.contains(COL_A, [4u8]), Some(false));
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -453,7 +453,7 @@ mod tests {
 
         for i in 0u32..1000 {
             let key = i.to_le_bytes();
-            match snap.get(COL_A, &key) {
+            match snap.get(COL_A, key) {
                 EntryState::Stored(v) => {
                     let expected = (i * 2).to_le_bytes();
                     assert_eq!(v.as_ref(), &expected);

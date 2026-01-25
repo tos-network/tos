@@ -41,6 +41,6 @@ async fn test_business_network_full_chain_path() {
         .await
         .expect("convergence");
 
-    let balance_node1 = network.node(1).daemon().get_balance(&bob).await.unwrap();
+    let balance_node1 = network.node(1).daemon().get_balance(bob).await.unwrap();
     assert_eq!(balance_node1, 1_000_000 + 10_000);
 }

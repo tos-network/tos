@@ -14,7 +14,7 @@ use tos_common::{
         VersionedUnoBalance,
     },
     block::{BlockVersion, TopoHeight},
-    config::TOS_ASSET,
+    config::{TOS_ASSET, UNO_ASSET},
     crypto::{
         elgamal::{Ciphertext, CompressedPublicKey},
         Hash, PublicKey,
@@ -373,9 +373,12 @@ impl<'a, S: Storage> ChainState<'a, S> {
                     );
                 }
 
-                let mut version = storage
-                    .get_nonce_at_exact_topoheight(key, scan_topo)
-                    .await?;
+                let mut version = match storage.get_nonce_at_exact_topoheight(key, scan_topo).await
+                {
+                    Ok(version) => version,
+                    Err(BlockchainError::NotFoundOnDisk(_)) => continue,
+                    Err(err) => return Err(err),
+                };
                 version.set_previous_topoheight(Some(scan_topo));
 
                 let multisig = storage
@@ -406,6 +409,36 @@ impl<'a, S: Storage> ChainState<'a, S> {
             if log::log_enabled!(log::Level::Debug) {
                 debug!(
                     "Account {} is registered but no nonce, creating with nonce=0",
+                    key.as_address(storage.is_mainnet())
+                );
+            }
+
+            let multisig = storage
+                .get_multisig_at_maximum_topoheight_for(key, topoheight)
+                .await?
+                .map(|(topo, multisig)| {
+                    multisig
+                        .take()
+                        .map(|m| (VersionedState::FetchedAt(topo), Some(m.into_owned())))
+                })
+                .flatten();
+
+            return Ok(Account {
+                nonce: VersionedNonce::new(0, None),
+                assets: HashMap::new(),
+                uno_assets: HashMap::new(),
+                multisig,
+            });
+        }
+
+        // Fallback: account has balances but no registration/nonce pointer recorded.
+        // Treat as existing account with default nonce.
+        let has_balance = storage.has_balance_for(key, &TOS_ASSET).await?
+            || storage.has_balance_for(key, &UNO_ASSET).await?;
+        if has_balance {
+            if log::log_enabled!(log::Level::Debug) {
+                debug!(
+                    "Account {} has balances but no registration, creating with nonce=0",
                     key.as_address(storage.is_mainnet())
                 );
             }

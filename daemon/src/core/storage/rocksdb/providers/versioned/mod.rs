@@ -15,6 +15,7 @@ use crate::core::{
 };
 
 mod asset;
+mod asset_supply;
 mod balance;
 mod cache;
 mod contract;

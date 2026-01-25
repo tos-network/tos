@@ -4,31 +4,33 @@ use std::str::FromStr;
 use tempdir::TempDir;
 use tokio::time::{sleep, Duration};
 
-use tos_common::account::{VersionedBalance, VersionedNonce};
-use tos_common::block::Block;
+use tos_common::block::{Block, BlockVersion};
 use tos_common::config::{COIN_VALUE, FEE_PER_KB, TOS_ASSET};
 use tos_common::crypto::{Address, AddressType, KeyPair, PublicKey};
 use tos_common::network::Network;
 use tos_common::rpc::server::RPCServerHandler;
 use tos_common::serializer::Serializer;
+use tos_common::tns::REGISTRATION_FEE;
 use tos_common::transaction::builder::UnsignedTransaction;
 use tos_common::transaction::{
-    CreateEscrowPayload, FeeType, Reference, RegisterNamePayload, TransactionType, TxVersion,
+    CreateEscrowPayload, FeeType, Reference, RegisterNamePayload, TransactionType, TransferPayload,
+    TxVersion,
 };
-use tos_daemon::core::blockchain::{Blockchain, BroadcastOption};
+use tos_daemon::core::blockchain::{estimate_required_tx_fees, Blockchain, BroadcastOption};
 use tos_daemon::core::config::{Config, RocksDBConfig};
-use tos_daemon::core::storage::{
-    AccountProvider, BalanceProvider, BlockDagProvider, NonceProvider, RocksStorage,
-};
+use tos_daemon::core::storage::{BalanceProvider, BlockDagProvider, NonceProvider, RocksStorage};
 use tos_daemon::rpc::DaemonRpcServer;
 use tos_daemon::vrf::WrappedMinerSecret;
 
 struct TestRpcServer {
     base_url: String,
     server: std::sync::Arc<DaemonRpcServer<RocksStorage>>,
+    miner_keypair: KeyPair,
     miner_pubkey: PublicKey,
     _temp_dir: TempDir,
 }
+
+const TEST_FUNDING_BALANCE: u64 = COIN_VALUE * 10;
 
 fn pick_free_port() -> u16 {
     let mut rng = rand::thread_rng();
@@ -36,28 +38,121 @@ fn pick_free_port() -> u16 {
 }
 
 async fn ensure_account_ready(
-    storage: &mut RocksStorage,
+    blockchain: &Blockchain<RocksStorage>,
+    miner: &KeyPair,
     key: &PublicKey,
-    topoheight: u64,
-    balance: u64,
+    min_balance: u64,
 ) {
-    storage
-        .set_account_registration_topoheight(key, topoheight)
-        .await
-        .expect("register account");
-    storage
-        .set_last_nonce_to(key, topoheight, &VersionedNonce::new(0, Some(topoheight)))
-        .await
-        .expect("init nonce");
-    storage
-        .set_last_balance_to(
-            key,
-            &TOS_ASSET,
+    let miner_pubkey = miner.get_public_key().compress();
+    let chain_id = u8::try_from(blockchain.get_network().chain_id()).expect("chain id fits u8");
+    let mut attempts = 0usize;
+    loop {
+        attempts += 1;
+        let topoheight = blockchain.get_topo_height();
+        let balance = {
+            let storage = blockchain.get_storage().read().await;
+            storage
+                .get_balance_at_maximum_topoheight(key, &TOS_ASSET, topoheight)
+                .await
+                .expect("get balance")
+                .map(|(_, v)| v.get_balance())
+                .unwrap_or(0)
+        };
+        if balance >= min_balance {
+            break;
+        }
+        let block = blockchain
+            .mine_block(&miner_pubkey)
+            .await
+            .expect("mine block");
+        blockchain
+            .add_new_block(block, None, BroadcastOption::None, true)
+            .await
+            .expect("add block");
+        if key == &miner_pubkey {
+            continue;
+        }
+        let topoheight = blockchain.get_topo_height();
+        let (reference_hash, nonce, miner_balance) = {
+            let storage = blockchain.get_storage().read().await;
+            let (reference_hash, _) = storage
+                .get_block_header_at_topoheight(topoheight)
+                .await
+                .expect("get reference header");
+            let nonce = storage
+                .get_nonce_at_maximum_topoheight(&miner_pubkey, topoheight)
+                .await
+                .expect("get miner nonce")
+                .map(|(_, v)| v.get_nonce())
+                .unwrap_or(0);
+            let miner_balance = storage
+                .get_balance_at_maximum_topoheight(&miner_pubkey, &TOS_ASSET, topoheight)
+                .await
+                .expect("get miner balance")
+                .map(|(_, v)| v.get_balance())
+                .unwrap_or(0);
+            (reference_hash, nonce, miner_balance)
+        };
+        let reference = Reference {
             topoheight,
-            &VersionedBalance::new(balance, Some(topoheight)),
-        )
-        .await
-        .expect("fund account");
+            hash: reference_hash,
+        };
+        let amount_needed = min_balance.saturating_sub(balance);
+        let payload = TransferPayload::new(TOS_ASSET, key.clone(), amount_needed, None);
+        let draft = UnsignedTransaction::new_with_fee_type(
+            TxVersion::T1,
+            chain_id,
+            miner_pubkey.clone(),
+            TransactionType::Transfers(vec![payload.clone()]),
+            0,
+            FeeType::TOS,
+            nonce,
+            reference.clone(),
+        );
+        let draft_tx = draft.finalize(miner);
+        let required_fee = {
+            let storage = blockchain.get_storage().read().await;
+            estimate_required_tx_fees(&*storage, topoheight, &draft_tx, BlockVersion::Nobunaga)
+                .await
+                .expect("estimate transfer fee")
+        };
+        let max_send = miner_balance.saturating_sub(required_fee);
+        let amount = amount_needed.min(max_send);
+        if amount == 0 {
+            continue;
+        }
+        let send_payload = TransferPayload::new(TOS_ASSET, key.clone(), amount, None);
+        let unsigned = UnsignedTransaction::new_with_fee_type(
+            TxVersion::T1,
+            chain_id,
+            miner_pubkey.clone(),
+            TransactionType::Transfers(vec![send_payload]),
+            required_fee,
+            FeeType::TOS,
+            nonce,
+            reference,
+        );
+        let tx = unsigned.finalize(miner);
+        blockchain
+            .add_tx_to_mempool(tx, true)
+            .await
+            .expect("add funding transfer");
+        let block = blockchain
+            .mine_block(&miner_pubkey)
+            .await
+            .expect("mine funding block");
+        blockchain
+            .add_new_block(block, None, BroadcastOption::None, true)
+            .await
+            .expect("add funding block");
+        if attempts > 50 {
+            panic!(
+                "unable to fund account {} to min balance {}",
+                key.as_address(false),
+                min_balance
+            );
+        }
+    }
 }
 
 async fn start_rpc_server() -> TestRpcServer {
@@ -95,11 +190,7 @@ async fn start_rpc_server() -> TestRpcServer {
             Ok(chain) => chain,
             Err(_) => continue,
         };
-        {
-            let mut storage = blockchain.get_storage().write().await;
-            ensure_account_ready(&mut storage, &miner_pubkey, blockchain.get_topo_height(), 0)
-                .await;
-        }
+        ensure_account_ready(&blockchain, &miner_keypair, &miner_pubkey, 0).await;
 
         let mut rpc_config = config.rpc.clone();
         rpc_config.disable = false;
@@ -109,6 +200,7 @@ async fn start_rpc_server() -> TestRpcServer {
                 return TestRpcServer {
                     base_url: format!("http://127.0.0.1:{}", port),
                     server,
+                    miner_keypair,
                     miner_pubkey,
                     _temp_dir: temp_dir,
                 };
@@ -138,61 +230,15 @@ async fn mine_and_apply(blockchain: &Blockchain<RocksStorage>, miner: &PublicKey
     block
 }
 
-#[tokio::test]
-#[ignore = "BUGS.md: BUG-2026-01-24-009 Multinode escrow consensus path timeout"]
-async fn test_multinode_escrow_consensus_path() {
-    let node0 = start_rpc_server().await;
-    let node1 = start_rpc_server().await;
-    let client = reqwest::Client::new();
-
-    let blockchain0 = node0.server.get_rpc_handler().get_data().clone();
-    let blockchain1 = node1.server.get_rpc_handler().get_data().clone();
-    let miner_pubkey = node0.miner_pubkey.clone();
-
-    let payer = KeyPair::new();
-    let provider = KeyPair::new();
-    let tns_owner = KeyPair::new();
-    let payer_pubkey = payer.get_public_key().compress();
-    let provider_pubkey = provider.get_public_key().compress();
-    let tns_owner_pubkey = tns_owner.get_public_key().compress();
-    let payer_address = Address::new(false, AddressType::Normal, payer_pubkey.clone());
-
-    {
-        let mut storage0 = blockchain0.get_storage().write().await;
-        ensure_account_ready(
-            &mut storage0,
-            &payer_pubkey,
-            blockchain0.get_topo_height(),
-            COIN_VALUE * 1000,
-        )
-        .await;
-        ensure_account_ready(
-            &mut storage0,
-            &tns_owner_pubkey,
-            blockchain0.get_topo_height(),
-            COIN_VALUE * 1000,
-        )
-        .await;
-
-        let mut storage1 = blockchain1.get_storage().write().await;
-        ensure_account_ready(
-            &mut storage1,
-            &payer_pubkey,
-            blockchain1.get_topo_height(),
-            COIN_VALUE * 1000,
-        )
-        .await;
-        ensure_account_ready(
-            &mut storage1,
-            &tns_owner_pubkey,
-            blockchain1.get_topo_height(),
-            COIN_VALUE * 1000,
-        )
-        .await;
-    }
-
-    let topoheight = blockchain0.get_topo_height();
-    let (reference_hash, _) = blockchain0
+async fn submit_escrow_and_tns(
+    blockchain: &Blockchain<RocksStorage>,
+    miner_pubkey: &PublicKey,
+    payer: &KeyPair,
+    tns_owner: &KeyPair,
+    provider_pubkey: &PublicKey,
+) {
+    let topoheight = blockchain.get_topo_height();
+    let (reference_hash, _) = blockchain
         .get_storage()
         .read()
         .await
@@ -203,7 +249,9 @@ async fn test_multinode_escrow_consensus_path() {
         hash: reference_hash,
         topoheight,
     };
-    let chain_id = u8::try_from(blockchain0.get_network().chain_id()).expect("chain id fits u8");
+    let chain_id = u8::try_from(blockchain.get_network().chain_id()).expect("chain id fits u8");
+    let payer_pubkey = payer.get_public_key().compress();
+    let tns_owner_pubkey = tns_owner.get_public_key().compress();
 
     let payload = CreateEscrowPayload {
         task_id: "task-mn-escrow".to_string(),
@@ -228,8 +276,8 @@ async fn test_multinode_escrow_consensus_path() {
         0,
         reference.clone(),
     );
-    let tx = unsigned.finalize(&payer);
-    blockchain0
+    let tx = unsigned.finalize(payer);
+    blockchain
         .add_tx_to_mempool(tx, true)
         .await
         .expect("add create escrow tx");
@@ -240,22 +288,100 @@ async fn test_multinode_escrow_consensus_path() {
         chain_id,
         tns_owner_pubkey.clone(),
         TransactionType::RegisterName(payload),
-        FEE_PER_KB,
+        REGISTRATION_FEE,
         FeeType::TOS,
         0,
         reference,
     );
-    let tx = unsigned.finalize(&tns_owner);
-    blockchain0
+    let tx = unsigned.finalize(tns_owner);
+    blockchain
         .add_tx_to_mempool(tx, true)
         .await
         .expect("add register name tx");
 
-    let block = mine_and_apply(&blockchain0, &miner_pubkey).await;
-    blockchain1
-        .add_new_block(block, None, BroadcastOption::None, false)
-        .await
-        .expect("apply block on node1");
+    mine_and_apply(blockchain, miner_pubkey).await;
+}
+
+#[test]
+fn test_multinode_escrow_consensus_path() {
+    let handle = std::thread::Builder::new()
+        .name("tck-multinode-escrow-consensus".to_string())
+        .stack_size(16 * 1024 * 1024)
+        .spawn(|| {
+            let rt = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .expect("build tokio runtime");
+            rt.block_on(run_multinode_escrow_consensus_path());
+        })
+        .expect("spawn multinode escrow consensus thread");
+    handle
+        .join()
+        .expect("join multinode escrow consensus thread");
+}
+
+async fn run_multinode_escrow_consensus_path() {
+    let node0 = start_rpc_server().await;
+    let node1 = start_rpc_server().await;
+    let client = reqwest::Client::new();
+
+    let blockchain0 = node0.server.get_rpc_handler().get_data().clone();
+    let blockchain1 = node1.server.get_rpc_handler().get_data().clone();
+    let miner_pubkey = node0.miner_pubkey.clone();
+
+    let payer = KeyPair::new();
+    let provider = KeyPair::new();
+    let tns_owner = KeyPair::new();
+    let payer_pubkey = payer.get_public_key().compress();
+    let provider_pubkey = provider.get_public_key().compress();
+    let tns_owner_pubkey = tns_owner.get_public_key().compress();
+    let payer_address = Address::new(false, AddressType::Normal, payer_pubkey.clone());
+
+    ensure_account_ready(
+        &blockchain0,
+        &node0.miner_keypair,
+        &payer_pubkey,
+        TEST_FUNDING_BALANCE,
+    )
+    .await;
+    ensure_account_ready(
+        &blockchain0,
+        &node0.miner_keypair,
+        &tns_owner_pubkey,
+        TEST_FUNDING_BALANCE,
+    )
+    .await;
+    ensure_account_ready(
+        &blockchain1,
+        &node1.miner_keypair,
+        &payer_pubkey,
+        TEST_FUNDING_BALANCE,
+    )
+    .await;
+    ensure_account_ready(
+        &blockchain1,
+        &node1.miner_keypair,
+        &tns_owner_pubkey,
+        TEST_FUNDING_BALANCE,
+    )
+    .await;
+
+    submit_escrow_and_tns(
+        &blockchain0,
+        &miner_pubkey,
+        &payer,
+        &tns_owner,
+        &provider_pubkey,
+    )
+    .await;
+    submit_escrow_and_tns(
+        &blockchain1,
+        &node1.miner_pubkey,
+        &payer,
+        &tns_owner,
+        &provider_pubkey,
+    )
+    .await;
 
     let req = json!({
         "jsonrpc": "2.0",

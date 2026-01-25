@@ -1043,7 +1043,10 @@ impl<S: Storage> Blockchain<S> {
         let algorithm = get_pow_algorithm_for_version(header.get_version());
         let mut hash = header.get_pow_hash(algorithm)?;
         let mut current_height = self.get_height();
-        while !self.is_simulator_enabled() && !check_difficulty(&hash, &difficulty)? {
+        while !self.is_simulator_enabled()
+            && !self.skip_pow_verification()
+            && !check_difficulty(&hash, &difficulty)?
+        {
             if self.get_height() != current_height {
                 current_height = self.get_height();
                 header = self.get_block_template(key.clone()).await?;

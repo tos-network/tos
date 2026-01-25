@@ -1,4 +1,5 @@
 mod asset;
+mod asset_supply;
 mod balance;
 mod cache;
 mod contract;
@@ -16,6 +17,7 @@ use log::debug;
 use tos_common::block::TopoHeight;
 
 pub use asset::*;
+pub use asset_supply::*;
 pub use balance::*;
 pub use cache::*;
 pub use contract::*;
