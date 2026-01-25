@@ -345,12 +345,51 @@ mod tests {
     // ========================================================================
 
     #[tokio::test]
-    #[ignore = "Requires LocalTosNetwork with VRF support and dynamic node join"]
     async fn late_join_node_verifies_vrf() {
-        // Setup: 2-node network, mine 10 blocks
-        // Add node 3 (late joiner)
-        // Wait for sync
-        // Assert: Node 3 verified all 10 blocks' VRF proofs during sync
+        // Setup: 2-node network with VRF
+        let mut network = LocalTosNetworkBuilder::new()
+            .with_nodes(2)
+            .with_random_vrf_keys()
+            .build()
+            .await
+            .expect("Failed to build network");
+
+        // Mine 10 blocks on node 0 (each with VRF proof)
+        for _ in 0..10 {
+            network.mine_and_propagate(0).await.expect("mine");
+        }
+
+        // Verify node 0 has VRF data for all blocks
+        for height in 1..=10 {
+            let vrf_data = network.node(0).get_block_vrf_data(height);
+            assert!(
+                vrf_data.is_some(),
+                "Node 0 should have VRF data for height {}",
+                height
+            );
+        }
+
+        // Add a late-joining node that syncs from node 0
+        // The sync process will verify VRF proofs for each block
+        let new_node_id = network
+            .add_node(0, None)
+            .await
+            .expect("Failed to add node - VRF verification may have failed");
+
+        // Verify new node synced to correct height
+        let new_node_height = network.node(new_node_id).get_tip_height().await.unwrap();
+        assert_eq!(
+            new_node_height, 10,
+            "New node should sync to height 10 after verifying all VRF proofs"
+        );
+
+        // Verify new node has the same tip as node 0
+        let node0_tips = network.node(0).get_tips().await.unwrap();
+        let new_node_tips = network.node(new_node_id).get_tips().await.unwrap();
+        assert_eq!(
+            node0_tips, new_node_tips,
+            "New node should have same tips as source node"
+        );
     }
 
     // ========================================================================

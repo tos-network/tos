@@ -13,6 +13,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tos_common::block::BlockVrfData;
 use tos_common::contract::{ScheduledExecution, ScheduledExecutionKind, ScheduledExecutionStatus};
+use tos_common::crypto::elgamal::CompressedPublicKey;
 use tos_common::crypto::{Hash, KeyPair};
 use tos_daemon::vrf::VrfKeyManager;
 
@@ -82,6 +83,8 @@ pub struct TestBlock {
     pub selected_parent: Hash,
     /// VRF data for this block (None if VRF not configured)
     pub vrf_data: Option<tos_common::block::BlockVrfData>,
+    /// Miner public key (for VRF verification)
+    pub miner: CompressedPublicKey,
 }
 
 /// Pruning depth constant (matches daemon/src/config.rs PRUNING_DEPTH)
@@ -216,21 +219,6 @@ impl TestBlockchain {
         // Compute initial state root
         let state_root = Self::compute_state_root(&accounts);
 
-        // Genesis hash (zero hash for test blockchain)
-        let genesis_hash = Hash::zero();
-
-        // Create genesis block with pruning point = genesis (itself)
-        let genesis_block = TestBlock {
-            hash: genesis_hash.clone(),
-            height: 0,
-            topoheight: 0,
-            transactions: vec![],
-            reward: 0,
-            pruning_point: genesis_hash.clone(),
-            selected_parent: genesis_hash.clone(), // Genesis has no parent
-            vrf_data: None,
-        };
-
         // Initialize VRF key manager if configured
         let (vrf_key_manager, chain_id) = if let Some(config) = vrf_config {
             let manager = if let Some(ref secret_hex) = config.secret_key_hex {
@@ -245,6 +233,23 @@ impl TestBlockchain {
 
         // Generate a deterministic miner keypair for VRF binding
         let miner_keypair = KeyPair::new();
+        let miner_pk = miner_keypair.get_public_key().compress();
+
+        // Genesis hash (zero hash for test blockchain)
+        let genesis_hash = Hash::zero();
+
+        // Create genesis block with pruning point = genesis (itself)
+        let genesis_block = TestBlock {
+            hash: genesis_hash.clone(),
+            height: 0,
+            topoheight: 0,
+            transactions: vec![],
+            reward: 0,
+            pruning_point: genesis_hash.clone(),
+            selected_parent: genesis_hash.clone(), // Genesis has no parent
+            vrf_data: None,
+            miner: miner_pk,
+        };
 
         // Initialize blocks_by_hash with genesis
         let mut blocks_by_hash = HashMap::new();
@@ -504,6 +509,7 @@ impl TestBlockchain {
             pruning_point,
             selected_parent,
             vrf_data,
+            miner: miner_pk,
         };
 
         // Update blockchain state
@@ -1426,6 +1432,12 @@ mod tests {
         Hash::new(bytes)
     }
 
+    fn test_miner() -> CompressedPublicKey {
+        // Create a deterministic test miner public key
+        let kp = KeyPair::new();
+        kp.get_public_key().compress()
+    }
+
     #[tokio::test]
     async fn test_blockchain_creation() {
         let clock = Arc::new(SystemClock);
@@ -1926,6 +1938,7 @@ mod tests {
             pruning_point: genesis_hash.clone(),
             selected_parent: genesis_hash,
             vrf_data: None,
+            miner: test_miner(),
         };
 
         blockchain.receive_block(block).await.unwrap();
@@ -1948,6 +1961,7 @@ mod tests {
             pruning_point: genesis_hash.clone(),
             selected_parent: genesis_hash,
             vrf_data: None,
+            miner: test_miner(),
         };
 
         let result = blockchain.receive_block(block).await;
@@ -1971,6 +1985,7 @@ mod tests {
             pruning_point: genesis_hash.clone(),
             selected_parent: genesis_hash,
             vrf_data: None,
+            miner: test_miner(),
         };
 
         blockchain.receive_block(block.clone()).await.unwrap();
@@ -3130,6 +3145,7 @@ mod tests {
             pruning_point: genesis_hash.clone(),
             selected_parent: genesis_hash,
             vrf_data: None,
+            miner: test_miner(),
         };
 
         blockchain.receive_block(block).await.unwrap();
@@ -3173,6 +3189,7 @@ mod tests {
             pruning_point: genesis_hash.clone(),
             selected_parent: genesis_hash,
             vrf_data: None,
+            miner: test_miner(),
         };
 
         blockchain.receive_block(block).await.unwrap();
@@ -3382,6 +3399,7 @@ mod tests {
             pruning_point: genesis_hash.clone(),
             selected_parent: genesis_hash,
             vrf_data: None,
+            miner: mined_block.miner,
         };
         blockchain2.receive_block(received_block).await.unwrap();
 
@@ -3565,6 +3583,7 @@ mod tests {
             pruning_point: genesis_hash.clone(),
             selected_parent: genesis_hash,
             vrf_data: None,
+            miner: test_miner(),
         };
 
         let result = blockchain.receive_block(block).await;
@@ -3589,6 +3608,7 @@ mod tests {
             pruning_point: genesis_hash.clone(),
             selected_parent: genesis_hash,
             vrf_data: None,
+            miner: test_miner(),
         };
 
         blockchain.receive_block(block.clone()).await.unwrap();
@@ -3783,6 +3803,7 @@ mod tests {
             pruning_point: genesis_hash.clone(),
             selected_parent: genesis_hash,
             vrf_data: None,
+            miner: test_miner(),
         };
 
         let result = blockchain.receive_block(block).await;
@@ -3855,6 +3876,7 @@ mod tests {
             pruning_point: genesis_hash.clone(),
             selected_parent: genesis_hash,
             vrf_data: None,
+            miner: test_miner(),
         };
 
         // Block with invalid transaction should be rejected

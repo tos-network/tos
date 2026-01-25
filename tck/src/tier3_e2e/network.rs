@@ -574,6 +574,205 @@ impl LocalTosNetwork {
         Ok(hash)
     }
 
+    /// Add a new node to the network (late joiner)
+    ///
+    /// The new node will:
+    /// 1. Be created with the same genesis state as other nodes
+    /// 2. Sync blocks from an existing node
+    /// 3. Verify VRF proofs during sync (if source node has VRF)
+    ///
+    /// # Arguments
+    ///
+    /// * `sync_from_node` - Node ID to sync blocks from
+    /// * `vrf_key` - Optional VRF secret key hex for the new node
+    ///
+    /// # Returns
+    ///
+    /// The ID of the newly added node
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let network = LocalTosNetworkBuilder::new()
+    ///     .with_nodes(2)
+    ///     .build()
+    ///     .await?;
+    ///
+    /// // Mine some blocks on node 0
+    /// for _ in 0..5 {
+    ///     network.mine_and_propagate(0).await?;
+    /// }
+    ///
+    /// // Add a late-joining node that syncs from node 0
+    /// let new_node_id = network.add_node(0, None).await?;
+    ///
+    /// // New node should have synced all 5 blocks
+    /// assert_eq!(network.node(new_node_id).get_tip_height().await?, 5);
+    /// ```
+    pub async fn add_node(
+        &mut self,
+        sync_from_node: usize,
+        vrf_key: Option<String>,
+    ) -> Result<usize> {
+        let new_node_id = self.nodes.len();
+
+        // Build blockchain with same genesis state
+        let mut builder =
+            TestBlockchainBuilder::new().with_clock(self.clock.clone() as Arc<dyn Clock>);
+
+        // Add genesis accounts (same as other nodes)
+        for (addr, balance) in self.genesis_accounts.values() {
+            builder = builder.with_funded_account(addr.clone(), *balance);
+        }
+
+        // Add VRF config if provided
+        if let Some(ref vrf_secret_hex) = vrf_key {
+            let vrf_config = VrfConfig::new(vrf_secret_hex.clone()).with_chain_id(3); // devnet
+            builder = builder.with_vrf_config(vrf_config);
+        }
+
+        let blockchain = builder
+            .build()
+            .await
+            .with_context(|| format!("Failed to build blockchain for node {}", new_node_id))?;
+
+        // Create daemon
+        let daemon = TestDaemon::new(blockchain, self.clock.clone() as Arc<dyn Clock>);
+
+        // Build peer list based on topology (connect to all existing nodes in full mesh)
+        let peers: Vec<usize> = match &self.topology {
+            NetworkTopology::FullMesh => (0..new_node_id).collect(),
+            NetworkTopology::Ring => {
+                // Connect to last node and first node
+                if new_node_id > 0 {
+                    vec![new_node_id - 1, 0]
+                } else {
+                    vec![]
+                }
+            }
+            NetworkTopology::Star { center } => vec![*center],
+            NetworkTopology::Custom(_) => vec![sync_from_node], // Just connect to sync source
+        };
+
+        // Create node handle
+        let node = NodeHandle {
+            id: new_node_id,
+            daemon,
+            clock: self.clock.clone(),
+            peers: peers.clone(),
+        };
+
+        self.nodes.push(node);
+
+        // Update existing nodes' peer lists for full mesh
+        if matches!(self.topology, NetworkTopology::FullMesh) {
+            for existing_node in &mut self.nodes[..new_node_id] {
+                existing_node.peers.push(new_node_id);
+            }
+        }
+
+        // Sync blocks from source node
+        let source_height = self.nodes[sync_from_node].get_tip_height().await?;
+
+        if source_height > 0 {
+            if log::log_enabled!(log::Level::Info) {
+                log::info!(
+                    "Node {} syncing {} blocks from node {}",
+                    new_node_id,
+                    source_height,
+                    sync_from_node
+                );
+            }
+
+            // Get blocks from source and apply to new node
+            for height in 1..=source_height {
+                let block = self.nodes[sync_from_node]
+                    .daemon
+                    .get_block_at_height(height)
+                    .await?
+                    .with_context(|| {
+                        format!("Block at height {} not found on source node", height)
+                    })?;
+
+                // Verify VRF if source node has VRF data for this block
+                if let Some(vrf_data) = self.nodes[sync_from_node].get_block_vrf_data(height) {
+                    // Verify VRF proof during sync
+                    let is_valid = self.verify_vrf_proof(&vrf_data, &block.hash, &block.miner);
+                    if !is_valid {
+                        anyhow::bail!(
+                            "VRF verification failed for block {} at height {}",
+                            block.hash,
+                            height
+                        );
+                    }
+
+                    if log::log_enabled!(log::Level::Debug) {
+                        log::debug!(
+                            "Node {} verified VRF for block {} at height {}",
+                            new_node_id,
+                            block.hash,
+                            height
+                        );
+                    }
+                }
+
+                // Apply block to new node
+                self.nodes[new_node_id]
+                    .daemon
+                    .receive_block(block)
+                    .await
+                    .with_context(|| format!("Failed to apply block at height {}", height))?;
+            }
+
+            if log::log_enabled!(log::Level::Info) {
+                log::info!(
+                    "Node {} sync complete, now at height {}",
+                    new_node_id,
+                    source_height
+                );
+            }
+        }
+
+        Ok(new_node_id)
+    }
+
+    /// Verify VRF proof for a block
+    ///
+    /// Returns true if the VRF proof is valid for the given block hash and miner.
+    fn verify_vrf_proof(
+        &self,
+        vrf_data: &tos_common::block::BlockVrfData,
+        block_hash: &Hash,
+        miner: &tos_common::crypto::elgamal::CompressedPublicKey,
+    ) -> bool {
+        use tos_common::block::compute_vrf_input;
+        use tos_daemon::vrf::{VrfOutput, VrfProof, VrfPublicKey};
+
+        // Parse VRF components
+        let public_key = match VrfPublicKey::from_bytes(&vrf_data.public_key) {
+            Ok(pk) => pk,
+            Err(_) => return false,
+        };
+
+        let proof = match VrfProof::from_bytes(&vrf_data.proof) {
+            Ok(p) => p,
+            Err(_) => return false,
+        };
+
+        let output = match VrfOutput::from_bytes(&vrf_data.output) {
+            Ok(o) => o,
+            Err(_) => return false,
+        };
+
+        // Compute VRF input with miner identity binding
+        // vrf_input = BLAKE3("TOS-VRF-INPUT-v1" || block_hash || miner_public_key)
+        let block_hash_bytes: [u8; 32] = *block_hash.as_bytes();
+        let vrf_input = compute_vrf_input(&block_hash_bytes, miner);
+
+        // Verify the proof (returns Result<(), VrfError>)
+        public_key.verify(&vrf_input, &output, &proof).is_ok()
+    }
+
     /// Shutdown network
     ///
     /// Stops all nodes gracefully.
