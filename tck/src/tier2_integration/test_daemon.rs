@@ -276,6 +276,48 @@ impl TestDaemon {
     }
 
     // ========================================================================
+    // Scheduled Execution Support
+    // ========================================================================
+
+    /// Schedule an execution for a future topoheight
+    ///
+    /// # Arguments
+    ///
+    /// * `exec` - The scheduled execution to register
+    ///
+    /// # Returns
+    ///
+    /// The hash of the scheduled execution
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if daemon is not running
+    pub fn schedule_execution(
+        &self,
+        exec: tos_common::contract::ScheduledExecution,
+    ) -> Result<Hash> {
+        self.ensure_running()?;
+        self.blockchain.schedule_execution(exec)
+    }
+
+    /// Get the status of a scheduled execution
+    ///
+    /// # Returns
+    ///
+    /// Some((status, topoheight)) if found, None if not scheduled
+    pub fn get_scheduled_status(
+        &self,
+        hash: &Hash,
+    ) -> Option<(tos_common::contract::ScheduledExecutionStatus, u64)> {
+        self.blockchain.get_scheduled_status(hash)
+    }
+
+    /// Get all pending executions at a specific topoheight
+    pub fn get_pending_at(&self, topo: u64) -> Vec<tos_common::contract::ScheduledExecution> {
+        self.blockchain.get_pending_at(topo)
+    }
+
+    // ========================================================================
     // Direct State Access (for test assertions)
     // ========================================================================
 

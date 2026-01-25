@@ -137,6 +137,27 @@ impl NodeHandle {
         self.daemon.has_vrf()
     }
 
+    /// Schedule an execution for a future topoheight
+    pub fn schedule_execution(
+        &self,
+        exec: tos_common::contract::ScheduledExecution,
+    ) -> Result<Hash> {
+        self.daemon.schedule_execution(exec)
+    }
+
+    /// Get the status of a scheduled execution
+    pub fn get_scheduled_status(
+        &self,
+        hash: &Hash,
+    ) -> Option<(tos_common::contract::ScheduledExecutionStatus, u64)> {
+        self.daemon.get_scheduled_status(hash)
+    }
+
+    /// Get all pending executions at a specific topoheight
+    pub fn get_pending_at(&self, topo: u64) -> Vec<tos_common::contract::ScheduledExecution> {
+        self.daemon.get_pending_at(topo)
+    }
+
     /// Receive a block that may create a fork (for reorg testing)
     pub async fn receive_fork_block(
         &self,

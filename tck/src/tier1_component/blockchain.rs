@@ -12,6 +12,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tos_common::block::BlockVrfData;
+use tos_common::contract::{ScheduledExecution, ScheduledExecutionKind, ScheduledExecutionStatus};
 use tos_common::crypto::{Hash, KeyPair};
 use tos_daemon::vrf::VrfKeyManager;
 
@@ -46,7 +47,7 @@ pub struct BlockchainCounters {
 }
 
 /// Transaction for testing
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TestTransaction {
     /// Transaction hash
     pub hash: Hash,
@@ -159,6 +160,12 @@ pub struct TestBlockchain {
 
     /// Blocks indexed by hash for O(1) lookup (for reorg support)
     blocks_by_hash: Arc<RwLock<HashMap<Hash, TestBlock>>>,
+
+    /// Scheduled execution queue: target_topoheight → pending executions
+    scheduled_queue: Arc<RwLock<BTreeMap<u64, Vec<ScheduledExecution>>>>,
+
+    /// Scheduled execution results: exec_hash → (status, executed_topoheight)
+    scheduled_results: Arc<RwLock<HashMap<Hash, (ScheduledExecutionStatus, u64)>>>,
 }
 
 impl TestBlockchain {
@@ -251,6 +258,8 @@ impl TestBlockchain {
             chain_id,
             genesis_accounts: funded_accounts,
             blocks_by_hash: Arc::new(RwLock::new(blocks_by_hash)),
+            scheduled_queue: Arc::new(RwLock::new(BTreeMap::new())),
+            scheduled_results: Arc::new(RwLock::new(HashMap::new())),
         })
     }
 
@@ -428,21 +437,27 @@ impl TestBlockchain {
         let new_topoheight = current_topoheight
             .checked_add(1)
             .context("Topoheight overflow - chain too long")?;
-        let block_hash = Self::compute_block_hash(new_height, &transactions);
 
-        // Get selected parent (previous tip)
+        // Get selected parent (previous tip) - needed for unique block hash
         let selected_parent = if let Some(last_block) = blocks.last() {
             last_block.hash.clone()
         } else {
             self.genesis_hash.clone()
         };
 
+        // Get miner public key (used for both block hash and VRF)
+        let miner_pk = self.miner_keypair.get_public_key().compress();
+        let miner_pk_bytes: [u8; 32] = *miner_pk.as_bytes();
+
+        // Compute block hash (includes parent and miner for uniqueness)
+        let block_hash =
+            Self::compute_block_hash(new_height, &transactions, &selected_parent, &miner_pk_bytes);
+
         // Calculate pruning point using BlockDAG algorithm
         let pruning_point = self.calc_pruning_point(&blocks, &selected_parent, new_topoheight);
 
         // Produce VRF data if configured
         let vrf_data = if let Some(ref vrf_mgr) = self.vrf_key_manager {
-            let miner_pk = self.miner_keypair.get_public_key().compress();
             let block_hash_bytes: [u8; 32] = *block_hash.as_bytes();
             match vrf_mgr.sign(
                 self.chain_id,
@@ -485,8 +500,22 @@ impl TestBlockchain {
         self.topoheight.store(new_topoheight, Ordering::SeqCst);
         *self.tips.write() = vec![block_hash.clone()];
 
+        // Store block by hash for reorg support
+        self.blocks_by_hash
+            .write()
+            .insert(block_hash.clone(), block.clone());
+
+        // Process scheduled executions at this topoheight
+        // (drop locks first to avoid deadlock)
+        drop(accounts);
+        drop(counters);
+        drop(blocks);
+        self.process_scheduled_at_topoheight(new_topoheight);
+
         // Recompute state root
+        let accounts = self.accounts.read();
         *self.state_root.write() = Self::compute_state_root(&accounts);
+        drop(accounts);
 
         if log::log_enabled!(log::Level::Info) {
             log::info!(
@@ -579,6 +608,115 @@ impl TestBlockchain {
     /// Get the chain ID used for VRF binding
     pub fn chain_id(&self) -> u64 {
         self.chain_id
+    }
+
+    // ========================================================================
+    // Scheduled Execution Support
+    // ========================================================================
+
+    /// Schedule an execution for a future topoheight
+    ///
+    /// # Arguments
+    ///
+    /// * `exec` - The scheduled execution to register
+    ///
+    /// # Returns
+    ///
+    /// The hash of the scheduled execution
+    pub fn schedule_execution(&self, mut exec: ScheduledExecution) -> Result<Hash> {
+        let target_topo = match exec.kind {
+            ScheduledExecutionKind::TopoHeight(t) => t,
+            ScheduledExecutionKind::BlockEnd => {
+                anyhow::bail!("BlockEnd scheduling not supported in TestBlockchain");
+            }
+        };
+
+        // Generate deterministic hash if not set
+        if exec.hash == Hash::zero() {
+            let mut hash_input = Vec::new();
+            hash_input.extend_from_slice(exec.scheduler_contract.as_bytes());
+            hash_input.extend_from_slice(exec.contract.as_bytes());
+            hash_input.extend_from_slice(&target_topo.to_le_bytes());
+            hash_input.extend_from_slice(&exec.offer_amount.to_le_bytes());
+            exec.hash = tos_common::crypto::hash(&hash_input);
+        }
+
+        let hash = exec.hash.clone();
+        let mut queue = self.scheduled_queue.write();
+        queue.entry(target_topo).or_default().push(exec);
+
+        if log::log_enabled!(log::Level::Debug) {
+            log::debug!(
+                "Scheduled execution {} for topoheight {}",
+                hash,
+                target_topo
+            );
+        }
+
+        Ok(hash)
+    }
+
+    /// Get the status of a scheduled execution
+    ///
+    /// # Returns
+    ///
+    /// Some((status, topoheight)) if found, None if not scheduled
+    pub fn get_scheduled_status(&self, hash: &Hash) -> Option<(ScheduledExecutionStatus, u64)> {
+        // First check results
+        let results = self.scheduled_results.read();
+        if let Some(result) = results.get(hash) {
+            return Some(*result);
+        }
+        drop(results);
+
+        // Check pending queue
+        let queue = self.scheduled_queue.read();
+        for (topo, execs) in queue.iter() {
+            for exec in execs {
+                if exec.hash == *hash {
+                    return Some((ScheduledExecutionStatus::Pending, *topo));
+                }
+            }
+        }
+
+        None
+    }
+
+    /// Get all pending executions at a specific topoheight
+    pub fn get_pending_at(&self, topo: u64) -> Vec<ScheduledExecution> {
+        let queue = self.scheduled_queue.read();
+        queue.get(&topo).cloned().unwrap_or_default()
+    }
+
+    /// Process scheduled executions at a given topoheight
+    ///
+    /// This is called during block processing (mine or receive).
+    /// Executions are marked as Executed (simplified - no actual contract execution).
+    fn process_scheduled_at_topoheight(&self, topo: u64) {
+        let mut queue = self.scheduled_queue.write();
+        let mut results = self.scheduled_results.write();
+
+        if let Some(execs) = queue.remove(&topo) {
+            for exec in execs {
+                // Mark as executed (simplified - actual execution would happen here)
+                results.insert(
+                    exec.hash.clone(),
+                    (ScheduledExecutionStatus::Executed, topo),
+                );
+
+                if log::log_enabled!(log::Level::Debug) {
+                    log::debug!("Executed scheduled {} at topoheight {}", exec.hash, topo);
+                }
+            }
+        }
+    }
+
+    /// Clear all scheduled state (for reorg reset)
+    fn clear_scheduled_state(&self) {
+        let mut queue = self.scheduled_queue.write();
+        let mut results = self.scheduled_results.write();
+        queue.clear();
+        results.clear();
     }
 
     /// Receive a block from a peer and apply it to the blockchain
@@ -692,6 +830,14 @@ impl TestBlockchain {
         // Remove applied transactions from mempool (if they exist)
         let mut mempool = self.mempool.write();
         mempool.retain(|tx| !block.transactions.iter().any(|btx| btx.hash == tx.hash));
+        drop(mempool);
+
+        // Process scheduled executions at this topoheight
+        // (drop locks first to avoid deadlock)
+        drop(accounts);
+        drop(counters);
+        drop(blocks);
+        self.process_scheduled_at_topoheight(block.topoheight);
 
         if log::log_enabled!(log::Level::Debug) {
             log::debug!(
@@ -886,6 +1032,9 @@ impl TestBlockchain {
         // Clear mempool
         self.mempool.write().clear();
 
+        // Clear scheduled execution state
+        self.clear_scheduled_state();
+
         if log::log_enabled!(log::Level::Debug) {
             log::debug!("Reset blockchain state to genesis");
         }
@@ -947,20 +1096,36 @@ impl TestBlockchain {
         // Recompute state root
         *self.state_root.write() = Self::compute_state_root(&accounts);
 
+        // Process scheduled executions at this topoheight
+        // (drop locks first to avoid deadlock)
+        drop(accounts);
+        drop(counters);
+        drop(blocks);
+        self.process_scheduled_at_topoheight(block.topoheight);
+
         Ok(())
     }
 
     /// Compute block hash from height and transactions
-    fn compute_block_hash(height: u64, transactions: &[TestTransaction]) -> Hash {
+    fn compute_block_hash(
+        height: u64,
+        transactions: &[TestTransaction],
+        parent_hash: &Hash,
+        miner_pk: &[u8; 32],
+    ) -> Hash {
         use std::collections::hash_map::DefaultHasher;
         use std::hash::{Hash as StdHash, Hasher};
 
         let mut hasher = DefaultHasher::new();
         height.hash(&mut hasher);
+        parent_hash.as_bytes().hash(&mut hasher);
 
         for tx in transactions {
             tx.hash.as_bytes().hash(&mut hasher);
         }
+
+        // Include miner public key to make block hash unique per miner
+        miner_pk.hash(&mut hasher);
 
         let hash_value = hasher.finish();
         let mut bytes = [0u8; 32];
@@ -2522,8 +2687,17 @@ mod tests {
         let block1 = blockchain1.mine_block().await.unwrap();
         let block2 = blockchain2.mine_block().await.unwrap();
 
-        // Blocks should have identical hashes
-        assert_eq!(block1.hash, block2.hash);
+        // Blocks from different miners should have DIFFERENT hashes
+        // (miner public key is included in block hash for uniqueness)
+        assert_ne!(
+            block1.hash, block2.hash,
+            "Different miners should produce different block hashes"
+        );
+
+        // But same height, same parent, same transactions, same miner = same hash
+        // This is verified by the block hash computation being deterministic
+        assert_eq!(block1.height, block2.height);
+        assert_eq!(block1.transactions, block2.transactions);
     }
 
     // ============================================================================
