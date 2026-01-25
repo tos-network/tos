@@ -206,6 +206,40 @@ impl TestDaemon {
         self.blockchain.get_nonce(address).await
     }
 
+    /// Get VRF data for block at specific height
+    ///
+    /// # Arguments
+    ///
+    /// * `height` - The block height to query VRF for
+    ///
+    /// # Returns
+    ///
+    /// VRF data if the block exists and has VRF data, None otherwise
+    pub fn get_block_vrf_data(&self, height: u64) -> Option<tos_common::block::BlockVrfData> {
+        self.blockchain.get_block_vrf_data(height)
+    }
+
+    /// Get VRF data for block at specific topoheight
+    ///
+    /// # Arguments
+    ///
+    /// * `topoheight` - The topoheight to query VRF for
+    ///
+    /// # Returns
+    ///
+    /// VRF data if the block exists and has VRF data, None otherwise
+    pub fn get_block_vrf_data_at_topoheight(
+        &self,
+        topoheight: u64,
+    ) -> Option<tos_common::block::BlockVrfData> {
+        self.blockchain.get_block_vrf_data_at_topoheight(topoheight)
+    }
+
+    /// Check if VRF is configured for this daemon's blockchain
+    pub fn has_vrf(&self) -> bool {
+        self.blockchain.has_vrf()
+    }
+
     // ========================================================================
     // Direct State Access (for test assertions)
     // ========================================================================

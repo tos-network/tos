@@ -2,7 +2,7 @@
 
 use super::test_daemon::TestDaemon;
 use crate::orchestrator::{Clock, SystemClock};
-use crate::tier1_component::TestBlockchainBuilder;
+use crate::tier1_component::{TestBlockchainBuilder, VrfConfig};
 use anyhow::Result;
 use std::sync::Arc;
 use tos_common::crypto::Hash;
@@ -33,6 +33,9 @@ pub struct TestDaemonBuilder {
 
     /// Number of funded accounts to create
     funded_account_count: Option<usize>,
+
+    /// VRF configuration (None = no VRF production)
+    vrf_config: Option<VrfConfig>,
 }
 
 impl TestDaemonBuilder {
@@ -41,12 +44,14 @@ impl TestDaemonBuilder {
     /// Default configuration:
     /// - SystemClock (real time)
     /// - 1 funded account with 1,000 TOS
+    /// - No VRF
     pub fn new() -> Self {
         Self {
             clock: None,
             funded_accounts: Vec::new(),
             default_balance: 1_000_000_000_000, // 1000 TOS in nanoTOS
             funded_account_count: None,
+            vrf_config: None,
         }
     }
 
@@ -115,6 +120,58 @@ impl TestDaemonBuilder {
         self
     }
 
+    /// Configure VRF with a hex-encoded secret key
+    ///
+    /// When VRF is configured, mined blocks will include VRF data.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let builder = TestDaemonBuilder::new()
+    ///     .with_vrf_key("0123456789abcdef...");
+    /// ```
+    pub fn with_vrf_key(mut self, secret_hex: &str) -> Self {
+        let config = self.vrf_config.get_or_insert(VrfConfig {
+            secret_key_hex: None,
+            chain_id: 3,
+        });
+        config.secret_key_hex = Some(secret_hex.to_string());
+        self
+    }
+
+    /// Configure VRF with full VrfConfig
+    pub fn with_vrf_config(mut self, config: VrfConfig) -> Self {
+        self.vrf_config = Some(config);
+        self
+    }
+
+    /// Configure VRF with a randomly generated key
+    ///
+    /// Generates a new random VRF keypair for this daemon.
+    pub fn with_random_vrf_key(mut self) -> Self {
+        use tos_daemon::vrf::VrfKeyManager;
+        let manager = VrfKeyManager::new();
+        let secret_hex = manager.secret_key_hex();
+        let config = self.vrf_config.get_or_insert(VrfConfig {
+            secret_key_hex: None,
+            chain_id: 3,
+        });
+        config.secret_key_hex = Some(secret_hex);
+        self
+    }
+
+    /// Set chain ID for VRF binding signature
+    ///
+    /// Default is 3 (devnet).
+    pub fn with_chain_id(mut self, chain_id: u64) -> Self {
+        let config = self.vrf_config.get_or_insert(VrfConfig {
+            secret_key_hex: None,
+            chain_id: 3,
+        });
+        config.chain_id = chain_id;
+        self
+    }
+
     /// Build the TestDaemon instance
     ///
     /// # Errors
@@ -148,6 +205,11 @@ impl TestDaemonBuilder {
         // Add individual funded accounts (these will be appended to the accounts from count)
         for (addr, balance) in self.funded_accounts {
             blockchain_builder = blockchain_builder.with_funded_account(addr, balance);
+        }
+
+        // Add VRF config if specified
+        if let Some(vrf_config) = self.vrf_config {
+            blockchain_builder = blockchain_builder.with_vrf_config(vrf_config);
         }
 
         let blockchain = blockchain_builder.build().await?;

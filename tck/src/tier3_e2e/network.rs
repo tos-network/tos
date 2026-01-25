@@ -52,7 +52,7 @@
 //! ```
 
 use crate::orchestrator::{Clock, PausedClock};
-use crate::tier1_component::TestBlockchainBuilder;
+use crate::tier1_component::{TestBlockchainBuilder, VrfConfig};
 use crate::tier2_integration::{Hash, NodeRpc, TestDaemon};
 use crate::tier3_e2e::waiters::*;
 use anyhow::{Context, Result};
@@ -60,6 +60,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::time::Duration;
+use tos_daemon::vrf::VrfKeyManager;
 
 /// Network topology defining connectivity between nodes
 #[derive(Debug, Clone, Default)]
@@ -116,6 +117,24 @@ impl NodeHandle {
     /// Check if this node is connected to another node
     pub fn is_connected_to(&self, peer_id: usize) -> bool {
         self.peers.contains(&peer_id)
+    }
+
+    /// Get VRF data for block at specific height
+    pub fn get_block_vrf_data(&self, height: u64) -> Option<tos_common::block::BlockVrfData> {
+        self.daemon.get_block_vrf_data(height)
+    }
+
+    /// Get VRF data for block at specific topoheight
+    pub fn get_block_vrf_data_at_topoheight(
+        &self,
+        topoheight: u64,
+    ) -> Option<tos_common::block::BlockVrfData> {
+        self.daemon.get_block_vrf_data_at_topoheight(topoheight)
+    }
+
+    /// Check if VRF is configured for this node
+    pub fn has_vrf(&self) -> bool {
+        self.daemon.has_vrf()
     }
 }
 
@@ -542,6 +561,13 @@ pub struct LocalTosNetworkBuilder {
 
     /// Clock seed (for deterministic testing)
     seed: Option<u64>,
+
+    /// Per-node VRF secret keys (hex strings)
+    /// If fewer keys than nodes, remaining nodes have no VRF
+    vrf_keys: Vec<String>,
+
+    /// Chain ID for VRF binding (default: 3 = devnet)
+    chain_id: u64,
 }
 
 impl LocalTosNetworkBuilder {
@@ -553,6 +579,8 @@ impl LocalTosNetworkBuilder {
             genesis_accounts: HashMap::new(),
             default_balance: 0,
             seed: None,
+            vrf_keys: Vec::new(),
+            chain_id: 3, // devnet default
         }
     }
 
@@ -601,6 +629,40 @@ impl LocalTosNetworkBuilder {
         self
     }
 
+    /// Set VRF keys for nodes
+    ///
+    /// Keys are assigned in order. If fewer keys than nodes, remaining
+    /// nodes will not have VRF configured.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// builder.with_vrf_keys(vec![
+    ///     "abcd1234...".to_string(),
+    ///     "efgh5678...".to_string(),
+    /// ]);
+    /// ```
+    pub fn with_vrf_keys(mut self, keys: Vec<String>) -> Self {
+        self.vrf_keys = keys;
+        self
+    }
+
+    /// Generate random VRF keys for all nodes
+    ///
+    /// Each node will get a unique randomly generated VRF keypair.
+    pub fn with_random_vrf_keys(mut self) -> Self {
+        self.vrf_keys = (0..self.node_count)
+            .map(|_| VrfKeyManager::new().secret_key_hex())
+            .collect();
+        self
+    }
+
+    /// Set chain ID for VRF binding (default: 3 = devnet)
+    pub fn with_chain_id(mut self, chain_id: u64) -> Self {
+        self.chain_id = chain_id;
+        self
+    }
+
     /// Build the network
     ///
     /// Creates all nodes, initializes their blockchains with genesis state,
@@ -631,6 +693,13 @@ impl LocalTosNetworkBuilder {
             // Add genesis accounts
             for (addr, balance) in genesis_accounts_map.values() {
                 builder = builder.with_funded_account(addr.clone(), *balance);
+            }
+
+            // Add VRF config if this node has a VRF key
+            if let Some(vrf_secret_hex) = self.vrf_keys.get(node_id) {
+                let vrf_config =
+                    VrfConfig::new(vrf_secret_hex.clone()).with_chain_id(self.chain_id);
+                builder = builder.with_vrf_config(vrf_config);
             }
 
             let blockchain = builder

@@ -46,7 +46,7 @@ pub use restart::{PreStopState, RestartMode};
 
 pub use clone::mock_cloned_state;
 pub use cluster_config::{ClusterConfig, MiningConfig, NodeConfig, NodeRole, NodeState, SyncMode};
-pub use network::NetworkTopology;
+pub use network::{LocalTosNetwork, LocalTosNetworkBuilder, NetworkTopology};
 pub use operations::{
     create_transfer_tx, mine_and_propagate, run_transaction_sequence, send_and_verify_transfer,
     verify_cluster_consistency,
