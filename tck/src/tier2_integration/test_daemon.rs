@@ -135,6 +135,41 @@ impl TestDaemon {
         self.blockchain.receive_block(block).await
     }
 
+    /// Receive a block that may create a fork (for reorg testing)
+    ///
+    /// # Arguments
+    ///
+    /// * `block` - The block to receive
+    ///
+    /// # Returns
+    ///
+    /// `Ok(true)` if this block creates a heavier chain
+    pub async fn receive_fork_block(
+        &self,
+        block: crate::tier1_component::TestBlock,
+    ) -> Result<bool> {
+        self.ensure_running()?;
+        self.blockchain.receive_fork_block(block).await
+    }
+
+    /// Reorganize to a new chain tip
+    ///
+    /// # Arguments
+    ///
+    /// * `new_tip_hash` - The hash of the new tip to reorg to
+    pub async fn reorg_to_chain(&self, new_tip_hash: &Hash) -> Result<()> {
+        self.ensure_running()?;
+        self.blockchain.reorg_to_chain(new_tip_hash).await
+    }
+
+    /// Get the chain of blocks from a tip back to genesis
+    pub fn get_chain_from_tip(
+        &self,
+        tip_hash: &Hash,
+    ) -> Result<Vec<crate::tier1_component::TestBlock>> {
+        self.blockchain.get_chain_from_tip(tip_hash)
+    }
+
     /// Get block at specific height (RPC-like interface)
     ///
     /// This allows peers to request blocks for synchronization.

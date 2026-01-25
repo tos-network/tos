@@ -8,7 +8,7 @@ use crate::tier1_component::builder::VrfConfig;
 use crate::utilities::TempRocksDB;
 use anyhow::{Context, Result};
 use parking_lot::RwLock;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tos_common::block::BlockVrfData;
@@ -153,6 +153,12 @@ pub struct TestBlockchain {
 
     /// Chain ID for VRF binding signature
     chain_id: u64,
+
+    /// Genesis accounts for state reset during reorg
+    genesis_accounts: Vec<(Hash, u64)>,
+
+    /// Blocks indexed by hash for O(1) lookup (for reorg support)
+    blocks_by_hash: Arc<RwLock<HashMap<Hash, TestBlock>>>,
 }
 
 impl TestBlockchain {
@@ -169,10 +175,16 @@ impl TestBlockchain {
         let mut accounts = BTreeMap::new();
         let mut total_balance = 0u128;
 
-        for (pubkey, balance) in funded_accounts {
-            accounts.insert(pubkey, AccountState { balance, nonce: 0 });
+        for (pubkey, balance) in &funded_accounts {
+            accounts.insert(
+                pubkey.clone(),
+                AccountState {
+                    balance: *balance,
+                    nonce: 0,
+                },
+            );
             // Use saturating_add to prevent overflow in genesis with many accounts
-            total_balance = total_balance.saturating_add(balance as u128);
+            total_balance = total_balance.saturating_add(*balance as u128);
         }
 
         // Initialize counters
@@ -218,6 +230,10 @@ impl TestBlockchain {
         // Generate a deterministic miner keypair for VRF binding
         let miner_keypair = KeyPair::new();
 
+        // Initialize blocks_by_hash with genesis
+        let mut blocks_by_hash = HashMap::new();
+        blocks_by_hash.insert(genesis_hash.clone(), genesis_block.clone());
+
         Ok(Self {
             clock,
             _temp_db: temp_db,
@@ -233,6 +249,8 @@ impl TestBlockchain {
             vrf_key_manager,
             miner_keypair,
             chain_id,
+            genesis_accounts: funded_accounts,
+            blocks_by_hash: Arc::new(RwLock::new(blocks_by_hash)),
         })
     }
 
@@ -661,6 +679,9 @@ impl TestBlockchain {
 
         // Update blockchain state
         blocks.push(block.clone());
+        self.blocks_by_hash
+            .write()
+            .insert(block.hash.clone(), block.clone());
         self.tip_height.store(block.height, Ordering::SeqCst);
         self.topoheight.store(block.topoheight, Ordering::SeqCst);
         *self.tips.write() = vec![block.hash.clone()];
@@ -680,6 +701,251 @@ impl TestBlockchain {
                 block.transactions.len()
             );
         }
+
+        Ok(())
+    }
+
+    /// Receive a block that may create a fork (for reorg testing)
+    ///
+    /// Unlike `receive_block`, this method:
+    /// - Accepts blocks that build on any known block (not just the tip)
+    /// - Stores the block without immediately applying it
+    /// - Returns whether this block creates a heavier chain
+    ///
+    /// # Arguments
+    ///
+    /// * `block` - The block to receive
+    ///
+    /// # Returns
+    ///
+    /// `Ok(true)` if this block creates a heavier chain (caller should reorg)
+    /// `Ok(false)` if current chain is still heavier
+    pub async fn receive_fork_block(&self, block: TestBlock) -> Result<bool> {
+        // Check if block already exists
+        if self.blocks_by_hash.read().contains_key(&block.hash) {
+            return Ok(false);
+        }
+
+        // Verify parent exists (except for genesis)
+        if block.height > 0
+            && !self
+                .blocks_by_hash
+                .read()
+                .contains_key(&block.selected_parent)
+        {
+            anyhow::bail!(
+                "Parent block not found: {} for block {} at height {}",
+                block.selected_parent,
+                block.hash,
+                block.height
+            );
+        }
+
+        // Store the block
+        self.blocks_by_hash
+            .write()
+            .insert(block.hash.clone(), block.clone());
+
+        // Check if this creates a heavier chain
+        let current_height = self.tip_height.load(Ordering::SeqCst);
+        let is_heavier = block.height > current_height;
+
+        if log::log_enabled!(log::Level::Debug) {
+            log::debug!(
+                "Received fork block {} at height {} (current tip height: {}, is_heavier: {})",
+                block.hash,
+                block.height,
+                current_height,
+                is_heavier
+            );
+        }
+
+        Ok(is_heavier)
+    }
+
+    /// Get the chain of block hashes from a tip back to genesis
+    ///
+    /// # Arguments
+    ///
+    /// * `tip_hash` - The hash of the tip block
+    ///
+    /// # Returns
+    ///
+    /// A vector of blocks from genesis to tip (in ascending height order)
+    pub fn get_chain_from_tip(&self, tip_hash: &Hash) -> Result<Vec<TestBlock>> {
+        let blocks_map = self.blocks_by_hash.read();
+
+        let mut chain = Vec::new();
+        let mut current_hash = tip_hash.clone();
+
+        // Walk back from tip to genesis
+        loop {
+            let block = blocks_map.get(&current_hash).ok_or_else(|| {
+                anyhow::anyhow!("Block not found while building chain: {}", current_hash)
+            })?;
+
+            chain.push(block.clone());
+
+            if block.height == 0 {
+                // Reached genesis
+                break;
+            }
+
+            current_hash = block.selected_parent.clone();
+        }
+
+        // Reverse to get genesis-to-tip order
+        chain.reverse();
+        Ok(chain)
+    }
+
+    /// Reorganize to a new chain
+    ///
+    /// This method:
+    /// 1. Resets state to genesis
+    /// 2. Replays all blocks in the new chain
+    ///
+    /// # Arguments
+    ///
+    /// * `new_tip_hash` - The hash of the new tip to reorg to
+    ///
+    /// # Returns
+    ///
+    /// Ok(()) if reorg succeeds
+    pub async fn reorg_to_chain(&self, new_tip_hash: &Hash) -> Result<()> {
+        // Get the new chain
+        let new_chain = self.get_chain_from_tip(new_tip_hash)?;
+
+        if new_chain.is_empty() {
+            anyhow::bail!("Cannot reorg to empty chain");
+        }
+
+        if log::log_enabled!(log::Level::Info) {
+            log::info!(
+                "Reorganizing to new chain with tip {} at height {}",
+                new_tip_hash,
+                new_chain.last().map(|b| b.height).unwrap_or(0)
+            );
+        }
+
+        // Reset state to genesis
+        self.reset_to_genesis();
+
+        // Replay all blocks (skipping genesis at index 0)
+        for block in new_chain.into_iter().skip(1) {
+            self.apply_block_internal(&block)?;
+        }
+
+        Ok(())
+    }
+
+    /// Reset blockchain state to genesis
+    fn reset_to_genesis(&self) {
+        // Reset accounts to genesis state
+        let mut accounts = self.accounts.write();
+        accounts.clear();
+        let mut total_balance = 0u128;
+
+        for (pubkey, balance) in &self.genesis_accounts {
+            accounts.insert(
+                pubkey.clone(),
+                AccountState {
+                    balance: *balance,
+                    nonce: 0,
+                },
+            );
+            total_balance = total_balance.saturating_add(*balance as u128);
+        }
+
+        // Reset counters
+        let mut counters = self.counters.write();
+        *counters = BlockchainCounters {
+            balances_total: total_balance,
+            fees_burned: 0,
+            fees_miner: 0,
+            fees_treasury: 0,
+            rewards_emitted: 0,
+            supply: total_balance,
+        };
+
+        // Reset blockchain state
+        self.tip_height.store(0, Ordering::SeqCst);
+        self.topoheight.store(0, Ordering::SeqCst);
+        *self.tips.write() = vec![self.genesis_hash.clone()];
+
+        // Reset blocks list to just genesis
+        let mut blocks = self.blocks.write();
+        if let Some(genesis) = self.blocks_by_hash.read().get(&self.genesis_hash) {
+            blocks.clear();
+            blocks.push(genesis.clone());
+        }
+
+        // Recompute state root
+        *self.state_root.write() = Self::compute_state_root(&accounts);
+
+        // Clear mempool
+        self.mempool.write().clear();
+
+        if log::log_enabled!(log::Level::Debug) {
+            log::debug!("Reset blockchain state to genesis");
+        }
+    }
+
+    /// Apply a block internally (for reorg replay)
+    ///
+    /// This applies a block's transactions and updates state without validation.
+    fn apply_block_internal(&self, block: &TestBlock) -> Result<()> {
+        let mut accounts = self.accounts.write();
+        let mut counters = self.counters.write();
+        let mut blocks = self.blocks.write();
+
+        // Process each transaction
+        for tx in &block.transactions {
+            let total_deduction = tx.amount.saturating_add(tx.fee);
+
+            // Deduct from sender
+            let sender = accounts.get_mut(&tx.sender).ok_or_else(|| {
+                anyhow::anyhow!("Sender account not found during reorg: {}", tx.sender)
+            })?;
+
+            if sender.balance < total_deduction {
+                anyhow::bail!(
+                    "Insufficient balance during reorg: need {}, have {}",
+                    total_deduction,
+                    sender.balance
+                );
+            }
+
+            sender.balance = sender.balance.saturating_sub(total_deduction);
+            sender.nonce = sender.nonce.saturating_add(1);
+
+            // Add to recipient
+            let recipient = accounts
+                .entry(tx.recipient.clone())
+                .or_insert_with(|| AccountState {
+                    balance: 0,
+                    nonce: 0,
+                });
+            recipient.balance = recipient.balance.saturating_add(tx.amount);
+
+            // Update counters
+            counters.balances_total = counters.balances_total.saturating_sub(tx.fee as u128);
+            counters.fees_miner = counters.fees_miner.saturating_add(tx.fee / 2);
+            counters.fees_burned = counters.fees_burned.saturating_add(tx.fee - tx.fee / 2);
+        }
+
+        // Apply block reward
+        counters.rewards_emitted = counters.rewards_emitted.saturating_add(block.reward);
+        counters.supply = counters.supply.saturating_add(block.reward as u128);
+
+        // Update blockchain state
+        blocks.push(block.clone());
+        self.tip_height.store(block.height, Ordering::SeqCst);
+        self.topoheight.store(block.topoheight, Ordering::SeqCst);
+        *self.tips.write() = vec![block.hash.clone()];
+
+        // Recompute state root
+        *self.state_root.write() = Self::compute_state_root(&accounts);
 
         Ok(())
     }

@@ -5,6 +5,7 @@
 
 #[cfg(test)]
 mod tests {
+    use crate::tier2_integration::NodeRpc;
     use crate::tier3_e2e::LocalTosNetworkBuilder;
 
     // ========================================================================
@@ -231,13 +232,102 @@ mod tests {
     // ========================================================================
 
     #[tokio::test]
-    #[ignore = "Requires LocalTosNetwork with VRF support and partition controller"]
     async fn vrf_reorg_consistency() {
+        // Setup: 3-node network with VRF keys
+        let network = LocalTosNetworkBuilder::new()
+            .with_nodes(3)
+            .with_random_vrf_keys()
+            .build()
+            .await
+            .expect("Failed to build network");
+
         // Create partition: [0,1] | [2]
-        // Partition A mines 5 blocks (VRF_A1..VRF_A5)
-        // Partition B mines 3 blocks (VRF_B1..VRF_B3)
+        network
+            .partition_groups(&[0, 1], &[2])
+            .await
+            .expect("partition");
+
+        // Partition A (nodes 0,1) mines 5 blocks
+        for _ in 0..5 {
+            network.node(0).daemon().mine_block().await.expect("mine A");
+        }
+        // Propagate within partition A
+        for height in 1..=5 {
+            network
+                .propagate_block_from(0, height)
+                .await
+                .expect("propagate A");
+        }
+
+        // Partition B (node 2) mines 3 blocks
+        for _ in 0..3 {
+            network.node(2).daemon().mine_block().await.expect("mine B");
+        }
+
+        // Capture VRF data from heavier chain (partition A) before heal
+        let vrf_a1 = network.node(0).get_block_vrf_data(1).expect("VRF A1");
+        let vrf_a3 = network.node(0).get_block_vrf_data(3).expect("VRF A3");
+        let vrf_a5 = network.node(0).get_block_vrf_data(5).expect("VRF A5");
+
+        // Get tip hash from partition A (heavier chain)
+        let tips_a = network.node(0).daemon().get_tips().await.expect("tips A");
+        let heavier_tip = tips_a[0].clone();
+
+        // Verify partition B has different VRF (different miner)
+        let vrf_b1 = network.node(2).get_block_vrf_data(1).expect("VRF B1");
+        assert_ne!(
+            vrf_a1.output, vrf_b1.output,
+            "Different partitions should have different VRF"
+        );
+
         // Heal partition
-        // Assert: All nodes converge on heavier chain's VRF values
+        network.heal_all_partitions().await;
+
+        // Send heavier chain blocks to node 2
+        for height in 1..=5 {
+            let block = network
+                .node(0)
+                .daemon()
+                .get_block_at_height(height)
+                .await
+                .expect("get block")
+                .expect("block exists");
+            network
+                .node(2)
+                .receive_fork_block(block)
+                .await
+                .expect("receive fork");
+        }
+
+        // Node 2 should reorg to heavier chain
+        network
+            .node(2)
+            .reorg_to_chain(&heavier_tip)
+            .await
+            .expect("reorg");
+
+        // Verify all nodes now have the same VRF data (from heavier chain)
+        let vrf_node2_h1 = network.node(2).get_block_vrf_data(1).expect("VRF node2 h1");
+        let vrf_node2_h3 = network.node(2).get_block_vrf_data(3).expect("VRF node2 h3");
+        let vrf_node2_h5 = network.node(2).get_block_vrf_data(5).expect("VRF node2 h5");
+
+        assert_eq!(
+            vrf_a1.output, vrf_node2_h1.output,
+            "Node 2 should have partition A's VRF at height 1 after reorg"
+        );
+        assert_eq!(
+            vrf_a3.output, vrf_node2_h3.output,
+            "Node 2 should have partition A's VRF at height 3 after reorg"
+        );
+        assert_eq!(
+            vrf_a5.output, vrf_node2_h5.output,
+            "Node 2 should have partition A's VRF at height 5 after reorg"
+        );
+
+        // Verify all nodes are at the same height
+        assert_eq!(network.node(0).get_tip_height().await.unwrap(), 5);
+        assert_eq!(network.node(1).get_tip_height().await.unwrap(), 5);
+        assert_eq!(network.node(2).get_tip_height().await.unwrap(), 5);
     }
 
     #[tokio::test]

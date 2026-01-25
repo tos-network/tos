@@ -136,6 +136,27 @@ impl NodeHandle {
     pub fn has_vrf(&self) -> bool {
         self.daemon.has_vrf()
     }
+
+    /// Receive a block that may create a fork (for reorg testing)
+    pub async fn receive_fork_block(
+        &self,
+        block: crate::tier1_component::TestBlock,
+    ) -> Result<bool> {
+        self.daemon.receive_fork_block(block).await
+    }
+
+    /// Reorganize to a new chain tip
+    pub async fn reorg_to_chain(&self, new_tip_hash: &Hash) -> Result<()> {
+        self.daemon.reorg_to_chain(new_tip_hash).await
+    }
+
+    /// Get the chain of blocks from a tip
+    pub fn get_chain_from_tip(
+        &self,
+        tip_hash: &Hash,
+    ) -> Result<Vec<crate::tier1_component::TestBlock>> {
+        self.daemon.get_chain_from_tip(tip_hash)
+    }
 }
 
 // Delegate NodeRpc trait to underlying daemon
