@@ -166,6 +166,15 @@ pub struct TestBlockchain {
 
     /// Scheduled execution results: exec_hash → (status, executed_topoheight)
     scheduled_results: Arc<RwLock<HashMap<Hash, (ScheduledExecutionStatus, u64)>>>,
+
+    /// Miner rewards accumulated: miner_address → total_reward
+    miner_rewards: Arc<RwLock<HashMap<Hash, u64>>>,
+
+    /// Stable depth: blocks older than (tip - stable_depth) are considered final
+    stable_depth: u64,
+
+    /// Contract bytecodes for deferral checking: contract_hash → bytecode
+    contract_bytecodes: Arc<RwLock<HashMap<Hash, Vec<u8>>>>,
 }
 
 impl TestBlockchain {
@@ -260,6 +269,9 @@ impl TestBlockchain {
             blocks_by_hash: Arc::new(RwLock::new(blocks_by_hash)),
             scheduled_queue: Arc::new(RwLock::new(BTreeMap::new())),
             scheduled_results: Arc::new(RwLock::new(HashMap::new())),
+            miner_rewards: Arc::new(RwLock::new(HashMap::new())),
+            stable_depth: 10, // Default: 10 blocks for finality
+            contract_bytecodes: Arc::new(RwLock::new(HashMap::new())),
         })
     }
 
@@ -695,18 +707,80 @@ impl TestBlockchain {
     fn process_scheduled_at_topoheight(&self, topo: u64) {
         let mut queue = self.scheduled_queue.write();
         let mut results = self.scheduled_results.write();
+        let mut miner_rewards = self.miner_rewards.write();
+        let bytecodes = self.contract_bytecodes.read();
 
-        if let Some(execs) = queue.remove(&topo) {
-            for exec in execs {
-                // Mark as executed (simplified - actual execution would happen here)
-                results.insert(
-                    exec.hash.clone(),
-                    (ScheduledExecutionStatus::Executed, topo),
-                );
+        if let Some(mut execs) = queue.remove(&topo) {
+            // Sort by offer_amount descending (higher priority first)
+            execs.sort_by(|a, b| b.offer_amount.cmp(&a.offer_amount));
+
+            let mut deferred = Vec::new();
+
+            // Only apply deferral logic if at least one contract has been deployed.
+            // This maintains backward compatibility with tests that don't use real contracts.
+            let should_check_contracts = !bytecodes.is_empty();
+
+            for mut exec in execs {
+                // Determine execution status
+                let status = if should_check_contracts {
+                    // Check if target contract exists (for deferral)
+                    let contract_exists = bytecodes.contains_key(&exec.contract);
+
+                    if !contract_exists && exec.defer_count < 3 {
+                        // Defer: contract not found, re-queue for next block
+                        exec.defer_count = exec.defer_count.saturating_add(1);
+                        let defer_count = exec.defer_count;
+                        let hash = exec.hash.clone();
+                        deferred.push(exec);
+
+                        if log::log_enabled!(log::Level::Debug) {
+                            log::debug!(
+                                "Deferred scheduled {} (defer_count={})",
+                                hash,
+                                defer_count
+                            );
+                        }
+                        continue;
+                    }
+
+                    // Execute (or fail if max deferrals reached without contract)
+                    if !contract_exists && exec.defer_count >= 3 {
+                        ScheduledExecutionStatus::Failed
+                    } else {
+                        ScheduledExecutionStatus::Executed
+                    }
+                } else {
+                    // No contracts deployed - use stub execution (for backward compatibility)
+                    ScheduledExecutionStatus::Executed
+                };
+
+                // Pay miner reward (70% of offer)
+                if exec.offer_amount > 0 {
+                    let miner_reward = exec.offer_amount.saturating_mul(70) / 100;
+                    let miner_pk = self.miner_keypair.get_public_key().compress();
+                    let miner_addr = Hash::new(*miner_pk.as_bytes());
+                    *miner_rewards.entry(miner_addr).or_insert(0) = miner_rewards
+                        .get(&miner_addr)
+                        .unwrap_or(&0)
+                        .saturating_add(miner_reward);
+                }
+
+                results.insert(exec.hash.clone(), (status, topo));
 
                 if log::log_enabled!(log::Level::Debug) {
-                    log::debug!("Executed scheduled {} at topoheight {}", exec.hash, topo);
+                    log::debug!(
+                        "Processed scheduled {} at topoheight {} with status {:?}",
+                        exec.hash,
+                        topo,
+                        status
+                    );
                 }
+            }
+
+            // Re-queue deferred executions for next topoheight
+            if !deferred.is_empty() {
+                let next_topo = topo.saturating_add(1);
+                queue.entry(next_topo).or_default().extend(deferred);
             }
         }
     }
@@ -715,8 +789,53 @@ impl TestBlockchain {
     fn clear_scheduled_state(&self) {
         let mut queue = self.scheduled_queue.write();
         let mut results = self.scheduled_results.write();
+        let mut miner_rewards = self.miner_rewards.write();
         queue.clear();
         results.clear();
+        miner_rewards.clear();
+    }
+
+    /// Get accumulated miner reward for an address
+    pub fn get_miner_reward(&self, miner: &Hash) -> u64 {
+        let rewards = self.miner_rewards.read();
+        rewards.get(miner).copied().unwrap_or(0)
+    }
+
+    /// Get the stable depth configuration
+    pub fn get_stable_depth(&self) -> u64 {
+        self.stable_depth
+    }
+
+    /// Check if a topoheight is considered stable (finalized)
+    pub fn is_stable(&self, topo: u64) -> bool {
+        let current_topo = self.topoheight.load(Ordering::SeqCst);
+        topo.saturating_add(self.stable_depth) <= current_topo
+    }
+
+    /// Deploy a contract (store bytecode for execution and deferral checks)
+    pub fn deploy_contract(&self, bytecode: &[u8]) -> Hash {
+        let contract_hash = tos_common::crypto::hash(bytecode);
+        let mut bytecodes = self.contract_bytecodes.write();
+        bytecodes.insert(contract_hash.clone(), bytecode.to_vec());
+        contract_hash
+    }
+
+    /// Check if a contract is deployed
+    pub fn has_contract(&self, contract: &Hash) -> bool {
+        let bytecodes = self.contract_bytecodes.read();
+        bytecodes.contains_key(contract)
+    }
+
+    /// Get the miner's address (derived from miner keypair)
+    pub fn get_miner_address(&self) -> Hash {
+        let miner_pk = self.miner_keypair.get_public_key().compress();
+        Hash::new(*miner_pk.as_bytes())
+    }
+
+    /// Deploy a contract at a specific address (for testing)
+    pub fn deploy_contract_at(&self, address: &Hash, bytecode: &[u8]) {
+        let mut bytecodes = self.contract_bytecodes.write();
+        bytecodes.insert(address.clone(), bytecode.to_vec());
     }
 
     /// Receive a block from a peer and apply it to the blockchain

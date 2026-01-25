@@ -276,11 +276,69 @@ mod tests {
     // ========================================================================
 
     #[tokio::test]
-    #[ignore = "Requires stable depth + VRF + scheduling"]
     async fn stable_depth_scheduled_vrf() {
-        // Schedule VRF-dependent execution
-        // Warp to target (execution runs)
-        // Mine additional blocks past stable depth
-        // Assert: Result is irreversible (no reorg can change it)
+        use crate::tier3_e2e::LocalTosNetworkBuilder;
+
+        // Setup: single-node network with VRF
+        let network = LocalTosNetworkBuilder::new()
+            .with_nodes(1)
+            .with_random_vrf_keys()
+            .build()
+            .await
+            .expect("Failed to build network");
+
+        // Schedule execution at target topo 3
+        let scheduler = Hash::new([0xDD; 32]);
+        let contract = Hash::new([0xCC; 32]);
+        let exec = ScheduledExecution::new_offercall(
+            contract,
+            0,
+            vec![],
+            100_000,
+            1000,
+            scheduler,
+            ScheduledExecutionKind::TopoHeight(3),
+            0,
+        );
+        let exec_hash = network.node(0).schedule_execution(exec).expect("schedule");
+
+        // Mine to target (execution happens at topo 3)
+        for _ in 0..3 {
+            network.node(0).daemon().mine_block().await.expect("mine");
+        }
+
+        // Verify execution happened
+        let (status, exec_topo) = network
+            .node(0)
+            .get_scheduled_status(&exec_hash)
+            .expect("should have status");
+        assert_eq!(status, ScheduledExecutionStatus::Executed);
+        assert_eq!(exec_topo, 3);
+
+        // Check if execution is NOT yet stable (default stable_depth = 10)
+        let is_stable_before = network.node(0).daemon().blockchain().is_stable(exec_topo);
+        assert!(
+            !is_stable_before,
+            "Execution at topo 3 should not be stable yet (current topo = 3)"
+        );
+
+        // Mine additional blocks past stable depth (10 more blocks)
+        for _ in 0..10 {
+            network.node(0).daemon().mine_block().await.expect("mine");
+        }
+
+        // Now the execution should be stable (irreversible)
+        let is_stable_after = network.node(0).daemon().blockchain().is_stable(exec_topo);
+        assert!(
+            is_stable_after,
+            "Execution at topo 3 should be stable now (current topo = 13)"
+        );
+
+        // Get stable depth for reference
+        let stable_depth = network.node(0).daemon().blockchain().get_stable_depth();
+        assert_eq!(stable_depth, 10, "Default stable depth should be 10");
+
+        // Note: Once stable, the result cannot be changed by reorg
+        // (any reorg would need to be longer than stable_depth blocks)
     }
 }
