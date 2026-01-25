@@ -56,6 +56,7 @@ members = [
     "u128-test",
     "vesting-access-control-token",
     "vesting-wallet",
+    "scheduler",
     "vrf-branching",
     "vrf-lottery",
     "vrf-prediction",

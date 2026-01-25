@@ -614,13 +614,89 @@ mod tests {
     // ========================================================================
 
     #[tokio::test]
-    #[ignore = "Requires offer_call syscall in contract execution"]
     async fn schedule_from_contract_syscall() {
+        // Deploy scheduler contract that uses offer_call syscall
+        let scheduler_account = sample_hash(0xAA);
+        let miner = sample_hash(0x99);
+
+        let config = ChainClientConfig::default()
+            .with_account(GenesisAccount::new(scheduler_account.clone(), 10_000_000))
+            .with_account(GenesisAccount::new(miner.clone(), 0))
+            .with_miner(miner);
+
+        let mut client = ChainClient::start(config).await.unwrap();
+
         // Deploy scheduler contract
-        // Call scheduler.schedule(target_contract, target_topo, offer)
-        // Assert: Execution registered in queue
-        // Warp to target
-        // Assert: Target contract executed
+        let bytecode = include_bytes!("../../tests/fixtures/scheduler.so");
+        let contract = client.deploy_contract(bytecode).await.unwrap();
+
+        // Prepare input: entry_id=0 (schedule_future) + target_topoheight=10
+        let target_topo: u64 = 10;
+        let params = target_topo.to_le_bytes().to_vec();
+
+        // Call contract with entry_id=0 to schedule future execution
+        let result = client
+            .call_contract(&contract, 0, params, vec![], 1_000_000)
+            .await
+            .unwrap();
+
+        // The contract should have successfully called offer_call
+        assert!(
+            result.tx_result.success,
+            "Contract call should succeed, logs: {:?}",
+            result.tx_result.log_messages
+        );
+
+        // Verify scheduled handle was stored
+        let handle_data = client
+            .get_contract_storage(&contract, b"scheduled_handle")
+            .await
+            .unwrap();
+        assert!(
+            handle_data.is_some(),
+            "Contract should store scheduled handle"
+        );
+
+        // Verify target_topoheight was stored
+        let topo_data = client
+            .get_contract_storage(&contract, b"target_topoheight")
+            .await
+            .unwrap();
+        assert!(
+            topo_data.is_some(),
+            "Contract should store target_topoheight"
+        );
+        let stored_topo = u64::from_le_bytes(topo_data.unwrap().try_into().unwrap());
+        assert_eq!(stored_topo, target_topo, "Stored topoheight should match");
+
+        // Execution count should be 0 before scheduled execution
+        let count_before = client
+            .get_contract_storage(&contract, b"execution_count")
+            .await
+            .unwrap();
+        let count_val = count_before
+            .map(|b| u64::from_le_bytes(b.try_into().unwrap_or([0; 8])))
+            .unwrap_or(0);
+        assert_eq!(count_val, 0, "Execution count should be 0 before trigger");
+
+        // Warp to target topoheight
+        client.warp_to_topoheight(target_topo).await.unwrap();
+        assert_eq!(client.topoheight(), target_topo);
+
+        // Execution count should be incremented after scheduled execution
+        let count_after = client
+            .get_contract_storage(&contract, b"execution_count")
+            .await
+            .unwrap();
+        assert!(
+            count_after.is_some(),
+            "Execution count should exist after scheduled execution"
+        );
+        let count_val = u64::from_le_bytes(count_after.unwrap().try_into().unwrap());
+        assert_eq!(
+            count_val, 1,
+            "Execution count should be 1 after scheduled execution triggered"
+        );
     }
 
     #[tokio::test]

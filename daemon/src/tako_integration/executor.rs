@@ -25,6 +25,7 @@ use tos_common::{
 };
 use tos_program_runtime::{
     invoke_context::InvokeContext, storage::ContractAssetProvider as TakoContractAssetProvider,
+    storage::ScheduledExecutionProvider,
 };
 use tos_tbpf::{
     aligned_memory::AlignedMemory,
@@ -455,6 +456,7 @@ impl TakoExecutor {
             true, // Contract asset syscalls enabled
             vrf_data,
             miner_public_key,
+            None, // No scheduled execution provider (use execute_with_all_providers directly)
         )
     }
 
@@ -465,6 +467,7 @@ impl TakoExecutor {
     /// - NFT provider for accessing the native NFT system
     /// - Contract asset provider for accessing the contract asset system
     /// - VRF data for verifiable randomness
+    /// - Scheduled execution provider for offer_call syscall (scheduling future executions)
     ///
     /// # NFT System Access
     ///
@@ -486,6 +489,14 @@ impl TakoExecutor {
     /// - Governance features (delegate, lock, timelock)
     /// - Role management (grant_role, revoke_role, has_role)
     /// - Advanced features (escrow, permit, agent operations)
+    ///
+    /// # Scheduled Execution Access (OFFERCALL)
+    ///
+    /// When `scheduled_provider` is provided, contracts can schedule future executions
+    /// via offer_call syscall:
+    /// - schedule_execution - Schedule a call at a future topoheight
+    /// - get_scheduled_execution - Query a scheduled execution by handle
+    /// - cancel_scheduled_execution - Cancel a pending execution
     #[allow(clippy::too_many_arguments)]
     pub fn execute_with_all_providers(
         bytecode: &[u8],
@@ -505,6 +516,7 @@ impl TakoExecutor {
         contract_assets_enabled: bool,                      // Contract asset syscalls enabled
         vrf_data: Option<&VrfData>,                         // VRF data for verifiable randomness
         miner_public_key: Option<&[u8; 32]>, // Block producer's key for VRF identity binding
+        scheduled_provider: Option<&mut dyn ScheduledExecutionProvider>, // Scheduled execution provider
     ) -> Result<ExecutionResult, TakoExecutionError> {
         use log::{debug, error, info, warn};
 
@@ -701,6 +713,15 @@ impl TakoExecutor {
             invoke_context.set_asset_provider(adapter.as_mut());
             if log::log_enabled!(log::Level::Debug) {
                 debug!("Contract asset provider wired to InvokeContext");
+            }
+        }
+
+        // 7f. Wire scheduled execution provider (if available)
+        // Enables contracts to schedule future executions via offer_call syscall
+        if let Some(scheduled) = scheduled_provider {
+            invoke_context.set_scheduled_execution_provider(scheduled);
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("Scheduled execution provider wired to InvokeContext");
             }
         }
 

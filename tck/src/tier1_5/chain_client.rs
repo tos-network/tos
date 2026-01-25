@@ -26,6 +26,8 @@ use tos_common::contract::{
 use tos_common::crypto::{Hash, KeyPair, PublicKey, Signature};
 use tos_daemon::tako_integration::TakoExecutor;
 use tos_daemon::vrf::{VrfData, VrfKeyManager, VrfOutput, VrfProof, VrfPublicKey};
+use tos_program_runtime::storage::{ScheduledExecutionInfo, ScheduledExecutionProvider};
+use tos_tbpf::error::EbpfError;
 
 use crate::orchestrator::{Clock, PausedClock};
 use crate::tier1_component::{TestBlockchain, TestBlockchainBuilder, TestTransaction};
@@ -314,6 +316,235 @@ impl ContractProvider for InMemoryContractProvider {
         _topoheight: TopoHeight,
     ) -> Result<Option<Vec<u8>>, anyhow::Error> {
         Ok(self.bytecodes.get(contract).cloned())
+    }
+}
+
+/// Scheduling provider for contract execution in ChainClient.
+///
+/// Implements `ScheduledExecutionProvider` trait from TAKO program-runtime,
+/// enabling contracts to schedule future executions via `offer_call` syscall.
+///
+/// # Architecture
+///
+/// ```text
+/// Contract → offer_call() → ChainClientSchedulingProvider
+///                                        ↓
+///                               Validate parameters
+///                                        ↓
+///                               Store in scheduled_queue
+///                                        ↓
+///                               Return handle (derived from hash)
+/// ```
+pub struct ChainClientSchedulingProvider<'a> {
+    /// Scheduled execution queue: target_topoheight -> executions
+    scheduled_queue: &'a mut BTreeMap<u64, Vec<ScheduledExecution>>,
+    /// Execution results: hash -> (status, execution_topo)
+    /// Used for checking if an execution has already been processed.
+    #[allow(dead_code)]
+    scheduled_results: &'a HashMap<Hash, (ScheduledExecutionStatus, u64)>,
+    /// Current topoheight for validation
+    current_topoheight: u64,
+    /// Scheduler contract hash (for authorization)
+    scheduler_contract: Hash,
+}
+
+impl<'a> ChainClientSchedulingProvider<'a> {
+    /// Create a new scheduling provider.
+    pub fn new(
+        scheduled_queue: &'a mut BTreeMap<u64, Vec<ScheduledExecution>>,
+        scheduled_results: &'a HashMap<Hash, (ScheduledExecutionStatus, u64)>,
+        current_topoheight: u64,
+        scheduler_contract: Hash,
+    ) -> Self {
+        Self {
+            scheduled_queue,
+            scheduled_results,
+            current_topoheight,
+            scheduler_contract,
+        }
+    }
+
+    /// Convert a hash to a handle (first 8 bytes as u64).
+    fn hash_to_handle(hash: &Hash) -> u64 {
+        let bytes = hash.as_bytes();
+        u64::from_be_bytes([
+            bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+        ])
+    }
+
+    /// Convert ScheduledExecution to ScheduledExecutionInfo.
+    fn execution_to_info(execution: &ScheduledExecution) -> ScheduledExecutionInfo {
+        let (target_topoheight, is_block_end) = match execution.kind {
+            tos_common::contract::ScheduledExecutionKind::TopoHeight(topo) => (topo, false),
+            tos_common::contract::ScheduledExecutionKind::BlockEnd => {
+                (execution.registration_topoheight, true)
+            }
+        };
+
+        let status = match execution.status {
+            ScheduledExecutionStatus::Pending => 0,
+            ScheduledExecutionStatus::Executed => 1,
+            ScheduledExecutionStatus::Cancelled => 2,
+            ScheduledExecutionStatus::Failed => 3,
+            ScheduledExecutionStatus::Expired => 4,
+        };
+
+        ScheduledExecutionInfo {
+            handle: Self::hash_to_handle(&execution.hash),
+            target_contract: *execution.contract.as_bytes(),
+            chunk_id: execution.chunk_id,
+            max_gas: execution.max_gas,
+            offer_amount: execution.offer_amount,
+            target_topoheight,
+            is_block_end,
+            registration_topoheight: execution.registration_topoheight,
+            status,
+        }
+    }
+}
+
+impl<'a> ScheduledExecutionProvider for ChainClientSchedulingProvider<'a> {
+    fn schedule_execution(
+        &mut self,
+        scheduler: &[u8; 32],
+        target_contract: &[u8; 32],
+        chunk_id: u16,
+        input_data: &[u8],
+        max_gas: u64,
+        offer_amount: u64,
+        target_topoheight: u64,
+        is_block_end: bool,
+    ) -> Result<u64, EbpfError> {
+        use std::io::{Error as IoError, ErrorKind};
+
+        // Verify scheduler matches
+        if scheduler != self.scheduler_contract.as_bytes() {
+            return Err(EbpfError::SyscallError(Box::new(IoError::new(
+                ErrorKind::PermissionDenied,
+                "Scheduler contract mismatch",
+            ))));
+        }
+
+        // Determine execution kind
+        let kind = if is_block_end {
+            tos_common::contract::ScheduledExecutionKind::BlockEnd
+        } else {
+            // Validate target topoheight
+            if target_topoheight <= self.current_topoheight {
+                return Err(EbpfError::SyscallError(Box::new(IoError::new(
+                    ErrorKind::InvalidInput,
+                    format!(
+                        "Target topoheight {} must be greater than current {}",
+                        target_topoheight, self.current_topoheight
+                    ),
+                ))));
+            }
+
+            // Check scheduling horizon
+            let horizon = target_topoheight.saturating_sub(self.current_topoheight);
+            if horizon > MAX_SCHEDULING_HORIZON {
+                return Err(EbpfError::SyscallError(Box::new(IoError::new(
+                    ErrorKind::InvalidInput,
+                    format!(
+                        "Target topoheight {} exceeds max scheduling horizon {}",
+                        target_topoheight, MAX_SCHEDULING_HORIZON
+                    ),
+                ))));
+            }
+
+            tos_common::contract::ScheduledExecutionKind::TopoHeight(target_topoheight)
+        };
+
+        // Convert target contract hash
+        let contract = Hash::new(*target_contract);
+
+        // Create scheduled execution
+        let execution = ScheduledExecution::new_offercall(
+            contract.clone(),
+            chunk_id,
+            input_data.to_vec(),
+            max_gas,
+            offer_amount,
+            self.scheduler_contract.clone(),
+            kind,
+            self.current_topoheight,
+        );
+
+        // Compute handle from hash
+        let handle = Self::hash_to_handle(&execution.hash);
+
+        // Get execution topoheight for storage
+        let execution_topoheight = match kind {
+            tos_common::contract::ScheduledExecutionKind::TopoHeight(topo) => topo,
+            tos_common::contract::ScheduledExecutionKind::BlockEnd => self.current_topoheight,
+        };
+
+        // Store the execution
+        self.scheduled_queue
+            .entry(execution_topoheight)
+            .or_default()
+            .push(execution);
+
+        Ok(handle)
+    }
+
+    fn get_scheduled_execution(
+        &self,
+        handle: u64,
+    ) -> Result<Option<ScheduledExecutionInfo>, EbpfError> {
+        // Search in queue
+        for executions in self.scheduled_queue.values() {
+            for execution in executions {
+                if Self::hash_to_handle(&execution.hash) == handle {
+                    return Ok(Some(Self::execution_to_info(execution)));
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    fn cancel_scheduled_execution(
+        &mut self,
+        scheduler: &[u8; 32],
+        handle: u64,
+    ) -> Result<u64, EbpfError> {
+        use std::io::{Error as IoError, ErrorKind};
+
+        // Verify scheduler matches
+        if scheduler != self.scheduler_contract.as_bytes() {
+            return Err(EbpfError::SyscallError(Box::new(IoError::new(
+                ErrorKind::PermissionDenied,
+                "Only the scheduler contract can cancel executions",
+            ))));
+        }
+
+        // Find and remove from queue
+        for (_topo, entries) in self.scheduled_queue.iter_mut() {
+            if let Some(pos) = entries
+                .iter()
+                .position(|e| Self::hash_to_handle(&e.hash) == handle)
+            {
+                let exec = &entries[pos];
+                if !exec.can_cancel(self.current_topoheight) {
+                    return Err(EbpfError::SyscallError(Box::new(IoError::other(
+                        "Cannot cancel: within minimum cancellation window",
+                    ))));
+                }
+                let exec = entries.remove(pos);
+                // Refund 70% (30% was burned)
+                let refund = exec.offer_amount.saturating_mul(70) / 100;
+                return Ok(refund);
+            }
+        }
+
+        Err(EbpfError::SyscallError(Box::new(IoError::new(
+            ErrorKind::NotFound,
+            "Scheduled execution not found",
+        ))))
+    }
+
+    fn get_current_topoheight(&self) -> u64 {
+        self.current_topoheight
     }
 }
 
@@ -817,8 +1048,14 @@ impl ChainClient {
 
     /// Call a deployed contract entry point.
     ///
-    /// Executes the contract via TakoExecutor with VRF context injection,
-    /// applies state changes, and returns the structured result with gas breakdown.
+    /// Executes the contract via TakoExecutor with VRF context injection and
+    /// scheduled execution support. Applies state changes and returns the
+    /// structured result with gas breakdown.
+    ///
+    /// # Scheduling Support
+    ///
+    /// Contracts can schedule future executions via the `offer_call` syscall.
+    /// The scheduling provider is automatically wired to enable this functionality.
     pub async fn call_contract(
         &mut self,
         contract: &Hash,
@@ -827,6 +1064,8 @@ impl ChainClient {
         deposits: Vec<CallDeposit>,
         max_gas: u64,
     ) -> Result<ContractCallResult, WarpError> {
+        use tos_daemon::tako_integration::SVMFeatureSet;
+
         // Load bytecode
         let bytecode = self
             .contract_bytecodes
@@ -857,23 +1096,36 @@ impl ChainClient {
             .get(&self.topoheight)
             .cloned()
             .unwrap_or_else(Hash::zero);
+        let current_topoheight = self.topoheight;
 
-        // Execute contract
-        let exec_result = TakoExecutor::execute_with_vrf(
+        // Create scheduling provider to enable offer_call syscall
+        let mut scheduling_provider = ChainClientSchedulingProvider::new(
+            &mut self.scheduled_queue,
+            &self.scheduled_results,
+            current_topoheight,
+            contract.clone(),
+        );
+
+        // Execute contract with all providers including scheduling
+        let exec_result = TakoExecutor::execute_with_all_providers(
             &bytecode,
             &provider,
-            self.topoheight,
+            current_topoheight,
             contract,
             &block_hash,
-            self.topoheight,
-            self.topoheight.saturating_mul(15),
+            current_topoheight,
+            current_topoheight.saturating_mul(15),
             &tx_hash,
             contract, // sender = contract for simplicity
             &input_data,
             Some(max_gas),
-            None,
+            &SVMFeatureSet::production(),
+            None, // No referral provider
+            None, // No NFT provider
+            true, // Contract asset syscalls enabled
             vrf_data.as_ref(),
             Some(&miner_pk_bytes),
+            Some(&mut scheduling_provider), // Scheduling provider enabled
         );
 
         let (success, gas_used, log_messages, return_data, exit_code, error_msg) = match exec_result
@@ -1630,6 +1882,11 @@ impl ChainClient {
                         .cloned()
                         .unwrap_or_else(|| tos_common::crypto::hash(&topo.to_le_bytes()));
 
+                    // Build input data: prepend chunk_id (entry_id) to input_data
+                    let mut full_input = Vec::with_capacity(2 + exec.input_data.len());
+                    full_input.extend_from_slice(&exec.chunk_id.to_le_bytes());
+                    full_input.extend_from_slice(&exec.input_data);
+
                     let result = TakoExecutor::execute_with_vrf(
                         &bytecode,
                         &provider,
@@ -1640,7 +1897,7 @@ impl ChainClient {
                         topo.saturating_mul(15),
                         &exec.hash,
                         &exec.scheduler_contract,
-                        &exec.input_data,
+                        &full_input,
                         Some(exec.max_gas),
                         None,
                         vrf_data.as_ref(),

@@ -57,6 +57,7 @@ CONTRACTS=(
     "vrf-lottery"
     "vrf-prediction"
     "vrf-random"
+    "scheduler"
 )
 
 # Parse arguments

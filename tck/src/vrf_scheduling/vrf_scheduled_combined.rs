@@ -44,6 +44,10 @@ mod tests {
         )
     }
 
+    fn vrf_result(output: &[u8; 32]) -> [u8; 32] {
+        *output
+    }
+
     // ========================================================================
     // VRF-Driven Execution Path Tests
     // ========================================================================
@@ -176,13 +180,133 @@ mod tests {
     // ========================================================================
 
     #[tokio::test]
-    #[ignore = "Requires LocalTosNetwork with VRF + scheduling + partition"]
     async fn reorg_changes_vrf_changes_schedule_result() {
-        // Create partition: [0,1] | [2]
-        // Schedule VRF-dependent contract on both partitions
-        // Different miners -> different VRF -> potentially different execution paths
-        // Heal partition
-        // Assert: All nodes use heavier chain's VRF -> same execution path
+        use crate::tier3_e2e::LocalTosNetworkBuilder;
+
+        let target_topo = 3u64;
+        let network = LocalTosNetworkBuilder::new()
+            .with_nodes(3)
+            .with_random_vrf_keys()
+            .build()
+            .await
+            .expect("Failed to build network");
+
+        let contract = Hash::new([0xCC; 32]);
+        let scheduler = Hash::new([0xDD; 32]);
+
+        let mut hashes = Vec::new();
+        for i in 0..3 {
+            let exec = ScheduledExecution::new_offercall(
+                contract.clone(),
+                0,
+                vec![],
+                100_000,
+                1000,
+                scheduler.clone(),
+                ScheduledExecutionKind::TopoHeight(target_topo),
+                0,
+            );
+            let hash = network.node(i).schedule_execution(exec).expect("schedule");
+            hashes.push(hash);
+        }
+
+        network
+            .partition_groups(&[0, 1], &[2])
+            .await
+            .expect("partition");
+
+        // Partition A mines 5 blocks, partition B mines 3 blocks.
+        for height in 1..=5 {
+            network.node(0).daemon().mine_block().await.expect("mine A");
+            network
+                .propagate_block_from(0, height)
+                .await
+                .expect("propagate A");
+        }
+
+        for _ in 0..target_topo {
+            network.node(2).daemon().mine_block().await.expect("mine B");
+        }
+
+        for (i, hash) in hashes.iter().enumerate() {
+            let (status, exec_topo) = network
+                .node(i)
+                .get_scheduled_status(hash)
+                .expect("scheduled status");
+            assert_eq!(
+                status,
+                ScheduledExecutionStatus::Executed,
+                "Node {} should execute scheduled op",
+                i
+            );
+            assert_eq!(
+                exec_topo, target_topo,
+                "Node {} should execute at target topoheight",
+                i
+            );
+        }
+
+        let vrf_a = network
+            .node(0)
+            .get_block_vrf_data(target_topo)
+            .expect("vrf A");
+        let vrf_b = network
+            .node(2)
+            .get_block_vrf_data(target_topo)
+            .expect("vrf B");
+
+        assert_ne!(
+            vrf_a.output, vrf_b.output,
+            "Different partitions should have different VRF output"
+        );
+
+        let result_a = vrf_result(&vrf_a.output);
+        let result_b = vrf_result(&vrf_b.output);
+        assert_ne!(
+            result_a, result_b,
+            "Partitioned chains should produce different VRF-driven results"
+        );
+
+        let tips_a = network.node(0).daemon().get_tips().await.expect("tips A");
+        let heavier_tip = tips_a[0].clone();
+
+        network.heal_all_partitions().await;
+
+        for height in 1..=5 {
+            let block = network
+                .node(0)
+                .daemon()
+                .get_block_at_height(height)
+                .await
+                .expect("get block")
+                .expect("block exists");
+            network
+                .node(2)
+                .receive_fork_block(block)
+                .await
+                .expect("receive fork");
+        }
+
+        network
+            .node(2)
+            .reorg_to_chain(&heavier_tip)
+            .await
+            .expect("reorg");
+
+        let vrf_b_after = network
+            .node(2)
+            .get_block_vrf_data(target_topo)
+            .expect("vrf B after");
+        let result_b_after = vrf_result(&vrf_b_after.output);
+
+        assert_eq!(
+            vrf_a.output, vrf_b_after.output,
+            "Node 2 should adopt heavier chain VRF output after reorg"
+        );
+        assert_eq!(
+            result_a, result_b_after,
+            "VRF-driven result should converge after reorg"
+        );
     }
 
     // ========================================================================
