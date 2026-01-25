@@ -14,7 +14,7 @@ use tos_common::{
         VersionedUnoBalance,
     },
     block::{BlockVersion, TopoHeight},
-    config::{TOS_ASSET, UNO_ASSET},
+    config::TOS_ASSET,
     crypto::{
         elgamal::{Ciphertext, CompressedPublicKey},
         Hash, PublicKey,
@@ -431,37 +431,10 @@ impl<'a, S: Storage> ChainState<'a, S> {
             });
         }
 
-        // Fallback: account has balances but no registration/nonce pointer recorded.
-        // Treat as existing account with default nonce.
-        let has_balance = storage.has_balance_for(key, &TOS_ASSET).await?
-            || storage.has_balance_for(key, &UNO_ASSET).await?;
-        if has_balance {
-            if log::log_enabled!(log::Level::Debug) {
-                debug!(
-                    "Account {} has balances but no registration, creating with nonce=0",
-                    key.as_address(storage.is_mainnet())
-                );
-            }
-
-            let multisig = storage
-                .get_multisig_at_maximum_topoheight_for(key, topoheight)
-                .await?
-                .map(|(topo, multisig)| {
-                    multisig
-                        .take()
-                        .map(|m| (VersionedState::FetchedAt(topo), Some(m.into_owned())))
-                })
-                .flatten();
-
-            return Ok(Account {
-                nonce: VersionedNonce::new(0, None),
-                assets: HashMap::new(),
-                uno_assets: HashMap::new(),
-                multisig,
-            });
-        }
-
         // Account truly does not exist
+        // Note: We intentionally do NOT create accounts with nonce=0 just because they have
+        // balances but no registration. This could mask data corruption and enable replay attacks.
+        // Accounts must be properly registered through normal transaction flow.
         if log::log_enabled!(log::Level::Debug) {
             debug!(
                 "Account {} not found: all checks failed",
