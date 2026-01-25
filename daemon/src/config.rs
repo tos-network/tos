@@ -1,4 +1,4 @@
-use std::num::NonZeroUsize;
+use std::{num::NonZeroUsize, sync::RwLock};
 
 use lazy_static::lazy_static;
 use tos_common::{
@@ -321,6 +321,9 @@ lazy_static! {
         // Future TIPs will be configured here (typically activated at genesis for testing)
         // Example: (TosHardfork::SmartContracts, ForkCondition::Block(0)),
     ]);
+
+    // Optional override for hard fork config (used in tests/e2e parity)
+    static ref HARD_FORKS_OVERRIDE: RwLock<Option<&'static [HardFork]>> = RwLock::new(None);
 }
 
 // Mainnet seed nodes
@@ -416,8 +419,28 @@ pub const fn get_seed_nodes(network: &Network) -> &[&str] {
 
 // Get hard forks based on the network
 // All networks use the same hard fork configuration (Nobunaga genesis)
-pub const fn get_hard_forks(_network: &Network) -> &'static [HardFork] {
+pub fn get_hard_forks(_network: &Network) -> &'static [HardFork] {
+    if let Ok(guard) = HARD_FORKS_OVERRIDE.read() {
+        if let Some(override_forks) = *guard {
+            return override_forks;
+        }
+    }
     &HARD_FORKS
+}
+
+/// Override hard fork configuration for tests (leaks the slice for static lifetime).
+pub fn set_hard_forks_override_for_tests(forks: Vec<HardFork>) {
+    let leaked: &'static [HardFork] = Box::leak(forks.into_boxed_slice());
+    if let Ok(mut guard) = HARD_FORKS_OVERRIDE.write() {
+        *guard = Some(leaked);
+    }
+}
+
+/// Clear hard fork override (restore default config).
+pub fn clear_hard_forks_override_for_tests() {
+    if let Ok(mut guard) = HARD_FORKS_OVERRIDE.write() {
+        *guard = None;
+    }
 }
 
 // Get TIP (TOS Improvement Proposal) activations based on the network
