@@ -142,13 +142,86 @@ mod tests {
     // ========================================================================
 
     #[tokio::test]
-    #[ignore = "Requires LocalTosNetwork with VRF + scheduling"]
     async fn scheduled_vrf_cross_node_determinism() {
-        // Setup: 3-node network
-        // Schedule VRF-dependent execution
-        // Mine to target
-        // Wait for convergence
-        // Assert: All nodes have same contract state (same VRF -> same path)
+        use crate::tier3_e2e::LocalTosNetworkBuilder;
+        use tos_common::contract::ScheduledExecution;
+
+        // Setup: 3-node network with VRF
+        let network = LocalTosNetworkBuilder::new()
+            .with_nodes(3)
+            .with_random_vrf_keys()
+            .build()
+            .await
+            .expect("Failed to build network");
+
+        // Create the same scheduled execution for all nodes
+        let contract = Hash::new([0xCC; 32]);
+        let scheduler = Hash::new([0xDD; 32]);
+        let target_topo = 5;
+
+        // Schedule the same execution on all nodes
+        // (In a real system, this would be propagated via transaction in a block)
+        let mut hashes = Vec::new();
+        for i in 0..3 {
+            let exec = ScheduledExecution::new_offercall(
+                contract.clone(),
+                0,
+                vec![],
+                100_000,
+                1000,
+                scheduler.clone(),
+                tos_common::contract::ScheduledExecutionKind::TopoHeight(target_topo),
+                0,
+            );
+            let hash = network.node(i).schedule_execution(exec).expect("schedule");
+            hashes.push(hash);
+        }
+
+        // Mine and propagate blocks until target
+        for _ in 0..target_topo {
+            network.mine_and_propagate(0).await.expect("mine");
+        }
+
+        // Verify all nodes executed at same topoheight
+        for (i, hash) in hashes.iter().enumerate() {
+            let (status, exec_topo) = network
+                .node(i)
+                .get_scheduled_status(hash)
+                .expect("should have status");
+            assert_eq!(
+                status,
+                tos_common::contract::ScheduledExecutionStatus::Executed,
+                "Node {} should have Executed status",
+                i
+            );
+            assert_eq!(
+                exec_topo, target_topo,
+                "Node {} should execute at target topo",
+                i
+            );
+        }
+
+        // Verify all nodes have same VRF data at execution block
+        let vrf_0 = network.node(0).get_block_vrf_data(target_topo);
+        let vrf_1 = network.node(1).get_block_vrf_data(target_topo);
+        let vrf_2 = network.node(2).get_block_vrf_data(target_topo);
+
+        // All nodes should have VRF data (blocks were propagated from node 0)
+        assert!(vrf_0.is_some(), "Node 0 should have VRF data");
+        assert!(vrf_1.is_some(), "Node 1 should have VRF data");
+        assert!(vrf_2.is_some(), "Node 2 should have VRF data");
+
+        // All should have the same VRF output (from the same miner - node 0)
+        assert_eq!(
+            vrf_0.as_ref().unwrap().output,
+            vrf_1.as_ref().unwrap().output,
+            "Nodes should have same VRF output"
+        );
+        assert_eq!(
+            vrf_1.as_ref().unwrap().output,
+            vrf_2.as_ref().unwrap().output,
+            "Nodes should have same VRF output"
+        );
     }
 
     // ========================================================================
