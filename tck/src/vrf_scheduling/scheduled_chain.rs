@@ -80,11 +80,75 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "Requires BlockEnd kind with contract VM timing"]
     async fn block_end_executes_same_block() {
-        // Schedule with ScheduledExecutionKind::BlockEnd
-        // Mine the current block
-        // Assert: Execution ran at end of that block
+        // Test that offer_call_block_end schedules execution at the END of the current block
+        let scheduler_account = sample_hash(0xBB);
+        let miner = sample_hash(0x99);
+
+        let config = ChainClientConfig::default()
+            .with_account(GenesisAccount::new(scheduler_account.clone(), 10_000_000))
+            .with_account(GenesisAccount::new(miner.clone(), 0))
+            .with_miner(miner);
+
+        let mut client = ChainClient::start(config).await.unwrap();
+
+        // Deploy scheduler contract
+        let bytecode = include_bytes!("../../tests/fixtures/scheduler.so");
+        let contract = client.deploy_contract(bytecode).await.unwrap();
+
+        // Current topoheight is 0
+        assert_eq!(client.topoheight(), 0);
+
+        // Call contract with entry_id=1 (schedule_block_end)
+        // This schedules on_scheduled_execution to run at the END of block 0
+        let result = client
+            .call_contract(&contract, 1, vec![], vec![], 1_000_000)
+            .await
+            .unwrap();
+        assert!(
+            result.tx_result.success,
+            "Contract call should succeed, logs: {:?}",
+            result.tx_result.log_messages
+        );
+
+        // Verify scheduled handle was stored
+        let handle_data = client
+            .get_contract_storage(&contract, b"scheduled_handle")
+            .await
+            .unwrap();
+        assert!(
+            handle_data.is_some(),
+            "Contract should store scheduled handle"
+        );
+
+        // Execution count should be 0 before block is mined
+        let count_before = client
+            .get_contract_storage(&contract, b"execution_count")
+            .await
+            .unwrap();
+        let count_val = count_before
+            .map(|b| u64::from_le_bytes(b.try_into().unwrap_or([0; 8])))
+            .unwrap_or(0);
+        assert_eq!(count_val, 0, "Execution count should be 0 before mining");
+
+        // Mine the block - BlockEnd execution should run at end of block 0
+        client.mine_empty_block().await.unwrap();
+        assert_eq!(client.topoheight(), 1);
+
+        // Execution count should be incremented (executed at end of block 0)
+        let count_after = client
+            .get_contract_storage(&contract, b"execution_count")
+            .await
+            .unwrap();
+        assert!(
+            count_after.is_some(),
+            "Execution count should exist after BlockEnd execution"
+        );
+        let count_val = u64::from_le_bytes(count_after.unwrap().try_into().unwrap());
+        assert_eq!(
+            count_val, 1,
+            "Execution count should be 1 after BlockEnd execution triggered"
+        );
     }
 
     // ========================================================================

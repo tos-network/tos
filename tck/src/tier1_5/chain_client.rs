@@ -1298,6 +1298,10 @@ impl ChainClient {
 
     /// Mine a single empty block (convenience method).
     pub async fn mine_empty_block(&mut self) -> Result<Hash, WarpError> {
+        // Process BlockEnd executions at current topoheight BEFORE mining
+        // (BlockEnd = "at end of current block", which is before next block starts)
+        self.process_block_end_at_topoheight(self.topoheight);
+
         let block = self
             .blockchain
             .mine_block()
@@ -1311,7 +1315,7 @@ impl ChainClient {
         // Produce VRF data if configured
         self.produce_vrf_for_block(&block.hash);
 
-        // Process scheduled executions at this topoheight
+        // Process TopoHeight scheduled executions at new topoheight
         self.process_scheduled_at_topoheight(self.topoheight);
 
         Ok(block.hash)
@@ -1810,6 +1814,114 @@ impl ChainClient {
 
             let block_vrf = BlockVrfData::new(pub_key_bytes, output_bytes, proof_bytes, sig_bytes);
             self.block_vrf_data.insert(self.topoheight, block_vrf);
+        }
+    }
+
+    /// Process BlockEnd executions at the given topoheight.
+    ///
+    /// This is called at the END of a block (before topoheight increments) to
+    /// process executions scheduled with ScheduledExecutionKind::BlockEnd.
+    /// TopoHeight executions are left in the queue for later processing.
+    fn process_block_end_at_topoheight(&mut self, topo: u64) {
+        let Some(mut executions) = self.scheduled_queue.remove(&topo) else {
+            return;
+        };
+
+        // Separate BlockEnd executions from TopoHeight executions
+        let mut block_end_execs = Vec::new();
+        let mut topo_height_execs = Vec::new();
+
+        for exec in executions.drain(..) {
+            match exec.kind {
+                tos_common::contract::ScheduledExecutionKind::BlockEnd => {
+                    block_end_execs.push(exec);
+                }
+                tos_common::contract::ScheduledExecutionKind::TopoHeight(_) => {
+                    topo_height_execs.push(exec);
+                }
+            }
+        }
+
+        // Put TopoHeight executions back in the queue
+        if !topo_height_execs.is_empty() {
+            self.scheduled_queue.insert(topo, topo_height_execs);
+        }
+
+        // Process BlockEnd executions
+        if block_end_execs.is_empty() {
+            return;
+        }
+
+        // Sort by priority
+        block_end_execs.sort_by(|a, b| {
+            b.offer_amount
+                .cmp(&a.offer_amount)
+                .then(a.registration_topoheight.cmp(&b.registration_topoheight))
+                .then(a.hash.cmp(&b.hash))
+        });
+
+        for mut exec in block_end_execs {
+            let exec_status =
+                if let Some(bytecode) = self.contract_bytecodes.get(&exec.contract).cloned() {
+                    let provider = InMemoryContractProvider {
+                        storage: self.contract_storage.clone(),
+                        bytecodes: self.contract_bytecodes.clone(),
+                        topoheight: topo,
+                    };
+
+                    let vrf_data = self
+                        .block_vrf_data
+                        .get(&topo)
+                        .and_then(block_vrf_to_executor_vrf);
+                    let miner_compressed = self.miner_keypair.get_public_key().compress();
+                    let miner_pk: [u8; 32] = *miner_compressed.as_bytes();
+                    let block_hash = self
+                        .block_hashes
+                        .get(&topo)
+                        .cloned()
+                        .unwrap_or_else(|| tos_common::crypto::hash(&topo.to_le_bytes()));
+
+                    // Build input data: prepend chunk_id to input_data
+                    let mut full_input = Vec::with_capacity(2 + exec.input_data.len());
+                    full_input.extend_from_slice(&exec.chunk_id.to_le_bytes());
+                    full_input.extend_from_slice(&exec.input_data);
+
+                    let result = TakoExecutor::execute_with_vrf(
+                        &bytecode,
+                        &provider,
+                        topo,
+                        &exec.contract,
+                        &block_hash,
+                        topo,
+                        topo.saturating_mul(15),
+                        &exec.hash,
+                        &exec.scheduler_contract,
+                        &full_input,
+                        Some(exec.max_gas),
+                        None,
+                        vrf_data.as_ref(),
+                        Some(&miner_pk),
+                    );
+
+                    match result {
+                        Ok(r) => {
+                            self.apply_contract_cache(&exec.contract, &r.cache);
+                            if r.return_value == 0 {
+                                ScheduledExecutionStatus::Executed
+                            } else {
+                                ScheduledExecutionStatus::Failed
+                            }
+                        }
+                        Err(_) => ScheduledExecutionStatus::Failed,
+                    }
+                } else {
+                    // No bytecode - mark as executed (stub behavior)
+                    ScheduledExecutionStatus::Executed
+                };
+
+            exec.status = exec_status;
+            self.scheduled_results
+                .insert(exec.hash.clone(), (exec_status, topo));
         }
     }
 
