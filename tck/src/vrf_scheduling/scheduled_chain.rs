@@ -919,4 +919,217 @@ mod tests {
         let result = client.schedule_execution(exec_dup).await;
         assert!(result.is_err(), "Duplicate hash should be rejected");
     }
+
+    // ========================================================================
+    // Real Processor Integration Tests
+    // ========================================================================
+
+    /// Test that the real process_scheduled_executions from tos_daemon
+    /// handles ContractNotFound as a retryable error (defers the execution).
+    #[tokio::test]
+    async fn real_processor_defers_missing_contract() {
+        let scheduler = sample_hash(1);
+        let contract = sample_hash(10);
+
+        let config = ChainClientConfig::default()
+            .with_account(GenesisAccount::new(scheduler.clone(), 10_000_000));
+
+        let mut client = ChainClient::start(config).await.unwrap();
+
+        // Schedule an execution at topoheight 5 (no contract deployed)
+        let exec = make_exec(contract.clone(), 5, 1_000, 100_000, 0, scheduler.clone());
+        client.schedule_execution(exec).await.unwrap();
+
+        // Verify execution is in queue
+        let pending = client.get_pending_at(5);
+        assert_eq!(
+            pending.len(),
+            1,
+            "Should have 1 pending execution at topo 5"
+        );
+
+        // Process with real processor
+        let results = client
+            .process_scheduled_with_real_processor(5)
+            .await
+            .unwrap();
+
+        // ContractNotFound is considered retryable, so execution should be deferred
+        assert_eq!(
+            results.deferred_count, 1,
+            "Should defer when contract not found"
+        );
+        assert_eq!(
+            results.results.len(),
+            0,
+            "Deferred executions don't appear in results"
+        );
+        assert_eq!(results.failure_count, 0, "Should not fail, only defer");
+
+        // Execution should be rescheduled to next topoheight
+        let pending_next = client.get_pending_at(6);
+        assert_eq!(pending_next.len(), 1, "Should be rescheduled to topo 6");
+    }
+
+    /// Test real processor with contract bytecode (using scheduler.so).
+    #[tokio::test]
+    async fn real_processor_with_contract() {
+        let scheduler_addr = sample_hash(0xBB);
+
+        let config = ChainClientConfig::default()
+            .with_account(GenesisAccount::new(scheduler_addr.clone(), 10_000_000));
+
+        let mut client = ChainClient::start(config).await.unwrap();
+
+        // Deploy scheduler contract
+        let bytecode = include_bytes!("../../tests/fixtures/scheduler.so");
+        let contract = client.deploy_contract(bytecode).await.unwrap();
+
+        // Schedule an execution using schedule_execution API (not syscall)
+        // Entry point 2 = on_scheduled_execution
+        let mut exec = ScheduledExecution::new_offercall(
+            contract.clone(),
+            2, // chunk_id for on_scheduled_execution
+            vec![],
+            100_000,
+            1_000,
+            scheduler_addr.clone(),
+            ScheduledExecutionKind::TopoHeight(5),
+            0,
+        );
+        exec.contract = contract.clone();
+        let exec_hash = exec.hash.clone();
+        client.schedule_execution(exec).await.unwrap();
+
+        // Warp to target topoheight
+        client.warp_to_topoheight(4).await.unwrap();
+
+        // Process with real processor
+        let results = client
+            .process_scheduled_with_real_processor(5)
+            .await
+            .unwrap();
+
+        // Should have processed one execution successfully
+        assert_eq!(results.results.len(), 1);
+        assert_eq!(results.success_count, 1, "Execution should succeed");
+        assert!(results.results[0].success);
+
+        // Check status
+        let (status, _) = client.get_scheduled_status(&exec_hash).unwrap();
+        assert_eq!(status, ScheduledExecutionStatus::Executed);
+    }
+
+    /// Test that real processor respects priority ordering with real contracts.
+    #[tokio::test]
+    async fn real_processor_priority_ordering() {
+        let scheduler = sample_hash(0xAA);
+
+        let config = ChainClientConfig::default()
+            .with_account(GenesisAccount::new(scheduler.clone(), 10_000_000));
+
+        let mut client = ChainClient::start(config).await.unwrap();
+
+        // Deploy same contract at 3 different addresses
+        let bytecode = include_bytes!("../../tests/fixtures/scheduler.so");
+        let c1 = Hash::new([0x01; 32]);
+        let c2 = Hash::new([0x02; 32]);
+        let c3 = Hash::new([0x03; 32]);
+        client.deploy_contract_at(&c1, bytecode).await.unwrap();
+        client.deploy_contract_at(&c2, bytecode).await.unwrap();
+        client.deploy_contract_at(&c3, bytecode).await.unwrap();
+
+        // Schedule 3 executions with different offers
+        // Entry point 2 = on_scheduled_execution
+        let mut exec_low = ScheduledExecution::new_offercall(
+            c1.clone(),
+            2,
+            vec![],
+            100_000,
+            100,
+            scheduler.clone(),
+            ScheduledExecutionKind::TopoHeight(5),
+            0,
+        );
+        exec_low.contract = c1.clone();
+
+        let mut exec_high = ScheduledExecution::new_offercall(
+            c2.clone(),
+            2,
+            vec![],
+            100_000,
+            1000,
+            scheduler.clone(),
+            ScheduledExecutionKind::TopoHeight(5),
+            0,
+        );
+        exec_high.contract = c2.clone();
+
+        let mut exec_mid = ScheduledExecution::new_offercall(
+            c3.clone(),
+            2,
+            vec![],
+            100_000,
+            500,
+            scheduler.clone(),
+            ScheduledExecutionKind::TopoHeight(5),
+            0,
+        );
+        exec_mid.contract = c3.clone();
+
+        client.schedule_execution(exec_low).await.unwrap();
+        client.schedule_execution(exec_high).await.unwrap();
+        client.schedule_execution(exec_mid).await.unwrap();
+
+        // Process with real processor
+        let results = client
+            .process_scheduled_with_real_processor(5)
+            .await
+            .unwrap();
+
+        // Should have processed 3 executions in priority order (high offer first)
+        assert_eq!(results.results.len(), 3, "Should have 3 execution results");
+
+        // Verify order: high (1000) -> mid (500) -> low (100)
+        assert_eq!(results.results[0].execution.offer_amount, 1000);
+        assert_eq!(results.results[1].execution.offer_amount, 500);
+        assert_eq!(results.results[2].execution.offer_amount, 100);
+    }
+
+    /// Test that real processor handles capacity limits correctly.
+    #[tokio::test]
+    async fn real_processor_capacity_limit() {
+        let scheduler = sample_hash(1);
+
+        let config = ChainClientConfig::default()
+            .with_account(GenesisAccount::new(scheduler.clone(), 100_000_000));
+
+        let mut client = ChainClient::start(config).await.unwrap();
+
+        // Schedule more than MAX_SCHEDULED_EXECUTIONS_PER_BLOCK
+        for i in 0..(MAX_SCHEDULED_EXECUTIONS_PER_BLOCK + 5) {
+            let exec = make_exec(
+                sample_hash(10 + i as u8),
+                5,
+                1_000,
+                1_000, // small gas to fit many
+                0,
+                scheduler.clone(),
+            );
+            client.schedule_execution(exec).await.unwrap();
+        }
+
+        // Warp and process
+        client.warp_to_topoheight(4).await.unwrap();
+        let results = client
+            .process_scheduled_with_real_processor(5)
+            .await
+            .unwrap();
+
+        // Should have processed at most MAX_SCHEDULED_EXECUTIONS_PER_BLOCK
+        assert!(
+            results.results.len() <= MAX_SCHEDULED_EXECUTIONS_PER_BLOCK,
+            "Should respect capacity limit"
+        );
+    }
 }

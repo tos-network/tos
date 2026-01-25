@@ -19,11 +19,16 @@ use tokio::sync::RwLock;
 use tos_common::asset::AssetData;
 use tos_common::block::{compute_vrf_binding_message, compute_vrf_input, BlockVrfData, TopoHeight};
 use tos_common::contract::{
-    ContractCache, ContractProvider, ContractStorage, ScheduledExecution, ScheduledExecutionStatus,
-    ValueCell, MAX_SCHEDULED_EXECUTIONS_PER_BLOCK, MAX_SCHEDULED_EXECUTION_GAS_PER_BLOCK,
-    MAX_SCHEDULING_HORIZON,
+    ContractCache, ContractProvider, ContractStorage, ScheduledExecution, ScheduledExecutionKind,
+    ScheduledExecutionStatus, ValueCell, MAX_SCHEDULED_EXECUTIONS_PER_BLOCK,
+    MAX_SCHEDULED_EXECUTION_GAS_PER_BLOCK, MAX_SCHEDULING_HORIZON,
 };
 use tos_common::crypto::{Hash, KeyPair, PublicKey, Signature};
+use tos_daemon::core::error::BlockchainError;
+use tos_daemon::core::storage::ContractScheduledExecutionProvider;
+use tos_daemon::core::{
+    process_scheduled_executions, BlockScheduledExecutionResults, ScheduledExecutionConfig,
+};
 use tos_daemon::tako_integration::TakoExecutor;
 use tos_daemon::vrf::{VrfData, VrfKeyManager, VrfOutput, VrfProof, VrfPublicKey};
 use tos_program_runtime::storage::{ScheduledExecutionInfo, ScheduledExecutionProvider};
@@ -316,6 +321,380 @@ impl ContractProvider for InMemoryContractProvider {
         _topoheight: TopoHeight,
     ) -> Result<Option<Vec<u8>>, anyhow::Error> {
         Ok(self.bytecodes.get(contract).cloned())
+    }
+}
+
+/// In-memory scheduled execution provider for ChainClient.
+///
+/// This provider implements the `ContractScheduledExecutionProvider` trait
+/// from tos_daemon, allowing ChainClient to use the real `process_scheduled_executions`
+/// function instead of the mock implementation.
+///
+/// # Storage Structure
+///
+/// ```text
+/// scheduled_queue: BTreeMap<TopoHeight, Vec<ScheduledExecution>>
+///                      │
+///                      ├─ TopoHeight executions: stored at target topoheight
+///                      └─ BlockEnd executions: stored at registration topoheight
+///
+/// scheduled_results: HashMap<Hash, (ScheduledExecutionStatus, TopoHeight)>
+///                      │
+///                      └─ Tracks execution outcomes for queries
+/// ```
+pub struct InMemoryScheduledExecutionProvider {
+    /// Scheduled execution queue: target_topoheight -> executions
+    scheduled_queue: BTreeMap<u64, Vec<ScheduledExecution>>,
+    /// Contract bytecodes for loading modules
+    bytecodes: HashMap<Hash, Vec<u8>>,
+    /// Contract storage for execution
+    storage: HashMap<(Hash, Vec<u8>), Vec<u8>>,
+    /// Current topoheight
+    topoheight: u64,
+}
+
+impl InMemoryScheduledExecutionProvider {
+    /// Create a new in-memory scheduled execution provider.
+    pub fn new(
+        scheduled_queue: BTreeMap<u64, Vec<ScheduledExecution>>,
+        bytecodes: HashMap<Hash, Vec<u8>>,
+        storage: HashMap<(Hash, Vec<u8>), Vec<u8>>,
+        topoheight: u64,
+    ) -> Self {
+        Self {
+            scheduled_queue,
+            bytecodes,
+            storage,
+            topoheight,
+        }
+    }
+
+    /// Get the scheduled queue (for syncing back to ChainClient).
+    pub fn into_queue(self) -> BTreeMap<u64, Vec<ScheduledExecution>> {
+        self.scheduled_queue
+    }
+
+    /// Get execution topoheight from kind.
+    fn get_execution_topoheight(execution: &ScheduledExecution) -> u64 {
+        match execution.kind {
+            ScheduledExecutionKind::TopoHeight(topo) => topo,
+            ScheduledExecutionKind::BlockEnd => execution.registration_topoheight,
+        }
+    }
+}
+
+#[async_trait]
+impl ContractScheduledExecutionProvider for InMemoryScheduledExecutionProvider {
+    async fn set_contract_scheduled_execution_at_topoheight(
+        &mut self,
+        _contract: &Hash,
+        _registration_topoheight: TopoHeight,
+        execution: &ScheduledExecution,
+        execution_topoheight: TopoHeight,
+    ) -> Result<(), BlockchainError> {
+        self.scheduled_queue
+            .entry(execution_topoheight)
+            .or_default()
+            .push(execution.clone());
+        Ok(())
+    }
+
+    async fn has_contract_scheduled_execution_at_topoheight(
+        &self,
+        contract: &Hash,
+        topoheight: TopoHeight,
+    ) -> Result<bool, BlockchainError> {
+        if let Some(executions) = self.scheduled_queue.get(&topoheight) {
+            return Ok(executions.iter().any(|e| &e.contract == contract));
+        }
+        Ok(false)
+    }
+
+    async fn get_contract_scheduled_execution_at_topoheight(
+        &self,
+        contract: &Hash,
+        topoheight: TopoHeight,
+    ) -> Result<ScheduledExecution, BlockchainError> {
+        if let Some(executions) = self.scheduled_queue.get(&topoheight) {
+            if let Some(exec) = executions.iter().find(|e| &e.contract == contract) {
+                return Ok(exec.clone());
+            }
+        }
+        Err(BlockchainError::Any(anyhow::anyhow!(
+            "Scheduled execution not found for contract {} at topoheight {}",
+            contract,
+            topoheight
+        )))
+    }
+
+    async fn get_registered_contract_scheduled_executions_at_topoheight<'a>(
+        &'a self,
+        topoheight: TopoHeight,
+    ) -> Result<
+        impl Iterator<Item = Result<(TopoHeight, Hash), BlockchainError>> + Send + 'a,
+        BlockchainError,
+    > {
+        let executions: Vec<_> = self
+            .scheduled_queue
+            .values()
+            .flatten()
+            .filter(|e| e.registration_topoheight == topoheight)
+            .map(|e| Ok((Self::get_execution_topoheight(e), e.contract.clone())))
+            .collect();
+        Ok(executions.into_iter())
+    }
+
+    async fn get_contract_scheduled_executions_at_topoheight<'a>(
+        &'a self,
+        topoheight: TopoHeight,
+    ) -> Result<
+        impl Iterator<Item = Result<ScheduledExecution, BlockchainError>> + Send + 'a,
+        BlockchainError,
+    > {
+        let executions: Vec<_> = self
+            .scheduled_queue
+            .get(&topoheight)
+            .map(|v| v.iter().cloned().map(Ok).collect())
+            .unwrap_or_default();
+        Ok(executions.into_iter())
+    }
+
+    async fn get_registered_contract_scheduled_executions_in_range<'a>(
+        &'a self,
+        minimum_topoheight: TopoHeight,
+        maximum_topoheight: TopoHeight,
+    ) -> Result<
+        impl futures::Stream<
+                Item = Result<(TopoHeight, TopoHeight, ScheduledExecution), BlockchainError>,
+            > + Send
+            + 'a,
+        BlockchainError,
+    > {
+        let executions: Vec<_> = self
+            .scheduled_queue
+            .values()
+            .flatten()
+            .filter(|e| {
+                e.registration_topoheight >= minimum_topoheight
+                    && e.registration_topoheight <= maximum_topoheight
+            })
+            .map(|e| {
+                Ok((
+                    Self::get_execution_topoheight(e),
+                    e.registration_topoheight,
+                    e.clone(),
+                ))
+            })
+            .collect();
+        Ok(futures::stream::iter(executions))
+    }
+
+    async fn get_priority_sorted_scheduled_executions_at_topoheight<'a>(
+        &'a self,
+        topoheight: TopoHeight,
+    ) -> Result<
+        impl Iterator<Item = Result<ScheduledExecution, BlockchainError>> + Send + 'a,
+        BlockchainError,
+    > {
+        let mut executions: Vec<_> = self
+            .scheduled_queue
+            .get(&topoheight)
+            .cloned()
+            .unwrap_or_default();
+
+        // Sort by priority: offer_amount DESC, registration_topoheight ASC, hash ASC
+        executions.sort_by(|a, b| {
+            b.offer_amount
+                .cmp(&a.offer_amount)
+                .then(a.registration_topoheight.cmp(&b.registration_topoheight))
+                .then(a.hash.cmp(&b.hash))
+        });
+
+        Ok(executions.into_iter().map(Ok))
+    }
+
+    async fn delete_contract_scheduled_execution(
+        &mut self,
+        contract: &Hash,
+        execution: &ScheduledExecution,
+    ) -> Result<(), BlockchainError> {
+        let exec_topo = Self::get_execution_topoheight(execution);
+        if let Some(entries) = self.scheduled_queue.get_mut(&exec_topo) {
+            if let Some(pos) = entries
+                .iter()
+                .position(|e| &e.contract == contract && e.hash == execution.hash)
+            {
+                entries.remove(pos);
+                if entries.is_empty() {
+                    self.scheduled_queue.remove(&exec_topo);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    async fn count_contract_scheduled_executions_in_window(
+        &self,
+        contract: &Hash,
+        from_topoheight: TopoHeight,
+        to_topoheight: TopoHeight,
+    ) -> Result<u64, BlockchainError> {
+        let mut count = 0u64;
+        for (topo, executions) in &self.scheduled_queue {
+            if *topo >= from_topoheight && *topo <= to_topoheight {
+                count = count.saturating_add(
+                    executions
+                        .iter()
+                        .filter(|e| &e.scheduler_contract == contract)
+                        .count() as u64,
+                );
+            }
+        }
+        Ok(count)
+    }
+
+    async fn get_scheduled_execution_by_handle(
+        &self,
+        handle: u64,
+    ) -> Result<Option<ScheduledExecution>, BlockchainError> {
+        for executions in self.scheduled_queue.values() {
+            for exec in executions {
+                // Hash is always 32 bytes, so [..8] slice is always valid
+                let hash_bytes = exec.hash.as_bytes();
+                let exec_handle = u64::from_le_bytes([
+                    hash_bytes[0],
+                    hash_bytes[1],
+                    hash_bytes[2],
+                    hash_bytes[3],
+                    hash_bytes[4],
+                    hash_bytes[5],
+                    hash_bytes[6],
+                    hash_bytes[7],
+                ]);
+                if exec_handle == handle {
+                    return Ok(Some(exec.clone()));
+                }
+            }
+        }
+        Ok(None)
+    }
+}
+
+/// Implement ContractProvider for InMemoryScheduledExecutionProvider
+/// to allow using the real process_scheduled_executions function.
+impl ContractProvider for InMemoryScheduledExecutionProvider {
+    fn get_contract_balance_for_asset(
+        &self,
+        _contract: &Hash,
+        _asset: &Hash,
+        _topoheight: TopoHeight,
+    ) -> Result<Option<(TopoHeight, u64)>, anyhow::Error> {
+        Ok(None)
+    }
+
+    fn get_account_balance_for_asset(
+        &self,
+        _key: &PublicKey,
+        _asset: &Hash,
+        _topoheight: TopoHeight,
+    ) -> Result<Option<(TopoHeight, u64)>, anyhow::Error> {
+        Ok(None)
+    }
+
+    fn asset_exists(&self, _asset: &Hash, _topoheight: TopoHeight) -> Result<bool, anyhow::Error> {
+        Ok(false)
+    }
+
+    fn load_asset_data(
+        &self,
+        _asset: &Hash,
+        _topoheight: TopoHeight,
+    ) -> Result<Option<(TopoHeight, AssetData)>, anyhow::Error> {
+        Ok(None)
+    }
+
+    fn load_asset_supply(
+        &self,
+        _asset: &Hash,
+        _topoheight: TopoHeight,
+    ) -> Result<Option<(TopoHeight, u64)>, anyhow::Error> {
+        Ok(None)
+    }
+
+    fn account_exists(
+        &self,
+        _key: &PublicKey,
+        _topoheight: TopoHeight,
+    ) -> Result<bool, anyhow::Error> {
+        Ok(false)
+    }
+
+    fn load_contract_module(
+        &self,
+        contract: &Hash,
+        _topoheight: TopoHeight,
+    ) -> Result<Option<Vec<u8>>, anyhow::Error> {
+        Ok(self.bytecodes.get(contract).cloned())
+    }
+}
+
+/// Implement ContractStorage for InMemoryScheduledExecutionProvider.
+impl ContractStorage for InMemoryScheduledExecutionProvider {
+    fn load_data(
+        &self,
+        contract: &Hash,
+        key: &ValueCell,
+        _topoheight: TopoHeight,
+    ) -> Result<Option<(TopoHeight, Option<ValueCell>)>, anyhow::Error> {
+        let key_bytes = key
+            .as_bytes()
+            .map_err(|e| anyhow::anyhow!("{}", e))?
+            .clone();
+        match self.storage.get(&(contract.clone(), key_bytes)) {
+            Some(value) => Ok(Some((
+                self.topoheight,
+                Some(ValueCell::Bytes(value.clone())),
+            ))),
+            None => Ok(None),
+        }
+    }
+
+    fn load_data_latest_topoheight(
+        &self,
+        contract: &Hash,
+        key: &ValueCell,
+        _topoheight: TopoHeight,
+    ) -> Result<Option<TopoHeight>, anyhow::Error> {
+        let key_bytes = key
+            .as_bytes()
+            .map_err(|e| anyhow::anyhow!("{}", e))?
+            .clone();
+        if self.storage.contains_key(&(contract.clone(), key_bytes)) {
+            Ok(Some(self.topoheight))
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn has_data(
+        &self,
+        contract: &Hash,
+        key: &ValueCell,
+        _topoheight: TopoHeight,
+    ) -> Result<bool, anyhow::Error> {
+        let key_bytes = key
+            .as_bytes()
+            .map_err(|e| anyhow::anyhow!("{}", e))?
+            .clone();
+        Ok(self.storage.contains_key(&(contract.clone(), key_bytes)))
+    }
+
+    fn has_contract(
+        &self,
+        contract: &Hash,
+        _topoheight: TopoHeight,
+    ) -> Result<bool, anyhow::Error> {
+        Ok(self.bytecodes.contains_key(contract))
     }
 }
 
@@ -2062,6 +2441,78 @@ impl ChainClient {
                 .or_default()
                 .extend(deferred);
         }
+    }
+
+    /// Process scheduled executions using the real daemon processor.
+    ///
+    /// This method uses the actual `process_scheduled_executions` function from
+    /// `tos_daemon::core` instead of the mock implementation. This ensures that
+    /// the TCK tests exercise the same code path as the production daemon.
+    ///
+    /// # Arguments
+    /// * `topo` - The topoheight at which to process scheduled executions
+    ///
+    /// # Returns
+    /// * `BlockScheduledExecutionResults` containing all execution outcomes
+    pub async fn process_scheduled_with_real_processor(
+        &mut self,
+        topo: u64,
+    ) -> Result<BlockScheduledExecutionResults, WarpError> {
+        // Create the in-memory provider with current state
+        let mut provider = InMemoryScheduledExecutionProvider::new(
+            std::mem::take(&mut self.scheduled_queue),
+            self.contract_bytecodes.clone(),
+            self.contract_storage.clone(),
+            topo,
+        );
+
+        // Get block hash for this topoheight
+        let block_hash = self
+            .block_hashes
+            .get(&topo)
+            .cloned()
+            .unwrap_or_else(|| tos_common::crypto::hash(&topo.to_le_bytes()));
+
+        // Use default config (same as daemon)
+        let config = ScheduledExecutionConfig::default();
+
+        // Call the real processor
+        let results = process_scheduled_executions(
+            &mut provider,
+            topo,
+            &block_hash,
+            topo,                    // block_height = topoheight in linear chain
+            topo.saturating_mul(15), // mock timestamp
+            &config,
+        )
+        .await
+        .map_err(|e| WarpError::StateTransition(format!("Scheduled execution failed: {:?}", e)))?;
+
+        // Sync state back from provider
+        self.scheduled_queue = provider.into_queue();
+
+        // Update scheduled_results from the real processor results
+        for result in &results.results {
+            self.scheduled_results.insert(
+                result.execution.hash.clone(),
+                (result.execution.status, topo),
+            );
+        }
+
+        // Pay miner rewards
+        if results.total_miner_rewards > 0 {
+            if let Some(ref miner_addr) = self.miner_address {
+                let miner_addr = miner_addr.clone();
+                if let Ok(miner_balance) = self.blockchain.get_balance_sync(&miner_addr) {
+                    let _ = self.blockchain.force_set_balance_sync(
+                        &miner_addr,
+                        miner_balance.saturating_add(results.total_miner_rewards),
+                    );
+                }
+            }
+        }
+
+        Ok(results)
     }
 
     /// Validate a transaction before execution.
