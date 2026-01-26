@@ -1,0 +1,40 @@
+[package]
+name = "tos_tck_crypto"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+
+[[bin]]
+name = "gen_sha3_vectors"
+path = "gen_sha3_vectors.rs"
+
+[[bin]]
+name = "gen_schnorr_vectors"
+path = "gen_schnorr_vectors.rs"
+
+[[bin]]
+name = "gen_bech32_vectors"
+path = "gen_bech32_vectors.rs"
+
+[[bin]]
+name = "gen_vrf_vectors"
+path = "gen_vrf_vectors.rs"
+
+[dependencies]
+# SHA3 - same version as TOS common
+sha3 = "0.10"
+
+# Curve25519/Ristretto255 - curve25519-dalek-ng is used by bulletproofs 4.0
+curve25519-dalek-ng = "4.1"
+
+# Bulletproofs for PedersenGens (H generator)
+bulletproofs = "4.0"
+
+# Schnorrkel for VRF
+schnorrkel = "0.11"
+
+# Serialization
+hex = "0.4"
+serde = { version = "1.0", features = ["derive"] }
+serde_yaml = "0.9"
