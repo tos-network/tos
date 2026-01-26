@@ -6,7 +6,13 @@ use p256::{
     elliptic_curve::sec1::ToEncodedPoint,
 };
 use serde::Serialize;
-use sha2::{Sha256, Digest};
+
+/// Normalize signature to low-s form.
+/// ECDSA signatures (r, s) and (r, n-s) are both valid.
+/// To prevent malleability, we enforce s <= (n-1)/2.
+fn normalize_signature(sig: Signature) -> Signature {
+    sig.normalize_s().unwrap_or(sig)
+}
 
 #[derive(Serialize)]
 struct TestVector {
@@ -37,7 +43,7 @@ fn main() {
         let verifying_key = VerifyingKey::from(&signing_key);
         let msg = b"hello world";
 
-        let signature: Signature = signing_key.sign(msg);
+        let signature: Signature = normalize_signature(signing_key.sign(msg));
 
         // Compressed public key (33 bytes)
         let public_key_bytes = verifying_key.to_encoded_point(true);
@@ -59,7 +65,7 @@ fn main() {
         let verifying_key = VerifyingKey::from(&signing_key);
         let msg: &[u8] = b"";
 
-        let signature: Signature = signing_key.sign(msg);
+        let signature: Signature = normalize_signature(signing_key.sign(msg));
         let public_key_bytes = verifying_key.to_encoded_point(true);
 
         vectors.push(TestVector {
@@ -79,7 +85,7 @@ fn main() {
         let verifying_key = VerifyingKey::from(&signing_key);
         let msg = b"The quick brown fox jumps over the lazy dog. This is a longer message to test hashing.";
 
-        let signature: Signature = signing_key.sign(msg);
+        let signature: Signature = normalize_signature(signing_key.sign(msg));
         let public_key_bytes = verifying_key.to_encoded_point(true);
 
         vectors.push(TestVector {
@@ -105,7 +111,7 @@ fn main() {
         let verifying_key = VerifyingKey::from(&signing_key);
         let msg = b"test message";
 
-        let signature: Signature = signing_key.sign(msg);
+        let signature: Signature = normalize_signature(signing_key.sign(msg));
         let public_key_bytes = verifying_key.to_encoded_point(true);
 
         vectors.push(TestVector {
@@ -130,7 +136,7 @@ fn main() {
             0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11, 0x00,
         ];
 
-        let signature: Signature = signing_key.sign(&msg);
+        let signature: Signature = normalize_signature(signing_key.sign(&msg));
         let public_key_bytes = verifying_key.to_encoded_point(true);
 
         vectors.push(TestVector {
