@@ -69,6 +69,10 @@ path = "gen_chacha20_vectors.rs"
 name = "gen_aes_gcm_vectors"
 path = "gen_aes_gcm_vectors.rs"
 
+[[bin]]
+name = "gen_chacha20_poly1305_vectors"
+path = "gen_chacha20_poly1305_vectors.rs"
+
 # Phase 4: Advanced
 [[bin]]
 name = "gen_bigint_vectors"
@@ -142,6 +146,9 @@ chacha20 = "0.9"
 
 # AES-GCM
 aes-gcm = "0.10"
+
+# ChaCha20-Poly1305 AEAD (TOS P2P encryption)
+chacha20poly1305 = "0.10"
 
 # BigInt
 num-bigint = "0.4"
