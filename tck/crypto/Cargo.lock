@@ -1004,6 +1004,7 @@ dependencies = [
  "hex",
  "hmac",
  "light-poseidon",
+ "merlin",
  "num-bigint",
  "rand",
  "schnorrkel",

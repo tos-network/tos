@@ -82,6 +82,26 @@ path = "gen_poseidon_vectors.rs"
 name = "gen_bn254_vectors"
 path = "gen_bn254_vectors.rs"
 
+[[bin]]
+name = "gen_rangeproofs_vectors"
+path = "gen_rangeproofs_vectors.rs"
+
+[[bin]]
+name = "check_gens"
+path = "check_gens.rs"
+
+[[bin]]
+name = "gen_rangeproofs_table"
+path = "gen_rangeproofs_table.rs"
+
+[[bin]]
+name = "verify_rangeproofs"
+path = "verify_rangeproofs.rs"
+
+[[bin]]
+name = "dump_proof"
+path = "dump_proof.rs"
+
 [dependencies]
 # SHA2 family
 sha2 = "0.10"
@@ -101,8 +121,9 @@ hmac = "0.12"
 # Curve25519/Ristretto255 - curve25519-dalek-ng is used by bulletproofs 4.0
 curve25519-dalek-ng = "4.1"
 
-# Bulletproofs for PedersenGens (H generator)
+# Bulletproofs for PedersenGens (H generator) and range proofs
 bulletproofs = "4.0"
+merlin = "3.0"
 
 # Schnorrkel for VRF
 schnorrkel = "0.11"
