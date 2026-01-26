@@ -1,0 +1,50 @@
+algorithm: HMAC-SHA256
+output_size: 32
+test_vectors:
+- name: rfc4231_test1
+  description: RFC 4231 Test Case 1
+  key_hex: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
+  key_length: 20
+  message_hex: '4869205468657265'
+  message_ascii: Hi There
+  message_length: 8
+  expected_hex: b0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7
+- name: rfc4231_test2
+  description: RFC 4231 Test Case 2
+  key_hex: 4a656665
+  key_length: 4
+  message_hex: 7768617420646f2079612077616e7420666f72206e6f7468696e673f
+  message_ascii: what do ya want for nothing?
+  message_length: 28
+  expected_hex: 5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843
+- name: rfc4231_test3
+  description: RFC 4231 Test Case 3
+  key_hex: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  key_length: 20
+  message_hex: dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+  message_length: 50
+  expected_hex: 773ea91e36800e46854db8ebd09181a72959098b3ef8c122d9635514ced565fe
+- name: empty_message
+  description: 32-byte key, empty message
+  key_hex: '0101010101010101010101010101010101010101010101010101010101010101'
+  key_length: 32
+  message_hex: ''
+  message_ascii: ''
+  message_length: 0
+  expected_hex: 2e72eb6626e1d4f7fc6dff111585898f2e37c471a68862f07f10aa2824d57c75
+- name: long_key
+  description: Key longer than block size (128 bytes)
+  key_hex: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  key_length: 128
+  message_hex: 5465737420776974682061206b6579206c6f6e676572207468616e20626c6f636b2073697a65
+  message_ascii: Test with a key longer than block size
+  message_length: 38
+  expected_hex: 3e2a0ab8ce4dbe47f3563265bfae324743bf3229ce8cbbed9888517a2851c8fd
+- name: bip32_path
+  description: HD wallet path derivation style
+  key_hex: '4242424242424242424242424242424242424242424242424242424242424242'
+  key_length: 32
+  message_hex: 6d2f3434272f353031272f30272f3027
+  message_ascii: m/44'/501'/0'/0'
+  message_length: 16
+  expected_hex: ed1667685235e3f53b7e336dafec04f481d5baacc0b0762d80dd40e1de2a568a

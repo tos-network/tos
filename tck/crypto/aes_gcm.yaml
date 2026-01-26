@@ -1,0 +1,78 @@
+algorithm: AES-GCM
+nonce_size: 12
+tag_size: 16
+test_vectors:
+- name: aes256_empty
+  description: AES-256-GCM empty plaintext
+  key_hex: '4242424242424242424242424242424242424242424242424242424242424242'
+  key_size: 32
+  nonce_hex: '000000000000000000000000'
+  plaintext_hex: ''
+  plaintext_length: 0
+  ciphertext_hex: ''
+  tag_hex: 1a617befa577e0b78c66db5b289e6113
+- name: aes256_hello
+  description: AES-256-GCM simple message
+  key_hex: '4242424242424242424242424242424242424242424242424242424242424242'
+  key_size: 32
+  nonce_hex: '000000000000000000000000'
+  plaintext_hex: 48656c6c6f2c20776f726c6421
+  plaintext_length: 13
+  ciphertext_hex: bcd7939533a0a590f63d276b10
+  tag_hex: 4b6af96054cec9121040a535280d2182
+- name: aes256_with_aad
+  description: AES-256-GCM with AAD
+  key_hex: '0101010101010101010101010101010101010101010101010101010101010101'
+  key_size: 32
+  nonce_hex: 000102030405060708090a0b
+  aad_hex: 6164646974696f6e616c2061757468656e746963617465642064617461
+  plaintext_hex: 736563726574206d657373616765
+  plaintext_length: 14
+  ciphertext_hex: c8c3f654458a26149b1994a5470c
+  tag_hex: 4eae94d750e770bc403a4ada7e33a21b
+- name: aes256_64bytes
+  description: AES-256-GCM 64-byte plaintext
+  key_hex: abababababababababababababababababababababababababababababababab
+  key_size: 32
+  nonce_hex: cdcdcdcdcdcdcdcdcdcdcdcd
+  plaintext_hex: '00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000'
+  plaintext_length: 64
+  ciphertext_hex: 91c8d10d442835537b351ee36aa63b7db8395a3f2150edbc07c17a7f3bc5155aea02bcc70efda0039dcc23550c4659916c2e72f1da396d5d6b9f94c9b7724e89
+  tag_hex: 4832798de6c7f9639861cd10d47c3d5d
+- name: aes128_empty
+  description: AES-128-GCM empty plaintext
+  key_hex: '42424242424242424242424242424242'
+  key_size: 16
+  nonce_hex: '000000000000000000000000'
+  plaintext_hex: ''
+  plaintext_length: 0
+  ciphertext_hex: ''
+  tag_hex: b79a4ed1b63f3449a97dba67284adb90
+- name: aes128_hello
+  description: AES-128-GCM simple message
+  key_hex: '42424242424242424242424242424242'
+  key_size: 16
+  nonce_hex: '000000000000000000000000'
+  plaintext_hex: 48656c6c6f2c20776f726c6421
+  plaintext_length: 13
+  ciphertext_hex: b472a5ce96d98ee231ffb305db
+  tag_hex: 1e07d982913d71d0bea3581e41b64764
+- name: aes128_with_aad
+  description: AES-128-GCM with AAD
+  key_hex: '01010101010101010101010101010101'
+  key_size: 16
+  nonce_hex: 000102030405060708090a0b
+  aad_hex: 6164646974696f6e616c2061757468656e746963617465642064617461
+  plaintext_hex: 736563726574206d657373616765
+  plaintext_length: 14
+  ciphertext_hex: 6b3faecc13970c631bef1950d83a
+  tag_hex: 5b344cf8541533f705a6d97ec7c9cbad
+- name: nist_aes256_tc14
+  description: NIST GCM Test Case 14 (zero key/nonce, empty plaintext)
+  key_hex: '0000000000000000000000000000000000000000000000000000000000000000'
+  key_size: 32
+  nonce_hex: '000000000000000000000000'
+  plaintext_hex: ''
+  plaintext_length: 0
+  ciphertext_hex: ''
+  tag_hex: 530f8afbc74536b9a963b4f1c4cb738b

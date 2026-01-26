@@ -5,6 +5,7 @@ edition = "2021"
 
 [workspace]
 
+# Existing generators
 [[bin]]
 name = "gen_sha3_vectors"
 path = "gen_sha3_vectors.rs"
@@ -21,9 +22,73 @@ path = "gen_bech32_vectors.rs"
 name = "gen_vrf_vectors"
 path = "gen_vrf_vectors.rs"
 
+# Phase 1: Standard hash functions
+[[bin]]
+name = "gen_sha256_vectors"
+path = "gen_sha256_vectors.rs"
+
+[[bin]]
+name = "gen_sha512_vectors"
+path = "gen_sha512_vectors.rs"
+
+[[bin]]
+name = "gen_keccak256_vectors"
+path = "gen_keccak256_vectors.rs"
+
+[[bin]]
+name = "gen_blake3_vectors"
+path = "gen_blake3_vectors.rs"
+
+[[bin]]
+name = "gen_hmac_vectors"
+path = "gen_hmac_vectors.rs"
+
+# Phase 2: Encoding and keys
+[[bin]]
+name = "gen_base58_vectors"
+path = "gen_base58_vectors.rs"
+
+[[bin]]
+name = "gen_ed25519_vectors"
+path = "gen_ed25519_vectors.rs"
+
+[[bin]]
+name = "gen_curve25519_vectors"
+path = "gen_curve25519_vectors.rs"
+
+[[bin]]
+name = "gen_x25519_vectors"
+path = "gen_x25519_vectors.rs"
+
+# Phase 3: Symmetric encryption
+[[bin]]
+name = "gen_chacha20_vectors"
+path = "gen_chacha20_vectors.rs"
+
+[[bin]]
+name = "gen_aes_gcm_vectors"
+path = "gen_aes_gcm_vectors.rs"
+
+# Phase 4: Advanced
+[[bin]]
+name = "gen_bigint_vectors"
+path = "gen_bigint_vectors.rs"
+
 [dependencies]
+# SHA2 family
+sha2 = "0.10"
+
 # SHA3 - same version as TOS common
 sha3 = "0.10"
+
+# Keccak (tiny-keccak for keccak256)
+tiny-keccak = { version = "2.0", features = ["keccak"] }
+
+# BLAKE3
+blake3 = "1.5"
+
+# HMAC
+hmac = "0.12"
 
 # Curve25519/Ristretto255 - curve25519-dalek-ng is used by bulletproofs 4.0
 curve25519-dalek-ng = "4.1"
@@ -33,6 +98,27 @@ bulletproofs = "4.0"
 
 # Schnorrkel for VRF
 schnorrkel = "0.11"
+
+# Ed25519
+ed25519-dalek = { version = "2.1", features = ["rand_core"] }
+
+# X25519
+x25519-dalek = { version = "2.0", features = ["static_secrets"] }
+
+# Base58
+bs58 = "0.5"
+
+# ChaCha20
+chacha20 = "0.9"
+
+# AES-GCM
+aes-gcm = "0.10"
+
+# BigInt
+num-bigint = "0.4"
+
+# Random
+rand = "0.8"
 
 # Serialization
 hex = "0.4"
