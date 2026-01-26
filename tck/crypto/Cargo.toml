@@ -74,6 +74,14 @@ path = "gen_aes_gcm_vectors.rs"
 name = "gen_bigint_vectors"
 path = "gen_bigint_vectors.rs"
 
+[[bin]]
+name = "gen_poseidon_vectors"
+path = "gen_poseidon_vectors.rs"
+
+[[bin]]
+name = "gen_bn254_vectors"
+path = "gen_bn254_vectors.rs"
+
 [dependencies]
 # SHA2 family
 sha2 = "0.10"
@@ -116,6 +124,15 @@ aes-gcm = "0.10"
 
 # BigInt
 num-bigint = "0.4"
+
+# Poseidon (light-poseidon used by Solana/TOS)
+light-poseidon = "0.2"
+
+# BN254 (ark-bn254 for curve operations)
+ark-bn254 = "0.4"
+ark-ec = "0.4"
+ark-ff = "0.4"
+ark-serialize = "0.4"
 
 # Random
 rand = "0.8"
