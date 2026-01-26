@@ -1,0 +1,39 @@
+algorithm: secp256k1
+description: secp256k1 ECDSA recoverable signature test vectors
+test_vectors:
+- name: hello_world
+  description: Simple message signing
+  msg_hash_hex: b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9
+  signature_hex: d893b2245cbdf77a3f789e35282100656c098379501166ae01af8a25952981025e7f7777433e6d96e02faea5a285932655f902109390bcbce1ff911a47289e62
+  recovery_id: 1
+  public_key_hex: 9101ff4fe19005d4829f9c4f66ac327e8f8baa3f89b88aadf304cdde1e80e3b25ce5f5ef0d1f0259817f27716daeec734047eb8b2168fcbec00293ab4fa6f68e
+  should_recover: true
+- name: zero_hash
+  description: All-zero message hash
+  msg_hash_hex: '0000000000000000000000000000000000000000000000000000000000000000'
+  signature_hex: 3f9ec51aee0a264640da0f99b10032cc10d300089d8348dab5020592f48963014bb0c75bddf5ee717a6f0627cbe83a1f8c4bd9d9a9229140bccb0db6cad2bfc6
+  recovery_id: 0
+  public_key_hex: bfaf2c40e19ea343d51b847800a5b62cdb4a72275e111b711e48d086dab2dd360770b90dba7cc8af3feac627ac8493b7f10ff857d2cd983875d7fe133dfa141c
+  should_recover: true
+- name: max_hash
+  description: All-0xFF message hash
+  msg_hash_hex: ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+  signature_hex: 14b43172b88c3b0dcde38aa75b9a7aee33b5c08206b8a5dc1a3092186d1a6f506f7c9b159a3fcd684f67cd13b7a92def9a798020e611f37a0c065e1c78474c29
+  recovery_id: 1
+  public_key_hex: cfb17dbba9b3a876993e47133e6ee899f0725025481e105d439ca37c71008ea04b8d60692e80ad6008f5efb1b09faf254e2be9495cc156dc393de46819759393
+  should_recover: true
+- name: deterministic
+  description: Deterministic test with known private key
+  msg_hash_hex: aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899
+  signature_hex: ff651c65eeded46383a4bdcd9170ff659a4f617bb658a46dd456c51ec8cc211a7dc4de91d0c847bf5def995bd043658136fe2135afe69282f7de873990dacb77
+  recovery_id: 1
+  public_key_hex: 84bf7562262bbd6940085748f3be6afa52ae317155181ece31b66351ccffa4b08cc43d63b2859d469fee15f31c9edb5324266e6fd0407e87382d60fc4511acd8
+  should_recover: true
+- name: eth_style
+  description: Ethereum-style transaction hash
+  msg_hash_hex: deadbeefcafebabe123456789abcdef0fedcba98765432101122334455667788
+  signature_hex: b4b56e1eeb3d96ca9a9d6ad975bb8c8ca27d9e76f74e78ea617d65fe6f5d4ddf1dc573aa509892505c894ffd7a69b40a58ce6c7d3b69e0aad1e0ac78e6519652
+  recovery_id: 1
+  public_key_hex: 451683e85d0702c6ff33e39a43f3d7f2de19ef9827e1861e77479b61d556f50db26913face84cda127f259f56b47c18a7246be227cb6a8f9e586f8ad16831f32
+  should_recover: true
+

@@ -1,0 +1,40 @@
+algorithm: secp256r1
+description: secp256r1 (NIST P-256) ECDSA signature verification test vectors
+note: Public key is compressed (33 bytes). Signature is (r, s) format (64 bytes). Message is hashed with SHA-256 internally.
+test_vectors:
+- name: hello_world
+  description: Simple message signing
+  message_hex: 68656c6c6f20776f726c64
+  message_length: 11
+  signature_hex: 1c78a97f931c3bd51c05f58c84f70000b6874c2d3169fe82c78c63ac802a9a457e57bc4eca0dbd44b7003aaa5731e28d15fb8b954b4800fe524ad7c55848c128
+  public_key_hex: 0268351bbf246f3f1cda8efc5942f81b8b77677ccef978492eabe0f2c6bc8ec4d5
+  should_verify: true
+- name: empty_message
+  description: Empty message
+  message_hex: ''
+  message_length: 0
+  signature_hex: 14d1bce8312952e150dd415258a6eb6e8dde9b6289002f9a0a2fad21a5019007b29c6aa4b1288ffea36ae48909a7bb8d9fa32325351933a37c4824bb4bdafc59
+  public_key_hex: 02f39c081b3097a43ffa458a84c424104fb82b6ed7a7827f4a9a0729e2bf5e7b5f
+  should_verify: true
+- name: long_message
+  description: Longer message for hash testing
+  message_hex: 54686520717569636b2062726f776e20666f78206a756d7073206f76657220746865206c617a7920646f672e20546869732069732061206c6f6e676572206d65737361676520746f20746573742068617368696e672e
+  message_length: 86
+  signature_hex: 660c5adf19be8e26263d5ee8e11988f295058cc8f433c78d448836af0669dc0b6dd186a882c5e3662e9d3eaa5289b15fe2cbe08f1f35748e5f64bd33bf14c7c2
+  public_key_hex: 02490143cccf0a0c3b5fba91bcc6d33b11524fed6e0a533fc4227492eacccf9dc9
+  should_verify: true
+- name: deterministic
+  description: Deterministic test with known private key
+  message_hex: 74657374206d657373616765
+  message_length: 12
+  signature_hex: 5c3c052d70d43e9835a7c2e8fdb223a50fa872d48f09620bf46e7fc520719d75a630b1226f845e0ffc4816470c2fd8e288fc8e04962616d1a940f1a6e24441dd
+  public_key_hex: 02515c3d6eb9e396b904d3feca7f54fdcd0cc1e997bf375dca515ad0a6c3b4035f
+  should_verify: true
+- name: binary_data
+  description: Binary data message
+  message_hex: 00112233445566778899aabbccddeeffffeeddccbbaa99887766554433221100
+  message_length: 32
+  signature_hex: eacddd1bc18d0368f80f579c58fea6a3b23add51f774c37b905dd1b890382fdcf655d80f549017a5d8b8e19ec4b68f8d8690d52fda6320f022f536a0567cc980
+  public_key_hex: 0244c508fbfd6025e7dff4287d6189e12127c58f38771693d7e31f96e76ff4904c
+  should_verify: true
+
