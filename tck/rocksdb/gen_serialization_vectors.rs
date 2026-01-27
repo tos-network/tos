@@ -719,6 +719,558 @@ fn generate_versioned_balance_vectors() -> Vec<VersionedBalanceTestVector> {
 }
 
 // ============================================================================
+// Asset Serialization
+// Structure: id (u64) + data_pointer (Option<u64>) + supply_pointer (Option<u64>)
+// ============================================================================
+
+#[derive(Serialize)]
+struct AssetTestVector {
+    name: String,
+    description: String,
+    id: u64,
+    data_pointer: Option<u64>,
+    supply_pointer: Option<u64>,
+    serialized_hex: String,
+    serialized_len: usize,
+}
+
+fn serialize_asset(id: u64, data_pointer: Option<u64>, supply_pointer: Option<u64>) -> Vec<u8> {
+    let mut buf = Vec::new();
+    buf.extend(write_u64_be(id));
+    buf.extend(write_option_u64_be(data_pointer));
+    buf.extend(write_option_u64_be(supply_pointer));
+    buf
+}
+
+fn generate_asset_vectors() -> Vec<AssetTestVector> {
+    let mut vectors = Vec::new();
+
+    // All 4 combinations of optional fields
+    for mask in 0u8..4 {
+        let has_data = (mask & 0b10) != 0;
+        let has_supply = (mask & 0b01) != 0;
+        let data = if has_data { Some(100) } else { None };
+        let supply = if has_supply { Some(200) } else { None };
+        let s = serialize_asset(mask as u64, data, supply);
+
+        vectors.push(AssetTestVector {
+            name: format!("asset_combo_{:02}", mask),
+            description: format!("Asset with data={}, supply={}", has_data, has_supply),
+            id: mask as u64,
+            data_pointer: data,
+            supply_pointer: supply,
+            serialized_hex: to_hex(&s),
+            serialized_len: s.len(),
+        });
+    }
+
+    // Boundary values
+    {
+        let s = serialize_asset(u64::MAX, Some(u64::MAX), Some(u64::MAX));
+        vectors.push(AssetTestVector {
+            name: "asset_all_max".to_string(),
+            description: "All fields at maximum".to_string(),
+            id: u64::MAX,
+            data_pointer: Some(u64::MAX),
+            supply_pointer: Some(u64::MAX),
+            serialized_hex: to_hex(&s),
+            serialized_len: s.len(),
+        });
+    }
+
+    // Native asset (id=0)
+    {
+        let s = serialize_asset(0, Some(0), Some(1));
+        vectors.push(AssetTestVector {
+            name: "asset_native".to_string(),
+            description: "Native TOS asset (id=0)".to_string(),
+            id: 0,
+            data_pointer: Some(0),
+            supply_pointer: Some(1),
+            serialized_hex: to_hex(&s),
+            serialized_len: s.len(),
+        });
+    }
+
+    vectors
+}
+
+// ============================================================================
+// Contract Serialization
+// Structure: id (u64) + module_pointer (Option<u64>)
+// ============================================================================
+
+#[derive(Serialize)]
+struct ContractTestVector {
+    name: String,
+    description: String,
+    id: u64,
+    module_pointer: Option<u64>,
+    serialized_hex: String,
+    serialized_len: usize,
+}
+
+fn serialize_contract(id: u64, module_pointer: Option<u64>) -> Vec<u8> {
+    let mut buf = Vec::new();
+    buf.extend(write_u64_be(id));
+    buf.extend(write_option_u64_be(module_pointer));
+    buf
+}
+
+fn generate_contract_vectors() -> Vec<ContractTestVector> {
+    vec![
+        {
+            let s = serialize_contract(0, None);
+            ContractTestVector {
+                name: "contract_no_module".to_string(),
+                description: "Contract without module pointer".to_string(),
+                id: 0,
+                module_pointer: None,
+                serialized_hex: to_hex(&s),
+                serialized_len: s.len(),
+            }
+        },
+        {
+            let s = serialize_contract(1, Some(100));
+            ContractTestVector {
+                name: "contract_with_module".to_string(),
+                description: "Contract with module pointer".to_string(),
+                id: 1,
+                module_pointer: Some(100),
+                serialized_hex: to_hex(&s),
+                serialized_len: s.len(),
+            }
+        },
+        {
+            let s = serialize_contract(u64::MAX, Some(u64::MAX));
+            ContractTestVector {
+                name: "contract_max_values".to_string(),
+                description: "Contract with max values".to_string(),
+                id: u64::MAX,
+                module_pointer: Some(u64::MAX),
+                serialized_hex: to_hex(&s),
+                serialized_len: s.len(),
+            }
+        },
+        {
+            let s = serialize_contract(12345, Some(0));
+            ContractTestVector {
+                name: "contract_module_zero".to_string(),
+                description: "Contract with module_pointer=Some(0)".to_string(),
+                id: 12345,
+                module_pointer: Some(0),
+                serialized_hex: to_hex(&s),
+                serialized_len: s.len(),
+            }
+        },
+    ]
+}
+
+// ============================================================================
+// AgentAccountMetaPointer Serialization
+// Structure: has_meta (bool as u8: 0x00 or 0x01)
+// ============================================================================
+
+#[derive(Serialize)]
+struct AgentAccountMetaPointerTestVector {
+    name: String,
+    description: String,
+    has_meta: bool,
+    serialized_hex: String,
+    serialized_len: usize,
+}
+
+fn serialize_agent_meta(has_meta: bool) -> Vec<u8> {
+    vec![if has_meta { 0x01 } else { 0x00 }]
+}
+
+fn generate_agent_meta_vectors() -> Vec<AgentAccountMetaPointerTestVector> {
+    vec![
+        {
+            let s = serialize_agent_meta(false);
+            AgentAccountMetaPointerTestVector {
+                name: "agent_meta_false".to_string(),
+                description: "No agent metadata".to_string(),
+                has_meta: false,
+                serialized_hex: to_hex(&s),
+                serialized_len: s.len(),
+            }
+        },
+        {
+            let s = serialize_agent_meta(true);
+            AgentAccountMetaPointerTestVector {
+                name: "agent_meta_true".to_string(),
+                description: "Has agent metadata".to_string(),
+                has_meta: true,
+                serialized_hex: to_hex(&s),
+                serialized_len: s.len(),
+            }
+        },
+    ]
+}
+
+// ============================================================================
+// TopoHeightMetadata Serialization
+// Structure: rewards (u64) + emitted_supply (u64) + burned_supply (u64)
+// ============================================================================
+
+#[derive(Serialize)]
+struct TopoHeightMetadataTestVector {
+    name: String,
+    description: String,
+    rewards: u64,
+    emitted_supply: u64,
+    burned_supply: u64,
+    serialized_hex: String,
+    serialized_len: usize,
+}
+
+fn serialize_topo_metadata(rewards: u64, emitted_supply: u64, burned_supply: u64) -> Vec<u8> {
+    let mut buf = Vec::new();
+    buf.extend(write_u64_be(rewards));
+    buf.extend(write_u64_be(emitted_supply));
+    buf.extend(write_u64_be(burned_supply));
+    buf
+}
+
+fn generate_topo_metadata_vectors() -> Vec<TopoHeightMetadataTestVector> {
+    vec![
+        {
+            let s = serialize_topo_metadata(0, 0, 0);
+            TopoHeightMetadataTestVector {
+                name: "topo_meta_genesis".to_string(),
+                description: "Genesis block metadata (all zeros)".to_string(),
+                rewards: 0,
+                emitted_supply: 0,
+                burned_supply: 0,
+                serialized_hex: to_hex(&s),
+                serialized_len: s.len(),
+            }
+        },
+        {
+            let s = serialize_topo_metadata(100_000_000, 1_000_000_000_000, 0);
+            TopoHeightMetadataTestVector {
+                name: "topo_meta_early".to_string(),
+                description: "Early block with rewards, no burns".to_string(),
+                rewards: 100_000_000, // 1 TOS reward
+                emitted_supply: 1_000_000_000_000, // 10k TOS emitted
+                burned_supply: 0,
+                serialized_hex: to_hex(&s),
+                serialized_len: s.len(),
+            }
+        },
+        {
+            let s = serialize_topo_metadata(50_000_000, 5_000_000_000_000_000, 100_000_000_000);
+            TopoHeightMetadataTestVector {
+                name: "topo_meta_mature".to_string(),
+                description: "Mature network with burns".to_string(),
+                rewards: 50_000_000, // 0.5 TOS reward (halved)
+                emitted_supply: 5_000_000_000_000_000, // 50M TOS
+                burned_supply: 100_000_000_000, // 1000 TOS burned
+                serialized_hex: to_hex(&s),
+                serialized_len: s.len(),
+            }
+        },
+        {
+            let s = serialize_topo_metadata(u64::MAX, u64::MAX, u64::MAX);
+            TopoHeightMetadataTestVector {
+                name: "topo_meta_max".to_string(),
+                description: "All maximum values".to_string(),
+                rewards: u64::MAX,
+                emitted_supply: u64::MAX,
+                burned_supply: u64::MAX,
+                serialized_hex: to_hex(&s),
+                serialized_len: s.len(),
+            }
+        },
+    ]
+}
+
+// ============================================================================
+// VarUint Serialization (for BlockDifficulty)
+// Format: 1 byte length (1-32) + big-endian bytes
+// ============================================================================
+
+#[derive(Serialize)]
+struct VarUintTestVector {
+    name: String,
+    description: String,
+    value_hex: String,  // U256 as hex
+    serialized_hex: String,
+    serialized_len: usize,
+}
+
+fn serialize_varuint(bytes: &[u8]) -> Vec<u8> {
+    // Trim leading zeros
+    let start = bytes.iter().position(|&b| b != 0).unwrap_or(bytes.len() - 1);
+    let trimmed = &bytes[start..];
+    let len = trimmed.len().max(1);
+
+    let mut buf = vec![len as u8];
+    if trimmed.is_empty() {
+        buf.push(0);
+    } else {
+        buf.extend(trimmed);
+    }
+    buf
+}
+
+fn u256_from_u64(val: u64) -> [u8; 32] {
+    let mut bytes = [0u8; 32];
+    bytes[24..32].copy_from_slice(&val.to_be_bytes());
+    bytes
+}
+
+fn generate_varuint_vectors() -> Vec<VarUintTestVector> {
+    vec![
+        {
+            let bytes = u256_from_u64(0);
+            let s = serialize_varuint(&bytes);
+            VarUintTestVector {
+                name: "varuint_zero".to_string(),
+                description: "VarUint(0) - minimum encoding".to_string(),
+                value_hex: "0".to_string(),
+                serialized_hex: to_hex(&s),
+                serialized_len: s.len(),
+            }
+        },
+        {
+            let bytes = u256_from_u64(1);
+            let s = serialize_varuint(&bytes);
+            VarUintTestVector {
+                name: "varuint_one".to_string(),
+                description: "VarUint(1)".to_string(),
+                value_hex: "1".to_string(),
+                serialized_hex: to_hex(&s),
+                serialized_len: s.len(),
+            }
+        },
+        {
+            let bytes = u256_from_u64(255);
+            let s = serialize_varuint(&bytes);
+            VarUintTestVector {
+                name: "varuint_255".to_string(),
+                description: "VarUint(255) - 1 byte value".to_string(),
+                value_hex: "ff".to_string(),
+                serialized_hex: to_hex(&s),
+                serialized_len: s.len(),
+            }
+        },
+        {
+            let bytes = u256_from_u64(256);
+            let s = serialize_varuint(&bytes);
+            VarUintTestVector {
+                name: "varuint_256".to_string(),
+                description: "VarUint(256) - 2 byte value".to_string(),
+                value_hex: "100".to_string(),
+                serialized_hex: to_hex(&s),
+                serialized_len: s.len(),
+            }
+        },
+        {
+            let bytes = u256_from_u64(0xFFFF);
+            let s = serialize_varuint(&bytes);
+            VarUintTestVector {
+                name: "varuint_u16_max".to_string(),
+                description: "VarUint(65535)".to_string(),
+                value_hex: "ffff".to_string(),
+                serialized_hex: to_hex(&s),
+                serialized_len: s.len(),
+            }
+        },
+        {
+            let bytes = u256_from_u64(1_000_000_000);
+            let s = serialize_varuint(&bytes);
+            VarUintTestVector {
+                name: "varuint_1b".to_string(),
+                description: "VarUint(1 billion) - typical difficulty".to_string(),
+                value_hex: "3b9aca00".to_string(),
+                serialized_hex: to_hex(&s),
+                serialized_len: s.len(),
+            }
+        },
+        {
+            let bytes = u256_from_u64(u64::MAX);
+            let s = serialize_varuint(&bytes);
+            VarUintTestVector {
+                name: "varuint_u64_max".to_string(),
+                description: "VarUint(u64::MAX)".to_string(),
+                value_hex: "ffffffffffffffff".to_string(),
+                serialized_hex: to_hex(&s),
+                serialized_len: s.len(),
+            }
+        },
+        // Full U256 max (32 bytes)
+        {
+            let bytes = [0xFF; 32];
+            let s = serialize_varuint(&bytes);
+            VarUintTestVector {
+                name: "varuint_u256_max".to_string(),
+                description: "VarUint(U256::MAX) - maximum encoding".to_string(),
+                value_hex: "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff".to_string(),
+                serialized_hex: to_hex(&s),
+                serialized_len: s.len(),
+            }
+        },
+    ]
+}
+
+// ============================================================================
+// BlockDifficulty Serialization
+// Structure: difficulty (VarUint) + cumulative_difficulty (VarUint) + covariance (VarUint)
+// ============================================================================
+
+#[derive(Serialize)]
+struct BlockDifficultyTestVector {
+    name: String,
+    description: String,
+    difficulty_hex: String,
+    cumulative_difficulty_hex: String,
+    covariance_hex: String,
+    serialized_hex: String,
+    serialized_len: usize,
+}
+
+fn generate_block_difficulty_vectors() -> Vec<BlockDifficultyTestVector> {
+    vec![
+        {
+            let d = serialize_varuint(&u256_from_u64(1));
+            let cd = serialize_varuint(&u256_from_u64(1));
+            let cov = serialize_varuint(&u256_from_u64(0));
+            let mut s = Vec::new();
+            s.extend(&d);
+            s.extend(&cd);
+            s.extend(&cov);
+            BlockDifficultyTestVector {
+                name: "block_diff_genesis".to_string(),
+                description: "Genesis block difficulty".to_string(),
+                difficulty_hex: "1".to_string(),
+                cumulative_difficulty_hex: "1".to_string(),
+                covariance_hex: "0".to_string(),
+                serialized_hex: to_hex(&s),
+                serialized_len: s.len(),
+            }
+        },
+        {
+            let d = serialize_varuint(&u256_from_u64(1_000_000_000));
+            let cd = serialize_varuint(&u256_from_u64(100_000_000_000));
+            let cov = serialize_varuint(&u256_from_u64(500_000));
+            let mut s = Vec::new();
+            s.extend(&d);
+            s.extend(&cd);
+            s.extend(&cov);
+            BlockDifficultyTestVector {
+                name: "block_diff_typical".to_string(),
+                description: "Typical mainnet difficulty".to_string(),
+                difficulty_hex: "3b9aca00".to_string(),
+                cumulative_difficulty_hex: "174876e800".to_string(),
+                covariance_hex: "7a120".to_string(),
+                serialized_hex: to_hex(&s),
+                serialized_len: s.len(),
+            }
+        },
+        {
+            let d = serialize_varuint(&u256_from_u64(u64::MAX));
+            let cd = serialize_varuint(&u256_from_u64(u64::MAX));
+            let cov = serialize_varuint(&u256_from_u64(u64::MAX));
+            let mut s = Vec::new();
+            s.extend(&d);
+            s.extend(&cd);
+            s.extend(&cov);
+            BlockDifficultyTestVector {
+                name: "block_diff_max_u64".to_string(),
+                description: "Maximum u64 values".to_string(),
+                difficulty_hex: "ffffffffffffffff".to_string(),
+                cumulative_difficulty_hex: "ffffffffffffffff".to_string(),
+                covariance_hex: "ffffffffffffffff".to_string(),
+                serialized_hex: to_hex(&s),
+                serialized_len: s.len(),
+            }
+        },
+    ]
+}
+
+// ============================================================================
+// EnergyResource Serialization (simplified - empty vectors)
+// Structure: energy (u64) + frozen_tos (u64) + last_update (u64) + 3 Vec counts (u64 each)
+// ============================================================================
+
+#[derive(Serialize)]
+struct EnergyResourceTestVector {
+    name: String,
+    description: String,
+    energy: u64,
+    frozen_tos: u64,
+    last_update: u64,
+    freeze_records_count: u64,
+    delegated_records_count: u64,
+    pending_unfreezes_count: u64,
+    serialized_hex: String,
+    serialized_len: usize,
+}
+
+fn serialize_energy_resource_empty(energy: u64, frozen_tos: u64, last_update: u64) -> Vec<u8> {
+    let mut buf = Vec::new();
+    buf.extend(write_u64_be(energy));
+    buf.extend(write_u64_be(frozen_tos));
+    buf.extend(write_u64_be(last_update));
+    buf.extend(write_u64_be(0)); // freeze_records count
+    buf.extend(write_u64_be(0)); // delegated_records count
+    buf.extend(write_u64_be(0)); // pending_unfreezes count
+    buf
+}
+
+fn generate_energy_resource_vectors() -> Vec<EnergyResourceTestVector> {
+    vec![
+        {
+            let s = serialize_energy_resource_empty(0, 0, 0);
+            EnergyResourceTestVector {
+                name: "energy_default".to_string(),
+                description: "Default empty energy resource".to_string(),
+                energy: 0,
+                frozen_tos: 0,
+                last_update: 0,
+                freeze_records_count: 0,
+                delegated_records_count: 0,
+                pending_unfreezes_count: 0,
+                serialized_hex: to_hex(&s),
+                serialized_len: s.len(),
+            }
+        },
+        {
+            let s = serialize_energy_resource_empty(1_000_000, 100, 5000);
+            EnergyResourceTestVector {
+                name: "energy_active".to_string(),
+                description: "Active staking account".to_string(),
+                energy: 1_000_000,
+                frozen_tos: 100,
+                last_update: 5000,
+                freeze_records_count: 0,
+                delegated_records_count: 0,
+                pending_unfreezes_count: 0,
+                serialized_hex: to_hex(&s),
+                serialized_len: s.len(),
+            }
+        },
+        {
+            let s = serialize_energy_resource_empty(u64::MAX, u64::MAX, u64::MAX);
+            EnergyResourceTestVector {
+                name: "energy_max".to_string(),
+                description: "Maximum values (empty records)".to_string(),
+                energy: u64::MAX,
+                frozen_tos: u64::MAX,
+                last_update: u64::MAX,
+                freeze_records_count: 0,
+                delegated_records_count: 0,
+                pending_unfreezes_count: 0,
+                serialized_hex: to_hex(&s),
+                serialized_len: s.len(),
+            }
+        },
+    ]
+}
+
+// ============================================================================
 // Main Output Structure
 // ============================================================================
 
@@ -733,6 +1285,13 @@ struct SerializationTestVectors {
     account_vectors: Vec<AccountTestVector>,
     versioned_nonce_vectors: Vec<VersionedNonceTestVector>,
     versioned_balance_vectors: Vec<VersionedBalanceTestVector>,
+    asset_vectors: Vec<AssetTestVector>,
+    contract_vectors: Vec<ContractTestVector>,
+    agent_meta_vectors: Vec<AgentAccountMetaPointerTestVector>,
+    topo_metadata_vectors: Vec<TopoHeightMetadataTestVector>,
+    varuint_vectors: Vec<VarUintTestVector>,
+    block_difficulty_vectors: Vec<BlockDifficultyTestVector>,
+    energy_resource_vectors: Vec<EnergyResourceTestVector>,
 }
 
 fn main() {
@@ -741,20 +1300,37 @@ fn main() {
     let acc_vectors = generate_account_vectors();
     let nonce_vectors = generate_versioned_nonce_vectors();
     let balance_vectors = generate_versioned_balance_vectors();
+    let asset_vectors = generate_asset_vectors();
+    let contract_vectors = generate_contract_vectors();
+    let agent_meta_vectors = generate_agent_meta_vectors();
+    let topo_metadata_vectors = generate_topo_metadata_vectors();
+    let varuint_vectors = generate_varuint_vectors();
+    let block_difficulty_vectors = generate_block_difficulty_vectors();
+    let energy_resource_vectors = generate_energy_resource_vectors();
 
     let total = be_vectors.len() + opt_vectors.len() + acc_vectors.len()
-        + nonce_vectors.len() + balance_vectors.len();
+        + nonce_vectors.len() + balance_vectors.len()
+        + asset_vectors.len() + contract_vectors.len() + agent_meta_vectors.len()
+        + topo_metadata_vectors.len() + varuint_vectors.len()
+        + block_difficulty_vectors.len() + energy_resource_vectors.len();
 
     let vectors = SerializationTestVectors {
         description: "RocksDB serialization test vectors for TOS/Avatar compatibility".to_string(),
-        version: "2.0".to_string(),
-        note: "All integers use big-endian encoding. Option<T> uses 1-byte flag (0x00=None, 0x01=Some) + optional value. Covers all combinations and boundary values.".to_string(),
+        version: "3.0".to_string(),
+        note: "Complete coverage of all RocksDB storage types. All integers use big-endian encoding. Option<T> uses 1-byte flag (0x00=None, 0x01=Some). VarUint uses 1-byte length prefix.".to_string(),
         total_vectors: total,
         big_endian_vectors: be_vectors,
         option_u64_vectors: opt_vectors,
         account_vectors: acc_vectors,
         versioned_nonce_vectors: nonce_vectors,
         versioned_balance_vectors: balance_vectors,
+        asset_vectors,
+        contract_vectors,
+        agent_meta_vectors,
+        topo_metadata_vectors,
+        varuint_vectors,
+        block_difficulty_vectors,
+        energy_resource_vectors,
     };
 
     let yaml = serde_yaml::to_string(&vectors).expect("Failed to serialize to YAML");
@@ -762,11 +1338,22 @@ fn main() {
     let mut file = File::create("serialization.yaml").expect("Failed to create file");
     file.write_all(yaml.as_bytes()).expect("Failed to write file");
 
-    println!("Generated serialization.yaml (v2.0 - comprehensive coverage)");
+    println!("Generated serialization.yaml (v3.0 - 100% type coverage)");
     println!("  Total vectors: {}", total);
-    println!("  - {} big-endian vectors", vectors.big_endian_vectors.len());
-    println!("  - {} option<u64> vectors", vectors.option_u64_vectors.len());
-    println!("  - {} account vectors (16 combinations + {} special cases)", 16, vectors.account_vectors.len() - 16);
-    println!("  - {} versioned_nonce vectors", vectors.versioned_nonce_vectors.len());
-    println!("  - {} versioned_balance vectors (12 combinations + {} special cases)", 12, vectors.versioned_balance_vectors.len() - 12);
+    println!("  Primitives:");
+    println!("    - {} big-endian vectors", vectors.big_endian_vectors.len());
+    println!("    - {} option<u64> vectors", vectors.option_u64_vectors.len());
+    println!("    - {} varuint vectors", vectors.varuint_vectors.len());
+    println!("  Account Types:");
+    println!("    - {} account vectors", vectors.account_vectors.len());
+    println!("    - {} versioned_nonce vectors", vectors.versioned_nonce_vectors.len());
+    println!("    - {} versioned_balance vectors", vectors.versioned_balance_vectors.len());
+    println!("    - {} energy_resource vectors", vectors.energy_resource_vectors.len());
+    println!("  Asset/Contract Types:");
+    println!("    - {} asset vectors", vectors.asset_vectors.len());
+    println!("    - {} contract vectors", vectors.contract_vectors.len());
+    println!("    - {} agent_meta vectors", vectors.agent_meta_vectors.len());
+    println!("  Block Types:");
+    println!("    - {} topo_metadata vectors", vectors.topo_metadata_vectors.len());
+    println!("    - {} block_difficulty vectors", vectors.block_difficulty_vectors.len());
 }
