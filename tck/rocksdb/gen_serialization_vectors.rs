@@ -1,0 +1,772 @@
+// Generate RocksDB serialization test vectors for TOS/Avatar compatibility
+// Run: cd ~/tos/tck/rocksdb && cargo run --release --bin gen_serialization_vectors
+//
+// These test vectors verify that Avatar (C) serialization matches TOS (Rust) exactly,
+// enabling database interoperability between implementations.
+//
+// Coverage Strategy:
+// - All combinations of optional fields (2^n permutations)
+// - Boundary values: 0, 1, typical, max-1, max
+// - All enum variants
+// - Edge cases specific to blockchain operations
+
+use serde::Serialize;
+use std::fs::File;
+use std::io::Write;
+
+// ============================================================================
+// TOS Serialization Primitives (Big-Endian)
+// ============================================================================
+
+fn write_u64_be(value: u64) -> Vec<u8> {
+    value.to_be_bytes().to_vec()
+}
+
+fn write_u8(value: u8) -> Vec<u8> {
+    vec![value]
+}
+
+fn write_option_u64_be(value: Option<u64>) -> Vec<u8> {
+    match value {
+        None => vec![0x00],
+        Some(v) => {
+            let mut buf = vec![0x01];
+            buf.extend(v.to_be_bytes());
+            buf
+        }
+    }
+}
+
+fn to_hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{:02x}", b)).collect()
+}
+
+// ============================================================================
+// Big-Endian Encoding Vectors - Boundary Values
+// ============================================================================
+
+#[derive(Serialize)]
+struct BigEndianTestVector {
+    name: String,
+    description: String,
+    value_u64: u64,
+    encoded_hex: String,
+}
+
+fn generate_big_endian_vectors() -> Vec<BigEndianTestVector> {
+    vec![
+        // Boundary values
+        BigEndianTestVector {
+            name: "be_zero".to_string(),
+            description: "Zero value (minimum)".to_string(),
+            value_u64: 0,
+            encoded_hex: to_hex(&0u64.to_be_bytes()),
+        },
+        BigEndianTestVector {
+            name: "be_one".to_string(),
+            description: "Value 1 (smallest positive)".to_string(),
+            value_u64: 1,
+            encoded_hex: to_hex(&1u64.to_be_bytes()),
+        },
+        BigEndianTestVector {
+            name: "be_max_minus_one".to_string(),
+            description: "Maximum minus one".to_string(),
+            value_u64: u64::MAX - 1,
+            encoded_hex: to_hex(&(u64::MAX - 1).to_be_bytes()),
+        },
+        BigEndianTestVector {
+            name: "be_max".to_string(),
+            description: "Maximum u64 value".to_string(),
+            value_u64: u64::MAX,
+            encoded_hex: to_hex(&u64::MAX.to_be_bytes()),
+        },
+        // Byte boundary values
+        BigEndianTestVector {
+            name: "be_byte1_max".to_string(),
+            description: "Max value in 1 byte (255)".to_string(),
+            value_u64: 0xFF,
+            encoded_hex: to_hex(&0xFFu64.to_be_bytes()),
+        },
+        BigEndianTestVector {
+            name: "be_byte2_max".to_string(),
+            description: "Max value in 2 bytes (65535)".to_string(),
+            value_u64: 0xFFFF,
+            encoded_hex: to_hex(&0xFFFFu64.to_be_bytes()),
+        },
+        BigEndianTestVector {
+            name: "be_byte4_max".to_string(),
+            description: "Max value in 4 bytes (u32::MAX)".to_string(),
+            value_u64: 0xFFFFFFFF,
+            encoded_hex: to_hex(&0xFFFFFFFFu64.to_be_bytes()),
+        },
+        // Typical blockchain values
+        BigEndianTestVector {
+            name: "be_topoheight_typical".to_string(),
+            description: "Typical topoheight (1 million)".to_string(),
+            value_u64: 1_000_000,
+            encoded_hex: to_hex(&1_000_000u64.to_be_bytes()),
+        },
+        BigEndianTestVector {
+            name: "be_balance_1_tos".to_string(),
+            description: "1 TOS in atomic units (8 decimals)".to_string(),
+            value_u64: 100_000_000,
+            encoded_hex: to_hex(&100_000_000u64.to_be_bytes()),
+        },
+        BigEndianTestVector {
+            name: "be_balance_max_supply".to_string(),
+            description: "TOS max supply (100M TOS)".to_string(),
+            value_u64: 100_000_000 * 100_000_000, // 100M TOS
+            encoded_hex: to_hex(&(100_000_000u64 * 100_000_000).to_be_bytes()),
+        },
+        // Pattern verification
+        BigEndianTestVector {
+            name: "be_sequential".to_string(),
+            description: "Sequential bytes for endian verification".to_string(),
+            value_u64: 0x0102030405060708,
+            encoded_hex: to_hex(&0x0102030405060708u64.to_be_bytes()),
+        },
+        BigEndianTestVector {
+            name: "be_alternating".to_string(),
+            description: "Alternating bits pattern".to_string(),
+            value_u64: 0xAAAAAAAAAAAAAAAA,
+            encoded_hex: to_hex(&0xAAAAAAAAAAAAAAAAu64.to_be_bytes()),
+        },
+    ]
+}
+
+// ============================================================================
+// Option<u64> Encoding Vectors
+// ============================================================================
+
+#[derive(Serialize)]
+struct OptionU64TestVector {
+    name: String,
+    description: String,
+    is_some: bool,
+    value: Option<u64>,
+    encoded_hex: String,
+    encoded_len: usize,
+}
+
+fn generate_option_u64_vectors() -> Vec<OptionU64TestVector> {
+    vec![
+        // None case
+        {
+            let e = write_option_u64_be(None);
+            OptionU64TestVector {
+                name: "option_none".to_string(),
+                description: "None value (single byte 0x00)".to_string(),
+                is_some: false,
+                value: None,
+                encoded_hex: to_hex(&e),
+                encoded_len: e.len(),
+            }
+        },
+        // Some with boundary values
+        {
+            let e = write_option_u64_be(Some(0));
+            OptionU64TestVector {
+                name: "option_some_zero".to_string(),
+                description: "Some(0) - distinguishes from None".to_string(),
+                is_some: true,
+                value: Some(0),
+                encoded_hex: to_hex(&e),
+                encoded_len: e.len(),
+            }
+        },
+        {
+            let e = write_option_u64_be(Some(1));
+            OptionU64TestVector {
+                name: "option_some_one".to_string(),
+                description: "Some(1)".to_string(),
+                is_some: true,
+                value: Some(1),
+                encoded_hex: to_hex(&e),
+                encoded_len: e.len(),
+            }
+        },
+        {
+            let e = write_option_u64_be(Some(u64::MAX - 1));
+            OptionU64TestVector {
+                name: "option_some_max_minus_one".to_string(),
+                description: "Some(u64::MAX - 1)".to_string(),
+                is_some: true,
+                value: Some(u64::MAX - 1),
+                encoded_hex: to_hex(&e),
+                encoded_len: e.len(),
+            }
+        },
+        {
+            let e = write_option_u64_be(Some(u64::MAX));
+            OptionU64TestVector {
+                name: "option_some_max".to_string(),
+                description: "Some(u64::MAX)".to_string(),
+                is_some: true,
+                value: Some(u64::MAX),
+                encoded_hex: to_hex(&e),
+                encoded_len: e.len(),
+            }
+        },
+        // Typical values
+        {
+            let e = write_option_u64_be(Some(0x123));
+            OptionU64TestVector {
+                name: "option_some_small".to_string(),
+                description: "Some(0x123) - small value".to_string(),
+                is_some: true,
+                value: Some(0x123),
+                encoded_hex: to_hex(&e),
+                encoded_len: e.len(),
+            }
+        },
+        {
+            let e = write_option_u64_be(Some(1_000_000));
+            OptionU64TestVector {
+                name: "option_some_topoheight".to_string(),
+                description: "Some(1000000) - typical topoheight".to_string(),
+                is_some: true,
+                value: Some(1_000_000),
+                encoded_hex: to_hex(&e),
+                encoded_len: e.len(),
+            }
+        },
+    ]
+}
+
+// ============================================================================
+// Account Serialization - All Optional Field Combinations
+// ============================================================================
+
+#[derive(Serialize)]
+struct AccountTestVector {
+    name: String,
+    description: String,
+    // Input fields
+    id: u64,
+    registered_at: Option<u64>,
+    nonce_pointer: Option<u64>,
+    multisig_pointer: Option<u64>,
+    energy_pointer: Option<u64>,
+    // Expected output
+    serialized_hex: String,
+    serialized_len: usize,
+}
+
+fn serialize_account(
+    id: u64,
+    registered_at: Option<u64>,
+    nonce_pointer: Option<u64>,
+    multisig_pointer: Option<u64>,
+    energy_pointer: Option<u64>,
+) -> Vec<u8> {
+    let mut buf = Vec::new();
+    buf.extend(write_u64_be(id));
+    buf.extend(write_option_u64_be(registered_at));
+    buf.extend(write_option_u64_be(nonce_pointer));
+    buf.extend(write_option_u64_be(multisig_pointer));
+    buf.extend(write_option_u64_be(energy_pointer));
+    buf
+}
+
+fn generate_account_vectors() -> Vec<AccountTestVector> {
+    let mut vectors = Vec::new();
+
+    // === All 16 combinations of optional fields (2^4) ===
+    // Format: RNME where R=registered_at, N=nonce, M=multisig, E=energy
+    // 0 = None, 1 = Some
+
+    for mask in 0u8..16 {
+        let has_r = (mask & 0b1000) != 0;
+        let has_n = (mask & 0b0100) != 0;
+        let has_m = (mask & 0b0010) != 0;
+        let has_e = (mask & 0b0001) != 0;
+
+        let r = if has_r { Some(100) } else { None };
+        let n = if has_n { Some(200) } else { None };
+        let m = if has_m { Some(300) } else { None };
+        let e = if has_e { Some(400) } else { None };
+
+        let s = serialize_account(mask as u64, r, n, m, e);
+        let pattern = format!("{}{}{}{}",
+            if has_r { "R" } else { "_" },
+            if has_n { "N" } else { "_" },
+            if has_m { "M" } else { "_" },
+            if has_e { "E" } else { "_" }
+        );
+
+        vectors.push(AccountTestVector {
+            name: format!("account_combo_{:02}_{}", mask, pattern),
+            description: format!("Account with optional fields: {} (mask=0b{:04b})", pattern, mask),
+            id: mask as u64,
+            registered_at: r,
+            nonce_pointer: n,
+            multisig_pointer: m,
+            energy_pointer: e,
+            serialized_hex: to_hex(&s),
+            serialized_len: s.len(),
+        });
+    }
+
+    // === Boundary value tests ===
+
+    // All fields at maximum
+    {
+        let s = serialize_account(u64::MAX, Some(u64::MAX), Some(u64::MAX), Some(u64::MAX), Some(u64::MAX));
+        vectors.push(AccountTestVector {
+            name: "account_all_max".to_string(),
+            description: "All fields at maximum u64 value".to_string(),
+            id: u64::MAX,
+            registered_at: Some(u64::MAX),
+            nonce_pointer: Some(u64::MAX),
+            multisig_pointer: Some(u64::MAX),
+            energy_pointer: Some(u64::MAX),
+            serialized_hex: to_hex(&s),
+            serialized_len: s.len(),
+        });
+    }
+
+    // All fields at zero (but Some)
+    {
+        let s = serialize_account(0, Some(0), Some(0), Some(0), Some(0));
+        vectors.push(AccountTestVector {
+            name: "account_all_zero_some".to_string(),
+            description: "All optional fields are Some(0)".to_string(),
+            id: 0,
+            registered_at: Some(0),
+            nonce_pointer: Some(0),
+            multisig_pointer: Some(0),
+            energy_pointer: Some(0),
+            serialized_hex: to_hex(&s),
+            serialized_len: s.len(),
+        });
+    }
+
+    // Typical genesis account
+    {
+        let s = serialize_account(0, Some(0), Some(0), None, None);
+        vectors.push(AccountTestVector {
+            name: "account_genesis_typical".to_string(),
+            description: "Typical genesis account (registered at topo 0, nonce 0)".to_string(),
+            id: 0,
+            registered_at: Some(0),
+            nonce_pointer: Some(0),
+            multisig_pointer: None,
+            energy_pointer: None,
+            serialized_hex: to_hex(&s),
+            serialized_len: s.len(),
+        });
+    }
+
+    // Active account with energy
+    {
+        let s = serialize_account(12345, Some(1000), Some(5000), None, Some(8000));
+        vectors.push(AccountTestVector {
+            name: "account_active_with_energy".to_string(),
+            description: "Active account with energy staking".to_string(),
+            id: 12345,
+            registered_at: Some(1000),
+            nonce_pointer: Some(5000),
+            multisig_pointer: None,
+            energy_pointer: Some(8000),
+            serialized_hex: to_hex(&s),
+            serialized_len: s.len(),
+        });
+    }
+
+    // Multisig account
+    {
+        let s = serialize_account(99999, Some(500), Some(600), Some(700), Some(800));
+        vectors.push(AccountTestVector {
+            name: "account_multisig_full".to_string(),
+            description: "Multisig account with all features".to_string(),
+            id: 99999,
+            registered_at: Some(500),
+            nonce_pointer: Some(600),
+            multisig_pointer: Some(700),
+            energy_pointer: Some(800),
+            serialized_hex: to_hex(&s),
+            serialized_len: s.len(),
+        });
+    }
+
+    // Large account ID
+    {
+        let s = serialize_account(u64::MAX - 1, Some(1), None, None, None);
+        vectors.push(AccountTestVector {
+            name: "account_large_id".to_string(),
+            description: "Account with very large ID".to_string(),
+            id: u64::MAX - 1,
+            registered_at: Some(1),
+            nonce_pointer: None,
+            multisig_pointer: None,
+            energy_pointer: None,
+            serialized_hex: to_hex(&s),
+            serialized_len: s.len(),
+        });
+    }
+
+    vectors
+}
+
+// ============================================================================
+// VersionedNonce Serialization
+// Order: previous_topoheight FIRST, then nonce
+// ============================================================================
+
+#[derive(Serialize)]
+struct VersionedNonceTestVector {
+    name: String,
+    description: String,
+    previous_topoheight: Option<u64>,
+    nonce: u64,
+    serialized_hex: String,
+    serialized_len: usize,
+}
+
+fn serialize_versioned_nonce(previous_topoheight: Option<u64>, nonce: u64) -> Vec<u8> {
+    let mut buf = Vec::new();
+    buf.extend(write_option_u64_be(previous_topoheight));
+    buf.extend(write_u64_be(nonce));
+    buf
+}
+
+fn generate_versioned_nonce_vectors() -> Vec<VersionedNonceTestVector> {
+    vec![
+        // Initial state (no previous)
+        {
+            let s = serialize_versioned_nonce(None, 0);
+            VersionedNonceTestVector {
+                name: "nonce_initial".to_string(),
+                description: "Initial nonce (no previous, nonce=0)".to_string(),
+                previous_topoheight: None,
+                nonce: 0,
+                serialized_hex: to_hex(&s),
+                serialized_len: s.len(),
+            }
+        },
+        // First transaction (nonce becomes 1)
+        {
+            let s = serialize_versioned_nonce(Some(0), 1);
+            VersionedNonceTestVector {
+                name: "nonce_first_tx".to_string(),
+                description: "After first transaction".to_string(),
+                previous_topoheight: Some(0),
+                nonce: 1,
+                serialized_hex: to_hex(&s),
+                serialized_len: s.len(),
+            }
+        },
+        // Chain of versions
+        {
+            let s = serialize_versioned_nonce(Some(100), 5);
+            VersionedNonceTestVector {
+                name: "nonce_chain_middle".to_string(),
+                description: "Middle of version chain".to_string(),
+                previous_topoheight: Some(100),
+                nonce: 5,
+                serialized_hex: to_hex(&s),
+                serialized_len: s.len(),
+            }
+        },
+        // High nonce value
+        {
+            let s = serialize_versioned_nonce(Some(999999), 1000);
+            VersionedNonceTestVector {
+                name: "nonce_high_activity".to_string(),
+                description: "High activity account".to_string(),
+                previous_topoheight: Some(999999),
+                nonce: 1000,
+                serialized_hex: to_hex(&s),
+                serialized_len: s.len(),
+            }
+        },
+        // Boundary: max values
+        {
+            let s = serialize_versioned_nonce(Some(u64::MAX), u64::MAX);
+            VersionedNonceTestVector {
+                name: "nonce_max_values".to_string(),
+                description: "Maximum values for both fields".to_string(),
+                previous_topoheight: Some(u64::MAX),
+                nonce: u64::MAX,
+                serialized_hex: to_hex(&s),
+                serialized_len: s.len(),
+            }
+        },
+        // Boundary: previous=Some(0), nonce=max
+        {
+            let s = serialize_versioned_nonce(Some(0), u64::MAX);
+            VersionedNonceTestVector {
+                name: "nonce_prev_zero_nonce_max".to_string(),
+                description: "Previous at genesis, max nonce".to_string(),
+                previous_topoheight: Some(0),
+                nonce: u64::MAX,
+                serialized_hex: to_hex(&s),
+                serialized_len: s.len(),
+            }
+        },
+        // No previous, max nonce
+        {
+            let s = serialize_versioned_nonce(None, u64::MAX);
+            VersionedNonceTestVector {
+                name: "nonce_no_prev_max_nonce".to_string(),
+                description: "No previous, max nonce (edge case)".to_string(),
+                previous_topoheight: None,
+                nonce: u64::MAX,
+                serialized_hex: to_hex(&s),
+                serialized_len: s.len(),
+            }
+        },
+    ]
+}
+
+// ============================================================================
+// VersionedBalance Serialization - All Combinations
+// Order: previous_topoheight, balance_type, final_balance, output_balance
+// ============================================================================
+
+#[derive(Serialize, Clone, Copy, Debug)]
+#[serde(rename_all = "snake_case")]
+enum BalanceType {
+    Input = 0,
+    Output = 1,
+    Both = 2,
+}
+
+#[derive(Serialize)]
+struct VersionedBalanceTestVector {
+    name: String,
+    description: String,
+    previous_topoheight: Option<u64>,
+    balance_type: BalanceType,
+    final_balance: u64,
+    output_balance: Option<u64>,
+    serialized_hex: String,
+    serialized_len: usize,
+}
+
+fn serialize_versioned_balance(
+    previous_topoheight: Option<u64>,
+    balance_type: BalanceType,
+    final_balance: u64,
+    output_balance: Option<u64>,
+) -> Vec<u8> {
+    let mut buf = Vec::new();
+    buf.extend(write_option_u64_be(previous_topoheight));
+    buf.extend(write_u8(balance_type as u8));
+    buf.extend(write_u64_be(final_balance));
+    buf.extend(write_option_u64_be(output_balance));
+    buf
+}
+
+fn generate_versioned_balance_vectors() -> Vec<VersionedBalanceTestVector> {
+    let mut vectors = Vec::new();
+
+    // === All 12 combinations: 3 types × 2 (prev) × 2 (output) ===
+
+    let types = [
+        (BalanceType::Input, "input"),
+        (BalanceType::Output, "output"),
+        (BalanceType::Both, "both"),
+    ];
+
+    for (bt, bt_name) in &types {
+        for has_prev in [false, true] {
+            for has_out in [false, true] {
+                let prev = if has_prev { Some(100) } else { None };
+                let out = if has_out { Some(50) } else { None };
+                let s = serialize_versioned_balance(prev, *bt, 1000, out);
+
+                let prev_str = if has_prev { "prev" } else { "noprev" };
+                let out_str = if has_out { "out" } else { "noout" };
+
+                vectors.push(VersionedBalanceTestVector {
+                    name: format!("balance_{}_{}_{}",  bt_name, prev_str, out_str),
+                    description: format!("Type={:?}, prev={}, output={}", bt, has_prev, has_out),
+                    previous_topoheight: prev,
+                    balance_type: *bt,
+                    final_balance: 1000,
+                    output_balance: out,
+                    serialized_hex: to_hex(&s),
+                    serialized_len: s.len(),
+                });
+            }
+        }
+    }
+
+    // === Boundary value tests ===
+
+    // Zero balance
+    {
+        let s = serialize_versioned_balance(None, BalanceType::Input, 0, None);
+        vectors.push(VersionedBalanceTestVector {
+            name: "balance_zero".to_string(),
+            description: "Zero balance (empty account)".to_string(),
+            previous_topoheight: None,
+            balance_type: BalanceType::Input,
+            final_balance: 0,
+            output_balance: None,
+            serialized_hex: to_hex(&s),
+            serialized_len: s.len(),
+        });
+    }
+
+    // Max balance
+    {
+        let s = serialize_versioned_balance(Some(u64::MAX), BalanceType::Both, u64::MAX, Some(u64::MAX));
+        vectors.push(VersionedBalanceTestVector {
+            name: "balance_all_max".to_string(),
+            description: "All fields at maximum".to_string(),
+            previous_topoheight: Some(u64::MAX),
+            balance_type: BalanceType::Both,
+            final_balance: u64::MAX,
+            output_balance: Some(u64::MAX),
+            serialized_hex: to_hex(&s),
+            serialized_len: s.len(),
+        });
+    }
+
+    // Typical: receiving funds
+    {
+        let s = serialize_versioned_balance(Some(1000), BalanceType::Input, 10_000_000_000, None);
+        vectors.push(VersionedBalanceTestVector {
+            name: "balance_receive_100_tos".to_string(),
+            description: "Received 100 TOS (input only)".to_string(),
+            previous_topoheight: Some(1000),
+            balance_type: BalanceType::Input,
+            final_balance: 10_000_000_000, // 100 TOS
+            output_balance: None,
+            serialized_hex: to_hex(&s),
+            serialized_len: s.len(),
+        });
+    }
+
+    // Typical: sending funds
+    {
+        let s = serialize_versioned_balance(Some(2000), BalanceType::Output, 5_000_000_000, Some(5_000_000_000));
+        vectors.push(VersionedBalanceTestVector {
+            name: "balance_send_50_tos".to_string(),
+            description: "Sent 50 TOS (output type)".to_string(),
+            previous_topoheight: Some(2000),
+            balance_type: BalanceType::Output,
+            final_balance: 5_000_000_000, // 50 TOS remaining
+            output_balance: Some(5_000_000_000), // 50 TOS sent
+            serialized_hex: to_hex(&s),
+            serialized_len: s.len(),
+        });
+    }
+
+    // Complex: both input and output in same block
+    {
+        let s = serialize_versioned_balance(Some(3000), BalanceType::Both, 15_000_000_000, Some(2_000_000_000));
+        vectors.push(VersionedBalanceTestVector {
+            name: "balance_both_in_out".to_string(),
+            description: "Both received and sent in same block".to_string(),
+            previous_topoheight: Some(3000),
+            balance_type: BalanceType::Both,
+            final_balance: 15_000_000_000, // 150 TOS final
+            output_balance: Some(2_000_000_000), // 20 TOS pending output
+            serialized_hex: to_hex(&s),
+            serialized_len: s.len(),
+        });
+    }
+
+    // Genesis balance
+    {
+        let s = serialize_versioned_balance(None, BalanceType::Input, 100_000_000_000_000_000, None);
+        vectors.push(VersionedBalanceTestVector {
+            name: "balance_genesis_premine".to_string(),
+            description: "Genesis premine balance (1B TOS)".to_string(),
+            previous_topoheight: None,
+            balance_type: BalanceType::Input,
+            final_balance: 100_000_000_000_000_000, // 1B TOS
+            output_balance: None,
+            serialized_hex: to_hex(&s),
+            serialized_len: s.len(),
+        });
+    }
+
+    // output_balance = Some(0)
+    {
+        let s = serialize_versioned_balance(Some(500), BalanceType::Both, 1000, Some(0));
+        vectors.push(VersionedBalanceTestVector {
+            name: "balance_output_zero".to_string(),
+            description: "Output balance is Some(0)".to_string(),
+            previous_topoheight: Some(500),
+            balance_type: BalanceType::Both,
+            final_balance: 1000,
+            output_balance: Some(0),
+            serialized_hex: to_hex(&s),
+            serialized_len: s.len(),
+        });
+    }
+
+    // final_balance = 0, output_balance = Some(value)
+    {
+        let s = serialize_versioned_balance(Some(600), BalanceType::Output, 0, Some(1000));
+        vectors.push(VersionedBalanceTestVector {
+            name: "balance_final_zero_output_nonzero".to_string(),
+            description: "Final balance 0 with pending output".to_string(),
+            previous_topoheight: Some(600),
+            balance_type: BalanceType::Output,
+            final_balance: 0,
+            output_balance: Some(1000),
+            serialized_hex: to_hex(&s),
+            serialized_len: s.len(),
+        });
+    }
+
+    vectors
+}
+
+// ============================================================================
+// Main Output Structure
+// ============================================================================
+
+#[derive(Serialize)]
+struct SerializationTestVectors {
+    description: String,
+    version: String,
+    note: String,
+    total_vectors: usize,
+    big_endian_vectors: Vec<BigEndianTestVector>,
+    option_u64_vectors: Vec<OptionU64TestVector>,
+    account_vectors: Vec<AccountTestVector>,
+    versioned_nonce_vectors: Vec<VersionedNonceTestVector>,
+    versioned_balance_vectors: Vec<VersionedBalanceTestVector>,
+}
+
+fn main() {
+    let be_vectors = generate_big_endian_vectors();
+    let opt_vectors = generate_option_u64_vectors();
+    let acc_vectors = generate_account_vectors();
+    let nonce_vectors = generate_versioned_nonce_vectors();
+    let balance_vectors = generate_versioned_balance_vectors();
+
+    let total = be_vectors.len() + opt_vectors.len() + acc_vectors.len()
+        + nonce_vectors.len() + balance_vectors.len();
+
+    let vectors = SerializationTestVectors {
+        description: "RocksDB serialization test vectors for TOS/Avatar compatibility".to_string(),
+        version: "2.0".to_string(),
+        note: "All integers use big-endian encoding. Option<T> uses 1-byte flag (0x00=None, 0x01=Some) + optional value. Covers all combinations and boundary values.".to_string(),
+        total_vectors: total,
+        big_endian_vectors: be_vectors,
+        option_u64_vectors: opt_vectors,
+        account_vectors: acc_vectors,
+        versioned_nonce_vectors: nonce_vectors,
+        versioned_balance_vectors: balance_vectors,
+    };
+
+    let yaml = serde_yaml::to_string(&vectors).expect("Failed to serialize to YAML");
+
+    let mut file = File::create("serialization.yaml").expect("Failed to create file");
+    file.write_all(yaml.as_bytes()).expect("Failed to write file");
+
+    println!("Generated serialization.yaml (v2.0 - comprehensive coverage)");
+    println!("  Total vectors: {}", total);
+    println!("  - {} big-endian vectors", vectors.big_endian_vectors.len());
+    println!("  - {} option<u64> vectors", vectors.option_u64_vectors.len());
+    println!("  - {} account vectors (16 combinations + {} special cases)", 16, vectors.account_vectors.len() - 16);
+    println!("  - {} versioned_nonce vectors", vectors.versioned_nonce_vectors.len());
+    println!("  - {} versioned_balance vectors (12 combinations + {} special cases)", 12, vectors.versioned_balance_vectors.len() - 12);
+}

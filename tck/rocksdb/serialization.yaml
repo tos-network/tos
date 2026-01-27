@@ -1,0 +1,499 @@
+description: RocksDB serialization test vectors for TOS/Avatar compatibility
+version: '2.0'
+note: All integers use big-endian encoding. Option<T> uses 1-byte flag (0x00=None, 0x01=Some) + optional value. Covers all combinations and boundary values.
+total_vectors: 68
+big_endian_vectors:
+- name: be_zero
+  description: Zero value (minimum)
+  value_u64: 0
+  encoded_hex: '0000000000000000'
+- name: be_one
+  description: Value 1 (smallest positive)
+  value_u64: 1
+  encoded_hex: '0000000000000001'
+- name: be_max_minus_one
+  description: Maximum minus one
+  value_u64: 18446744073709551614
+  encoded_hex: fffffffffffffffe
+- name: be_max
+  description: Maximum u64 value
+  value_u64: 18446744073709551615
+  encoded_hex: ffffffffffffffff
+- name: be_byte1_max
+  description: Max value in 1 byte (255)
+  value_u64: 255
+  encoded_hex: 00000000000000ff
+- name: be_byte2_max
+  description: Max value in 2 bytes (65535)
+  value_u64: 65535
+  encoded_hex: 000000000000ffff
+- name: be_byte4_max
+  description: Max value in 4 bytes (u32::MAX)
+  value_u64: 4294967295
+  encoded_hex: 00000000ffffffff
+- name: be_topoheight_typical
+  description: Typical topoheight (1 million)
+  value_u64: 1000000
+  encoded_hex: 00000000000f4240
+- name: be_balance_1_tos
+  description: 1 TOS in atomic units (8 decimals)
+  value_u64: 100000000
+  encoded_hex: 0000000005f5e100
+- name: be_balance_max_supply
+  description: TOS max supply (100M TOS)
+  value_u64: 10000000000000000
+  encoded_hex: 002386f26fc10000
+- name: be_sequential
+  description: Sequential bytes for endian verification
+  value_u64: 72623859790382856
+  encoded_hex: '0102030405060708'
+- name: be_alternating
+  description: Alternating bits pattern
+  value_u64: 12297829382473034410
+  encoded_hex: aaaaaaaaaaaaaaaa
+option_u64_vectors:
+- name: option_none
+  description: None value (single byte 0x00)
+  is_some: false
+  value: null
+  encoded_hex: '00'
+  encoded_len: 1
+- name: option_some_zero
+  description: Some(0) - distinguishes from None
+  is_some: true
+  value: 0
+  encoded_hex: '010000000000000000'
+  encoded_len: 9
+- name: option_some_one
+  description: Some(1)
+  is_some: true
+  value: 1
+  encoded_hex: '010000000000000001'
+  encoded_len: 9
+- name: option_some_max_minus_one
+  description: Some(u64::MAX - 1)
+  is_some: true
+  value: 18446744073709551614
+  encoded_hex: 01fffffffffffffffe
+  encoded_len: 9
+- name: option_some_max
+  description: Some(u64::MAX)
+  is_some: true
+  value: 18446744073709551615
+  encoded_hex: 01ffffffffffffffff
+  encoded_len: 9
+- name: option_some_small
+  description: Some(0x123) - small value
+  is_some: true
+  value: 291
+  encoded_hex: '010000000000000123'
+  encoded_len: 9
+- name: option_some_topoheight
+  description: Some(1000000) - typical topoheight
+  is_some: true
+  value: 1000000
+  encoded_hex: 0100000000000f4240
+  encoded_len: 9
+account_vectors:
+- name: account_combo_00_____
+  description: 'Account with optional fields: ____ (mask=0b0000)'
+  id: 0
+  registered_at: null
+  nonce_pointer: null
+  multisig_pointer: null
+  energy_pointer: null
+  serialized_hex: '000000000000000000000000'
+  serialized_len: 12
+- name: account_combo_01____E
+  description: 'Account with optional fields: ___E (mask=0b0001)'
+  id: 1
+  registered_at: null
+  nonce_pointer: null
+  multisig_pointer: null
+  energy_pointer: 400
+  serialized_hex: '0000000000000001000000010000000000000190'
+  serialized_len: 20
+- name: account_combo_02___M_
+  description: 'Account with optional fields: __M_ (mask=0b0010)'
+  id: 2
+  registered_at: null
+  nonce_pointer: null
+  multisig_pointer: 300
+  energy_pointer: null
+  serialized_hex: 0000000000000002000001000000000000012c00
+  serialized_len: 20
+- name: account_combo_03___ME
+  description: 'Account with optional fields: __ME (mask=0b0011)'
+  id: 3
+  registered_at: null
+  nonce_pointer: null
+  multisig_pointer: 300
+  energy_pointer: 400
+  serialized_hex: 0000000000000003000001000000000000012c010000000000000190
+  serialized_len: 28
+- name: account_combo_04__N__
+  description: 'Account with optional fields: _N__ (mask=0b0100)'
+  id: 4
+  registered_at: null
+  nonce_pointer: 200
+  multisig_pointer: null
+  energy_pointer: null
+  serialized_hex: 0000000000000004000100000000000000c80000
+  serialized_len: 20
+- name: account_combo_05__N_E
+  description: 'Account with optional fields: _N_E (mask=0b0101)'
+  id: 5
+  registered_at: null
+  nonce_pointer: 200
+  multisig_pointer: null
+  energy_pointer: 400
+  serialized_hex: 0000000000000005000100000000000000c800010000000000000190
+  serialized_len: 28
+- name: account_combo_06__NM_
+  description: 'Account with optional fields: _NM_ (mask=0b0110)'
+  id: 6
+  registered_at: null
+  nonce_pointer: 200
+  multisig_pointer: 300
+  energy_pointer: null
+  serialized_hex: 0000000000000006000100000000000000c801000000000000012c00
+  serialized_len: 28
+- name: account_combo_07__NME
+  description: 'Account with optional fields: _NME (mask=0b0111)'
+  id: 7
+  registered_at: null
+  nonce_pointer: 200
+  multisig_pointer: 300
+  energy_pointer: 400
+  serialized_hex: 0000000000000007000100000000000000c801000000000000012c010000000000000190
+  serialized_len: 36
+- name: account_combo_08_R___
+  description: 'Account with optional fields: R___ (mask=0b1000)'
+  id: 8
+  registered_at: 100
+  nonce_pointer: null
+  multisig_pointer: null
+  energy_pointer: null
+  serialized_hex: '0000000000000008010000000000000064000000'
+  serialized_len: 20
+- name: account_combo_09_R__E
+  description: 'Account with optional fields: R__E (mask=0b1001)'
+  id: 9
+  registered_at: 100
+  nonce_pointer: null
+  multisig_pointer: null
+  energy_pointer: 400
+  serialized_hex: '00000000000000090100000000000000640000010000000000000190'
+  serialized_len: 28
+- name: account_combo_10_R_M_
+  description: 'Account with optional fields: R_M_ (mask=0b1010)'
+  id: 10
+  registered_at: 100
+  nonce_pointer: null
+  multisig_pointer: 300
+  energy_pointer: null
+  serialized_hex: 000000000000000a0100000000000000640001000000000000012c00
+  serialized_len: 28
+- name: account_combo_11_R_ME
+  description: 'Account with optional fields: R_ME (mask=0b1011)'
+  id: 11
+  registered_at: 100
+  nonce_pointer: null
+  multisig_pointer: 300
+  energy_pointer: 400
+  serialized_hex: 000000000000000b0100000000000000640001000000000000012c010000000000000190
+  serialized_len: 36
+- name: account_combo_12_RN__
+  description: 'Account with optional fields: RN__ (mask=0b1100)'
+  id: 12
+  registered_at: 100
+  nonce_pointer: 200
+  multisig_pointer: null
+  energy_pointer: null
+  serialized_hex: 000000000000000c0100000000000000640100000000000000c80000
+  serialized_len: 28
+- name: account_combo_13_RN_E
+  description: 'Account with optional fields: RN_E (mask=0b1101)'
+  id: 13
+  registered_at: 100
+  nonce_pointer: 200
+  multisig_pointer: null
+  energy_pointer: 400
+  serialized_hex: 000000000000000d0100000000000000640100000000000000c800010000000000000190
+  serialized_len: 36
+- name: account_combo_14_RNM_
+  description: 'Account with optional fields: RNM_ (mask=0b1110)'
+  id: 14
+  registered_at: 100
+  nonce_pointer: 200
+  multisig_pointer: 300
+  energy_pointer: null
+  serialized_hex: 000000000000000e0100000000000000640100000000000000c801000000000000012c00
+  serialized_len: 36
+- name: account_combo_15_RNME
+  description: 'Account with optional fields: RNME (mask=0b1111)'
+  id: 15
+  registered_at: 100
+  nonce_pointer: 200
+  multisig_pointer: 300
+  energy_pointer: 400
+  serialized_hex: 000000000000000f0100000000000000640100000000000000c801000000000000012c010000000000000190
+  serialized_len: 44
+- name: account_all_max
+  description: All fields at maximum u64 value
+  id: 18446744073709551615
+  registered_at: 18446744073709551615
+  nonce_pointer: 18446744073709551615
+  multisig_pointer: 18446744073709551615
+  energy_pointer: 18446744073709551615
+  serialized_hex: ffffffffffffffff01ffffffffffffffff01ffffffffffffffff01ffffffffffffffff01ffffffffffffffff
+  serialized_len: 44
+- name: account_all_zero_some
+  description: All optional fields are Some(0)
+  id: 0
+  registered_at: 0
+  nonce_pointer: 0
+  multisig_pointer: 0
+  energy_pointer: 0
+  serialized_hex: '0000000000000000010000000000000000010000000000000000010000000000000000010000000000000000'
+  serialized_len: 44
+- name: account_genesis_typical
+  description: Typical genesis account (registered at topo 0, nonce 0)
+  id: 0
+  registered_at: 0
+  nonce_pointer: 0
+  multisig_pointer: null
+  energy_pointer: null
+  serialized_hex: '00000000000000000100000000000000000100000000000000000000'
+  serialized_len: 28
+- name: account_active_with_energy
+  description: Active account with energy staking
+  id: 12345
+  registered_at: 1000
+  nonce_pointer: 5000
+  multisig_pointer: null
+  energy_pointer: 8000
+  serialized_hex: 00000000000030390100000000000003e801000000000000138800010000000000001f40
+  serialized_len: 36
+- name: account_multisig_full
+  description: Multisig account with all features
+  id: 99999
+  registered_at: 500
+  nonce_pointer: 600
+  multisig_pointer: 700
+  energy_pointer: 800
+  serialized_hex: 000000000001869f0100000000000001f40100000000000002580100000000000002bc010000000000000320
+  serialized_len: 44
+- name: account_large_id
+  description: Account with very large ID
+  id: 18446744073709551614
+  registered_at: 1
+  nonce_pointer: null
+  multisig_pointer: null
+  energy_pointer: null
+  serialized_hex: fffffffffffffffe010000000000000001000000
+  serialized_len: 20
+versioned_nonce_vectors:
+- name: nonce_initial
+  description: Initial nonce (no previous, nonce=0)
+  previous_topoheight: null
+  nonce: 0
+  serialized_hex: '000000000000000000'
+  serialized_len: 9
+- name: nonce_first_tx
+  description: After first transaction
+  previous_topoheight: 0
+  nonce: 1
+  serialized_hex: '0100000000000000000000000000000001'
+  serialized_len: 17
+- name: nonce_chain_middle
+  description: Middle of version chain
+  previous_topoheight: 100
+  nonce: 5
+  serialized_hex: '0100000000000000640000000000000005'
+  serialized_len: 17
+- name: nonce_high_activity
+  description: High activity account
+  previous_topoheight: 999999
+  nonce: 1000
+  serialized_hex: 0100000000000f423f00000000000003e8
+  serialized_len: 17
+- name: nonce_max_values
+  description: Maximum values for both fields
+  previous_topoheight: 18446744073709551615
+  nonce: 18446744073709551615
+  serialized_hex: 01ffffffffffffffffffffffffffffffff
+  serialized_len: 17
+- name: nonce_prev_zero_nonce_max
+  description: Previous at genesis, max nonce
+  previous_topoheight: 0
+  nonce: 18446744073709551615
+  serialized_hex: 010000000000000000ffffffffffffffff
+  serialized_len: 17
+- name: nonce_no_prev_max_nonce
+  description: No previous, max nonce (edge case)
+  previous_topoheight: null
+  nonce: 18446744073709551615
+  serialized_hex: 00ffffffffffffffff
+  serialized_len: 9
+versioned_balance_vectors:
+- name: balance_input_noprev_noout
+  description: Type=Input, prev=false, output=false
+  previous_topoheight: null
+  balance_type: input
+  final_balance: 1000
+  output_balance: null
+  serialized_hex: 000000000000000003e800
+  serialized_len: 11
+- name: balance_input_noprev_out
+  description: Type=Input, prev=false, output=true
+  previous_topoheight: null
+  balance_type: input
+  final_balance: 1000
+  output_balance: 50
+  serialized_hex: 000000000000000003e8010000000000000032
+  serialized_len: 19
+- name: balance_input_prev_noout
+  description: Type=Input, prev=true, output=false
+  previous_topoheight: 100
+  balance_type: input
+  final_balance: 1000
+  output_balance: null
+  serialized_hex: 0100000000000000640000000000000003e800
+  serialized_len: 19
+- name: balance_input_prev_out
+  description: Type=Input, prev=true, output=true
+  previous_topoheight: 100
+  balance_type: input
+  final_balance: 1000
+  output_balance: 50
+  serialized_hex: 0100000000000000640000000000000003e8010000000000000032
+  serialized_len: 27
+- name: balance_output_noprev_noout
+  description: Type=Output, prev=false, output=false
+  previous_topoheight: null
+  balance_type: output
+  final_balance: 1000
+  output_balance: null
+  serialized_hex: 000100000000000003e800
+  serialized_len: 11
+- name: balance_output_noprev_out
+  description: Type=Output, prev=false, output=true
+  previous_topoheight: null
+  balance_type: output
+  final_balance: 1000
+  output_balance: 50
+  serialized_hex: 000100000000000003e8010000000000000032
+  serialized_len: 19
+- name: balance_output_prev_noout
+  description: Type=Output, prev=true, output=false
+  previous_topoheight: 100
+  balance_type: output
+  final_balance: 1000
+  output_balance: null
+  serialized_hex: 0100000000000000640100000000000003e800
+  serialized_len: 19
+- name: balance_output_prev_out
+  description: Type=Output, prev=true, output=true
+  previous_topoheight: 100
+  balance_type: output
+  final_balance: 1000
+  output_balance: 50
+  serialized_hex: 0100000000000000640100000000000003e8010000000000000032
+  serialized_len: 27
+- name: balance_both_noprev_noout
+  description: Type=Both, prev=false, output=false
+  previous_topoheight: null
+  balance_type: both
+  final_balance: 1000
+  output_balance: null
+  serialized_hex: 000200000000000003e800
+  serialized_len: 11
+- name: balance_both_noprev_out
+  description: Type=Both, prev=false, output=true
+  previous_topoheight: null
+  balance_type: both
+  final_balance: 1000
+  output_balance: 50
+  serialized_hex: 000200000000000003e8010000000000000032
+  serialized_len: 19
+- name: balance_both_prev_noout
+  description: Type=Both, prev=true, output=false
+  previous_topoheight: 100
+  balance_type: both
+  final_balance: 1000
+  output_balance: null
+  serialized_hex: 0100000000000000640200000000000003e800
+  serialized_len: 19
+- name: balance_both_prev_out
+  description: Type=Both, prev=true, output=true
+  previous_topoheight: 100
+  balance_type: both
+  final_balance: 1000
+  output_balance: 50
+  serialized_hex: 0100000000000000640200000000000003e8010000000000000032
+  serialized_len: 27
+- name: balance_zero
+  description: Zero balance (empty account)
+  previous_topoheight: null
+  balance_type: input
+  final_balance: 0
+  output_balance: null
+  serialized_hex: '0000000000000000000000'
+  serialized_len: 11
+- name: balance_all_max
+  description: All fields at maximum
+  previous_topoheight: 18446744073709551615
+  balance_type: both
+  final_balance: 18446744073709551615
+  output_balance: 18446744073709551615
+  serialized_hex: 01ffffffffffffffff02ffffffffffffffff01ffffffffffffffff
+  serialized_len: 27
+- name: balance_receive_100_tos
+  description: Received 100 TOS (input only)
+  previous_topoheight: 1000
+  balance_type: input
+  final_balance: 10000000000
+  output_balance: null
+  serialized_hex: 0100000000000003e80000000002540be40000
+  serialized_len: 19
+- name: balance_send_50_tos
+  description: Sent 50 TOS (output type)
+  previous_topoheight: 2000
+  balance_type: output
+  final_balance: 5000000000
+  output_balance: 5000000000
+  serialized_hex: 0100000000000007d001000000012a05f20001000000012a05f200
+  serialized_len: 27
+- name: balance_both_in_out
+  description: Both received and sent in same block
+  previous_topoheight: 3000
+  balance_type: both
+  final_balance: 15000000000
+  output_balance: 2000000000
+  serialized_hex: 010000000000000bb802000000037e11d600010000000077359400
+  serialized_len: 27
+- name: balance_genesis_premine
+  description: Genesis premine balance (1B TOS)
+  previous_topoheight: null
+  balance_type: input
+  final_balance: 100000000000000000
+  output_balance: null
+  serialized_hex: 0000016345785d8a000000
+  serialized_len: 11
+- name: balance_output_zero
+  description: Output balance is Some(0)
+  previous_topoheight: 500
+  balance_type: both
+  final_balance: 1000
+  output_balance: 0
+  serialized_hex: 0100000000000001f40200000000000003e8010000000000000000
+  serialized_len: 27
+- name: balance_final_zero_output_nonzero
+  description: Final balance 0 with pending output
+  previous_topoheight: 600
+  balance_type: output
+  final_balance: 0
+  output_balance: 1000
+  serialized_hex: '0100000000000002580100000000000000000100000000000003e8'
+  serialized_len: 27

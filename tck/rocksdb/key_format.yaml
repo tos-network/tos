@@ -1,0 +1,116 @@
+description: RocksDB key format test vectors for TOS/Avatar compatibility
+version: '1.0'
+note: All multi-byte integers use big-endian encoding. Keys are raw bytes.
+account_key_vectors:
+- name: account_key_zero
+  description: Account key for id=0
+  account_id: 0
+  key_hex: '0000000000000000'
+  key_len: 8
+- name: account_key_one
+  description: Account key for id=1
+  account_id: 1
+  key_hex: '0000000000000001'
+  key_len: 8
+- name: account_key_42
+  description: Account key for typical id
+  account_id: 42
+  key_hex: 000000000000002a
+  key_len: 8
+- name: account_key_max
+  description: Account key for maximum id
+  account_id: 18446744073709551615
+  key_hex: ffffffffffffffff
+  key_len: 8
+balance_key_vectors:
+- name: balance_key_native_initial
+  description: Balance key for account 1, native asset at genesis
+  account_id: 1
+  asset_hash_hex: '0000000000000000000000000000000000000000000000000000000000000000'
+  topoheight: 0
+  key_hex: '000000000000000100000000000000000000000000000000000000000000000000000000000000000000000000000000'
+  key_len: 48
+- name: balance_key_custom_asset
+  description: Balance key for account 42, custom asset at topo 1000
+  account_id: 42
+  asset_hash_hex: 0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20
+  topoheight: 1000
+  key_hex: 000000000000002a0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f2000000000000003e8
+  key_len: 48
+- name: balance_key_max_values
+  description: Balance key with maximum values
+  account_id: 18446744073709551615
+  asset_hash_hex: ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+  topoheight: 18446744073709551615
+  key_hex: ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+  key_len: 48
+nonce_key_vectors:
+- name: nonce_key_genesis
+  description: Nonce key for account 0 at genesis
+  account_id: 0
+  topoheight: 0
+  key_hex: '00000000000000000000000000000000'
+  key_len: 16
+- name: nonce_key_account1_topo100
+  description: Nonce key for account 1 at topoheight 100
+  account_id: 1
+  topoheight: 100
+  key_hex: '00000000000000010000000000000064'
+  key_len: 16
+- name: nonce_key_large
+  description: Nonce key with larger values
+  account_id: 1000
+  topoheight: 999999
+  key_hex: 00000000000003e800000000000f423f
+  key_len: 16
+tx_hash_key_vectors:
+- name: tx_key_zero
+  description: Transaction key with zero hash
+  tx_hash_hex: '0000000000000000000000000000000000000000000000000000000000000000'
+  key_hex: '0000000000000000000000000000000000000000000000000000000000000000'
+  key_len: 32
+- name: tx_key_sequential
+  description: Transaction key with sequential bytes
+  tx_hash_hex: 000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f
+  key_hex: 000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f
+  key_len: 32
+- name: tx_key_max
+  description: Transaction key with all 0xFF bytes
+  tx_hash_hex: ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+  key_hex: ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+  key_len: 32
+block_hash_key_vectors:
+- name: block_key_genesis
+  description: Block key for genesis block
+  block_hash_hex: '9e00000000000000000000000000000000000000000000000000000000000000'
+  key_hex: '9e00000000000000000000000000000000000000000000000000000000000000'
+  key_len: 32
+topoheight_key_vectors:
+- name: topo_key_genesis
+  description: Topoheight key for genesis (0)
+  topoheight: 0
+  key_hex: '0000000000000000'
+  key_len: 8
+- name: topo_key_one
+  description: Topoheight key for block 1
+  topoheight: 1
+  key_hex: '0000000000000001'
+  key_len: 8
+- name: topo_key_million
+  description: Topoheight key for block 1000000
+  topoheight: 1000000
+  key_hex: 00000000000f4240
+  key_len: 8
+prefix_key_vectors:
+- name: balance_prefix_account1
+  description: Prefix for all balances of account 1
+  column_family: balances
+  account_id: 1
+  prefix_hex: '0000000000000001'
+  prefix_len: 8
+- name: nonce_prefix_account42
+  description: Prefix for all nonces of account 42
+  column_family: nonces
+  account_id: 42
+  prefix_hex: 000000000000002a
+  prefix_len: 8
