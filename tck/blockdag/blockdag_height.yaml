@@ -1,0 +1,42 @@
+algorithm: BlockDAG_Height
+test_vectors:
+- name: genesis_block
+  description: Genesis block has height 0 (no parents)
+  parent_heights: ''
+  expected_height: 0
+- name: single_parent
+  description: Single parent at height 5
+  parent_heights: '5'
+  expected_height: 6
+- name: two_parents_same_height
+  description: Two parents at same height
+  parent_heights: 10,10
+  expected_height: 11
+- name: two_parents_different_height
+  description: Two parents at different heights
+  parent_heights: 5,10
+  expected_height: 11
+- name: three_parents_different_heights
+  description: Three parents at different heights
+  parent_heights: 3,7,5
+  expected_height: 8
+- name: three_parents_max_first
+  description: Maximum height parent is first
+  parent_heights: 100,50,75
+  expected_height: 101
+- name: three_parents_max_last
+  description: Maximum height parent is last
+  parent_heights: 50,75,100
+  expected_height: 101
+- name: large_heights
+  description: Large height values
+  parent_heights: 1000000,999999,1000000
+  expected_height: 1000001
+- name: height_one
+  description: Block at height 1 (parent is genesis)
+  parent_heights: '0'
+  expected_height: 1
+- name: all_same_height
+  description: All three parents at same height
+  parent_heights: 42,42,42
+  expected_height: 43

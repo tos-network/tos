@@ -1,0 +1,102 @@
+algorithm: BlockDAG_Sorting
+test_vectors:
+- name: ascending_distinct_difficulties
+  description: Ascending sort with distinct difficulties
+  ascending: true
+  blocks: aa:3000000,bb:1000000,cc:2000000
+  expected_order: bb,cc,aa
+- name: ascending_same_difficulty_tiebreaker
+  description: Ascending sort with same difficulty - lower hash first
+  ascending: true
+  blocks: cc:1000000,aa:1000000,bb:1000000
+  expected_order: aa,bb,cc
+- name: ascending_mixed_tiebreaker
+  description: Ascending with some tied difficulties
+  ascending: true
+  blocks: dd:2000000,aa:1000000,cc:2000000,bb:1000000
+  expected_order: aa,bb,cc,dd
+- name: descending_distinct_difficulties
+  description: Descending sort with distinct difficulties
+  ascending: false
+  blocks: aa:1000000,bb:3000000,cc:2000000
+  expected_order: bb,cc,aa
+- name: descending_same_difficulty_tiebreaker
+  description: Descending sort with same difficulty - higher hash first
+  ascending: false
+  blocks: aa:1000000,cc:1000000,bb:1000000
+  expected_order: cc,bb,aa
+- name: descending_mixed_tiebreaker
+  description: Descending with some tied difficulties
+  ascending: false
+  blocks: aa:2000000,dd:1000000,bb:1000000,cc:2000000
+  expected_order: cc,aa,dd,bb
+- name: two_blocks_ascending
+  description: Two blocks ascending with same difficulty
+  ascending: true
+  blocks: ff:1000000,01:1000000
+  expected_order: 01,ff
+- name: two_blocks_descending
+  description: Two blocks descending with same difficulty
+  ascending: false
+  blocks: 01:1000000,ff:1000000
+  expected_order: ff,01
+- name: single_block
+  description: Single block (trivial sort)
+  ascending: true
+  blocks: ab:5000000
+  expected_order: ab
+- name: already_sorted_ascending
+  description: Already sorted in ascending order
+  ascending: true
+  blocks: aa:1000000,bb:2000000,cc:3000000
+  expected_order: aa,bb,cc
+- name: already_sorted_descending
+  description: Already sorted in descending order
+  ascending: false
+  blocks: cc:3000000,bb:2000000,aa:1000000
+  expected_order: cc,bb,aa
+- name: reverse_sorted_ascending
+  description: Reverse sorted - needs full reorder for ascending
+  ascending: true
+  blocks: cc:3000000,bb:2000000,aa:1000000
+  expected_order: aa,bb,cc
+- name: all_zero_difficulty_ascending
+  description: All zero difficulty - pure hash tiebreaker ascending
+  ascending: true
+  blocks: bb:0,aa:0,cc:0
+  expected_order: aa,bb,cc
+- name: all_zero_difficulty_descending
+  description: All zero difficulty - pure hash tiebreaker descending
+  ascending: false
+  blocks: bb:0,aa:0,cc:0
+  expected_order: cc,bb,aa
+- name: large_values_ascending
+  description: Large cumulative difficulty values ascending
+  ascending: true
+  blocks: aa:10000000000000000,bb:10000000000000001,cc:9999999999999999
+  expected_order: cc,aa,bb
+- name: numeric_vs_alpha_hash_ascending
+  description: Numeric vs alpha hash tiebreaker ascending
+  ascending: true
+  blocks: a0:1000,9f:1000,0a:1000
+  expected_order: 0a,9f,a0
+- name: four_blocks_mixed_ascending
+  description: Four blocks with mixed order ascending
+  ascending: true
+  blocks: dd:2000,aa:3000,cc:1000,bb:2000
+  expected_order: cc,bb,dd,aa
+- name: four_blocks_mixed_descending
+  description: Four blocks with mixed order descending
+  ascending: false
+  blocks: dd:2000,aa:3000,cc:1000,bb:2000
+  expected_order: aa,dd,bb,cc
+- name: consecutive_diff_ascending
+  description: Consecutive difficulty values ascending
+  ascending: true
+  blocks: cc:102,aa:100,bb:101
+  expected_order: aa,bb,cc
+- name: same_prefix_different_suffix_ascending
+  description: Same hash prefix, different suffix ascending
+  ascending: true
+  blocks: a3:1000,a1:1000,a2:1000
+  expected_order: a1,a2,a3

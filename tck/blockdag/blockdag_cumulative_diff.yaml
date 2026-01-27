@@ -1,0 +1,52 @@
+algorithm: BlockDAG_Cumulative_Difficulty
+test_vectors:
+- name: genesis_block
+  description: Genesis block (no parents)
+  parent_cumulative_diffs: ''
+  block_difficulty: 100000
+  expected_cumulative_diff: 100000
+- name: single_parent
+  description: Single parent
+  parent_cumulative_diffs: '500000'
+  block_difficulty: 100000
+  expected_cumulative_diff: 600000
+- name: two_parents_same_cumulative
+  description: Two parents with same cumulative difficulty
+  parent_cumulative_diffs: 1000000,1000000
+  block_difficulty: 200000
+  expected_cumulative_diff: 1200000
+- name: two_parents_different_cumulative
+  description: Two parents with different cumulative difficulty
+  parent_cumulative_diffs: 1000000,1500000
+  block_difficulty: 200000
+  expected_cumulative_diff: 1700000
+- name: three_parents_max_first
+  description: Maximum cumulative difficulty is first parent
+  parent_cumulative_diffs: 5000000,3000000,4000000
+  block_difficulty: 100000
+  expected_cumulative_diff: 5100000
+- name: three_parents_max_middle
+  description: Maximum cumulative difficulty is middle parent
+  parent_cumulative_diffs: 3000000,5000000,4000000
+  block_difficulty: 100000
+  expected_cumulative_diff: 5100000
+- name: three_parents_max_last
+  description: Maximum cumulative difficulty is last parent
+  parent_cumulative_diffs: 3000000,4000000,5000000
+  block_difficulty: 100000
+  expected_cumulative_diff: 5100000
+- name: minimum_difficulty_block
+  description: Block with minimum mainnet difficulty
+  parent_cumulative_diffs: '1000000'
+  block_difficulty: 100000
+  expected_cumulative_diff: 1100000
+- name: high_difficulty_block
+  description: Block with very high difficulty
+  parent_cumulative_diffs: 1000000,2000000,1500000
+  block_difficulty: 10000000
+  expected_cumulative_diff: 12000000
+- name: all_same_cumulative
+  description: All parents with same cumulative difficulty
+  parent_cumulative_diffs: 7777777,7777777,7777777
+  block_difficulty: 123456
+  expected_cumulative_diff: 7901233

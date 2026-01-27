@@ -1,0 +1,82 @@
+algorithm: BlockDAG_Fork_Choice
+test_vectors:
+- name: single_tip
+  description: Single tip - trivial choice
+  tips: aa:1000000
+  expected_best_tip: aa
+- name: two_tips_different_difficulty
+  description: Two tips with different difficulties
+  tips: aa:1000000,bb:2000000
+  expected_best_tip: bb
+- name: two_tips_same_difficulty_higher_hash_wins
+  description: Two tips with same difficulty - higher hash wins
+  tips: aa:1000000,bb:1000000
+  expected_best_tip: bb
+- name: three_tips_clear_winner
+  description: Three tips with clear difficulty winner
+  tips: aa:1000000,bb:3000000,cc:2000000
+  expected_best_tip: bb
+- name: three_tips_two_tied_higher_hash_wins
+  description: Three tips, two tied at highest - higher hash wins
+  tips: aa:3000000,cc:3000000,bb:2000000
+  expected_best_tip: cc
+- name: three_tips_all_tied
+  description: All three tips tied - highest hash wins
+  tips: bb:5000000,aa:5000000,cc:5000000
+  expected_best_tip: cc
+- name: extreme_hash_values
+  description: Extreme hash values with same difficulty
+  tips: 01:1000000,ff:1000000
+  expected_best_tip: ff
+- name: large_difficulty_values
+  description: Large difficulty values
+  tips: aa:10000000000000000,bb:10000000000000001
+  expected_best_tip: bb
+- name: winner_not_first
+  description: Best tip is not first in list
+  tips: aa:1000000,bb:500000,cc:5000000
+  expected_best_tip: cc
+- name: winner_in_middle
+  description: Best tip is in middle of list
+  tips: aa:1000000,dd:9000000,cc:5000000
+  expected_best_tip: dd
+- name: hash_tiebreaker_numeric_vs_alpha
+  description: 'Hash tiebreaker: ''9f'' vs ''a0'' with same difficulty'
+  tips: 9f:1000000,a0:1000000
+  expected_best_tip: a0
+- name: minimum_difficulty
+  description: Minimum difficulty values
+  tips: aa:1,bb:2
+  expected_best_tip: bb
+- name: zero_difficulty
+  description: Zero vs non-zero difficulty
+  tips: aa:0,bb:1
+  expected_best_tip: bb
+- name: all_zero_difficulty
+  description: All zero difficulty - pure hash tiebreaker
+  tips: bb:0,aa:0,cc:0
+  expected_best_tip: cc
+- name: consecutive_difficulty
+  description: Consecutive difficulty values
+  tips: aa:100,bb:101,cc:102
+  expected_best_tip: cc
+- name: lower_hash_higher_diff_wins
+  description: Lower hash with higher difficulty wins
+  tips: ff:1000,aa:2000
+  expected_best_tip: aa
+- name: reverse_alphabetical_same_diff
+  description: Reverse alphabetical order with same difficulty
+  tips: dd:5000000,cc:5000000,bb:5000000,aa:5000000
+  expected_best_tip: dd
+- name: near_max_u64
+  description: Near maximum u64 cumulative difficulty
+  tips: aa:18446744073709551614,bb:18446744073709551615
+  expected_best_tip: bb
+- name: diff_of_one_high_values
+  description: Difficulty difference of 1 at high values
+  tips: ff:9999999999999999,aa:10000000000000000
+  expected_best_tip: aa
+- name: mixed_hex_digits
+  description: Mixed hex digits with same difficulty
+  tips: 0a:1000,a0:1000,1b:1000
+  expected_best_tip: a0

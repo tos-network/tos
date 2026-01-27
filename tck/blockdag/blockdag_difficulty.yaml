@@ -1,0 +1,100 @@
+algorithm: BlockDAG_Difficulty_V2
+constants:
+  shift: 20
+  left_shift: 1048576
+  process_noise: 20971
+  initial_p: 1048576
+  min_mainnet: 100000
+  min_testnet: 10000
+  min_devnet: 1000
+test_vectors:
+- name: exact_target_time
+  description: Solve time equals target - difficulty unchanged
+  solve_time_ms: 1000
+  previous_difficulty: 500000
+  previous_covariance: 1048576
+  minimum_difficulty: 100000
+  block_time_target_ms: 1000
+  expected_difficulty: 500000
+  expected_covariance: 10382720768
+- name: double_target_time
+  description: Solve time is 2x target - difficulty decreases
+  solve_time_ms: 2000
+  previous_difficulty: 500000
+  previous_covariance: 1048576
+  minimum_difficulty: 100000
+  block_time_target_ms: 1000
+  expected_difficulty: 495097
+  expected_covariance: 10280923113
+- name: half_target_time
+  description: Solve time is 0.5x target - difficulty increases
+  solve_time_ms: 500
+  previous_difficulty: 500000
+  previous_covariance: 1048576
+  minimum_difficulty: 100000
+  block_time_target_ms: 1000
+  expected_difficulty: 502487
+  expected_covariance: 10434374652
+- name: minimum_clamp_mainnet
+  description: Difficulty clamped to mainnet minimum
+  solve_time_ms: 100000
+  previous_difficulty: 100000
+  previous_covariance: 1048576
+  minimum_difficulty: 100000
+  block_time_target_ms: 1000
+  expected_difficulty: 100000
+  expected_covariance: 1048576
+- name: minimum_clamp_devnet
+  description: Difficulty clamped to devnet minimum
+  solve_time_ms: 100000
+  previous_difficulty: 5000
+  previous_covariance: 1048576
+  minimum_difficulty: 1000
+  block_time_target_ms: 1000
+  expected_difficulty: 2512
+  expected_covariance: 52689093
+- name: very_fast_block
+  description: Very fast solve time (10ms vs 1000ms target)
+  solve_time_ms: 10
+  previous_difficulty: 500000
+  previous_covariance: 1048576
+  minimum_difficulty: 100000
+  block_time_target_ms: 1000
+  expected_difficulty: 504909
+  expected_covariance: 10485508497
+- name: covariance_growth
+  description: Covariance grows with consecutive adjustments
+  solve_time_ms: 1000
+  previous_difficulty: 500000
+  previous_covariance: 2000000
+  minimum_difficulty: 100000
+  block_time_target_ms: 1000
+  expected_difficulty: 500000
+  expected_covariance: 10383652770
+- name: large_difficulty
+  description: Large difficulty value
+  solve_time_ms: 1000
+  previous_difficulty: 1000000000000
+  previous_covariance: 1048576
+  minimum_difficulty: 100000
+  block_time_target_ms: 1000
+  expected_difficulty: 1000000000000
+  expected_covariance: 20763385149086595
+- name: slow_recovery_from_minimum
+  description: Recovery from minimum difficulty
+  solve_time_ms: 100
+  previous_difficulty: 100000
+  previous_covariance: 1048576
+  minimum_difficulty: 100000
+  block_time_target_ms: 1000
+  expected_difficulty: 100899
+  expected_covariance: 2096051579
+- name: genesis_like
+  description: First block after genesis
+  solve_time_ms: 800
+  previous_difficulty: 100000
+  previous_covariance: 1048576
+  minimum_difficulty: 100000
+  block_time_target_ms: 1000
+  expected_difficulty: 100198
+  expected_covariance: 2081490663

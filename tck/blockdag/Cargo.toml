@@ -1,0 +1,42 @@
+[package]
+name = "tos_tck_blockdag"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+
+# BlockDAG test vector generators
+# Pure function generators (no TOS dependencies)
+
+[[bin]]
+name = "gen_height_vectors"
+path = "gen_height_vectors.rs"
+
+[[bin]]
+name = "gen_cumulative_diff_vectors"
+path = "gen_cumulative_diff_vectors.rs"
+
+[[bin]]
+name = "gen_sorting_vectors"
+path = "gen_sorting_vectors.rs"
+
+[[bin]]
+name = "gen_fork_choice_vectors"
+path = "gen_fork_choice_vectors.rs"
+
+# Difficulty generator (uses VarUint from tos_common)
+[[bin]]
+name = "gen_difficulty_vectors"
+path = "gen_difficulty_vectors.rs"
+
+[dependencies]
+# Serialization (for all generators)
+hex = "0.4"
+serde = { version = "1.0", features = ["derive"] }
+serde_yaml = "0.9"
+
+# Random for test case generation
+rand = "0.8"
+
+# VarUint for difficulty calculations (same as TOS)
+primitive-types = { version = "0.12", features = ["serde"] }
