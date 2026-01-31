@@ -197,3 +197,6 @@ path = "gen_secp256r1_vectors.rs"
 [[bin]]
 name = "gen_bls12_381_vectors"
 path = "gen_bls12_381_vectors.rs"
+[[bin]]
+name = "gen_ed25519_point_vectors"
+path = "gen_ed25519_point_vectors.rs"
