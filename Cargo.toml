@@ -47,4 +47,7 @@ overflow-checks = false
 lto = true
 strip = true
 
-# Note: curve25519-dalek patch removed - now managed by tos-crypto
+# Patch crates.io dependencies to use TOS forks
+# This ensures type compatibility across all crates (schnorrkel, ed25519-dalek, etc.)
+[patch.crates-io]
+curve25519-dalek = { git = "https://github.com/tos-network/curve25519-dalek", rev = "0ca0e1a1cab7c08733e35cfedc33fc68db2058be" }

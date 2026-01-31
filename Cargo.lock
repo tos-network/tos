@@ -935,7 +935,7 @@ version = "5.0.2"
 source = "git+https://github.com/tos-network/bulletproofs?rev=566a53ec0a00b066e9271bbf9dc48ca6c33828f7#566a53ec0a00b066e9271bbf9dc48ca6c33828f7"
 dependencies = [
  "byteorder",
- "curve25519-dalek 4.1.3 (git+https://github.com/tos-network/curve25519-dalek?rev=0ca0e1a1cab7c08733e35cfedc33fc68db2058be)",
+ "curve25519-dalek",
  "digest 0.10.7",
  "group",
  "merlin",
@@ -1567,29 +1567,12 @@ dependencies = [
 [[package]]
 name = "curve25519-dalek"
 version = "4.1.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "97fb8b7c4503de7d6ae7b42ab72a5a59857b4c937ec27a3d4539dba95b5ab2be"
-dependencies = [
- "cfg-if",
- "cpufeatures",
- "curve25519-dalek-derive 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
- "digest 0.10.7",
- "fiat-crypto",
- "rustc_version",
- "serde",
- "subtle",
- "zeroize",
-]
-
-[[package]]
-name = "curve25519-dalek"
-version = "4.1.3"
 source = "git+https://github.com/tos-network/curve25519-dalek?rev=0ca0e1a1cab7c08733e35cfedc33fc68db2058be#0ca0e1a1cab7c08733e35cfedc33fc68db2058be"
 dependencies = [
  "bytemuck",
  "cfg-if",
  "cpufeatures",
- "curve25519-dalek-derive 0.1.1 (git+https://github.com/tos-network/curve25519-dalek?rev=0ca0e1a1cab7c08733e35cfedc33fc68db2058be)",
+ "curve25519-dalek-derive",
  "digest 0.10.7",
  "fiat-crypto",
  "group",
@@ -1598,17 +1581,6 @@ dependencies = [
  "serde",
  "subtle",
  "zeroize",
-]
-
-[[package]]
-name = "curve25519-dalek-derive"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f46882e17999c6cc590af592290432be3bce0428cb0d5f8b6715e4dc7b383eb3"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
 ]
 
 [[package]]
@@ -1772,7 +1744,7 @@ version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "70e796c081cee67dc755e1a36a0a172b897fab85fc3f6bc48307991f64e4eca9"
 dependencies = [
- "curve25519-dalek 4.1.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "curve25519-dalek",
  "ed25519",
  "rand_core 0.6.4",
  "serde",
@@ -4538,7 +4510,7 @@ dependencies = [
  "aead 0.5.2",
  "arrayref",
  "arrayvec",
- "curve25519-dalek 4.1.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "curve25519-dalek",
  "getrandom_or_panic",
  "merlin",
  "rand_core 0.6.4",
@@ -5550,7 +5522,7 @@ source = "git+https://github.com/tos-network/tos-crypto?rev=abb56b0#abb56b022339
 dependencies = [
  "blake3",
  "bulletproofs",
- "curve25519-dalek 4.1.3 (git+https://github.com/tos-network/curve25519-dalek?rev=0ca0e1a1cab7c08733e35cfedc33fc68db2058be)",
+ "curve25519-dalek",
  "hex",
  "lazy_static",
  "merlin",
@@ -5663,7 +5635,7 @@ dependencies = [
  "blake3",
  "blst",
  "c-kzg",
- "curve25519-dalek 4.1.3 (git+https://github.com/tos-network/curve25519-dalek?rev=0ca0e1a1cab7c08733e35cfedc33fc68db2058be)",
+ "curve25519-dalek",
  "hex",
  "libsecp256k1",
  "log",
@@ -6890,7 +6862,7 @@ version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c7e468321c81fb07fa7f4c636c3972b9100f0346e5b6a9f2bd0603a52f7ed277"
 dependencies = [
- "curve25519-dalek 4.1.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "curve25519-dalek",
  "rand_core 0.6.4",
  "serde",
  "zeroize",
