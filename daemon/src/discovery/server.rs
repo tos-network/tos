@@ -6,7 +6,7 @@
 //! - Bootstrap node connections
 
 use std::collections::HashMap;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -54,6 +54,80 @@ const MAX_VALIDATED_ENDPOINTS: usize = 1024;
 
 /// Maximum processed PONGs to track (replay prevention).
 const MAX_PROCESSED_PONGS: usize = 512;
+
+/// Check if an address is valid for discovery protocol (outbound traffic).
+///
+/// Rejects addresses that should not be used for discovery:
+/// - Private/local networks (10.x.x.x, 192.168.x.x, 172.16-31.x.x)
+/// - Loopback addresses (127.x.x.x, ::1)
+/// - Multicast addresses
+/// - Unspecified addresses (0.0.0.0, ::)
+/// - Link-local addresses
+/// - Port 0 (invalid for UDP)
+///
+/// This prevents malicious peers from using NEIGHBORS responses to scan
+/// internal networks or exhaust our pending PING capacity with bogus addresses.
+fn is_valid_discovery_address(addr: &SocketAddr) -> bool {
+    // Reject port 0
+    if addr.port() == 0 {
+        return false;
+    }
+
+    match addr.ip() {
+        IpAddr::V4(ipv4) => {
+            // Reject unspecified (0.0.0.0)
+            if ipv4.is_unspecified() {
+                return false;
+            }
+            // Reject loopback (127.x.x.x)
+            if ipv4.is_loopback() {
+                return false;
+            }
+            // Reject private networks (10.x.x.x, 172.16-31.x.x, 192.168.x.x)
+            if ipv4.is_private() {
+                return false;
+            }
+            // Reject multicast (224.0.0.0 - 239.255.255.255)
+            if ipv4.is_multicast() {
+                return false;
+            }
+            // Reject link-local (169.254.x.x)
+            if ipv4.is_link_local() {
+                return false;
+            }
+            // Reject broadcast (255.255.255.255)
+            if ipv4.is_broadcast() {
+                return false;
+            }
+            // Reject documentation addresses (192.0.2.x, 198.51.100.x, 203.0.113.x)
+            let octets = ipv4.octets();
+            if (octets[0] == 192 && octets[1] == 0 && octets[2] == 2)
+                || (octets[0] == 198 && octets[1] == 51 && octets[2] == 100)
+                || (octets[0] == 203 && octets[1] == 0 && octets[2] == 113)
+            {
+                return false;
+            }
+            true
+        }
+        IpAddr::V6(ipv6) => {
+            // Reject unspecified (::)
+            if ipv6.is_unspecified() {
+                return false;
+            }
+            // Reject loopback (::1)
+            if ipv6.is_loopback() {
+                return false;
+            }
+            // Reject multicast (ff00::/8)
+            if ipv6.is_multicast() {
+                return false;
+            }
+            // Note: is_global() is unstable, so we do basic checks only
+            // In production, consider more thorough IPv6 validation
+            true
+        }
+    }
+}
 
 /// Pending ping information.
 struct PendingPing {
@@ -508,15 +582,19 @@ impl DiscoveryServer {
             );
             self.routing_table.insert(node_info).await;
 
-            // Update external address discovery
-            let mut external = self.external_address.write().await;
-            if external.is_none() {
-                *external = Some(from);
-                if log::log_enabled!(log::Level::Info) {
-                    info!("Discovered external address: {}", from);
-                }
-            }
-            drop(external);
+            // Round 6 Fix 2: Remove broken external address discovery.
+            // The previous code set external_address = from, which records the PONG sender's
+            // address as our own - completely wrong! This would cause us to advertise the
+            // peer's address as ours, breaking discovery and potentially routing traffic
+            // to the attacker.
+            //
+            // Proper external address discovery requires one of:
+            // 1. PONG includes an echo of our observed IP (protocol change needed)
+            // 2. Use STUN/TURN servers for NAT traversal
+            // 3. Collect observations from multiple independent peers and use consensus
+            //
+            // For now, external_address remains None until explicitly set by config
+            // or a proper discovery mechanism is implemented.
 
             // Mark this endpoint as validated (anti-amplification)
             {
@@ -729,6 +807,19 @@ impl DiscoveryServer {
                     warn!(
                         "NEIGHBORS contains node with invalid node_id: {}",
                         hex::encode(node.node_id.as_bytes())
+                    );
+                }
+                continue;
+            }
+
+            // Round 6 Fix 1: Validate address before pinging
+            // Reject private, loopback, multicast, unspecified addresses, and port 0.
+            // This prevents third-party scanning and pending PING capacity exhaustion.
+            if !is_valid_discovery_address(&node.address) {
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "NEIGHBORS contains node with invalid address {}, skipping",
+                        node.address
                     );
                 }
                 continue;
@@ -1022,5 +1113,98 @@ mod tests {
 
         server.stop();
         assert!(!server.is_running());
+    }
+
+    #[test]
+    fn test_is_valid_discovery_address() {
+        use std::net::{Ipv4Addr, Ipv6Addr};
+
+        // Valid global addresses
+        assert!(is_valid_discovery_address(&SocketAddr::new(
+            IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)),
+            2126
+        )));
+        assert!(is_valid_discovery_address(&SocketAddr::new(
+            IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1)),
+            2126
+        )));
+
+        // Port 0 is invalid
+        assert!(!is_valid_discovery_address(&SocketAddr::new(
+            IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)),
+            0
+        )));
+
+        // Loopback is invalid
+        assert!(!is_valid_discovery_address(&SocketAddr::new(
+            IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+            2126
+        )));
+
+        // Private networks are invalid
+        assert!(!is_valid_discovery_address(&SocketAddr::new(
+            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
+            2126
+        )));
+        assert!(!is_valid_discovery_address(&SocketAddr::new(
+            IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)),
+            2126
+        )));
+        assert!(!is_valid_discovery_address(&SocketAddr::new(
+            IpAddr::V4(Ipv4Addr::new(172, 16, 0, 1)),
+            2126
+        )));
+
+        // Multicast is invalid
+        assert!(!is_valid_discovery_address(&SocketAddr::new(
+            IpAddr::V4(Ipv4Addr::new(224, 0, 0, 1)),
+            2126
+        )));
+
+        // Link-local is invalid
+        assert!(!is_valid_discovery_address(&SocketAddr::new(
+            IpAddr::V4(Ipv4Addr::new(169, 254, 1, 1)),
+            2126
+        )));
+
+        // Unspecified is invalid
+        assert!(!is_valid_discovery_address(&SocketAddr::new(
+            IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+            2126
+        )));
+
+        // Broadcast is invalid
+        assert!(!is_valid_discovery_address(&SocketAddr::new(
+            IpAddr::V4(Ipv4Addr::BROADCAST),
+            2126
+        )));
+
+        // Documentation addresses are invalid
+        assert!(!is_valid_discovery_address(&SocketAddr::new(
+            IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
+            2126
+        )));
+        assert!(!is_valid_discovery_address(&SocketAddr::new(
+            IpAddr::V4(Ipv4Addr::new(198, 51, 100, 1)),
+            2126
+        )));
+        assert!(!is_valid_discovery_address(&SocketAddr::new(
+            IpAddr::V4(Ipv4Addr::new(203, 0, 113, 1)),
+            2126
+        )));
+
+        // IPv6 tests
+        assert!(is_valid_discovery_address(&SocketAddr::new(
+            IpAddr::V6(Ipv6Addr::new(0x2001, 0x4860, 0x4860, 0, 0, 0, 0, 0x8888)),
+            2126
+        )));
+        assert!(!is_valid_discovery_address(&SocketAddr::new(
+            IpAddr::V6(Ipv6Addr::LOCALHOST),
+            2126
+        )));
+        assert!(!is_valid_discovery_address(&SocketAddr::new(
+            IpAddr::V6(Ipv6Addr::UNSPECIFIED),
+            2126
+        )));
     }
 }
