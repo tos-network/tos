@@ -19,6 +19,8 @@ tos-kernel = { git = "https://github.com/tos-network/tako", rev = "06c1b03" }
 # Features: uno = ecdlp (balance decryption) + zk-proofs (bulletproofs + merlin), vrf = VRF support
 tos-crypto = { git = "https://github.com/tos-network/tos-crypto", rev = "abb56b0", features = ["uno", "vrf"] }
 blake3 = "1.5.1"
+# Ed25519 for discovery protocol node identity
+ed25519-dalek = { version = "2.1", features = ["rand_core", "zeroize"] }
 zeroize = { version = "1.7.0", features = ["derive"] }
 sha3 = "0.10.8"
 # HMAC-SHA256 for callback signature (TIP-QR-PAYMENT)

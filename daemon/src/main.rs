@@ -7,7 +7,10 @@
 pub mod config;
 // VRF must be declared before core (core/config.rs uses WrappedVrfSecret)
 pub mod a2a;
+// Discovery protocol for peer discovery (discv6-based)
+// Must be declared before core (core/config.rs uses DiscoveryConfig)
 pub mod core;
+pub mod discovery;
 pub mod escrow;
 pub mod p2p;
 pub mod rpc;

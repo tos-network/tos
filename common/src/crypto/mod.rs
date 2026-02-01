@@ -4,6 +4,7 @@ mod human_readable_proof;
 mod transcript;
 
 pub mod bech32;
+pub mod ed25519;
 pub mod elgamal;
 pub mod error;
 pub mod proofs;

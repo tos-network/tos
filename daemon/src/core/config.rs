@@ -1,3 +1,4 @@
+use crate::discovery::DiscoveryConfig;
 use crate::vrf::{WrappedMinerSecret, WrappedVrfSecret};
 use crate::{
     config::*,
@@ -595,6 +596,10 @@ pub struct P2pConfig {
     #[clap(name = "p2p-reorg-from-priority-only", long)]
     #[serde(default)]
     pub reorg_from_priority_only: bool,
+    /// Discovery protocol configuration.
+    #[clap(flatten)]
+    #[serde(default)]
+    pub discovery: DiscoveryConfig,
 }
 
 #[derive(Debug, Clone, Copy, clap::ValueEnum, Serialize, Deserialize)]
