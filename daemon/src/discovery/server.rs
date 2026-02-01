@@ -40,6 +40,17 @@ const RESPONSE_TIMEOUT: Duration = Duration::from_secs(5);
 /// Maximum pending PING requests.
 const MAX_PENDING_PINGS: usize = 256;
 
+/// Pending ping information.
+struct PendingPing {
+    /// Target node ID.
+    node_id: NodeId,
+    /// Target address (for future validation).
+    #[allow(dead_code)]
+    address: SocketAddr,
+    /// Time the ping was sent.
+    sent_time: Instant,
+}
+
 /// Discovery server handling UDP communication.
 pub struct DiscoveryServer {
     /// UDP socket for sending/receiving packets.
@@ -54,8 +65,8 @@ pub struct DiscoveryServer {
     running: AtomicBool,
     /// Sequence counter for PING messages.
     seq_counter: AtomicU64,
-    /// Pending PING requests (seq -> (target_node_id, sent_time)).
-    pending_pings: RwLock<HashMap<u64, (NodeId, Instant)>>,
+    /// Pending PING requests (ping_hash -> PendingPing).
+    pending_pings: RwLock<HashMap<Hash, PendingPing>>,
     /// Our external address (as seen by other nodes).
     external_address: RwLock<Option<SocketAddr>>,
 }
@@ -246,20 +257,20 @@ impl DiscoveryServer {
                 self.handle_ping(&packet, ping, from).await
             }
             Message::Pong(pong) => {
-                // Get the source public key from our routing table or pending pings
-                if let Some(entry) = self.routing_table.get(&pong.source.node_id).await {
-                    packet.verify(&entry.info.public_key)?;
-                }
+                // Always verify PONG signature using the included public key
+                packet.verify(&pong.source.public_key)?;
                 self.handle_pong(pong, from).await
             }
             Message::FindNode(find_node) => {
-                // Find the sender in our routing table
-                if let Some(entry) = self.routing_table.get(&find_node.target).await {
-                    packet.verify(&entry.info.public_key)?;
-                }
+                // Verify signature using the source's public key
+                packet.verify(&find_node.source.public_key)?;
                 self.handle_find_node(find_node, from).await
             }
-            Message::Neighbors(neighbors) => self.handle_neighbors(neighbors, from).await,
+            Message::Neighbors(neighbors) => {
+                // Verify signature using the source's public key
+                packet.verify(&neighbors.source.public_key)?;
+                self.handle_neighbors(neighbors, from).await
+            }
         }
     }
 
@@ -276,6 +287,20 @@ impl DiscoveryServer {
                 from,
                 hex::encode(ping.source.node_id.as_bytes())
             );
+        }
+
+        // Validate node ID matches public key
+        if !ping.source.verify_node_id() {
+            if log::log_enabled!(log::Level::Warn) {
+                warn!(
+                    "PING from {} has invalid node_id (doesn't match public key)",
+                    from
+                );
+            }
+            return Err(DiscoveryError::InvalidNodeId(
+                "expected".to_string(),
+                "mismatch".to_string(),
+            ));
         }
 
         // Add/update sender in routing table
@@ -309,7 +334,55 @@ impl DiscoveryServer {
             );
         }
 
-        // Update routing table
+        // Validate node ID matches public key
+        if !pong.source.verify_node_id() {
+            if log::log_enabled!(log::Level::Warn) {
+                warn!(
+                    "PONG from {} has invalid node_id (doesn't match public key)",
+                    from
+                );
+            }
+            return Err(DiscoveryError::InvalidNodeId(
+                "expected".to_string(),
+                "mismatch".to_string(),
+            ));
+        }
+
+        // Validate PONG matches a pending PING
+        let pending_info = {
+            let mut pending = self.pending_pings.write().await;
+            pending.remove(&pong.ping_hash)
+        };
+
+        let is_valid_response = match &pending_info {
+            Some(info) => {
+                // Verify the PONG is from the expected node
+                if info.node_id != pong.source.node_id {
+                    if log::log_enabled!(log::Level::Warn) {
+                        warn!(
+                            "PONG from {} has unexpected node_id (expected: {}, got: {})",
+                            from,
+                            hex::encode(info.node_id.as_bytes()),
+                            hex::encode(pong.source.node_id.as_bytes())
+                        );
+                    }
+                    false
+                } else {
+                    true
+                }
+            }
+            None => {
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "Received unsolicited PONG from {} (no matching pending PING)",
+                        from
+                    );
+                }
+                false
+            }
+        };
+
+        // Update routing table (even for unsolicited PONGs, if signature was valid)
         let node_info = NodeInfo::new(
             pong.source.node_id.clone(),
             from,
@@ -317,15 +390,18 @@ impl DiscoveryServer {
         );
         self.routing_table.insert(node_info).await;
 
-        // Update our external address if provided
-        // The PONG contains the address they see us as
-        let mut external = self.external_address.write().await;
-        if external.is_none() {
-            *external = Some(from);
+        // Only update external address for valid responses to our PINGs
+        if is_valid_response {
+            let mut external = self.external_address.write().await;
+            if external.is_none() {
+                *external = Some(from);
+                if log::log_enabled!(log::Level::Info) {
+                    info!("Discovered external address: {}", from);
+                }
+            }
         }
 
-        // Remove from pending pings
-        // Note: We'd need to match by ping_hash, but for simplicity we just touch the node
+        // Touch the node in routing table
         self.routing_table.touch(&pong.source.node_id).await;
 
         Ok(())
@@ -345,6 +421,28 @@ impl DiscoveryServer {
             );
         }
 
+        // Validate node ID matches public key
+        if !find_node.source.verify_node_id() {
+            if log::log_enabled!(log::Level::Warn) {
+                warn!(
+                    "FINDNODE from {} has invalid node_id (doesn't match public key)",
+                    from
+                );
+            }
+            return Err(DiscoveryError::InvalidNodeId(
+                "expected".to_string(),
+                "mismatch".to_string(),
+            ));
+        }
+
+        // Add/update sender in routing table
+        let node_info = NodeInfo::new(
+            find_node.source.node_id.clone(),
+            from,
+            find_node.source.public_key.clone(),
+        );
+        self.routing_table.insert(node_info).await;
+
         // Find closest nodes to target
         let closest = self
             .routing_table
@@ -353,7 +451,12 @@ impl DiscoveryServer {
         let nodes: Vec<NodeInfo> = closest.into_iter().map(|e| e.info).collect();
 
         // Send NEIGHBORS response
-        let neighbors = Neighbors::new(nodes);
+        let source = NodeInfo::new(
+            self.identity.node_id().clone(),
+            from, // Will be updated when we know our external address
+            self.identity.public_key(),
+        );
+        let neighbors = Neighbors::new(source, nodes);
         self.send_message(Message::Neighbors(neighbors), from)
             .await?;
 
@@ -374,10 +477,43 @@ impl DiscoveryServer {
             );
         }
 
+        // Validate source node ID matches public key
+        if !neighbors.source.verify_node_id() {
+            if log::log_enabled!(log::Level::Warn) {
+                warn!(
+                    "NEIGHBORS from {} has invalid source node_id (doesn't match public key)",
+                    from
+                );
+            }
+            return Err(DiscoveryError::InvalidNodeId(
+                "expected".to_string(),
+                "mismatch".to_string(),
+            ));
+        }
+
+        // Update source in routing table
+        let source_info = NodeInfo::new(
+            neighbors.source.node_id.clone(),
+            from,
+            neighbors.source.public_key.clone(),
+        );
+        self.routing_table.insert(source_info).await;
+
         // Add all nodes to routing table
         for node in &neighbors.nodes {
             // Don't add ourselves
             if node.node_id == *self.identity.node_id() {
+                continue;
+            }
+
+            // Validate node ID matches public key
+            if !node.verify_node_id() {
+                if log::log_enabled!(log::Level::Warn) {
+                    warn!(
+                        "NEIGHBORS contains node with invalid node_id: {}",
+                        hex::encode(node.node_id.as_bytes())
+                    );
+                }
                 continue;
             }
 
@@ -431,30 +567,60 @@ impl DiscoveryServer {
         );
 
         let ping = Ping::new(source, seq);
+        let message = Message::Ping(ping);
 
-        // Track pending ping
+        // Create signed packet and compute hash
+        let msg_bytes = message.to_bytes();
+        let signature = self.identity.sign(&msg_bytes);
+        let packet = SignedPacket::new(message, signature);
+        let ping_hash = packet.hash();
+        let data = packet.encode();
+
+        if data.len() > MAX_PACKET_SIZE {
+            return Err(DiscoveryError::PacketTooLarge(data.len(), MAX_PACKET_SIZE));
+        }
+
+        // Track pending ping with the hash
         {
             let mut pending = self.pending_pings.write().await;
             // Clean up if too many pending
             if pending.len() >= MAX_PENDING_PINGS {
-                let old_keys: Vec<u64> = pending
+                let old_keys: Vec<Hash> = pending
                     .iter()
-                    .filter(|(_, (_, time))| time.elapsed() > RESPONSE_TIMEOUT)
-                    .map(|(k, _)| *k)
+                    .filter(|(_, info)| info.sent_time.elapsed() > RESPONSE_TIMEOUT)
+                    .map(|(k, _)| k.clone())
                     .collect();
                 for key in old_keys {
                     pending.remove(&key);
                 }
             }
-            pending.insert(seq, (node_id.clone(), Instant::now()));
+            pending.insert(
+                ping_hash,
+                PendingPing {
+                    node_id: node_id.clone(),
+                    address,
+                    sent_time: Instant::now(),
+                },
+            );
         }
 
-        self.send_message(Message::Ping(ping), address).await
+        self.socket.send_to(&data, address).await?;
+
+        if log::log_enabled!(log::Level::Trace) {
+            trace!("Sent PING ({} bytes) to {}", data.len(), address);
+        }
+
+        Ok(())
     }
 
     /// Send a FINDNODE request.
     pub async fn find_node(&self, target: &NodeId, address: SocketAddr) -> DiscoveryResult<()> {
-        let find_node = FindNode::new(target.clone());
+        let source = NodeInfo::new(
+            self.identity.node_id().clone(),
+            address, // Will be updated when we know our external address
+            self.identity.public_key(),
+        );
+        let find_node = FindNode::new(source, target.clone());
         self.send_message(Message::FindNode(find_node), address)
             .await
     }
@@ -510,17 +676,24 @@ impl DiscoveryServer {
 
     /// Clean up expired pending pings.
     async fn cleanup_pending_pings(&self) {
-        let mut pending = self.pending_pings.write().await;
-        let expired: Vec<u64> = pending
-            .iter()
-            .filter(|(_, (_, time))| time.elapsed() > RESPONSE_TIMEOUT)
-            .map(|(k, _)| *k)
-            .collect();
+        // Collect expired entries and release lock before calling record_failure
+        let expired_nodes: Vec<NodeId> = {
+            let mut pending = self.pending_pings.write().await;
+            let expired_keys: Vec<Hash> = pending
+                .iter()
+                .filter(|(_, info)| info.sent_time.elapsed() > RESPONSE_TIMEOUT)
+                .map(|(k, _)| k.clone())
+                .collect();
 
-        for key in expired {
-            if let Some((node_id, _)) = pending.remove(&key) {
-                self.routing_table.record_failure(&node_id).await;
-            }
+            expired_keys
+                .into_iter()
+                .filter_map(|key| pending.remove(&key).map(|info| info.node_id))
+                .collect()
+        }; // Lock is released here
+
+        // Now record failures without holding the lock
+        for node_id in expired_nodes {
+            self.routing_table.record_failure(&node_id).await;
         }
     }
 }

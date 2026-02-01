@@ -249,6 +249,8 @@ impl Serializer for Pong {
 /// FINDNODE message to request nodes close to a target.
 #[derive(Debug, Clone)]
 pub struct FindNode {
+    /// Source node information (sender).
+    pub source: NodeInfo,
     /// Target node ID to find nodes close to.
     pub target: NodeId,
     /// Message expiration timestamp (Unix seconds).
@@ -257,9 +259,13 @@ pub struct FindNode {
 
 impl FindNode {
     /// Create a new FINDNODE message.
-    pub fn new(target: NodeId) -> Self {
+    pub fn new(source: NodeInfo, target: NodeId) -> Self {
         let expiration = get_current_time_in_seconds().saturating_add(EXPIRATION_WINDOW);
-        Self { target, expiration }
+        Self {
+            source,
+            target,
+            expiration,
+        }
     }
 
     /// Check if the message has expired.
@@ -270,24 +276,32 @@ impl FindNode {
 
 impl Serializer for FindNode {
     fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
+        let source = NodeInfo::read(reader)?;
         let target = Hash::read(reader)?;
         let expiration = reader.read_u64()?;
-        Ok(Self { target, expiration })
+        Ok(Self {
+            source,
+            target,
+            expiration,
+        })
     }
 
     fn write(&self, writer: &mut Writer) {
+        self.source.write(writer);
         self.target.write(writer);
         writer.write_u64(&self.expiration);
     }
 
     fn size(&self) -> usize {
-        32 + 8 // target + expiration
+        self.source.size() + 32 + 8 // source + target + expiration
     }
 }
 
 /// NEIGHBORS message containing a list of nodes.
 #[derive(Debug, Clone)]
 pub struct Neighbors {
+    /// Source node information (sender).
+    pub source: NodeInfo,
     /// List of node information (max MAX_NEIGHBORS).
     pub nodes: Vec<NodeInfo>,
     /// Message expiration timestamp (Unix seconds).
@@ -296,7 +310,7 @@ pub struct Neighbors {
 
 impl Neighbors {
     /// Create a new NEIGHBORS message.
-    pub fn new(nodes: Vec<NodeInfo>) -> Self {
+    pub fn new(source: NodeInfo, nodes: Vec<NodeInfo>) -> Self {
         let expiration = get_current_time_in_seconds().saturating_add(EXPIRATION_WINDOW);
         // Truncate to MAX_NEIGHBORS
         let nodes = if nodes.len() > MAX_NEIGHBORS {
@@ -304,7 +318,11 @@ impl Neighbors {
         } else {
             nodes
         };
-        Self { nodes, expiration }
+        Self {
+            source,
+            nodes,
+            expiration,
+        }
     }
 
     /// Check if the message has expired.
@@ -315,6 +333,7 @@ impl Neighbors {
 
 impl Serializer for Neighbors {
     fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
+        let source = NodeInfo::read(reader)?;
         let count = reader.read_u8()? as usize;
         if count > MAX_NEIGHBORS {
             return Err(ReaderError::InvalidSize);
@@ -326,10 +345,15 @@ impl Serializer for Neighbors {
         }
 
         let expiration = reader.read_u64()?;
-        Ok(Self { nodes, expiration })
+        Ok(Self {
+            source,
+            nodes,
+            expiration,
+        })
     }
 
     fn write(&self, writer: &mut Writer) {
+        self.source.write(writer);
         writer.write_u8(self.nodes.len() as u8);
         for node in &self.nodes {
             node.write(writer);
@@ -338,7 +362,8 @@ impl Serializer for Neighbors {
     }
 
     fn size(&self) -> usize {
-        1 + self.nodes.iter().map(|n| n.size()).sum::<usize>() + 8 // count + nodes + expiration
+        self.source.size() + 1 + self.nodes.iter().map(|n| n.size()).sum::<usize>() + 8
+        // source + count + nodes + expiration
     }
 }
 
@@ -546,36 +571,43 @@ mod tests {
 
     #[test]
     fn test_findnode_message() {
+        let source = create_test_node_info();
         let target = Hash::new([0xaa; 32]);
-        let findnode = FindNode::new(target.clone());
+        let findnode = FindNode::new(source.clone(), target.clone());
 
         assert!(!findnode.is_expired());
         assert_eq!(findnode.target, target);
+        assert_eq!(findnode.source.node_id, source.node_id);
 
         let bytes = findnode.to_bytes();
         let decoded = FindNode::from_bytes(&bytes).unwrap();
 
         assert_eq!(decoded.target, target);
+        assert_eq!(decoded.source.node_id, source.node_id);
     }
 
     #[test]
     fn test_neighbors_message() {
+        let source = create_test_node_info();
         let nodes: Vec<NodeInfo> = (0..5).map(|_| create_test_node_info()).collect();
-        let neighbors = Neighbors::new(nodes.clone());
+        let neighbors = Neighbors::new(source.clone(), nodes.clone());
 
         assert!(!neighbors.is_expired());
         assert_eq!(neighbors.nodes.len(), 5);
+        assert_eq!(neighbors.source.node_id, source.node_id);
 
         let bytes = neighbors.to_bytes();
         let decoded = Neighbors::from_bytes(&bytes).unwrap();
 
         assert_eq!(decoded.nodes.len(), 5);
+        assert_eq!(decoded.source.node_id, source.node_id);
     }
 
     #[test]
     fn test_neighbors_truncation() {
+        let source = create_test_node_info();
         let nodes: Vec<NodeInfo> = (0..20).map(|_| create_test_node_info()).collect();
-        let neighbors = Neighbors::new(nodes);
+        let neighbors = Neighbors::new(source, nodes);
 
         assert_eq!(neighbors.nodes.len(), MAX_NEIGHBORS);
     }
