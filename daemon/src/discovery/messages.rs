@@ -467,6 +467,9 @@ impl SignedPacket {
     }
 
     /// Decode a packet from bytes.
+    ///
+    /// Rejects packets with trailing data after the message to prevent
+    /// byte-level message smuggling attacks.
     pub fn decode(data: &[u8]) -> DiscoveryResult<Self> {
         if data.len() < SIGNATURE_SIZE + 1 {
             return Err(DiscoveryError::InvalidPacketSize(
@@ -487,6 +490,12 @@ impl SignedPacket {
 
         // Read message
         let message = Message::read(&mut reader)?;
+
+        // Reject trailing data (Fix 3: prevents byte-level message smuggling)
+        let remaining = reader.size();
+        if remaining > 0 {
+            return Err(DiscoveryError::TrailingData(remaining));
+        }
 
         Ok(Self { signature, message })
     }
@@ -683,5 +692,44 @@ mod tests {
         // Verify with keypair2 (should fail)
         let compressed2 = keypair2.get_public_key().compress();
         assert!(packet.verify(&compressed2).is_err());
+    }
+
+    #[test]
+    fn test_signed_packet_trailing_data_rejected() {
+        // Fix 3: Verify that trailing data is rejected to prevent smuggling
+        let keypair = KeyPair::new();
+        let compressed = keypair.get_public_key().compress();
+        let node_id = NodeIdentity::compute_node_id(&compressed);
+        let source = NodeInfo::new(
+            node_id,
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 2126),
+            compressed,
+        );
+
+        let ping = Ping::new(source, 999);
+        let message = Message::Ping(ping);
+        let msg_bytes = message.to_bytes();
+        let signature = keypair.sign(&msg_bytes);
+        let packet = SignedPacket::new(message, signature);
+
+        // Encode valid packet
+        let mut encoded = packet.encode();
+
+        // Append trailing garbage data
+        encoded.extend_from_slice(b"TRAILING_GARBAGE");
+
+        // Decode should fail with TrailingData error
+        let result = SignedPacket::decode(&encoded);
+        assert!(result.is_err());
+
+        // Verify error is specifically TrailingData
+        if let Err(e) = result {
+            let error_msg = format!("{}", e);
+            assert!(
+                error_msg.contains("trailing data"),
+                "Expected TrailingData error, got: {}",
+                error_msg
+            );
+        }
     }
 }

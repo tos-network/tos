@@ -75,6 +75,18 @@ pub enum DiscoveryError {
     /// Self-referential operation (e.g., adding self to routing table).
     #[error("Cannot perform operation on self")]
     SelfOperation,
+
+    /// Trailing data after message.
+    #[error("Packet contains {0} bytes of trailing data")]
+    TrailingData(usize),
+
+    /// Endpoint not validated (anti-amplification).
+    #[error("Endpoint not validated: {0}")]
+    EndpointNotValidated(String),
+
+    /// Unsolicited response (no matching request).
+    #[error("Unsolicited {0} response from {1}")]
+    UnsolicitedResponse(String, String),
 }
 
 /// Result type alias for discovery operations.

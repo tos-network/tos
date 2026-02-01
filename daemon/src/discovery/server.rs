@@ -40,18 +40,48 @@ const RESPONSE_TIMEOUT: Duration = Duration::from_secs(5);
 /// Maximum pending PING requests.
 const MAX_PENDING_PINGS: usize = 256;
 
+/// Maximum pending FINDNODE requests.
+const MAX_PENDING_FINDNODES: usize = 256;
+
 /// Maximum concurrent packet handlers (DoS prevention).
 const MAX_CONCURRENT_HANDLERS: usize = 64;
+
+/// How long an endpoint validation remains valid.
+const ENDPOINT_VALIDATION_DURATION: Duration = Duration::from_secs(300);
+
+/// Maximum validated endpoints to track.
+const MAX_VALIDATED_ENDPOINTS: usize = 1024;
+
+/// Maximum processed PONGs to track (replay prevention).
+const MAX_PROCESSED_PONGS: usize = 512;
 
 /// Pending ping information.
 struct PendingPing {
     /// Target node ID.
     node_id: NodeId,
-    /// Target address (for future validation).
-    #[allow(dead_code)]
+    /// Target address (for validation).
     address: SocketAddr,
     /// Time the ping was sent.
     sent_time: Instant,
+}
+
+/// Pending FINDNODE request information.
+struct PendingFindNode {
+    /// Target node ID we're looking for (stored for future validation).
+    #[allow(dead_code)]
+    target: NodeId,
+    /// Address we sent the request to.
+    address: SocketAddr,
+    /// Time the request was sent.
+    sent_time: Instant,
+}
+
+/// Validated endpoint information.
+struct ValidatedEndpoint {
+    /// Node ID at this endpoint.
+    node_id: NodeId,
+    /// When the endpoint was validated.
+    validated_at: Instant,
 }
 
 /// Discovery server handling UDP communication.
@@ -74,6 +104,14 @@ pub struct DiscoveryServer {
     external_address: RwLock<Option<SocketAddr>>,
     /// Semaphore to limit concurrent packet handlers (DoS prevention).
     handler_semaphore: Arc<Semaphore>,
+    /// Validated endpoints (SocketAddr -> ValidatedEndpoint).
+    /// Only respond to FINDNODE from validated endpoints (anti-amplification).
+    validated_endpoints: RwLock<HashMap<SocketAddr, ValidatedEndpoint>>,
+    /// Pending FINDNODE requests (node_id of sender -> PendingFindNode).
+    /// Only accept NEIGHBORS from senders with matching pending requests.
+    pending_findnodes: RwLock<HashMap<NodeId, PendingFindNode>>,
+    /// Recently processed PONG hashes (replay prevention).
+    processed_pongs: RwLock<HashMap<Hash, Instant>>,
 }
 
 impl DiscoveryServer {
@@ -110,6 +148,9 @@ impl DiscoveryServer {
             pending_pings: RwLock::new(HashMap::new()),
             external_address: RwLock::new(None),
             handler_semaphore: Arc::new(Semaphore::new(MAX_CONCURRENT_HANDLERS)),
+            validated_endpoints: RwLock::new(HashMap::new()),
+            pending_findnodes: RwLock::new(HashMap::new()),
+            processed_pongs: RwLock::new(HashMap::new()),
         }))
     }
 
@@ -390,6 +431,33 @@ impl DiscoveryServer {
             ));
         }
 
+        // Fix 4: Check for PONG replay attack
+        {
+            let mut processed = self.processed_pongs.write().await;
+
+            // Check if this ping_hash was already processed
+            if processed.contains_key(&pong.ping_hash) {
+                if log::log_enabled!(log::Level::Warn) {
+                    warn!(
+                        "Duplicate PONG from {} (ping_hash already processed, possible replay)",
+                        from
+                    );
+                }
+                return Ok(()); // Silently ignore replayed PONGs
+            }
+
+            // Clean up old entries if at capacity
+            if processed.len() >= MAX_PROCESSED_PONGS {
+                let cutoff = Instant::now() - RESPONSE_TIMEOUT;
+                processed.retain(|_, time| *time > cutoff);
+            }
+
+            // Track this ping_hash as processed
+            if processed.len() < MAX_PROCESSED_PONGS {
+                processed.insert(pong.ping_hash.clone(), Instant::now());
+            }
+        }
+
         // Validate PONG matches a pending PING
         let pending_info = {
             let mut pending = self.pending_pings.write().await;
@@ -440,13 +508,44 @@ impl DiscoveryServer {
         );
         self.routing_table.insert(node_info).await;
 
-        // Only update external address for valid responses to our PINGs
+        // Only update external address and validate endpoint for valid responses
         if is_valid_response {
+            // Update external address discovery
             let mut external = self.external_address.write().await;
             if external.is_none() {
                 *external = Some(from);
                 if log::log_enabled!(log::Level::Info) {
                     info!("Discovered external address: {}", from);
+                }
+            }
+            drop(external);
+
+            // Fix 1: Mark this endpoint as validated (anti-amplification)
+            {
+                let mut validated = self.validated_endpoints.write().await;
+
+                // Clean up old entries if at capacity
+                if validated.len() >= MAX_VALIDATED_ENDPOINTS {
+                    let cutoff = Instant::now() - ENDPOINT_VALIDATION_DURATION;
+                    validated.retain(|_, v| v.validated_at > cutoff);
+                }
+
+                // Mark endpoint as validated
+                if validated.len() < MAX_VALIDATED_ENDPOINTS {
+                    validated.insert(
+                        from,
+                        ValidatedEndpoint {
+                            node_id: pong.source.node_id.clone(),
+                            validated_at: Instant::now(),
+                        },
+                    );
+                    if log::log_enabled!(log::Level::Trace) {
+                        trace!(
+                            "Validated endpoint {} (node_id: {})",
+                            from,
+                            hex::encode(pong.source.node_id.as_bytes())
+                        );
+                    }
                 }
             }
         }
@@ -458,6 +557,10 @@ impl DiscoveryServer {
     }
 
     /// Handle a FINDNODE message.
+    ///
+    /// Fix 1: Only respond to FINDNODE from validated endpoints to prevent
+    /// amplification attacks. NEIGHBORS response can be much larger than
+    /// FINDNODE request, so we require prior PING/PONG exchange.
     async fn handle_find_node(
         &self,
         find_node: &FindNode,
@@ -485,6 +588,35 @@ impl DiscoveryServer {
             ));
         }
 
+        // Fix 1: Check if endpoint is validated (anti-amplification)
+        let is_validated = {
+            let validated = self.validated_endpoints.read().await;
+            if let Some(endpoint) = validated.get(&from) {
+                // Check if validation is still fresh and node_id matches
+                endpoint.validated_at.elapsed() < ENDPOINT_VALIDATION_DURATION
+                    && endpoint.node_id == find_node.source.node_id
+            } else {
+                false
+            }
+        };
+
+        if !is_validated {
+            if log::log_enabled!(log::Level::Debug) {
+                debug!(
+                    "Ignoring FINDNODE from unvalidated endpoint {} (send PING first)",
+                    from
+                );
+            }
+            // Send a PING to initiate validation, don't respond with NEIGHBORS yet
+            // The sender should complete PING/PONG exchange before sending FINDNODE
+            if let Err(e) = self.ping_node(&find_node.source.node_id, from).await {
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Failed to ping unvalidated endpoint {}: {}", from, e);
+                }
+            }
+            return Err(DiscoveryError::EndpointNotValidated(from.to_string()));
+        }
+
         // Add/update sender in routing table
         let node_info = NodeInfo::new(
             find_node.source.node_id.clone(),
@@ -510,6 +642,9 @@ impl DiscoveryServer {
     }
 
     /// Handle a NEIGHBORS message.
+    ///
+    /// Fix 2: Only accept NEIGHBORS responses that correspond to outstanding
+    /// FINDNODE requests to prevent routing table poisoning and third-party scanning.
     async fn handle_neighbors(
         &self,
         neighbors: &Neighbors,
@@ -535,6 +670,38 @@ impl DiscoveryServer {
                 "expected".to_string(),
                 "mismatch".to_string(),
             ));
+        }
+
+        // Fix 2: Verify this NEIGHBORS corresponds to a pending FINDNODE request
+        let pending_request = {
+            let mut pending = self.pending_findnodes.write().await;
+            pending.remove(&neighbors.source.node_id)
+        };
+
+        if pending_request.is_none() {
+            if log::log_enabled!(log::Level::Warn) {
+                warn!(
+                    "Ignoring unsolicited NEIGHBORS from {} (no matching FINDNODE request)",
+                    from
+                );
+            }
+            return Err(DiscoveryError::UnsolicitedResponse(
+                "NEIGHBORS".to_string(),
+                from.to_string(),
+            ));
+        }
+
+        // Verify the response is from the expected address
+        if let Some(ref req) = pending_request {
+            if req.address != from {
+                if log::log_enabled!(log::Level::Warn) {
+                    warn!(
+                        "NEIGHBORS from unexpected address (expected: {}, got: {})",
+                        req.address, from
+                    );
+                }
+                // Still process it since node_id matched, but log the discrepancy
+            }
         }
 
         // Update source in routing table
@@ -701,10 +868,41 @@ impl DiscoveryServer {
     }
 
     /// Send a FINDNODE request.
-    pub async fn find_node(&self, target: &NodeId, address: SocketAddr) -> DiscoveryResult<()> {
+    ///
+    /// Fix 2: Track pending FINDNODE to only accept solicited NEIGHBORS responses.
+    pub async fn find_node(
+        &self,
+        target: &NodeId,
+        address: SocketAddr,
+        sender_node_id: &NodeId,
+    ) -> DiscoveryResult<()> {
         // Use our correct local address
         let source = self.local_node_info().await;
         let find_node = FindNode::new(source, target.clone());
+
+        // Track pending FINDNODE request
+        {
+            let mut pending = self.pending_findnodes.write().await;
+
+            // Clean up old entries if at capacity
+            if pending.len() >= MAX_PENDING_FINDNODES {
+                let cutoff = Instant::now() - RESPONSE_TIMEOUT;
+                pending.retain(|_, v| v.sent_time > cutoff);
+            }
+
+            // Track this request
+            if pending.len() < MAX_PENDING_FINDNODES {
+                pending.insert(
+                    sender_node_id.clone(),
+                    PendingFindNode {
+                        target: target.clone(),
+                        address,
+                        sent_time: Instant::now(),
+                    },
+                );
+            }
+        }
+
         self.send_message(Message::FindNode(find_node), address)
             .await
     }
@@ -723,7 +921,10 @@ impl DiscoveryServer {
                 seen.insert(entry.info.node_id.clone());
 
                 // Send FINDNODE
-                if let Err(e) = self.find_node(target, entry.info.address).await {
+                if let Err(e) = self
+                    .find_node(target, entry.info.address, &entry.info.node_id)
+                    .await
+                {
                     if log::log_enabled!(log::Level::Debug) {
                         debug!("FINDNODE failed to {}: {}", entry.info.address, e);
                     }
@@ -758,7 +959,7 @@ impl DiscoveryServer {
         self.lookup(&target).await;
     }
 
-    /// Clean up expired pending pings.
+    /// Clean up expired pending pings and other tracking structures.
     async fn cleanup_pending_pings(&self) {
         // Collect expired entries and release lock before calling record_failure
         let expired_nodes: Vec<NodeId> = {
@@ -778,6 +979,25 @@ impl DiscoveryServer {
         // Now record failures without holding the lock
         for node_id in expired_nodes {
             self.routing_table.record_failure(&node_id).await;
+        }
+
+        // Clean up expired pending FINDNODE requests
+        {
+            let mut pending = self.pending_findnodes.write().await;
+            pending.retain(|_, v| v.sent_time.elapsed() <= RESPONSE_TIMEOUT);
+        }
+
+        // Clean up expired processed PONGs
+        {
+            let mut processed = self.processed_pongs.write().await;
+            let cutoff = Instant::now() - RESPONSE_TIMEOUT;
+            processed.retain(|_, time| *time > cutoff);
+        }
+
+        // Clean up expired validated endpoints
+        {
+            let mut validated = self.validated_endpoints.write().await;
+            validated.retain(|_, v| v.validated_at.elapsed() < ENDPOINT_VALIDATION_DURATION);
         }
     }
 }
