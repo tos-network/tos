@@ -15,7 +15,7 @@ use log::{debug, error, info, trace, warn};
 use tos_common::crypto::Hash;
 use tos_common::serializer::Serializer;
 use tos_common::tokio::net::UdpSocket;
-use tos_common::tokio::sync::RwLock;
+use tos_common::tokio::sync::{RwLock, Semaphore};
 use tos_common::tokio::time::interval;
 
 use super::config::DiscoveryConfig;
@@ -39,6 +39,9 @@ const RESPONSE_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Maximum pending PING requests.
 const MAX_PENDING_PINGS: usize = 256;
+
+/// Maximum concurrent packet handlers (DoS prevention).
+const MAX_CONCURRENT_HANDLERS: usize = 64;
 
 /// Pending ping information.
 struct PendingPing {
@@ -69,6 +72,8 @@ pub struct DiscoveryServer {
     pending_pings: RwLock<HashMap<Hash, PendingPing>>,
     /// Our external address (as seen by other nodes).
     external_address: RwLock<Option<SocketAddr>>,
+    /// Semaphore to limit concurrent packet handlers (DoS prevention).
+    handler_semaphore: Arc<Semaphore>,
 }
 
 impl DiscoveryServer {
@@ -104,6 +109,7 @@ impl DiscoveryServer {
             seq_counter: AtomicU64::new(0),
             pending_pings: RwLock::new(HashMap::new()),
             external_address: RwLock::new(None),
+            handler_semaphore: Arc::new(Semaphore::new(MAX_CONCURRENT_HANDLERS)),
         }))
     }
 
@@ -121,6 +127,28 @@ impl DiscoveryServer {
     pub async fn node_url(&self) -> Option<TosNodeUrl> {
         let external_addr = self.external_address.read().await;
         external_addr.map(|addr| TosNodeUrl::new(self.identity.node_id().clone(), addr))
+    }
+
+    /// Get our local NodeInfo with the correct address.
+    ///
+    /// Uses external_address if known, otherwise falls back to the socket's local address.
+    async fn local_node_info(&self) -> NodeInfo {
+        // Default address when local_addr fails (should not happen in practice)
+        const DEFAULT_ADDR: std::net::SocketAddr =
+            std::net::SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::new(0, 0, 0, 0)), 0);
+
+        let address = {
+            let external = self.external_address.read().await;
+            match *external {
+                Some(addr) => addr,
+                None => self.socket.local_addr().unwrap_or(DEFAULT_ADDR),
+            }
+        };
+        NodeInfo::new(
+            self.identity.node_id().clone(),
+            address,
+            self.identity.public_key(),
+        )
     }
 
     /// Check if the server is running.
@@ -201,9 +229,27 @@ impl DiscoveryServer {
                     if log::log_enabled!(log::Level::Trace) {
                         trace!("Received {} bytes from {}", len, from);
                     }
+
+                    // Rate limiting: try to acquire a permit (non-blocking)
+                    let permit = match self.handler_semaphore.clone().try_acquire_owned() {
+                        Ok(permit) => permit,
+                        Err(_) => {
+                            // Too many concurrent handlers, drop this packet
+                            if log::log_enabled!(log::Level::Debug) {
+                                debug!(
+                                    "Dropping packet from {} (at handler capacity {})",
+                                    from, MAX_CONCURRENT_HANDLERS
+                                );
+                            }
+                            continue;
+                        }
+                    };
+
                     let data = buf[..len].to_vec();
                     let server = Arc::clone(&self);
                     tos_common::tokio::spawn_task("discovery-handle", async move {
+                        // Permit is automatically released when dropped at end of task
+                        let _permit = permit;
                         if let Err(e) = server.handle_packet(&data, from).await {
                             if log::log_enabled!(log::Level::Debug) {
                                 debug!("Error handling packet from {}: {}", from, e);
@@ -311,13 +357,9 @@ impl DiscoveryServer {
         );
         self.routing_table.insert(node_info.clone()).await;
 
-        // Send PONG
+        // Send PONG with our correct address
         let pong_hash = packet.hash();
-        let source = NodeInfo::new(
-            self.identity.node_id().clone(),
-            from, // Use the address they see us as
-            self.identity.public_key(),
-        );
+        let source = self.local_node_info().await;
         let pong = Pong::new(pong_hash, source);
         self.send_message(Message::Pong(pong), from).await?;
 
@@ -356,7 +398,7 @@ impl DiscoveryServer {
 
         let is_valid_response = match &pending_info {
             Some(info) => {
-                // Verify the PONG is from the expected node
+                // Verify the PONG is from the expected node AND address
                 if info.node_id != pong.source.node_id {
                     if log::log_enabled!(log::Level::Warn) {
                         warn!(
@@ -364,6 +406,14 @@ impl DiscoveryServer {
                             from,
                             hex::encode(info.node_id.as_bytes()),
                             hex::encode(pong.source.node_id.as_bytes())
+                        );
+                    }
+                    false
+                } else if info.address != from {
+                    if log::log_enabled!(log::Level::Warn) {
+                        warn!(
+                            "PONG has unexpected source address (expected: {}, got: {})",
+                            info.address, from
                         );
                     }
                     false
@@ -450,12 +500,8 @@ impl DiscoveryServer {
             .await;
         let nodes: Vec<NodeInfo> = closest.into_iter().map(|e| e.info).collect();
 
-        // Send NEIGHBORS response
-        let source = NodeInfo::new(
-            self.identity.node_id().clone(),
-            from, // Will be updated when we know our external address
-            self.identity.public_key(),
-        );
+        // Send NEIGHBORS response with our correct address
+        let source = self.local_node_info().await;
         let neighbors = Neighbors::new(source, nodes);
         self.send_message(Message::Neighbors(neighbors), from)
             .await?;
@@ -499,7 +545,7 @@ impl DiscoveryServer {
         );
         self.routing_table.insert(source_info).await;
 
-        // Add all nodes to routing table
+        // Process nodes from NEIGHBORS - ping to verify before adding
         for node in &neighbors.nodes {
             // Don't add ourselves
             if node.node_id == *self.identity.node_id() {
@@ -517,13 +563,48 @@ impl DiscoveryServer {
                 continue;
             }
 
+            // Check if already in routing table
+            if self.routing_table.contains(&node.node_id).await {
+                // Already known, skip
+                continue;
+            }
+
+            // Check if bucket has space
             let result = self.routing_table.insert(node.clone()).await;
-            if matches!(result, InsertResult::Inserted) {
-                // Ping new nodes to verify they're alive
-                if let Err(e) = self.ping_node(&node.node_id, node.address).await {
-                    if log::log_enabled!(log::Level::Debug) {
-                        debug!("Failed to ping new node {}: {}", node.address, e);
+            match result {
+                InsertResult::Inserted => {
+                    // Ping new nodes to verify they're alive
+                    // If they don't respond, they'll be evicted via record_failure
+                    if let Err(e) = self.ping_node(&node.node_id, node.address).await {
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!("Failed to ping new node {}: {}", node.address, e);
+                        }
+                        // Remove immediately if we couldn't even send the ping
+                        self.routing_table.remove(&node.node_id).await;
                     }
+                }
+                InsertResult::Updated => {
+                    // Already in table, touch to update
+                }
+                InsertResult::BucketFull(oldest_id) => {
+                    // Bucket is full, ping oldest node to check if it's still alive
+                    if let Some(oldest) = self.routing_table.get(&oldest_id).await {
+                        if self
+                            .ping_node(&oldest_id, oldest.info.address)
+                            .await
+                            .is_err()
+                        {
+                            // Couldn't send ping, try to evict and insert new node
+                            if self.routing_table.evict_if_oldest(&oldest_id).await {
+                                self.routing_table.insert(node.clone()).await;
+                            }
+                        }
+                        // If ping sent successfully, the oldest node will be evicted
+                        // via record_failure if it doesn't respond
+                    }
+                }
+                InsertResult::SelfInsert => {
+                    // Should not happen since we check for self above
                 }
             }
         }
@@ -560,12 +641,8 @@ impl DiscoveryServer {
     pub async fn ping_node(&self, node_id: &NodeId, address: SocketAddr) -> DiscoveryResult<()> {
         let seq = self.seq_counter.fetch_add(1, Ordering::SeqCst);
 
-        let source = NodeInfo::new(
-            self.identity.node_id().clone(),
-            address, // This will be updated when we know our external address
-            self.identity.public_key(),
-        );
-
+        // Use our correct local address
+        let source = self.local_node_info().await;
         let ping = Ping::new(source, seq);
         let message = Message::Ping(ping);
 
@@ -583,7 +660,7 @@ impl DiscoveryServer {
         // Track pending ping with the hash
         {
             let mut pending = self.pending_pings.write().await;
-            // Clean up if too many pending
+            // Clean up expired entries if too many pending
             if pending.len() >= MAX_PENDING_PINGS {
                 let old_keys: Vec<Hash> = pending
                     .iter()
@@ -593,6 +670,16 @@ impl DiscoveryServer {
                 for key in old_keys {
                     pending.remove(&key);
                 }
+            }
+            // Enforce hard cap - don't insert if still at max after cleanup
+            if pending.len() >= MAX_PENDING_PINGS {
+                if log::log_enabled!(log::Level::Warn) {
+                    warn!(
+                        "Pending pings at capacity ({}), dropping ping to {}",
+                        MAX_PENDING_PINGS, address
+                    );
+                }
+                return Ok(()); // Drop the ping silently
             }
             pending.insert(
                 ping_hash,
@@ -615,11 +702,8 @@ impl DiscoveryServer {
 
     /// Send a FINDNODE request.
     pub async fn find_node(&self, target: &NodeId, address: SocketAddr) -> DiscoveryResult<()> {
-        let source = NodeInfo::new(
-            self.identity.node_id().clone(),
-            address, // Will be updated when we know our external address
-            self.identity.public_key(),
-        );
+        // Use our correct local address
+        let source = self.local_node_info().await;
         let find_node = FindNode::new(source, target.clone());
         self.send_message(Message::FindNode(find_node), address)
             .await

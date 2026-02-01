@@ -22,6 +22,9 @@ pub const DEFAULT_BUCKET_SIZE: usize = 16;
 /// Alpha parameter for parallel lookups.
 pub const ALPHA: usize = 3;
 
+/// Number of failures before a node is considered for eviction.
+pub const EVICTION_THRESHOLD: u32 = 3;
+
 /// Entry in a k-bucket containing node information and metadata.
 #[derive(Debug, Clone)]
 pub struct NodeEntry {
@@ -258,16 +261,24 @@ impl RoutingTable {
         false
     }
 
-    /// Record a failure for a node.
-    pub async fn record_failure(&self, node_id: &NodeId) {
+    /// Record a failure for a node and evict if threshold exceeded.
+    ///
+    /// Returns true if the node was evicted due to exceeding the failure threshold.
+    pub async fn record_failure(&self, node_id: &NodeId) -> bool {
         if let Some(bucket_idx) = self.bucket_index(node_id) {
             let mut bucket = self.buckets[bucket_idx].write().await;
             if let Some(index) = bucket.find_index(node_id) {
                 if let Some(entry) = bucket.nodes.get_mut(index) {
                     entry.record_failure();
+                    // Evict if exceeded threshold
+                    if entry.fail_count >= EVICTION_THRESHOLD {
+                        bucket.nodes.remove(index);
+                        return true;
+                    }
                 }
             }
         }
+        false
     }
 
     /// Remove a node from the routing table.
