@@ -25,7 +25,7 @@ use super::messages::{
     FindNode, Message, Neighbors, NodeInfo, Ping, Pong, SignedPacket, MAX_NEIGHBORS,
     MAX_PACKET_SIZE,
 };
-use super::routing_table::{InsertResult, RoutingTable, ALPHA};
+use super::routing_table::{RoutingTable, ALPHA};
 use super::url::TosNodeUrl;
 
 /// Interval for sending refresh requests to bootstrap nodes.
@@ -390,13 +390,10 @@ impl DiscoveryServer {
             ));
         }
 
-        // Add/update sender in routing table
-        let node_info = NodeInfo::new(
-            ping.source.node_id.clone(),
-            from,
-            ping.source.public_key.clone(),
-        );
-        self.routing_table.insert(node_info.clone()).await;
+        // Fix 1: Do NOT insert into routing table on PING alone.
+        // The UDP source address can be spoofed, so we cannot trust it.
+        // Nodes are only inserted when we receive a valid PONG to our own PING,
+        // which proves reachability. The PONG handler already does this correctly.
 
         // Send PONG with our correct address
         let pong_hash = packet.hash();
@@ -613,13 +610,9 @@ impl DiscoveryServer {
                     from
                 );
             }
-            // Send a PING to initiate validation, don't respond with NEIGHBORS yet
-            // The sender should complete PING/PONG exchange before sending FINDNODE
-            if let Err(e) = self.ping_node(&find_node.source.node_id, from).await {
-                if log::log_enabled!(log::Level::Debug) {
-                    debug!("Failed to ping unvalidated endpoint {}: {}", from, e);
-                }
-            }
+            // Fix 3: Do NOT send validation PING - this could be abused for reflection.
+            // The sender with a spoofed UDP source could cause us to send PINGs to victims.
+            // Instead, simply drop the request. Legitimate nodes should send PING first.
             return Err(DiscoveryError::EndpointNotValidated(from.to_string()));
         }
 
@@ -721,7 +714,9 @@ impl DiscoveryServer {
         );
         self.routing_table.insert(source_info).await;
 
-        // Process nodes from NEIGHBORS - ping to verify before adding
+        // Fix 2: Process nodes from NEIGHBORS - ping to verify BEFORE adding to routing table.
+        // Do NOT insert into routing table until we receive a valid PONG proving reachability.
+        // This prevents malicious peers from filling our buckets with bogus/dead nodes.
         for node in &neighbors.nodes {
             // Don't add ourselves
             if node.node_id == *self.identity.node_id() {
@@ -745,42 +740,12 @@ impl DiscoveryServer {
                 continue;
             }
 
-            // Check if bucket has space
-            let result = self.routing_table.insert(node.clone()).await;
-            match result {
-                InsertResult::Inserted => {
-                    // Ping new nodes to verify they're alive
-                    // If they don't respond, they'll be evicted via record_failure
-                    if let Err(e) = self.ping_node(&node.node_id, node.address).await {
-                        if log::log_enabled!(log::Level::Debug) {
-                            debug!("Failed to ping new node {}: {}", node.address, e);
-                        }
-                        // Remove immediately if we couldn't even send the ping
-                        self.routing_table.remove(&node.node_id).await;
-                    }
-                }
-                InsertResult::Updated => {
-                    // Already in table, touch to update
-                }
-                InsertResult::BucketFull(oldest_id) => {
-                    // Bucket is full, ping oldest node to check if it's still alive
-                    if let Some(oldest) = self.routing_table.get(&oldest_id).await {
-                        if self
-                            .ping_node(&oldest_id, oldest.info.address)
-                            .await
-                            .is_err()
-                        {
-                            // Couldn't send ping, try to evict and insert new node
-                            if self.routing_table.evict_if_oldest(&oldest_id).await {
-                                self.routing_table.insert(node.clone()).await;
-                            }
-                        }
-                        // If ping sent successfully, the oldest node will be evicted
-                        // via record_failure if it doesn't respond
-                    }
-                }
-                InsertResult::SelfInsert => {
-                    // Should not happen since we check for self above
+            // Send PING to verify the node is alive.
+            // Do NOT insert yet - wait for PONG response.
+            // The PONG handler will insert the node when we receive a valid response.
+            if let Err(e) = self.ping_node(&node.node_id, node.address).await {
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Failed to ping node from NEIGHBORS {}: {}", node.address, e);
                 }
             }
         }
