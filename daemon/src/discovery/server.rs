@@ -122,8 +122,68 @@ fn is_valid_discovery_address(addr: &SocketAddr) -> bool {
             if ipv6.is_multicast() {
                 return false;
             }
-            // Note: is_global() is unstable, so we do basic checks only
-            // In production, consider more thorough IPv6 validation
+
+            // Round 7 Fix: Complete IPv6 validation to match IPv4 security level
+            let segments = ipv6.segments();
+
+            // Reject link-local (fe80::/10)
+            // First 10 bits are 1111111010, so first segment starts with 0xfe80-0xfebf
+            if (segments[0] & 0xffc0) == 0xfe80 {
+                return false;
+            }
+
+            // Reject unique local addresses (fc00::/7, includes fd00::/8)
+            // First 7 bits are 1111110, so first byte is 0xfc or 0xfd
+            if (segments[0] & 0xfe00) == 0xfc00 {
+                return false;
+            }
+
+            // Reject site-local (fec0::/10) - deprecated but still reject
+            // First 10 bits are 1111111011, so first segment starts with 0xfec0-0xfeff
+            if (segments[0] & 0xffc0) == 0xfec0 {
+                return false;
+            }
+
+            // Reject documentation addresses (2001:db8::/32)
+            if segments[0] == 0x2001 && segments[1] == 0x0db8 {
+                return false;
+            }
+
+            // Reject IPv4-mapped IPv6 addresses (::ffff:x.x.x.x)
+            // These could be used to bypass IPv4 private address checks
+            if let Some(ipv4) = ipv6.to_ipv4_mapped() {
+                // Apply the same IPv4 validation rules
+                if ipv4.is_unspecified()
+                    || ipv4.is_loopback()
+                    || ipv4.is_private()
+                    || ipv4.is_multicast()
+                    || ipv4.is_link_local()
+                    || ipv4.is_broadcast()
+                {
+                    return false;
+                }
+                // Check documentation addresses
+                let octets = ipv4.octets();
+                if (octets[0] == 192 && octets[1] == 0 && octets[2] == 2)
+                    || (octets[0] == 198 && octets[1] == 51 && octets[2] == 100)
+                    || (octets[0] == 203 && octets[1] == 0 && octets[2] == 113)
+                {
+                    return false;
+                }
+            }
+
+            // Reject Teredo tunneling addresses (2001:0000::/32)
+            // Can be used for NAT traversal attacks
+            if segments[0] == 0x2001 && segments[1] == 0x0000 {
+                return false;
+            }
+
+            // Reject 6to4 addresses (2002::/16)
+            // Embeds IPv4 address, could be used to target internal networks
+            if segments[0] == 0x2002 {
+                return false;
+            }
+
             true
         }
     }
@@ -1193,17 +1253,84 @@ mod tests {
             2126
         )));
 
-        // IPv6 tests
+        // IPv6 tests - valid global addresses
         assert!(is_valid_discovery_address(&SocketAddr::new(
             IpAddr::V6(Ipv6Addr::new(0x2001, 0x4860, 0x4860, 0, 0, 0, 0, 0x8888)),
             2126
         )));
+
+        // IPv6 loopback is invalid
         assert!(!is_valid_discovery_address(&SocketAddr::new(
             IpAddr::V6(Ipv6Addr::LOCALHOST),
             2126
         )));
+
+        // IPv6 unspecified is invalid
         assert!(!is_valid_discovery_address(&SocketAddr::new(
             IpAddr::V6(Ipv6Addr::UNSPECIFIED),
+            2126
+        )));
+
+        // IPv6 link-local is invalid (fe80::/10)
+        assert!(!is_valid_discovery_address(&SocketAddr::new(
+            IpAddr::V6(Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 1)),
+            2126
+        )));
+        // Edge of link-local range
+        assert!(!is_valid_discovery_address(&SocketAddr::new(
+            IpAddr::V6(Ipv6Addr::new(0xfebf, 0xffff, 0xffff, 0xffff, 0, 0, 0, 1)),
+            2126
+        )));
+
+        // IPv6 unique local is invalid (fc00::/7, includes fd00::/8)
+        assert!(!is_valid_discovery_address(&SocketAddr::new(
+            IpAddr::V6(Ipv6Addr::new(0xfc00, 0, 0, 0, 0, 0, 0, 1)),
+            2126
+        )));
+        assert!(!is_valid_discovery_address(&SocketAddr::new(
+            IpAddr::V6(Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1)),
+            2126
+        )));
+
+        // IPv6 site-local is invalid (fec0::/10) - deprecated but reject
+        assert!(!is_valid_discovery_address(&SocketAddr::new(
+            IpAddr::V6(Ipv6Addr::new(0xfec0, 0, 0, 0, 0, 0, 0, 1)),
+            2126
+        )));
+
+        // IPv6 documentation is invalid (2001:db8::/32)
+        assert!(!is_valid_discovery_address(&SocketAddr::new(
+            IpAddr::V6(Ipv6Addr::new(0x2001, 0x0db8, 0, 0, 0, 0, 0, 1)),
+            2126
+        )));
+
+        // IPv4-mapped IPv6 with private IPv4 is invalid (::ffff:192.168.1.1)
+        assert!(!is_valid_discovery_address(&SocketAddr::new(
+            IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0xffff, 0xc0a8, 0x0101)),
+            2126
+        )));
+
+        // IPv4-mapped IPv6 with loopback is invalid (::ffff:127.0.0.1)
+        assert!(!is_valid_discovery_address(&SocketAddr::new(
+            IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0xffff, 0x7f00, 0x0001)),
+            2126
+        )));
+
+        // Teredo tunneling is invalid (2001:0000::/32)
+        assert!(!is_valid_discovery_address(&SocketAddr::new(
+            IpAddr::V6(Ipv6Addr::new(0x2001, 0x0000, 0x1234, 0, 0, 0, 0, 1)),
+            2126
+        )));
+
+        // 6to4 addresses are invalid (2002::/16)
+        assert!(!is_valid_discovery_address(&SocketAddr::new(
+            IpAddr::V6(Ipv6Addr::new(0x2002, 0xc0a8, 0x0101, 0, 0, 0, 0, 1)),
+            2126
+        )));
+
+        // IPv6 multicast is invalid
+        assert!(!is_valid_discovery_address(&SocketAddr::new(
+            IpAddr::V6(Ipv6Addr::new(0xff02, 0, 0, 0, 0, 0, 0, 1)),
             2126
         )));
     }
