@@ -22,6 +22,7 @@ use crate::{
         tx_selector::{TxSelector, TxSelectorEntry},
         ScheduledExecutionConfig, TxCache,
     },
+    discovery::{DiscoveryServer, NodeIdentity},
     escrow::auto_release::apply_auto_release,
     p2p::P2pServer,
     rpc::{
@@ -135,6 +136,8 @@ pub struct Blockchain<S: Storage> {
     environment: Environment,
     // P2p module
     p2p: RwLock<Option<Arc<P2pServer<S>>>>,
+    // Discovery module (discv6 UDP)
+    discovery: RwLock<Option<Arc<DiscoveryServer>>>,
     // RPC module
     rpc: RwLock<Option<SharedDaemonRpcServer<S>>>,
     // if a simulator is set
@@ -383,6 +386,7 @@ impl<S: Storage> Blockchain<S> {
             storage_semaphore: Semaphore::new(1),
             environment,
             p2p: RwLock::new(None),
+            discovery: RwLock::new(None),
             rpc: RwLock::new(None),
             skip_pow_verification: config.skip_pow_verification || config.simulator.is_some(),
             simulator: config.simulator,
@@ -481,8 +485,20 @@ impl<S: Storage> Blockchain<S> {
         }
 
         let arc = Arc::new(blockchain);
-        // create P2P Server
-        if !config.p2p.disable {
+
+        // Extract discovery config before P2P takes ownership
+        let discovery_config = config.p2p.discovery.clone();
+        let is_discovery_only = discovery_config.discovery_only;
+
+        // In discovery-only mode, skip P2P server entirely
+        if is_discovery_only {
+            if log::log_enabled!(log::Level::Info) {
+                info!("Running in discovery-only (bootnode) mode");
+            }
+        }
+
+        // create P2P Server (skip in discovery-only mode)
+        if !config.p2p.disable && !is_discovery_only {
             let dir_path = config.dir_path;
             let config = config.p2p;
             if log::log_enabled!(log::Level::Info) {
@@ -696,8 +712,57 @@ impl<S: Storage> Blockchain<S> {
             };
         }
 
-        // create RPC Server
-        if !config.rpc.disable {
+        // create Discovery Server (discv6 UDP)
+        if discovery_config.is_enabled() {
+            if log::log_enabled!(log::Level::Info) {
+                info!(
+                    "Starting Discovery server on port {}...",
+                    discovery_config.port
+                );
+            }
+
+            // Create or load node identity
+            let identity = if let Some(ref secret) = discovery_config.private_key {
+                match NodeIdentity::from_secret_bytes(secret.inner().as_bytes()) {
+                    Some(id) => id,
+                    None => {
+                        if log::log_enabled!(log::Level::Error) {
+                            error!("Failed to load discovery identity from private key (invalid scalar)");
+                        }
+                        NodeIdentity::generate()
+                    }
+                }
+            } else {
+                if log::log_enabled!(log::Level::Info) {
+                    info!("Generating new discovery node identity");
+                }
+                NodeIdentity::generate()
+            };
+
+            if log::log_enabled!(log::Level::Info) {
+                info!(
+                    "Discovery node_id: 0x{}",
+                    hex::encode(identity.node_id().as_bytes())
+                );
+            }
+
+            match DiscoveryServer::new(discovery_config, identity).await {
+                Ok(server) => {
+                    *arc.discovery.write().await = Some(Arc::clone(&server));
+
+                    // Start the discovery server (spawns receive and maintenance loops)
+                    server.start().await;
+                }
+                Err(e) => {
+                    if log::log_enabled!(log::Level::Error) {
+                        error!("Error while creating Discovery server: {}", e);
+                    }
+                }
+            }
+        }
+
+        // create RPC Server (skip in discovery-only mode for minimal footprint)
+        if !config.rpc.disable && !is_discovery_only {
             if log::log_enabled!(log::Level::Info) {
                 info!("RPC Server will listen on: {}", config.rpc.bind_address);
             }
@@ -769,6 +834,16 @@ impl<S: Storage> Blockchain<S> {
             let mut p2p = self.p2p.write().await;
             if let Some(p2p) = p2p.take() {
                 p2p.stop().await;
+            }
+        }
+
+        {
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("stopping discovery module");
+            }
+            let mut discovery = self.discovery.write().await;
+            if let Some(discovery) = discovery.take() {
+                discovery.stop();
             }
         }
 
@@ -2403,6 +2478,11 @@ impl<S: Storage> Blockchain<S> {
     // Returns the P2p module used for blockchain if enabled
     pub fn get_p2p(&self) -> &RwLock<Option<Arc<P2pServer<S>>>> {
         &self.p2p
+    }
+
+    // Returns the Discovery server used for peer discovery if enabled
+    pub fn get_discovery(&self) -> &RwLock<Option<Arc<DiscoveryServer>>> {
+        &self.discovery
     }
 
     // Returns the RPC server used for blockchain if enabled

@@ -19,6 +19,9 @@ pub mod config;
 // Must be declared before `core` since core/config.rs uses WrappedVrfSecret
 pub mod vrf;
 
+// Discovery protocol for peer discovery (discv6-based)
+pub mod discovery;
+
 pub mod core;
 pub mod escrow;
 pub mod p2p;

@@ -356,6 +356,20 @@ const TESTNET_SEED_NODES: [&str; 1] = [
     "157.7.65.157:2125",
 ];
 
+// Discovery bootnodes (discv6 UDP)
+// These nodes handle peer discovery only, not block/transaction sync
+// Format: tosnode://<node_id>@<host>:<port> or just <host>:<port>
+
+// Mainnet discovery bootnodes
+const MAINNET_DISCOVERY_BOOTNODES: [&str; 0] = [
+    // TODO: Add mainnet bootnodes when deployed
+];
+
+// Testnet discovery bootnodes
+const TESTNET_DISCOVERY_BOOTNODES: [&str; 0] = [
+    // TODO: Add testnet bootnodes when deployed
+];
+
 // Genesis block to have the same starting point for every nodes
 // Genesis block in hexadecimal format (Nobunaga version with VRF flag)
 // Format: header fields + VRF flag (00 = no VRF)
@@ -418,6 +432,17 @@ pub const fn get_seed_nodes(network: &Network) -> &[&str] {
     match network {
         Network::Mainnet => &MAINNET_SEED_NODES,
         Network::Testnet => &TESTNET_SEED_NODES,
+        Network::Stagenet => &[],
+        Network::Devnet => &[],
+    }
+}
+
+// Get discovery bootnodes based on the network used
+// These are UDP-only nodes for discv6 peer discovery
+pub const fn get_discovery_bootnodes(network: &Network) -> &[&str] {
+    match network {
+        Network::Mainnet => &MAINNET_DISCOVERY_BOOTNODES,
+        Network::Testnet => &TESTNET_DISCOVERY_BOOTNODES,
         Network::Stagenet => &[],
         Network::Devnet => &[],
     }

@@ -5749,6 +5749,7 @@ dependencies = [
  "console-subscriber",
  "criterion 0.6.0",
  "crossterm",
+ "ed25519-dalek",
  "fern",
  "futures",
  "futures-util",
