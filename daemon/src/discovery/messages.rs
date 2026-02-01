@@ -33,6 +33,10 @@ pub const MAX_PACKET_SIZE: usize = 1280;
 /// Expiration window in seconds for message validity.
 pub const EXPIRATION_WINDOW: u64 = 20;
 
+/// Maximum acceptable clock drift in seconds (2x expiration window).
+/// Messages with expiration beyond this are rejected to prevent long-lived replay.
+pub const MAX_CLOCK_DRIFT: u64 = EXPIRATION_WINDOW * 2;
+
 /// Maximum number of neighbors in a NEIGHBORS response.
 pub const MAX_NEIGHBORS: usize = 16;
 
@@ -166,9 +170,20 @@ impl Ping {
         }
     }
 
-    /// Check if the message has expired.
+    /// Check if the message has expired (past expiration time).
     pub fn is_expired(&self) -> bool {
         get_current_time_in_seconds() > self.expiration
+    }
+
+    /// Check if the expiration timestamp is valid.
+    ///
+    /// Returns true if the message is not expired AND the expiration is not
+    /// too far in the future (within MAX_CLOCK_DRIFT). This prevents long-lived
+    /// replay attacks using messages with far-future expirations.
+    pub fn is_expiration_valid(&self) -> bool {
+        let now = get_current_time_in_seconds();
+        // Not expired AND not too far in the future
+        self.expiration > now && self.expiration <= now.saturating_add(MAX_CLOCK_DRIFT)
     }
 }
 
@@ -221,6 +236,12 @@ impl Pong {
     pub fn is_expired(&self) -> bool {
         get_current_time_in_seconds() > self.expiration
     }
+
+    /// Check if the expiration timestamp is valid.
+    pub fn is_expiration_valid(&self) -> bool {
+        let now = get_current_time_in_seconds();
+        self.expiration > now && self.expiration <= now.saturating_add(MAX_CLOCK_DRIFT)
+    }
 }
 
 impl Serializer for Pong {
@@ -271,6 +292,12 @@ impl FindNode {
     /// Check if the message has expired.
     pub fn is_expired(&self) -> bool {
         get_current_time_in_seconds() > self.expiration
+    }
+
+    /// Check if the expiration timestamp is valid.
+    pub fn is_expiration_valid(&self) -> bool {
+        let now = get_current_time_in_seconds();
+        self.expiration > now && self.expiration <= now.saturating_add(MAX_CLOCK_DRIFT)
     }
 }
 
@@ -328,6 +355,12 @@ impl Neighbors {
     /// Check if the message has expired.
     pub fn is_expired(&self) -> bool {
         get_current_time_in_seconds() > self.expiration
+    }
+
+    /// Check if the expiration timestamp is valid.
+    pub fn is_expiration_valid(&self) -> bool {
+        let now = get_current_time_in_seconds();
+        self.expiration > now && self.expiration <= now.saturating_add(MAX_CLOCK_DRIFT)
     }
 }
 
@@ -394,6 +427,19 @@ impl Message {
             Message::Pong(m) => m.is_expired(),
             Message::FindNode(m) => m.is_expired(),
             Message::Neighbors(m) => m.is_expired(),
+        }
+    }
+
+    /// Check if the expiration timestamp is valid.
+    ///
+    /// Returns true if the message is not expired AND the expiration is not
+    /// too far in the future. This prevents long-lived replay attacks.
+    pub fn is_expiration_valid(&self) -> bool {
+        match self {
+            Message::Ping(m) => m.is_expiration_valid(),
+            Message::Pong(m) => m.is_expiration_valid(),
+            Message::FindNode(m) => m.is_expiration_valid(),
+            Message::Neighbors(m) => m.is_expiration_valid(),
         }
     }
 }
@@ -569,6 +615,7 @@ mod tests {
         let ping = Ping::new(source.clone(), 42);
 
         assert!(!ping.is_expired());
+        assert!(ping.is_expiration_valid()); // New message should be valid
         assert_eq!(ping.seq, 42);
 
         let bytes = ping.to_bytes();
@@ -576,6 +623,33 @@ mod tests {
 
         assert_eq!(decoded.source.node_id, source.node_id);
         assert_eq!(decoded.seq, 42);
+    }
+
+    #[test]
+    fn test_expiration_validation() {
+        // Test that far-future expirations are rejected to prevent replay attacks
+        let source = create_test_node_info();
+        let now = get_current_time_in_seconds();
+
+        // Valid: expiration within acceptable window
+        let mut ping = Ping::new(source.clone(), 1);
+        assert!(ping.is_expiration_valid());
+
+        // Invalid: expiration in the past
+        ping.expiration = now.saturating_sub(1);
+        assert!(!ping.is_expiration_valid());
+
+        // Invalid: expiration too far in the future (beyond MAX_CLOCK_DRIFT)
+        ping.expiration = now.saturating_add(MAX_CLOCK_DRIFT + 10);
+        assert!(!ping.is_expiration_valid());
+
+        // Valid: expiration exactly at MAX_CLOCK_DRIFT
+        ping.expiration = now.saturating_add(MAX_CLOCK_DRIFT);
+        assert!(ping.is_expiration_valid());
+
+        // Valid: expiration at 1 second from now
+        ping.expiration = now.saturating_add(1);
+        assert!(ping.is_expiration_valid());
     }
 
     #[test]

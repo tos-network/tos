@@ -332,8 +332,8 @@ impl DiscoveryServer {
     async fn handle_packet(&self, data: &[u8], from: SocketAddr) -> DiscoveryResult<()> {
         let packet = SignedPacket::decode(data)?;
 
-        // Check expiration
-        if packet.message.is_expired() {
+        // Check expiration (Fix 1: also reject far-future expirations to prevent replay)
+        if !packet.message.is_expiration_valid() {
             return Err(DiscoveryError::MessageExpired(0, 0));
         }
 
@@ -500,16 +500,17 @@ impl DiscoveryServer {
             }
         };
 
-        // Update routing table (even for unsolicited PONGs, if signature was valid)
-        let node_info = NodeInfo::new(
-            pong.source.node_id.clone(),
-            from,
-            pong.source.public_key.clone(),
-        );
-        self.routing_table.insert(node_info).await;
-
-        // Only update external address and validate endpoint for valid responses
+        // Fix 2: Only update routing table for valid responses (matching pending PING)
+        // This prevents Sybil nodes from injecting themselves without proving liveness
         if is_valid_response {
+            // Insert/update node in routing table
+            let node_info = NodeInfo::new(
+                pong.source.node_id.clone(),
+                from,
+                pong.source.public_key.clone(),
+            );
+            self.routing_table.insert(node_info).await;
+
             // Update external address discovery
             let mut external = self.external_address.write().await;
             if external.is_none() {
@@ -520,7 +521,7 @@ impl DiscoveryServer {
             }
             drop(external);
 
-            // Fix 1: Mark this endpoint as validated (anti-amplification)
+            // Mark this endpoint as validated (anti-amplification)
             {
                 let mut validated = self.validated_endpoints.write().await;
 
@@ -548,10 +549,15 @@ impl DiscoveryServer {
                     }
                 }
             }
-        }
 
-        // Touch the node in routing table
-        self.routing_table.touch(&pong.source.node_id).await;
+            // Touch the node in routing table
+            self.routing_table.touch(&pong.source.node_id).await;
+        } else if log::log_enabled!(log::Level::Debug) {
+            debug!(
+                "Ignoring unsolicited PONG from {} (not inserting into routing table)",
+                from
+            );
+        }
 
         Ok(())
     }
@@ -691,16 +697,19 @@ impl DiscoveryServer {
             ));
         }
 
-        // Verify the response is from the expected address
+        // Fix 3: Verify the response is from the expected address (strict validation)
         if let Some(ref req) = pending_request {
             if req.address != from {
                 if log::log_enabled!(log::Level::Warn) {
                     warn!(
-                        "NEIGHBORS from unexpected address (expected: {}, got: {})",
+                        "Ignoring NEIGHBORS from unexpected address (expected: {}, got: {})",
                         req.address, from
                     );
                 }
-                // Still process it since node_id matched, but log the discrepancy
+                return Err(DiscoveryError::UnsolicitedResponse(
+                    "NEIGHBORS".to_string(),
+                    format!("address mismatch: expected {}, got {}", req.address, from),
+                ));
             }
         }
 
