@@ -8,10 +8,9 @@ use std::collections::VecDeque;
 use std::net::SocketAddr;
 use std::time::Instant;
 
-use tos_common::crypto::ed25519::Ed25519PublicKey;
 use tos_common::tokio::sync::RwLock;
 
-use super::identity::{compare_distance, log2_distance, NodeId};
+use super::identity::{compare_distance, log2_distance, CompressedPublicKey, NodeId};
 use super::messages::NodeInfo;
 
 /// Number of k-buckets (one for each bit position).
@@ -66,7 +65,7 @@ impl NodeEntry {
     }
 
     /// Get the public key.
-    pub fn public_key(&self) -> &Ed25519PublicKey {
+    pub fn public_key(&self) -> &CompressedPublicKey {
         &self.info.public_key
     }
 }
@@ -377,21 +376,25 @@ impl RoutingTable {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::discovery::identity::NodeIdentity;
     use std::net::{IpAddr, Ipv4Addr};
-    use tos_common::crypto::ed25519::Ed25519KeyPair;
+    use tos_common::crypto::KeyPair;
 
     fn create_test_node_info() -> NodeInfo {
-        let keypair = Ed25519KeyPair::generate();
+        let keypair = KeyPair::new();
+        let compressed = keypair.get_public_key().compress();
+        let node_id = NodeIdentity::compute_node_id(&compressed);
         NodeInfo::new(
-            keypair.node_id(),
+            node_id,
             SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 2126),
-            keypair.public_key(),
+            compressed,
         )
     }
 
     #[allow(dead_code)]
     fn create_test_node_with_id(id_byte: u8) -> NodeInfo {
-        let keypair = Ed25519KeyPair::generate();
+        let keypair = KeyPair::new();
+        let compressed = keypair.get_public_key().compress();
         // Create a specific node ID for testing
         let mut id_bytes = [0u8; 32];
         id_bytes[0] = id_byte;
@@ -402,7 +405,7 @@ mod tests {
                 IpAddr::V4(Ipv4Addr::new(127, 0, 0, (id_byte % 255) + 1)),
                 2126,
             ),
-            keypair.public_key(),
+            compressed,
         )
     }
 
@@ -435,11 +438,12 @@ mod tests {
         let local_id = tos_common::crypto::Hash::new([0u8; 32]);
         let table = RoutingTable::new(local_id.clone(), DEFAULT_BUCKET_SIZE);
 
-        let keypair = Ed25519KeyPair::generate();
+        let keypair = KeyPair::new();
+        let compressed = keypair.get_public_key().compress();
         let node = NodeInfo::new(
             local_id, // Same as local ID
             SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 2126),
-            keypair.public_key(),
+            compressed,
         );
 
         let result = table.insert(node).await;

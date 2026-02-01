@@ -1,14 +1,16 @@
 //! Node identity for the discovery protocol.
 //!
 //! Each node in the discovery network has a unique identity consisting of:
-//! - An Ed25519 key pair for signing/verifying messages
+//! - A Schnorr key pair (tos-crypto) for signing/verifying messages
 //! - A node ID derived from the public key (SHA3-256 hash)
 
 use std::fmt;
-use tos_common::crypto::{
-    ed25519::{Ed25519Error, Ed25519KeyPair, Ed25519PublicKey, Ed25519SecretKey, Ed25519Signature},
-    Hash,
-};
+use tos_common::crypto::elgamal;
+use tos_common::crypto::{self, Hash, KeyPair, PrivateKey, Signature};
+use tos_crypto::curve25519_dalek::Scalar;
+
+/// Compressed public key type for wire format (32 bytes).
+pub type CompressedPublicKey = elgamal::CompressedPublicKey;
 
 /// Node ID is a 32-byte hash of the node's public key.
 ///
@@ -20,25 +22,51 @@ pub type NodeId = Hash;
 
 /// Node identity containing the key pair and derived node ID.
 pub struct NodeIdentity {
-    /// Ed25519 key pair for signing messages.
-    keypair: Ed25519KeyPair,
-    /// Node ID (SHA3-256 hash of public key).
+    /// Schnorr key pair for signing messages.
+    keypair: KeyPair,
+    /// Node ID (SHA3-256 hash of compressed public key).
     node_id: NodeId,
 }
 
 impl NodeIdentity {
     /// Generate a new random node identity.
     pub fn generate() -> Self {
-        let keypair = Ed25519KeyPair::generate();
-        let node_id = keypair.node_id();
+        let keypair = KeyPair::new();
+        let node_id = Self::compute_node_id_from_keypair(&keypair);
         Self { keypair, node_id }
     }
 
-    /// Create a node identity from a secret key.
-    pub fn from_secret(secret: &Ed25519SecretKey) -> Result<Self, Ed25519Error> {
-        let keypair = Ed25519KeyPair::from_secret(secret)?;
-        let node_id = keypair.node_id();
-        Ok(Self { keypair, node_id })
+    /// Create a node identity from a private key.
+    pub fn from_private_key(private_key: PrivateKey) -> Self {
+        let keypair = KeyPair::from_private_key(private_key);
+        let node_id = Self::compute_node_id_from_keypair(&keypair);
+        Self { keypair, node_id }
+    }
+
+    /// Create a node identity from raw secret key bytes (32 bytes).
+    ///
+    /// The bytes are converted to a Scalar using `from_bytes_mod_order`,
+    /// which ensures a valid scalar is produced from any 32-byte input.
+    /// Returns `None` if the resulting scalar is zero (invalid for key generation).
+    pub fn from_secret_bytes(bytes: &[u8; 32]) -> Option<Self> {
+        let scalar = Scalar::from_bytes_mod_order(*bytes);
+        // Zero scalar is invalid for key generation
+        if scalar == Scalar::ZERO {
+            return None;
+        }
+        let private_key = PrivateKey::from_scalar(scalar);
+        Some(Self::from_private_key(private_key))
+    }
+
+    /// Compute node ID from a keypair (hash of compressed public key).
+    fn compute_node_id_from_keypair(keypair: &KeyPair) -> NodeId {
+        let compressed = keypair.get_public_key().compress();
+        crypto::hash(compressed.as_bytes())
+    }
+
+    /// Compute node ID from a compressed public key.
+    pub fn compute_node_id(public_key: &CompressedPublicKey) -> NodeId {
+        crypto::hash(public_key.as_bytes())
     }
 
     /// Get the node ID.
@@ -46,32 +74,38 @@ impl NodeIdentity {
         &self.node_id
     }
 
-    /// Get the public key.
-    pub fn public_key(&self) -> Ed25519PublicKey {
-        self.keypair.public_key()
+    /// Get the compressed public key (for wire format).
+    pub fn public_key(&self) -> CompressedPublicKey {
+        self.keypair.get_public_key().compress()
     }
 
-    /// Get the secret key.
-    pub fn secret_key(&self) -> Ed25519SecretKey {
-        self.keypair.secret_key()
+    /// Get the uncompressed public key (for verification).
+    pub fn public_key_uncompressed(&self) -> &elgamal::PublicKey {
+        self.keypair.get_public_key()
+    }
+
+    /// Get the private key.
+    pub fn private_key(&self) -> &PrivateKey {
+        self.keypair.get_private_key()
     }
 
     /// Sign a message with this identity's private key.
-    pub fn sign(&self, message: &[u8]) -> Ed25519Signature {
+    pub fn sign(&self, message: &[u8]) -> Signature {
         self.keypair.sign(message)
     }
 
     /// Verify a signature against this identity's public key.
-    pub fn verify(&self, message: &[u8], signature: &Ed25519Signature) -> Result<(), Ed25519Error> {
-        self.public_key().verify(message, signature)
+    pub fn verify(&self, message: &[u8], signature: &Signature) -> bool {
+        signature.verify(message, self.keypair.get_public_key())
     }
 }
 
 impl fmt::Debug for NodeIdentity {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let compressed = self.keypair.get_public_key().compress();
         f.debug_struct("NodeIdentity")
             .field("node_id", &self.node_id)
-            .field("public_key", &self.keypair.public_key())
+            .field("public_key", &hex::encode(compressed.as_bytes()))
             .finish()
     }
 }
@@ -150,13 +184,16 @@ mod tests {
     }
 
     #[test]
-    fn test_identity_from_secret() {
+    fn test_identity_from_private_key() {
         let identity1 = NodeIdentity::generate();
-        let secret = identity1.secret_key();
+        let private_key = identity1.private_key().clone();
 
-        let identity2 = NodeIdentity::from_secret(&secret).unwrap();
+        let identity2 = NodeIdentity::from_private_key(private_key);
         assert_eq!(identity1.node_id(), identity2.node_id());
-        assert_eq!(identity1.public_key(), identity2.public_key());
+        assert_eq!(
+            identity1.public_key().as_bytes(),
+            identity2.public_key().as_bytes()
+        );
     }
 
     #[test]
@@ -165,7 +202,7 @@ mod tests {
         let message = b"Test message for discovery";
 
         let signature = identity.sign(message);
-        assert!(identity.verify(message, &signature).is_ok());
+        assert!(identity.verify(message, &signature));
     }
 
     #[test]

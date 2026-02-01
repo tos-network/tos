@@ -9,15 +9,15 @@
 use std::net::SocketAddr;
 
 use serde::{Deserialize, Serialize};
-use tos_common::crypto::ed25519::{
-    Ed25519PublicKey, Ed25519Signature, ED25519_PUBLIC_KEY_SIZE, ED25519_SIGNATURE_SIZE,
-};
-use tos_common::crypto::Hash;
+use tos_common::crypto::{self, Hash, Signature, SIGNATURE_SIZE};
 use tos_common::serializer::{Reader, ReaderError, Serializer, Writer};
 use tos_common::time::get_current_time_in_seconds;
 
 use super::error::{DiscoveryError, DiscoveryResult};
-use super::identity::NodeId;
+use super::identity::{CompressedPublicKey, NodeId};
+
+/// Public key size in bytes (compressed Ristretto point).
+pub const PUBLIC_KEY_SIZE: usize = 32;
 
 /// Message type identifiers.
 pub mod message_type {
@@ -43,18 +43,24 @@ pub struct NodeInfo {
     pub node_id: NodeId,
     /// Network address.
     pub address: SocketAddr,
-    /// Ed25519 public key.
-    pub public_key: Ed25519PublicKey,
+    /// Schnorr public key (compressed Ristretto point, 32 bytes).
+    pub public_key: CompressedPublicKey,
 }
 
 impl NodeInfo {
     /// Create a new NodeInfo.
-    pub fn new(node_id: NodeId, address: SocketAddr, public_key: Ed25519PublicKey) -> Self {
+    pub fn new(node_id: NodeId, address: SocketAddr, public_key: CompressedPublicKey) -> Self {
         Self {
             node_id,
             address,
             public_key,
         }
+    }
+
+    /// Verify that the node_id matches the public key.
+    pub fn verify_node_id(&self) -> bool {
+        let expected = crypto::hash(self.public_key.as_bytes());
+        self.node_id == expected
     }
 }
 
@@ -91,12 +97,8 @@ impl Serializer for NodeInfo {
             _ => return Err(ReaderError::InvalidValue),
         };
 
-        // Read public_key (32 bytes)
-        let mut pk_bytes = [0u8; ED25519_PUBLIC_KEY_SIZE];
-        for byte in &mut pk_bytes {
-            *byte = reader.read_u8()?;
-        }
-        let public_key = Ed25519PublicKey::from_bytes(pk_bytes);
+        // Read public_key (32 bytes) using Serializer trait
+        let public_key = CompressedPublicKey::read(reader)?;
 
         Ok(Self {
             node_id,
@@ -138,7 +140,7 @@ impl Serializer for NodeInfo {
             + 1 // address version
             + if self.address.is_ipv4() { 4 } else { 16 } // IP bytes
             + 2 // port
-            + ED25519_PUBLIC_KEY_SIZE // public_key
+            + PUBLIC_KEY_SIZE // public_key
     }
 }
 
@@ -413,15 +415,15 @@ impl Serializer for Message {
 /// The signature is over (message_type || message_data).
 #[derive(Debug, Clone)]
 pub struct SignedPacket {
-    /// Ed25519 signature over the message.
-    pub signature: Ed25519Signature,
+    /// Schnorr signature over the message.
+    pub signature: Signature,
     /// The message.
     pub message: Message,
 }
 
 impl SignedPacket {
     /// Create a new signed packet (signature will be computed later).
-    pub fn new(message: Message, signature: Ed25519Signature) -> Self {
+    pub fn new(message: Message, signature: Signature) -> Self {
         Self { signature, message }
     }
 
@@ -430,7 +432,8 @@ impl SignedPacket {
         let mut bytes = Vec::new();
         let mut writer = Writer::new(&mut bytes);
         // Write signature
-        for byte in self.signature.as_bytes() {
+        let sig_bytes = self.signature.to_bytes();
+        for byte in &sig_bytes {
             writer.write_u8(*byte);
         }
         // Write message
@@ -440,9 +443,9 @@ impl SignedPacket {
 
     /// Decode a packet from bytes.
     pub fn decode(data: &[u8]) -> DiscoveryResult<Self> {
-        if data.len() < ED25519_SIGNATURE_SIZE + 1 {
+        if data.len() < SIGNATURE_SIZE + 1 {
             return Err(DiscoveryError::InvalidPacketSize(
-                ED25519_SIGNATURE_SIZE + 1,
+                SIGNATURE_SIZE + 1,
                 data.len(),
             ));
         }
@@ -450,11 +453,12 @@ impl SignedPacket {
         let mut reader = Reader::new(data);
 
         // Read signature
-        let mut sig_bytes = [0u8; ED25519_SIGNATURE_SIZE];
+        let mut sig_bytes = [0u8; SIGNATURE_SIZE];
         for byte in &mut sig_bytes {
             *byte = reader.read_u8()?;
         }
-        let signature = Ed25519Signature::from_bytes(sig_bytes);
+        let signature =
+            Signature::from_bytes(&sig_bytes).map_err(|_| DiscoveryError::InvalidSignature)?;
 
         // Read message
         let message = Message::read(&mut reader)?;
@@ -470,30 +474,41 @@ impl SignedPacket {
     /// Compute the hash of this packet (used for PONG reference).
     pub fn hash(&self) -> Hash {
         let data = self.encode();
-        tos_common::crypto::hash(&data)
+        crypto::hash(&data)
     }
 
-    /// Verify the signature against a public key.
-    pub fn verify(&self, public_key: &Ed25519PublicKey) -> DiscoveryResult<()> {
+    /// Verify the signature against a compressed public key.
+    ///
+    /// The public key is decompressed before verification.
+    pub fn verify(&self, public_key: &CompressedPublicKey) -> DiscoveryResult<()> {
         let signed_data = self.signed_data();
-        public_key
-            .verify(&signed_data, &self.signature)
-            .map_err(|_| DiscoveryError::InvalidSignature)
+        // Decompress the public key for signature verification
+        let uncompressed = public_key
+            .decompress()
+            .map_err(|_| DiscoveryError::InvalidSignature)?;
+        if self.signature.verify(&signed_data, &uncompressed) {
+            Ok(())
+        } else {
+            Err(DiscoveryError::InvalidSignature)
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::discovery::identity::NodeIdentity;
     use std::net::{IpAddr, Ipv4Addr};
-    use tos_common::crypto::ed25519::Ed25519KeyPair;
+    use tos_common::crypto::KeyPair;
 
     fn create_test_node_info() -> NodeInfo {
-        let keypair = Ed25519KeyPair::generate();
+        let keypair = KeyPair::new();
+        let compressed = keypair.get_public_key().compress();
+        let node_id = NodeIdentity::compute_node_id(&compressed);
         NodeInfo::new(
-            keypair.node_id(),
+            node_id,
             SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 2126),
-            keypair.public_key(),
+            compressed,
         )
     }
 
@@ -506,6 +521,12 @@ mod tests {
         assert_eq!(decoded.node_id, node_info.node_id);
         assert_eq!(decoded.address, node_info.address);
         assert_eq!(decoded.public_key, node_info.public_key);
+    }
+
+    #[test]
+    fn test_node_info_verify_node_id() {
+        let node_info = create_test_node_info();
+        assert!(node_info.verify_node_id());
     }
 
     #[test]
@@ -579,11 +600,13 @@ mod tests {
 
     #[test]
     fn test_signed_packet() {
-        let keypair = Ed25519KeyPair::generate();
+        let keypair = KeyPair::new();
+        let compressed = keypair.get_public_key().compress();
+        let node_id = NodeIdentity::compute_node_id(&compressed);
         let source = NodeInfo::new(
-            keypair.node_id(),
+            node_id,
             SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 2126),
-            keypair.public_key(),
+            compressed.clone(),
         );
 
         let ping = Ping::new(source, 999);
@@ -600,18 +623,20 @@ mod tests {
         let decoded = SignedPacket::decode(&encoded).unwrap();
 
         // Verify signature
-        assert!(decoded.verify(&keypair.public_key()).is_ok());
+        assert!(decoded.verify(&compressed).is_ok());
     }
 
     #[test]
     fn test_signed_packet_invalid_signature() {
-        let keypair1 = Ed25519KeyPair::generate();
-        let keypair2 = Ed25519KeyPair::generate();
+        let keypair1 = KeyPair::new();
+        let keypair2 = KeyPair::new();
 
+        let compressed1 = keypair1.get_public_key().compress();
+        let node_id = NodeIdentity::compute_node_id(&compressed1);
         let source = NodeInfo::new(
-            keypair1.node_id(),
+            node_id,
             SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 2126),
-            keypair1.public_key(),
+            compressed1,
         );
 
         let ping = Ping::new(source, 999);
@@ -624,6 +649,7 @@ mod tests {
         let packet = SignedPacket::new(message, signature);
 
         // Verify with keypair2 (should fail)
-        assert!(packet.verify(&keypair2.public_key()).is_err());
+        let compressed2 = keypair2.get_public_key().compress();
+        assert!(packet.verify(&compressed2).is_err());
     }
 }

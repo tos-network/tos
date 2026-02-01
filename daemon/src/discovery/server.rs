@@ -279,7 +279,11 @@ impl DiscoveryServer {
         }
 
         // Add/update sender in routing table
-        let node_info = NodeInfo::new(ping.source.node_id.clone(), from, ping.source.public_key);
+        let node_info = NodeInfo::new(
+            ping.source.node_id.clone(),
+            from,
+            ping.source.public_key.clone(),
+        );
         self.routing_table.insert(node_info.clone()).await;
 
         // Send PONG
@@ -306,7 +310,11 @@ impl DiscoveryServer {
         }
 
         // Update routing table
-        let node_info = NodeInfo::new(pong.source.node_id.clone(), from, pong.source.public_key);
+        let node_info = NodeInfo::new(
+            pong.source.node_id.clone(),
+            from,
+            pong.source.public_key.clone(),
+        );
         self.routing_table.insert(node_info).await;
 
         // Update our external address if provided

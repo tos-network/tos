@@ -34,10 +34,11 @@ pub struct DiscoveryConfig {
     #[serde(default = "default_discovery_port")]
     pub port: u16,
 
-    /// Ed25519 private key for node identity (hex format).
+    /// Private key for node identity (hex format, 32 bytes).
     ///
     /// If not provided, a new key will be generated on startup.
     /// For persistent node identity, save and reuse the generated key.
+    /// The key is used to derive a Schnorr key pair for signing discovery messages.
     #[clap(name = "discovery-private-key", long, env = "DISCOVERY_PRIVATE_KEY")]
     #[serde(default)]
     pub private_key: Option<WrappedEd25519Secret>,

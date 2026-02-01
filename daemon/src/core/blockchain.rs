@@ -723,11 +723,11 @@ impl<S: Storage> Blockchain<S> {
 
             // Create or load node identity
             let identity = if let Some(ref secret) = discovery_config.private_key {
-                match NodeIdentity::from_secret(secret.inner()) {
-                    Ok(id) => id,
-                    Err(e) => {
+                match NodeIdentity::from_secret_bytes(secret.inner().as_bytes()) {
+                    Some(id) => id,
+                    None => {
                         if log::log_enabled!(log::Level::Error) {
-                            error!("Failed to load discovery identity from private key: {}", e);
+                            error!("Failed to load discovery identity from private key (invalid scalar)");
                         }
                         NodeIdentity::generate()
                     }

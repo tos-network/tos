@@ -3,7 +3,6 @@
 use std::io::Error as IoError;
 use std::net::AddrParseError;
 use thiserror::Error;
-use tos_common::crypto::ed25519::Ed25519Error;
 use tos_common::serializer::ReaderError;
 
 /// Error type for discovery protocol operations.
@@ -12,10 +11,6 @@ pub enum DiscoveryError {
     /// I/O error during network operations.
     #[error("I/O error: {0}")]
     Io(#[from] IoError),
-
-    /// Ed25519 cryptographic error.
-    #[error("Ed25519 error: {0}")]
-    Ed25519(#[from] Ed25519Error),
 
     /// Address parsing error.
     #[error("Invalid address: {0}")]
