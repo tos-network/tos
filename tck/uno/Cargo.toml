@@ -1,0 +1,22 @@
+[package]
+name = "tos_tck_uno"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+
+[[bin]]
+name = "gen_uno_proof_vectors"
+path = "gen_uno_proof_vectors.rs"
+
+[dependencies]
+# Use tos_common directly to ensure crypto compatibility
+tos_common = { path = "../../common" }
+
+# Serialization
+hex = "0.4"
+serde = { version = "1.0", features = ["derive"] }
+serde_yaml = "0.9"
+
+# Random
+rand = "0.8"
