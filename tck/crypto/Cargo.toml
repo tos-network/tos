@@ -243,3 +243,7 @@ path = "gen_multisig_vectors.rs"
 name = "gen_contract_vectors"
 path = "gen_contract_vectors.rs"
 
+[[bin]]
+name = "gen_uno_vectors"
+path = "gen_uno_vectors.rs"
+
