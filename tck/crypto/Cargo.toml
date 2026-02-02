@@ -247,3 +247,8 @@ path = "gen_contract_vectors.rs"
 name = "gen_uno_vectors"
 path = "gen_uno_vectors.rs"
 
+
+[[bin]]
+name = "gen_block_hash_vectors"
+path = "gen_block_hash_vectors.rs"
+
