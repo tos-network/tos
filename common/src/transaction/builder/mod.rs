@@ -18,9 +18,9 @@ use super::{
     extra_data::{ExtraDataType, PlaintextData, UnknownExtraDataFormat},
     payload::{ShieldTransferPayload, UnoTransferPayload, UnshieldTransferPayload},
     AgentAccountPayload, BatchReferralRewardPayload, BindReferrerPayload, BurnPayload,
-    ContractDeposit, DeployContractPayload, EnergyPayload, EphemeralMessagePayload, FeeType,
-    InvokeConstructorPayload, InvokeContractPayload, MultiSigPayload, RegisterNamePayload, Role,
-    SourceCommitment, Transaction, TransactionType, TransferPayload, TxVersion,
+    ContractDeposit, DeployContractPayload, Deposits, EnergyPayload, EphemeralMessagePayload,
+    FeeType, InvokeConstructorPayload, InvokeContractPayload, MultiSigPayload, RegisterNamePayload,
+    Role, SourceCommitment, Transaction, TransactionType, TransferPayload, TxVersion,
     EXTRA_DATA_LIMIT_SIZE, EXTRA_DATA_LIMIT_SUM_SIZE, MAX_MULTISIG_PARTICIPANTS,
     MAX_TRANSFER_COUNT,
 };
@@ -724,8 +724,8 @@ impl TransactionBuilder {
     // Build deposits for contracts (simplified - no proofs)
     fn build_deposits<E>(
         deposits: &IndexMap<Hash, ContractDepositBuilder>,
-    ) -> Result<IndexMap<Hash, ContractDeposit>, GenerationError<E>> {
-        let mut result = IndexMap::new();
+    ) -> Result<Deposits, GenerationError<E>> {
+        let mut result = Deposits::new();
         for (asset, deposit) in deposits.iter() {
             if deposit.amount == 0 {
                 return Err(GenerationError::DepositZero);

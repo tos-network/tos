@@ -1,8 +1,7 @@
-use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use tos_kernel::ValueCell;
 
-use super::ContractDeposit;
+use super::Deposits;
 use crate::{crypto::Hash, serializer::*};
 
 // InvokeContractPayload is a public payload allowing to call a smart contract
@@ -13,7 +12,7 @@ pub struct InvokeContractPayload {
     // Contract are the TXID of the transaction that deployed the contract
     pub contract: Hash,
     // Assets deposited with this call
-    pub deposits: IndexMap<Hash, ContractDeposit>,
+    pub deposits: Deposits,
     // The entry point to invoke
     pub entry_id: u16,
     // Additionnal fees to pay
@@ -28,13 +27,7 @@ pub struct InvokeContractPayload {
 impl Serializer for InvokeContractPayload {
     fn write(&self, writer: &mut Writer) {
         self.contract.write(writer);
-
-        writer.write_u8(self.deposits.len() as u8);
-        for (asset, deposit) in &self.deposits {
-            asset.write(writer);
-            deposit.write(writer);
-        }
-
+        self.deposits.write(writer);
         writer.write_u16(self.entry_id);
         self.max_gas.write(writer);
 
@@ -46,15 +39,7 @@ impl Serializer for InvokeContractPayload {
 
     fn read(reader: &mut Reader) -> Result<InvokeContractPayload, ReaderError> {
         let contract = Hash::read(reader)?;
-
-        let len = reader.read_u8()? as usize;
-        let mut deposits = IndexMap::new();
-        for _ in 0..len {
-            let asset = Hash::read(reader)?;
-            let deposit = ContractDeposit::read(reader)?;
-            deposits.insert(asset, deposit);
-        }
-
+        let deposits = Deposits::read(reader)?;
         let entry_id = reader.read_u16()?;
         let max_gas = reader.read_u64()?;
 
@@ -74,16 +59,11 @@ impl Serializer for InvokeContractPayload {
 
     fn size(&self) -> usize {
         let mut size = self.contract.size()
+            + self.deposits.size()
             + self.entry_id.size()
-            + self.max_gas.size()
-        // 1 byte for the deposits length
-            + 1;
+            + self.max_gas.size();
 
-        for (asset, deposit) in &self.deposits {
-            size += asset.size() + deposit.size();
-        }
-
-        size += 1;
+        size += 1; // parameters count (u8)
         for parameter in &self.parameters {
             size += parameter.size();
         }

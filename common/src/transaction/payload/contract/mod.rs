@@ -1,4 +1,5 @@
 mod deploy;
+mod deposits;
 mod invoke;
 
 use crate::serializer::*;
@@ -9,6 +10,7 @@ use tos_kernel::Module;
 use tos_kernel::{OpaqueWrapper, Primitive, ValueCell, U256};
 
 pub use deploy::*;
+pub use deposits::*;
 pub use invoke::*;
 
 /// Maximum nesting depth for ValueCell structures to prevent stack overflow DoS attacks

@@ -181,6 +181,15 @@ hex = "0.4"
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.9"
 
+# IndexSet (same version as TOS common)
+indexmap = "2.2"
+
+# TOS common for transaction payloads
+tos_common = { path = "../../common" }
+
+# TOS Kernel - for Module, ValueCell, Primitive types
+tos-kernel = { git = "https://github.com/tos-network/tako", rev = "06c1b03" }
+
 [[bin]]
 name = "verify_quick"
 path = "verify_quick.rs"
@@ -200,3 +209,37 @@ path = "gen_bls12_381_vectors.rs"
 [[bin]]
 name = "gen_ed25519_point_vectors"
 path = "gen_ed25519_point_vectors.rs"
+
+# Transaction payload test vectors (TOS Rust wire format)
+[[bin]]
+name = "gen_arbitration_vectors"
+path = "gen_arbitration_vectors.rs"
+
+[[bin]]
+name = "gen_escrow_vectors"
+path = "gen_escrow_vectors.rs"
+
+[[bin]]
+name = "gen_basic_vectors"
+path = "gen_basic_vectors.rs"
+
+[[bin]]
+name = "gen_kyc_vectors"
+path = "gen_kyc_vectors.rs"
+
+[[bin]]
+name = "gen_referral_vectors"
+path = "gen_referral_vectors.rs"
+
+[[bin]]
+name = "gen_tns_vectors"
+path = "gen_tns_vectors.rs"
+
+[[bin]]
+name = "gen_multisig_vectors"
+path = "gen_multisig_vectors.rs"
+
+[[bin]]
+name = "gen_contract_vectors"
+path = "gen_contract_vectors.rs"
+
