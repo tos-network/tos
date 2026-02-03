@@ -91,8 +91,8 @@ paths:
           required: true
           schema:
             type: string
-            pattern: '^[0-9a-fA-F]{42}$'
-          description: Account address in hex (21 bytes)
+            pattern: '^(tos1|tst1)[a-z0-9]{58}$'
+          description: Account address in Bech32 format (tos1.../tst1...)
       responses:
         '200':
           description: Account state
@@ -166,21 +166,21 @@ components:
           type: boolean
         state_digest:
           type: string
-          description: SHA3-256 digest of loaded state (hex)
+          description: BLAKE3 digest of loaded state (hex)
 
     StateDigestResponse:
       type: object
       properties:
         state_digest:
           type: string
-          description: SHA3-256 digest of current state (hex)
+          description: BLAKE3 digest of current state (hex)
 
     AccountState:
       type: object
       properties:
-        address_hex:
+        address:
           type: string
-          description: Account address (21 bytes hex)
+          description: Account address in Bech32 format (tos1.../tst1...)
         balance:
           type: integer
           format: int64
@@ -239,10 +239,10 @@ components:
         state_digest:
           type: string
           description: State digest after execution (hex)
-        gas_used:
+        compute_units:
           type: integer
           format: int64
-          description: Gas consumed
+          description: Compute units consumed
 
     BlockExecuteRequest:
       type: object

@@ -124,18 +124,18 @@ All TOS transactions are serialized to a canonical binary format for:
 
 | Type | Size | Encoding | Notes |
 |------|------|----------|-------|
-| `u8` | 1 byte | Little-endian | Unsigned 8-bit integer |
-| `u16` | 2 bytes | Little-endian | Unsigned 16-bit integer |
-| `u32` | 4 bytes | Little-endian | Unsigned 32-bit integer |
-| `u64` | 8 bytes | Little-endian | Unsigned 64-bit integer |
-| `u128` | 16 bytes | Little-endian | Unsigned 128-bit integer |
-| `i64` | 8 bytes | Little-endian (two's complement) | Signed 64-bit integer |
+| `u8` | 1 byte | Big-endian | Unsigned 8-bit integer |
+| `u16` | 2 bytes | Big-endian | Unsigned 16-bit integer |
+| `u32` | 4 bytes | Big-endian | Unsigned 32-bit integer |
+| `u64` | 8 bytes | Big-endian | Unsigned 64-bit integer |
+| `u128` | 16 bytes | Big-endian | Unsigned 128-bit integer |
+| `i64` | 8 bytes | Big-endian (two's complement) | Signed 64-bit integer |
 | `bool` | 1 byte | `0x00` = false, `0x01` = true | No other values allowed |
 
 **Example: u64 encoding**
 ```
 Value: 1000000 (0xF4240)
-Wire:  40 42 0F 00 00 00 00 00  (8 bytes, little-endian)
+Wire:  00 00 00 00 00 0F 42 40  (8 bytes, big-endian)
 ```
 
 #### 2.A.3 Variable-Length Encoding
@@ -144,13 +144,13 @@ Wire:  40 42 0F 00 00 00 00 00  (8 bytes, little-endian)
 ```
 ┌──────────────────┬─────────────────────────────────┐
 │  Length (u32)    │  Data (length bytes)            │
-│  4 bytes LE      │  variable                       │
+│  4 bytes BE      │  variable                       │
 └──────────────────┴─────────────────────────────────┘
 ```
 
 **Example: "Hello" (5 bytes)**
 ```
-Wire: 05 00 00 00 48 65 6C 6C 6F
+Wire: 00 00 00 05 48 65 6C 6C 6F
       └─ length ─┘ └── data ──┘
 ```
 
@@ -182,7 +182,7 @@ Some(5): 01 05 00 00 00 00 00 00 00
 ```
 ┌──────────────────┬─────────────────────────────────┐
 │  Count (u32)     │  Elements (count × element_size)│
-│  4 bytes LE      │  concatenated                   │
+│  4 bytes BE      │  concatenated                   │
 └──────────────────┴─────────────────────────────────┘
 ```
 
@@ -190,7 +190,7 @@ Some(5): 01 05 00 00 00 00 00 00 00
 ```
 ┌──────────────────┬─────────────────────────────────────────────┐
 │  Count (u32)     │  Entries (count × (key_size + value_size)) │
-│  4 bytes LE      │  sorted by key, concatenated               │
+│  4 bytes BE      │  sorted by key, concatenated               │
 └──────────────────┴─────────────────────────────────────────────┘
 ```
 
@@ -198,22 +198,32 @@ Some(5): 01 05 00 00 00 00 00 00 00
 
 #### 2.A.6 Account Address Encoding
 
-Account addresses are 21 bytes:
+TOS uses 32-byte compressed public keys with Bech32 encoding for human-readable addresses:
+
+**Internal Representation** (32 bytes):
 ```
-┌─────────────────┬─────────────────────────────────┐
-│  Type (u8)      │  Hash (20 bytes)                │
-│  Account type   │  RIPEMD160(SHA256(pubkey))      │
-└─────────────────┴─────────────────────────────────┘
+┌─────────────────────────────────────────────────────┐
+│  CompressedPublicKey (32 bytes)                     │
+│  Ristretto255 compressed point                      │
+└─────────────────────────────────────────────────────┘
 ```
 
-Account types:
-| Type Byte | Account Type |
-|-----------|--------------|
-| `0x01` | Standard (single-sig) |
-| `0x02` | MultiSig |
-| `0x03` | Contract |
-| `0x04` | Agent |
-| `0x05` | System |
+**Human-Readable Format** (Bech32):
+| Network | Prefix | Example |
+|---------|--------|---------|
+| Mainnet | `tos1` | `tos1abc123...xyz789` |
+| Testnet | `tst1` | `tst1abc123...xyz789` |
+
+**Encoding**:
+- Raw bytes: 32-byte Ristretto255 compressed public key
+- Display: Bech32-encoded with network prefix
+- Checksum: Bech32 includes error-detection checksum
+
+**Example**:
+```
+Raw (32 bytes): 50bb83534f8209a9584a5972c8fa9ad3c25cbf030dffa1099213bcdb6a8c413c
+Bech32 (tst1): tst12zacnuun3lkv5kxzn2jy8l28d0zft7rqhyxlz2v6h6u23xmruy7sqm0d38u
+```
 
 #### 2.A.7 Transaction Envelope
 
@@ -227,7 +237,7 @@ All transactions share a common envelope structure:
 ├─────────────────┼───────────────────────────────────────────┤
 │  type (u8)      │  Transaction type (0-255)                 │
 ├─────────────────┼───────────────────────────────────────────┤
-│  sender (21)    │  Account address of sender                │
+│  sender (32)    │  Sender's compressed public key           │
 ├─────────────────┼───────────────────────────────────────────┤
 │  nonce (u64)    │  Sender's transaction sequence number     │
 ├─────────────────┼───────────────────────────────────────────┤
@@ -241,7 +251,7 @@ All transactions share a common envelope structure:
 └─────────────────┴───────────────────────────────────────────┘
 ```
 
-**Envelope header size**: 1 + 1 + 21 + 8 + 8 + 8 = **47 bytes** (fixed)
+**Envelope header size**: 1 + 1 + 32 + 8 + 8 + 8 = **58 bytes** (fixed)
 
 #### 2.A.8 Transaction Type Catalog
 
@@ -304,7 +314,7 @@ All transactions share a common envelope structure:
 Payload structure:
 ```
 ┌─────────────────┬───────────────────────────────────────────┐
-│  recipient (21) │  Destination account address              │
+│  recipient (32) │  Recipient's compressed public key        │
 ├─────────────────┼───────────────────────────────────────────┤
 │  amount (u64)   │  Transfer amount in base units            │
 └─────────────────┴───────────────────────────────────────────┘
@@ -316,14 +326,14 @@ Offset  Size  Field         Example Value
 ------  ----  -----         -------------
 0       1     version       01
 1       1     type          01 (Transfer)
-2       21    sender        01 + <20 bytes hash>
-23      8     nonce         05 00 00 00 00 00 00 00 (5)
-31      8     fee           01 00 00 00 00 00 00 00 (1)
-39      8     timestamp     00 E8 76 48 17 01 00 00 (ms since epoch)
-47      21    recipient     01 + <20 bytes hash>
-68      8     amount        64 00 00 00 00 00 00 00 (100)
+2       32    sender        <32 bytes compressed pubkey>
+34      8     nonce         00 00 00 00 00 00 00 05 (5, big-endian)
+42      8     fee           00 00 00 00 00 00 00 01 (1, big-endian)
+50      8     timestamp     00 00 01 89 12 34 56 78 (ms since epoch)
+58      32    recipient     <32 bytes compressed pubkey>
+90      8     amount        00 00 00 00 00 00 00 64 (100, big-endian)
 ------
-Total: 76 bytes (+ signature)
+Total: 98 bytes (+ signature)
 ```
 
 **Burn Transaction (Type 0)**
@@ -341,13 +351,13 @@ Offset  Size  Field         Example Value
 ------  ----  -----         -------------
 0       1     version       01
 1       1     type          00 (Burn)
-2       21    sender        01 + <20 bytes hash>
-23      8     nonce         05 00 00 00 00 00 00 00
-31      8     fee           01 00 00 00 00 00 00 00
-39      8     timestamp     00 E8 76 48 17 01 00 00
-47      8     amount        E8 03 00 00 00 00 00 00 (1000)
+2       32    sender        <32 bytes compressed pubkey>
+34      8     nonce         00 00 00 00 00 00 00 05 (5, big-endian)
+42      8     fee           00 00 00 00 00 00 00 01 (1, big-endian)
+50      8     timestamp     00 00 01 89 12 34 56 78 (ms since epoch)
+58      8     amount        00 00 00 00 00 00 03 E8 (1000, big-endian)
 ------
-Total: 55 bytes (+ signature)
+Total: 66 bytes (+ signature)
 ```
 
 ---
@@ -402,26 +412,30 @@ sig_hash = SHA3-512(envelope_without_signature)
 
 #### 2.B.4 Address Derivation
 
-Account addresses are derived from public keys:
+TOS uses Ristretto255 compressed public keys with Bech32 encoding:
 
+**Internal Representation**:
 ```
-address = type_byte || RIPEMD160(SHA256(compressed_pubkey))
+address = CompressedPublicKey (32 bytes Ristretto255 point)
+```
+
+**Human-Readable Format** (Bech32):
+```
+display_address = Bech32Encode(prefix, compressed_pubkey)
 ```
 
 **Steps**:
-1. Compress public key to 33 bytes
-2. SHA256 hash (32 bytes)
-3. RIPEMD160 hash (20 bytes)
-4. Prepend account type byte (1 byte)
-5. Total: 21 bytes
+1. Generate Ristretto255 keypair from secret key
+2. Compress public key to 32 bytes (Ristretto compressed point)
+3. For display: Bech32-encode with network prefix (tos1/tst1)
+4. Total internal size: 32 bytes
 
 **Example**:
 ```
-Public key (uncompressed): 04 + X (32 bytes) + Y (32 bytes)
-Compressed:                02/03 + X (32 bytes) = 33 bytes
-SHA256:                    e3b0c44298... (32 bytes)
-RIPEMD160:                 b472a266d0... (20 bytes)
-Address:                   01 b472a266d0... (21 bytes)
+Secret Key:                (32 bytes scalar)
+Public Key (Ristretto):    (32 bytes compressed point)
+Raw hex:                   50bb83534f8209a9584a5972c8fa9ad3c25cbf030dffa1099213bcdb6a8c413c
+Bech32 (testnet):          tst12zacnuun3lkv5kxzn2jy8l28d0zft7rqhyxlz2v6h6u23xmruy7sqm0d38u
 ```
 
 #### 2.B.5 State Root Computation
@@ -475,48 +489,62 @@ TOS uses a BlockDAG (Directed Acyclic Graph) structure where blocks can have mul
 └─────────────────┴───────────────────────────────────────────┘
 ```
 
-#### 2.C.3 DAG Ordering Algorithm (GHOSTDAG)
+#### 2.C.3 DAG Ordering Algorithm (Cumulative Difficulty)
 
-The execution order of blocks follows the GHOSTDAG protocol:
+TOS uses a cumulative-difficulty-based topological ordering (NOT GHOSTDAG):
 
-**Step 1: Compute Blue Set**
+**Step 1: Initialize Processing Stack**
 
 ```python
-def compute_blue_set(block, k):
+def generate_full_order(target_block):
     """
-    Compute the blue (honest) set of blocks.
-    k = anticone size parameter (e.g., 18)
+    Generate deterministic total ordering from target block.
+    Based on: daemon/src/core/blockchain.rs:2232-2326
     """
-    blue_set = set()
+    stack = deque()
+    processed = set()
+    ordered = []
 
-    for parent in sorted_parents(block):
-        if len(anticone(parent, blue_set)) <= k:
-            blue_set.add(parent)
-            blue_set |= parent.blue_set
-
-    return blue_set
+    stack.append(target_block.hash)
 ```
 
-**Step 2: Order Blocks**
+**Step 2: Traverse DAG with Cumulative Difficulty Sorting**
 
 ```python
-def order_blocks(tip):
-    """
-    Produce deterministic total ordering of all blocks.
-    """
-    ordered = []
-    blue_set = compute_blue_set(tip, K_PARAMETER)
+    while stack:
+        current_hash = stack.pop()
 
-    # Process blocks in topological order
-    for block in topological_sort(tip.ancestors):
-        if block in blue_set:
-            ordered.append(block)
-        else:
-            # Red blocks inserted after their blue merge point
-            merge_point = find_merge_point(block, blue_set)
-            insert_after(ordered, merge_point, block)
+        if current_hash in processed:
+            continue
+
+        current_block = get_block(current_hash)
+        tips = current_block.tips
+
+        # Sort tips by cumulative difficulty (ascending)
+        scores = [(tip, get_cumulative_difficulty(tip)) for tip in tips]
+        scores.sort(key=lambda x: x[1])  # Ascending order
+
+        processed.add(current_hash)
+        ordered.append(current_hash)
+
+        # Push tips to stack (higher difficulty processed last = executed first)
+        for tip_hash, _ in scores:
+            if tip_hash not in processed:
+                stack.append(tip_hash)
 
     return ordered
+```
+
+**Step 3: Assign TopoHeight**
+
+```python
+def assign_topoheight(ordered, base_topoheight):
+    """
+    Assign sequential topoheight to ordered blocks.
+    """
+    for i, block_hash in enumerate(ordered):
+        topoheight = base_topoheight + i
+        store_topoheight(block_hash, topoheight)
 ```
 
 **Step 3: Order Transactions Within Blocks**
@@ -665,7 +693,7 @@ Failed transactions are recorded in blocks with:
 ├─────────────────┼───────────────────────────────────────────┤
 │  error_code (u8)│  Standardized error code                  │
 ├─────────────────┼───────────────────────────────────────────┤
-│  gas_used (u64) │  Computational resources consumed         │
+│  compute_units  │  Computational resources consumed (CU)    │
 └─────────────────┴───────────────────────────────────────────┘
 ```
 
@@ -804,7 +832,7 @@ Each account is encoded as:
 
 ```
 ┌─────────────────┬───────────────────────────────────────────┐
-│  address (21)   │  Account address                          │
+│  address (32)   │  Compressed public key                    │
 ├─────────────────┼───────────────────────────────────────────┤
 │  balance (u64)  │  Liquid balance                           │
 ├─────────────────┼───────────────────────────────────────────┤
@@ -855,24 +883,24 @@ def compute_state_digest(state, block_hash):
 
     # Accounts (sorted)
     accounts = sorted(state.accounts.items(), key=lambda x: x[0])
-    buffer.extend(len(accounts).to_bytes(4, 'little'))
+    buffer.extend(len(accounts).to_bytes(4, 'big'))
 
     for address, account in accounts:
-        buffer.extend(address)  # 21 bytes
-        buffer.extend(account.balance.to_bytes(8, 'little'))
-        buffer.extend(account.nonce.to_bytes(8, 'little'))
-        buffer.extend(account.frozen.to_bytes(8, 'little'))
-        buffer.extend(account.energy.to_bytes(8, 'little'))
-        buffer.extend(account.flags.to_bytes(4, 'little'))
-        buffer.extend(len(account.data).to_bytes(4, 'little'))
+        buffer.extend(address)  # 32 bytes (compressed public key)
+        buffer.extend(account.balance.to_bytes(8, 'big'))
+        buffer.extend(account.nonce.to_bytes(8, 'big'))
+        buffer.extend(account.frozen.to_bytes(8, 'big'))
+        buffer.extend(account.energy.to_bytes(8, 'big'))
+        buffer.extend(account.flags.to_bytes(4, 'big'))
+        buffer.extend(len(account.data).to_bytes(4, 'big'))
         buffer.extend(account.data)
 
     # Global state
-    buffer.extend(state.total_supply.to_bytes(16, 'little'))
-    buffer.extend(state.total_burned.to_bytes(16, 'little'))
-    buffer.extend(state.total_energy.to_bytes(16, 'little'))
-    buffer.extend(state.block_height.to_bytes(8, 'little'))
-    buffer.extend(state.timestamp.to_bytes(8, 'little'))
+    buffer.extend(state.total_supply.to_bytes(16, 'big'))
+    buffer.extend(state.total_burned.to_bytes(16, 'big'))
+    buffer.extend(state.total_energy.to_bytes(16, 'big'))
+    buffer.extend(state.block_height.to_bytes(8, 'big'))
+    buffer.extend(state.timestamp.to_bytes(8, 'big'))
 
     # Compute digest
     return sha3_256(bytes(buffer))
@@ -968,7 +996,7 @@ All error codes are standardized as u16 values:
 |------|------|-------------|
 | 0x0500 | CONTRACT_NOT_FOUND | Contract does not exist |
 | 0x0501 | CONTRACT_REVERT | Contract execution reverted |
-| 0x0502 | OUT_OF_GAS | Contract exceeded gas limit |
+| 0x0502 | OUT_OF_CU | Contract exceeded compute unit limit |
 | 0x0503 | INVALID_OPCODE | Unknown contract opcode |
 | 0x0504 | STACK_OVERFLOW | Contract stack overflow |
 | 0x0505 | STACK_UNDERFLOW | Contract stack underflow |
@@ -1063,7 +1091,7 @@ test_vectors:
     expected:
       status: "success"
       error_code: 0x0000
-      gas_used: 21000
+      compute_units: 2000  # Base cost for Transfer
 
     # Post-execution state
     post_state:
@@ -1509,7 +1537,7 @@ POST /tx/execute
     "success": true/false,
     "error_code": 0x0000,
     "state_digest": "def...",
-    "gas_used": 21000
+    "compute_units": 2000
   }
 
 POST /block/execute
@@ -2107,6 +2135,9 @@ int main(int argc, char **argv) {
 
 ---
 
-*Document Version: 1.0*
-*Last Updated: 2026-02-03*
+*Document Version: 1.1*
+*Last Updated: 2026-02-04*
 *Status: Draft*
+
+**Revision History**:
+- v1.1 (2026-02-04): Fixed endianness (Big-endian), address format (32-byte CompressedPublicKey with Bech32), DAG ordering (cumulative-difficulty, not GHOSTDAG), terminology (compute_units, not gas)
