@@ -1,243 +1,242 @@
-# TOS-TCK Conformance Spec: Call Syscalls
-# Tests contract call operations
+# TOS TAKO Cross-Program Invocation (CPI) Syscalls Conformance Specifications
+# Based on: daemon/src/tako_integration/loader.rs, executor.rs
+#
+# TAKO uses invoke syscall for cross-program invocation (CPI)
+# Recursive CPI to same contract is prevented (no re-entrancy)
+# MAX_CALL_DEPTH = 64 (executor.rs:71)
 
+---
 spec:
-  name: syscall_call_basic
+  name: syscall_invoke_basic
   version: "1.0"
   category: syscalls
   subcategory: call
-
-description: |
-  Verifies basic CALL to another contract.
-  Should transfer value and execute code.
+  description: "Basic cross-program invocation (CPI)"
+  priority: P0
 
 preconditions:
-  - account: "contract_a"
-    balance: 1000000000
-  - account: "contract_b"
-    balance: 0
+  - caller_contract: "contract_a_hash"
+  - target_contract:
+      hash: "contract_b_hash"
+      deployed: true
 
 action:
-  type: call
-  contract: "contract_b"
-  function: "receive"
-  args: []
+  type: syscall
+  name: invoke
+  params:
+    target: "contract_b_hash"  # &[u8; 32]
+    input: "0xabcdef..."       # &[u8] - call data
 
 expected:
   status: success
-  gas_used: "<= 25000"
-
-postconditions: []
+  result:
+    return_code: 0  # u32 - success
+    output: "Vec<u8>"  # return data
+  compute_units: 10000  # ~10000+ CU base
 
 ---
 spec:
-  name: syscall_call_with_value
+  name: syscall_invoke_with_return_data
   version: "1.0"
   category: syscalls
   subcategory: call
-
-description: |
-  Verifies CALL with value transfer.
-  Should debit caller and credit callee.
+  description: "CPI with return data from callee"
+  priority: P0
 
 preconditions:
-  - account: "contract_a"
-    balance: 1000000000
-  - account: "contract_b"
-    balance: 0
+  - target_contract:
+      hash: "contract_b_hash"
+      returns: "0x123456..."
 
 action:
   type: syscall
-  name: call
-  args:
-    - target: "contract_b"
-    - value: 100000000
-    - data: "0x"
+  name: invoke
+  params:
+    target: "contract_b_hash"
+    input: "0x..."
 
 expected:
   status: success
-  gas_used: "<= 30000"
-
-postconditions:
-  - account: "contract_a"
-    balance: 900000000
-  - account: "contract_b"
-    balance: 100000000
+  result:
+    return_code: 0
+    output: "0x123456..."
 
 ---
 spec:
-  name: syscall_call_revert
+  name: syscall_invoke_nonexistent_contract
   version: "1.0"
   category: syscalls
   subcategory: call
-
-description: |
-  Verifies CALL handles revert correctly.
-  State changes in callee should be rolled back.
+  description: "CPI to non-existent contract fails"
+  priority: P0
 
 preconditions:
-  - account: "contract_a"
-    balance: 1000000000
-  - account: "reverting_contract"
+  - contract_not_exists: "unknown_hash..."
 
 action:
   type: syscall
-  name: call
-  args:
-    - target: "reverting_contract"
-    - value: 0
-    - data: "0xrevert_selector"
-
-expected:
-  status: revert
-  gas_used: "<= 25000"
-
-postconditions:
-  - account: "contract_a"
-    balance: 1000000000  # Unchanged
-
----
-spec:
-  name: syscall_staticcall_basic
-  version: "1.0"
-  category: syscalls
-  subcategory: call
-
-description: |
-  Verifies STATICCALL for read-only calls.
-  Should fail if callee attempts state modification.
-
-preconditions:
-  - account: "contract_a"
-  - account: "view_contract"
-    storage:
-      "0x01": "0x42"
-
-action:
-  type: syscall
-  name: staticcall
-  args:
-    - target: "view_contract"
-    - data: "0xget_value_selector"
-
-expected:
-  status: success
-  return_value: "0x42"
-  gas_used: "<= 5000"
-
-postconditions: []
-
----
-spec:
-  name: syscall_staticcall_write_fails
-  version: "1.0"
-  category: syscalls
-  subcategory: call
-
-description: |
-  Verifies STATICCALL prevents state writes.
-  Any SSTORE in callee should cause revert.
-
-preconditions: []
-
-action:
-  type: syscall
-  name: staticcall
-  args:
-    - target: "writing_contract"
-    - data: "0xset_value_selector"
-
-expected:
-  status: revert
-  error_code: "STATIC_CALL_VIOLATION"
-
-postconditions: []
-
----
-spec:
-  name: syscall_delegatecall_basic
-  version: "1.0"
-  category: syscalls
-  subcategory: call
-
-description: |
-  Verifies DELEGATECALL executes code in caller's context.
-  Storage writes affect caller, not callee.
-
-preconditions:
-  - account: "contract_a"
-    storage: {}
-  - account: "library_contract"
-
-action:
-  type: syscall
-  name: delegatecall
-  args:
-    - target: "library_contract"
-    - data: "0xset_slot_zero_selector"
-
-expected:
-  status: success
-  gas_used: "<= 10000"
-
-postconditions:
-  - account: "contract_a"
-    storage:
-      "0x00": "!= 0x00"  # Modified by delegatecall
-
----
-spec:
-  name: syscall_call_depth_limit
-  version: "1.0"
-  category: syscalls
-  subcategory: call
-
-description: |
-  Verifies call depth limit (1024).
-  Deep recursion should fail, not crash.
-
-preconditions:
-  - account: "recursive_contract"
-
-action:
-  type: syscall
-  name: call
-  args:
-    - target: "recursive_contract"
-    - data: "0xrecurse_1024_times"
+  name: invoke
+  params:
+    target: "unknown_hash..."
+    input: "0x..."
 
 expected:
   status: error
-  error_code: "CALL_DEPTH_EXCEEDED"
-
-postconditions: []
+  error: "ContractNotFound"
 
 ---
 spec:
-  name: syscall_call_reentrancy
+  name: syscall_invoke_reentrancy_blocked
   version: "1.0"
   category: syscalls
   subcategory: call
-
-description: |
-  Verifies reentrancy is possible but state is consistent.
-  Contract should handle reentrant calls correctly.
+  description: "Re-entrant CPI to same contract is blocked"
+  priority: P0
 
 preconditions:
-  - account: "vulnerable_contract"
-    balance: 1000000000
-  - account: "attacker_contract"
-    balance: 0
+  - current_contract: "contract_a_hash"
 
 action:
   type: syscall
-  name: call
-  args:
-    - target: "attacker_contract"
-    - data: "0xattack_selector"
+  name: invoke
+  params:
+    target: "contract_a_hash"  # Same as caller
+    input: "0x..."
+
+expected:
+  status: error
+  error: "ReentrantCallProhibited"
+  note: "TAKO prevents recursive CPI to same contract"
+
+---
+spec:
+  name: syscall_invoke_call_depth_limit
+  version: "1.0"
+  category: syscalls
+  subcategory: call
+  description: "CPI fails when MAX_CALL_DEPTH (64) exceeded"
+  priority: P0
+
+preconditions:
+  - current_call_depth: 64
+
+action:
+  type: syscall
+  name: invoke
+  params:
+    target: "some_contract_hash"
+    input: "0x..."
+
+expected:
+  status: error
+  error: "CallDepthExceeded"
+  max_call_depth: 64
+
+---
+spec:
+  name: syscall_invoke_callee_error
+  version: "1.0"
+  category: syscalls
+  subcategory: call
+  description: "CPI returns error code when callee fails"
+  priority: P0
+
+preconditions:
+  - target_contract:
+      hash: "failing_contract_hash"
+      will_fail: true
+
+action:
+  type: syscall
+  name: invoke
+  params:
+    target: "failing_contract_hash"
+    input: "0x..."
+
+expected:
+  status: success  # invoke itself succeeds
+  result:
+    return_code: 1  # Non-zero indicates error
+    output: "0x..."  # Error message
+
+---
+spec:
+  name: syscall_invoke_compute_budget
+  version: "1.0"
+  category: syscalls
+  subcategory: call
+  description: "CPI consumes compute units from caller's budget"
+  priority: P1
+
+preconditions:
+  - caller_compute_budget: 100000
+  - target_compute_usage: 50000
+
+action:
+  type: syscall
+  name: invoke
+  params:
+    target: "compute_heavy_contract"
+    input: "0x..."
 
 expected:
   status: success
+  compute_units_consumed: ">= 50000"
+  caller_budget_remaining: "<= 50000"
+
+---
+spec:
+  name: syscall_invoke_insufficient_compute
+  version: "1.0"
+  category: syscalls
+  subcategory: call
+  description: "CPI fails when compute budget exhausted"
+  priority: P1
+
+preconditions:
+  - caller_compute_budget: 1000
+  - target_requires: 10000
+
+action:
+  type: syscall
+  name: invoke
+  params:
+    target: "compute_heavy_contract"
+    input: "0x..."
+
+expected:
+  status: error
+  error: "ComputeBudgetExceeded"
+
+---
+spec:
+  name: syscall_invoke_state_isolation
+  version: "1.0"
+  category: syscalls
+  subcategory: call
+  description: "CPI maintains storage isolation between contracts"
+  priority: P0
+
+preconditions:
+  - caller_storage:
+      key: "0x01"
+      value: "0xaaa"
+  - callee_storage:
+      key: "0x01"
+      value: "0xbbb"
+
+action:
+  type: syscall
+  name: invoke
+  params:
+    target: "callee_contract"
+    input: "0x..."  # Callee reads storage key 0x01
+
+expected:
+  status: success
+  callee_sees: "0xbbb"  # Callee's own storage
 
 postconditions:
-  - assertion: "total_balance_conserved"
+  - caller_storage:
+      key: "0x01"
+      value: "0xaaa"  # Unchanged

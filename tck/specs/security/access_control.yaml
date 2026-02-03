@@ -1,139 +1,209 @@
-# Access Control Security Conformance Specifications
-# Tests for access control and authorization
+# TOS Access Control Security Conformance Specifications
+# Based on: daemon/src/core/, common/src/transaction/
+#
+# TOS uses multiple access control mechanisms:
+# 1. Transaction-level: nonce, signature verification
+# 2. KYC system: KYC levels for regulated operations
+# 3. Committee system: hierarchical approval for certain operations
+# 4. Contract-level: get_caller() for authorization
 
 ---
 spec:
-  name: security_access_owner_only
+  name: security_access_signature_required
   version: "1.0"
   category: security
   subcategory: access_control
-  description: "Owner-only functions reject non-owners"
+  description: "All transactions require valid signature"
   priority: P0
 
 preconditions:
-  - contract:
-      address: "0xcontract..."
-      owner: "alice"
-  - caller: "bob"
+  - transaction:
+      source: "tos1alice..."
+      signature: null  # Missing signature
 
 action:
-  type: call
-  to: "0xcontract..."
-  method: "setFee"
-  modifier: "onlyOwner"
-  from: "bob"
+  type: submit_transaction
+  transaction: "unsigned_tx"
 
 expected:
-  status: revert
-  error: "Ownable: caller is not the owner"
+  status: error
+  error: "NoTxSignature"
+  error_message: "No signature found for TX"
 
 ---
 spec:
-  name: security_access_owner_success
+  name: security_access_signature_verification
   version: "1.0"
   category: security
   subcategory: access_control
-  description: "Owner can call owner-only functions"
+  description: "Invalid signature is rejected"
   priority: P0
 
 preconditions:
-  - contract:
-      address: "0xcontract..."
-      owner: "alice"
-  - caller: "alice"
+  - transaction:
+      source: "tos1alice..."
+      signature: "invalid_signature_bytes"
 
 action:
-  type: call
-  to: "0xcontract..."
-  method: "setFee"
-  modifier: "onlyOwner"
-  from: "alice"
-  params:
-    newFee: 100
+  type: submit_transaction
+  transaction: "invalid_sig_tx"
 
 expected:
-  status: success
+  status: error
+  error: "InvalidTransactionSignature"
+  error_message: "Invalid transaction signature"
 
 ---
 spec:
-  name: security_access_role_based
+  name: security_access_kyc_required
   version: "1.0"
   category: security
   subcategory: access_control
-  description: "Role-based access control works correctly"
+  description: "KYC-gated operations require sufficient KYC level"
   priority: P0
 
 preconditions:
-  - contract:
-      address: "0xcontract..."
-      roles:
-        ADMIN_ROLE: ["alice"]
-        MINTER_ROLE: ["bob"]
-  - caller: "bob"
+  - account:
+      address: "tos1alice..."
+      kyc_level: 1
+  - operation_requires_kyc_level: 2
 
 action:
-  type: call
-  to: "0xcontract..."
-  method: "mint"
-  required_role: "MINTER_ROLE"
-  from: "bob"
+  type: transaction
+  tx_type: "KycGatedOperation"
+  from: "tos1alice..."
 
 expected:
-  status: success
+  status: error
+  error: "InsufficientKycLevel"
+  error_message: "Insufficient KYC level"
+  required: 2
+  actual: 1
 
 ---
 spec:
-  name: security_access_role_denied
+  name: security_access_kyc_expired
   version: "1.0"
   category: security
   subcategory: access_control
-  description: "Missing role causes revert"
+  description: "Expired KYC is rejected"
   priority: P0
 
 preconditions:
-  - contract:
-      address: "0xcontract..."
-      roles:
-        MINTER_ROLE: ["bob"]
-  - caller: "charlie"
+  - account:
+      address: "tos1alice..."
+      kyc_level: 3
+      kyc_expiry: "2020-01-01"  # Expired
 
 action:
-  type: call
-  to: "0xcontract..."
-  method: "mint"
-  required_role: "MINTER_ROLE"
-  from: "charlie"
+  type: transaction
+  tx_type: "KycGatedOperation"
+  from: "tos1alice..."
 
 expected:
-  status: revert
-  error: "AccessControl: account missing role"
+  status: error
+  error: "KycExpired"
+  error_message: "KYC has expired"
 
 ---
 spec:
-  name: security_access_multi_sig
+  name: security_access_committee_approval
   version: "1.0"
   category: security
   subcategory: access_control
-  description: "Multi-signature requirement enforced"
+  description: "Committee-gated operations require threshold approvals"
   priority: P1
 
 preconditions:
-  - multisig:
-      address: "0xmultisig..."
+  - committee:
+      id: "committee_1"
       threshold: 2
-      signers: ["alice", "bob", "charlie"]
-  - transaction:
-      to: "0xtarget..."
-      value: 1000
-      approvals: ["alice"]  # Only 1 approval
+      members: ["member_a", "member_b", "member_c"]
+  - pending_operation:
+      approvals: 1  # Only 1 approval
 
 action:
-  type: execute_multisig
-  multisig: "0xmultisig..."
-  tx_id: 1
+  type: execute_committee_operation
+  committee: "committee_1"
+  operation_id: 1
 
 expected:
-  status: revert
-  error: "not_enough_approvals"
+  status: error
+  error: "InsufficientApprovals"
+  error_message: "Insufficient approvals"
   required: 2
-  current: 1
+  actual: 1
+
+---
+spec:
+  name: security_access_contract_caller_check
+  version: "1.0"
+  category: security
+  subcategory: access_control
+  description: "Contract can check caller via get_caller syscall"
+  priority: P0
+
+preconditions:
+  - contract:
+      hash: "contract_hash"
+      admin: "tos1admin..."
+  - caller: "tos1unauthorized..."
+
+action:
+  type: execute_contract
+  contract: "contract_hash"
+  method: "admin_only_function"
+  caller: "tos1unauthorized..."
+
+expected:
+  status: error
+  contract_revert: true
+  reason: "unauthorized_caller"
+
+---
+spec:
+  name: security_access_multisig_threshold
+  version: "1.0"
+  category: security
+  subcategory: access_control
+  description: "Multisig transactions require threshold signatures"
+  priority: P0
+
+preconditions:
+  - multisig_config:
+      threshold: 3
+      signers: 5
+  - transaction:
+      signatures_count: 2  # Below threshold
+
+action:
+  type: submit_transaction
+  transaction: "multisig_tx"
+
+expected:
+  status: error
+  error: "MultiSigThreshold"
+  error_message: "Invalid multisig threshold"
+
+---
+spec:
+  name: security_access_sender_not_receiver
+  version: "1.0"
+  category: security
+  subcategory: access_control
+  description: "Self-transfers are rejected"
+  priority: P0
+
+preconditions:
+  - sender: "tos1alice..."
+
+action:
+  type: transfer
+  from: "tos1alice..."
+  to: "tos1alice..."  # Same as sender
+  amount: 1000
+
+expected:
+  status: error
+  error: "SenderIsReceiver"
+  error_message: "Sender cannot be receiver"

@@ -1,13 +1,45 @@
-# RPC Methods Conformance Specifications
-# Tests for JSON-RPC API methods
+# TOS RPC Methods Conformance Specifications
+# Based on: daemon/src/rpc/rpc.rs, common/src/api/daemon/mod.rs
+#
+# TOS uses its own RPC methods (NOT Ethereum eth_* methods)
+# Address format: Bech32 (tos1.../tst1...), NOT 0x hex
 
 ---
 spec:
-  name: rpc_eth_blockNumber
+  name: rpc_get_info
   version: "1.0"
   category: api
   subcategory: rpc
-  description: "Returns the current block number"
+  description: "Returns node information"
+  priority: P0
+
+preconditions:
+  - node_running: true
+
+action:
+  type: rpc_call
+  method: get_info
+  params: []
+
+expected:
+  status: success
+  result:
+    height: "u64"
+    topoheight: "u64"
+    stableheight: "u64"
+    pruned_topoheight: "Option<u64>"
+    top_block_hash: "Hash"
+    network: "string"  # mainnet/testnet/devnet
+    version: "string"
+    mempool_size: "u64"
+
+---
+spec:
+  name: rpc_get_height
+  version: "1.0"
+  category: api
+  subcategory: rpc
+  description: "Returns current block height"
   priority: P0
 
 preconditions:
@@ -15,17 +47,39 @@ preconditions:
 
 action:
   type: rpc_call
-  method: eth_blockNumber
+  method: get_height
   params: []
 
 expected:
   status: success
-  result: "0x3039"  # 12345 in hex
-  result_type: quantity
+  result: 12345
+  result_type: u64
 
 ---
 spec:
-  name: rpc_eth_getBalance
+  name: rpc_get_topoheight
+  version: "1.0"
+  category: api
+  subcategory: rpc
+  description: "Returns current topological height"
+  priority: P0
+
+preconditions:
+  - topoheight: 15000
+
+action:
+  type: rpc_call
+  method: get_topoheight
+  params: []
+
+expected:
+  status: success
+  result: 15000
+  result_type: u64
+
+---
+spec:
+  name: rpc_get_balance
   version: "1.0"
   category: api
   subcategory: rpc
@@ -34,24 +88,24 @@ spec:
 
 preconditions:
   - account:
-      address: "0x1234567890123456789012345678901234567890"
-      balance: 1000000000000000000  # 1 TOS
+      address: "tos1qyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqs2u83p5"
+      balance: 1000000000
 
 action:
   type: rpc_call
-  method: eth_getBalance
+  method: get_balance
   params:
-    - "0x1234567890123456789012345678901234567890"
-    - "latest"
+    address: "tos1qyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqs2u83p5"
 
 expected:
   status: success
-  result: "0xde0b6b3a7640000"  # 1e18 in hex
-  result_type: quantity
+  result:
+    balance: 1000000000
+  result_type: GetBalanceResult
 
 ---
 spec:
-  name: rpc_eth_getTransactionCount
+  name: rpc_get_nonce
   version: "1.0"
   category: api
   subcategory: rpc
@@ -60,200 +114,301 @@ spec:
 
 preconditions:
   - account:
-      address: "0x1234567890123456789012345678901234567890"
+      address: "tos1qyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqs2u83p5"
       nonce: 42
 
 action:
   type: rpc_call
-  method: eth_getTransactionCount
+  method: get_nonce
   params:
-    - "0x1234567890123456789012345678901234567890"
-    - "latest"
+    address: "tos1qyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqs2u83p5"
 
 expected:
   status: success
-  result: "0x2a"  # 42 in hex
+  result:
+    nonce: 42
+    topoheight: "u64"  # topoheight of last nonce change
 
 ---
 spec:
-  name: rpc_eth_sendRawTransaction
+  name: rpc_submit_transaction
   version: "1.0"
   category: api
   subcategory: rpc
-  description: "Submits signed transaction"
+  description: "Submits signed transaction to mempool"
   priority: P0
 
 preconditions:
-  - signed_transaction: "0xf86c..."
+  - signed_transaction_hex: "0x..."  # Transaction wire format
 
 action:
   type: rpc_call
-  method: eth_sendRawTransaction
+  method: submit_transaction
   params:
-    - "signed_transaction"
+    data: "signed_transaction_hex"
 
 expected:
   status: success
+  result: "Hash"  # Transaction hash (BLAKE3)
   result_type: transaction_hash
 
 ---
 spec:
-  name: rpc_eth_getTransactionReceipt
+  name: rpc_get_transaction
   version: "1.0"
   category: api
   subcategory: rpc
-  description: "Returns transaction receipt"
+  description: "Returns transaction by hash"
   priority: P0
 
 preconditions:
   - transaction:
-      hash: "0xabc123..."
-      status: success
-      gas_used: 21000
-      block_number: 1000
+      hash: "abc123..."
+      executed: true
+      block_hash: "def456..."
 
 action:
   type: rpc_call
-  method: eth_getTransactionReceipt
+  method: get_transaction
   params:
-    - "0xabc123..."
+    hash: "abc123..."
 
 expected:
   status: success
   result:
-    transactionHash: "0xabc123..."
-    status: "0x1"
-    gasUsed: "0x5208"
-    blockNumber: "0x3e8"
+    hash: "abc123..."
+    source: "CompressedPublicKey"
+    data: "TransactionType"
+    fee: "u64"
+    nonce: "u64"
+    signature: "Signature"
+    executed_in_block: "def456..."
+  result_type: RPCTransaction
 
 ---
 spec:
-  name: rpc_eth_call
+  name: rpc_get_block_at_topoheight
   version: "1.0"
   category: api
   subcategory: rpc
-  description: "Executes call without creating transaction"
-  priority: P0
-
-preconditions:
-  - contract:
-      address: "0x1234567890123456789012345678901234567890"
-      method: "balanceOf"
-      returns: 1000
-
-action:
-  type: rpc_call
-  method: eth_call
-  params:
-    - to: "0x1234567890123456789012345678901234567890"
-      data: "0x70a08231..."  # balanceOf selector
-    - "latest"
-
-expected:
-  status: success
-  result_type: bytes
-
----
-spec:
-  name: rpc_eth_estimateGas
-  version: "1.0"
-  category: api
-  subcategory: rpc
-  description: "Estimates gas for transaction"
-  priority: P0
-
-preconditions:
-  - from: "0xabc..."
-  - to: "0x123..."
-
-action:
-  type: rpc_call
-  method: eth_estimateGas
-  params:
-    - from: "0xabc..."
-      to: "0x123..."
-      value: "0x1"
-
-expected:
-  status: success
-  result: ">= 0x5208"  # At least 21000
-
----
-spec:
-  name: rpc_eth_getBlockByNumber
-  version: "1.0"
-  category: api
-  subcategory: rpc
-  description: "Returns block by number"
+  description: "Returns block at specific topoheight"
   priority: P0
 
 preconditions:
   - block:
-      number: 100
-      hash: "0xblock..."
-      transactions_count: 5
+      topoheight: 1000
+      hash: "block_hash..."
+      height: 950
 
 action:
   type: rpc_call
-  method: eth_getBlockByNumber
+  method: get_block_at_topoheight
   params:
-    - "0x64"  # 100
-    - false   # no tx details
+    topoheight: 1000
+    include_txs: false
 
 expected:
   status: success
   result:
-    number: "0x64"
-    hash: "0xblock..."
-    transactions: "array_of_hashes"
+    hash: "block_hash..."
+    topoheight: 1000
+    height: 950
+    timestamp: "u64"
+    nonce: "u64"
+    miner: "CompressedPublicKey"
+    tips: ["parent_hash_1", "parent_hash_2"]  # DAG parents
+    txs_hashes: ["tx1", "tx2"]
+  result_type: BlockResponse
 
 ---
 spec:
-  name: rpc_eth_getLogs
+  name: rpc_get_tips
   version: "1.0"
   category: api
   subcategory: rpc
-  description: "Returns logs matching filter"
-  priority: P1
-
-preconditions:
-  - logs:
-      - address: "0xcontract..."
-        topics: ["0xtopic1..."]
-        block: 100
-      - address: "0xcontract..."
-        topics: ["0xtopic1..."]
-        block: 101
-
-action:
-  type: rpc_call
-  method: eth_getLogs
-  params:
-    - fromBlock: "0x64"
-      toBlock: "0x65"
-      address: "0xcontract..."
-
-expected:
-  status: success
-  result_count: 2
-
----
-spec:
-  name: rpc_eth_chainId
-  version: "1.0"
-  category: api
-  subcategory: rpc
-  description: "Returns chain ID"
+  description: "Returns current DAG tips"
   priority: P0
 
 preconditions:
-  - chain_id: 1
+  - tips: ["tip1_hash", "tip2_hash"]
 
 action:
   type: rpc_call
-  method: eth_chainId
+  method: get_tips
   params: []
 
 expected:
   status: success
-  result: "0x1"
+  result: ["tip1_hash", "tip2_hash"]
+  result_type: "HashSet<Hash>"
+
+---
+spec:
+  name: rpc_get_mempool
+  version: "1.0"
+  category: api
+  subcategory: rpc
+  description: "Returns mempool transactions"
+  priority: P1
+
+action:
+  type: rpc_call
+  method: get_mempool
+  params: {}
+
+expected:
+  status: success
+  result:
+    txs: ["tx_hash_1", "tx_hash_2"]
+    size: "u64"
+  result_type: GetMempoolResult
+
+---
+spec:
+  name: rpc_validate_address
+  version: "1.0"
+  category: api
+  subcategory: rpc
+  description: "Validates address format"
+  priority: P1
+
+action:
+  type: rpc_call
+  method: validate_address
+  params:
+    address: "tos1qyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqs2u83p5"
+
+expected:
+  status: success
+  result:
+    is_valid: true
+    is_mainnet: true
+    is_integrated: false
+
+---
+spec:
+  name: rpc_get_dag_order
+  version: "1.0"
+  category: api
+  subcategory: rpc
+  description: "Returns DAG order between topoheights"
+  priority: P1
+
+preconditions:
+  - topoheight_range: [100, 105]
+
+action:
+  type: rpc_call
+  method: get_dag_order
+  params:
+    start_topoheight: 100
+    end_topoheight: 105
+
+expected:
+  status: success
+  result: ["block_100", "block_101", "block_102", "block_103", "block_104"]
+  result_type: "Vec<Hash>"
+
+---
+spec:
+  name: rpc_get_block_template
+  version: "1.0"
+  category: api
+  subcategory: rpc
+  description: "Returns block template for mining"
+  priority: P1
+  requires: allow_mining_methods
+
+preconditions:
+  - mining_enabled: true
+
+action:
+  type: rpc_call
+  method: get_block_template
+  params:
+    address: "tos1..."  # Miner address
+
+expected:
+  status: success
+  result:
+    template: "BlockHeader bytes"
+    difficulty: "Difficulty"
+    height: "u64"
+    topoheight: "u64"
+  result_type: GetBlockTemplateResult
+
+---
+spec:
+  name: rpc_get_energy
+  version: "1.0"
+  category: api
+  subcategory: rpc
+  description: "Returns account energy balance"
+  priority: P1
+
+preconditions:
+  - account:
+      address: "tos1..."
+      energy: 5000
+
+action:
+  type: rpc_call
+  method: get_energy
+  params:
+    address: "tos1..."
+
+expected:
+  status: success
+  result: 5000
+  result_type: u64
+
+---
+spec:
+  name: rpc_get_contract_data
+  version: "1.0"
+  category: api
+  subcategory: rpc
+  description: "Returns contract storage data"
+  priority: P1
+
+preconditions:
+  - contract:
+      address: "contract_hash..."
+      key: "storage_key"
+      value: "stored_value"
+
+action:
+  type: rpc_call
+  method: get_contract_data
+  params:
+    contract: "contract_hash..."
+    key: "storage_key"
+
+expected:
+  status: success
+  result: "stored_value"
+  result_type: Value
+
+---
+spec:
+  name: rpc_resolve_name
+  version: "1.0"
+  category: api
+  subcategory: rpc
+  description: "Resolves TNS name to address"
+  priority: P2
+
+preconditions:
+  - tns_name: "alice"
+  - tns_address: "tos1..."
+
+action:
+  type: rpc_call
+  method: resolve_name
+  params:
+    name: "alice"
+
+expected:
+  status: success
+  result: "tos1..."
+  result_type: Address

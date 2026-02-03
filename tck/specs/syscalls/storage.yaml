@@ -1,150 +1,341 @@
-# TOS-TCK Conformance Spec: Storage Syscalls
-# Tests sload and sstore syscall behavior
+# TOS TAKO Storage Syscalls Conformance Specifications
+# Based on: daemon/src/tako_integration/storage.rs
+#
+# TAKO provides both persistent and transient storage (EIP-1153)
+# Storage is contract-isolated and versioned by topoheight
+# Keys/values are byte arrays (NOT 32-byte slots like EVM)
 
+---
 spec:
-  name: syscall_storage_sstore_basic
+  name: syscall_storage_write_basic
   version: "1.0"
   category: syscalls
   subcategory: storage
-
-description: |
-  Verifies basic storage write operation.
-  SSTORE should persist a 32-byte value at the given key.
+  description: "Write value to persistent storage"
+  priority: P0
 
 preconditions:
-  - account: "contract_a"
-    storage: {}
+  - contract_deployed: true
+  - storage_empty: true
 
 action:
   type: syscall
-  name: sstore
-  args:
-    - key: "0x0000000000000000000000000000000000000000000000000000000000000001"
-    - value: "0x000000000000000000000000000000000000000000000000000000000000002a"
+  name: storage_write
+  params:
+    key: "0x0001"
+    value: "0xdeadbeef"
 
 expected:
   status: success
-  gas_used: "<= 20000"
+  compute_units: 5000  # ~5000 CU for storage_write
 
 postconditions:
-  - account: "contract_a"
-    storage:
-      "0x0000000000000000000000000000000000000000000000000000000000000001": "0x000000000000000000000000000000000000000000000000000000000000002a"
+  - storage:
+      key: "0x0001"
+      value: "0xdeadbeef"
 
 ---
-# Test case: Storage read
 spec:
-  name: syscall_storage_sload_basic
+  name: syscall_storage_read_existing
   version: "1.0"
   category: syscalls
   subcategory: storage
-
-description: |
-  Verifies basic storage read operation.
-  SLOAD should return the stored value or zero if not set.
+  description: "Read existing value from persistent storage"
+  priority: P0
 
 preconditions:
-  - account: "contract_a"
-    storage:
-      "0x0000000000000000000000000000000000000000000000000000000000000001": "0x000000000000000000000000000000000000000000000000000000000000002a"
+  - contract_deployed: true
+  - storage:
+      key: "0x0001"
+      value: "0xdeadbeef"
 
 action:
   type: syscall
-  name: sload
-  args:
-    - key: "0x0000000000000000000000000000000000000000000000000000000000000001"
+  name: storage_read
+  params:
+    key: "0x0001"
 
 expected:
   status: success
-  return_value: "0x000000000000000000000000000000000000000000000000000000000000002a"
-  gas_used: "<= 2100"
-
-postconditions: []
+  result: "0xdeadbeef"
+  result_type: "Option<Vec<u8>>"
+  compute_units: 1000  # ~1000 CU for storage_read
 
 ---
-# Test case: Read uninitialized storage
 spec:
-  name: syscall_storage_sload_uninitialized
+  name: syscall_storage_read_nonexistent
   version: "1.0"
   category: syscalls
   subcategory: storage
-
-description: |
-  Verifies that reading uninitialized storage returns zero.
+  description: "Read non-existent key returns None"
+  priority: P0
 
 preconditions:
-  - account: "contract_a"
-    storage: {}
+  - contract_deployed: true
+  - storage_empty: true
 
 action:
   type: syscall
-  name: sload
-  args:
-    - key: "0x0000000000000000000000000000000000000000000000000000000000000099"
+  name: storage_read
+  params:
+    key: "0x9999"
 
 expected:
   status: success
-  return_value: "0x0000000000000000000000000000000000000000000000000000000000000000"
-  gas_used: "<= 2100"
-
-postconditions: []
+  result: null  # None
+  compute_units: 1000
 
 ---
-# Test case: Clear storage (set to zero)
 spec:
-  name: syscall_storage_sstore_clear
+  name: syscall_tstore_basic
   version: "1.0"
   category: syscalls
   subcategory: storage
-
-description: |
-  Verifies clearing storage by setting value to zero.
-  Should receive gas refund for clearing storage.
+  description: "Write value to transient storage (EIP-1153)"
+  priority: P0
 
 preconditions:
-  - account: "contract_a"
-    storage:
-      "0x0000000000000000000000000000000000000000000000000000000000000001": "0x000000000000000000000000000000000000000000000000000000000000002a"
-
-action:
-  type: syscall
-  name: sstore
-  args:
-    - key: "0x0000000000000000000000000000000000000000000000000000000000000001"
-    - value: "0x0000000000000000000000000000000000000000000000000000000000000000"
-
-expected:
-  status: success
-  gas_used: "<= 5000"  # Reduced cost for clearing
-
-postconditions:
-  - account: "contract_a"
-    storage:
-      "0x0000000000000000000000000000000000000000000000000000000000000001": "0x0000000000000000000000000000000000000000000000000000000000000000"
-
----
-# Test case: Transient storage (EIP-1153)
-spec:
-  name: syscall_storage_tstore_basic
-  version: "1.0"
-  category: syscalls
-  subcategory: storage
-
-description: |
-  Verifies transient storage write operation (EIP-1153).
-  TSTORE values persist only within the transaction.
-
-preconditions: []
+  - contract_deployed: true
+  - transient_storage_empty: true
 
 action:
   type: syscall
   name: tstore
-  args:
-    - key: "0x0000000000000000000000000000000000000000000000000000000000000001"
-    - value: "0x00000000000000000000000000000000000000000000000000000000000000ff"
+  params:
+    key: "0x0001"
+    value: "0xabcd1234"
 
 expected:
   status: success
-  gas_used: "<= 100"
+  compute_units: 100  # ~100 CU (cheaper than persistent storage)
 
-postconditions: []
+postconditions:
+  - transient_storage:
+      key: "0x0001"
+      value: "0xabcd1234"
+
+---
+spec:
+  name: syscall_tload_basic
+  version: "1.0"
+  category: syscalls
+  subcategory: storage
+  description: "Read value from transient storage"
+  priority: P0
+
+preconditions:
+  - contract_deployed: true
+  - transient_storage:
+      key: "0x0001"
+      value: "0xabcd1234"
+
+action:
+  type: syscall
+  name: tload
+  params:
+    key: "0x0001"
+
+expected:
+  status: success
+  result: "0xabcd1234"
+  compute_units: 100  # ~100 CU
+
+---
+spec:
+  name: syscall_transient_storage_cleared_after_tx
+  version: "1.0"
+  category: syscalls
+  subcategory: storage
+  description: "Transient storage cleared after transaction ends"
+  priority: P0
+
+preconditions:
+  - previous_tx:
+      transient_storage:
+        key: "0x0001"
+        value: "0xabcd1234"
+  - new_transaction: true
+
+action:
+  type: syscall
+  name: tload
+  params:
+    key: "0x0001"
+
+expected:
+  status: success
+  result: null  # Cleared after previous tx
+
+---
+spec:
+  name: syscall_storage_contract_isolation
+  version: "1.0"
+  category: syscalls
+  subcategory: storage
+  description: "Contract cannot access another contract's storage"
+  priority: P0
+
+preconditions:
+  - contract_a:
+      address: "contract_a_hash"
+      storage:
+        key: "0x0001"
+        value: "0xprivate_data"
+  - contract_b:
+      address: "contract_b_hash"
+      executing: true
+
+action:
+  type: syscall
+  name: storage_read
+  caller: "contract_b"
+  params:
+    key: "0x0001"
+
+expected:
+  status: success
+  result: null  # contract_b has different storage namespace
+
+---
+spec:
+  name: syscall_storage_overwrite
+  version: "1.0"
+  category: syscalls
+  subcategory: storage
+  description: "Overwrite existing storage value"
+  priority: P1
+
+preconditions:
+  - storage:
+      key: "0x0001"
+      value: "0xold_value"
+
+action:
+  type: syscall
+  name: storage_write
+  params:
+    key: "0x0001"
+    value: "0xnew_value"
+
+expected:
+  status: success
+  compute_units: 5000
+
+postconditions:
+  - storage:
+      key: "0x0001"
+      value: "0xnew_value"
+
+---
+spec:
+  name: syscall_storage_delete
+  version: "1.0"
+  category: syscalls
+  subcategory: storage
+  description: "Delete storage value by writing empty"
+  priority: P1
+
+preconditions:
+  - storage:
+      key: "0x0001"
+      value: "0xsome_value"
+
+action:
+  type: syscall
+  name: storage_write
+  params:
+    key: "0x0001"
+    value: ""  # Empty value = delete
+
+expected:
+  status: success
+
+postconditions:
+  - storage:
+      key: "0x0001"
+      value: null
+
+---
+spec:
+  name: syscall_storage_versioned_by_topoheight
+  version: "1.0"
+  category: syscalls
+  subcategory: storage
+  description: "Storage versioned by topoheight for historical queries"
+  priority: P2
+
+preconditions:
+  - at_topoheight_100:
+      storage:
+        key: "0x0001"
+        value: "0xvalue_at_100"
+  - at_topoheight_200:
+      storage:
+        key: "0x0001"
+        value: "0xvalue_at_200"
+
+action:
+  type: historical_query
+  topoheight: 100
+  syscall: storage_read
+  params:
+    key: "0x0001"
+
+expected:
+  status: success
+  result: "0xvalue_at_100"
+
+---
+spec:
+  name: syscall_storage_cache_behavior
+  version: "1.0"
+  category: syscalls
+  subcategory: storage
+  description: "Storage uses write-through cache (cache-first reads)"
+  priority: P2
+
+preconditions:
+  - cache_enabled: true
+  - storage_empty: true
+
+action:
+  type: syscall_sequence
+  calls:
+    - name: storage_write
+      params: { key: "0x0001", value: "0xfirst_write" }
+    - name: storage_read
+      params: { key: "0x0001" }  # Should read from cache
+
+expected:
+  - status: success
+  - status: success
+    result: "0xfirst_write"
+    source: cache
+
+---
+spec:
+  name: syscall_storage_key_value_bytes
+  version: "1.0"
+  category: syscalls
+  subcategory: storage
+  description: "Keys and values are arbitrary byte arrays"
+  priority: P1
+
+preconditions:
+  - contract_deployed: true
+
+action:
+  type: syscall
+  name: storage_write
+  params:
+    key: "0x0102030405"  # 5 bytes (not 32)
+    value: "0xabcdef0123456789"  # 8 bytes
+
+expected:
+  status: success
+  note: "TAKO storage is NOT limited to 32-byte slots"
+
+postconditions:
+  - storage:
+      key: "0x0102030405"
+      value: "0xabcdef0123456789"

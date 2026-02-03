@@ -161,8 +161,8 @@ async fn validate_tips() -> Result<bool>
 **File**: `daemon/src/config.rs`
 
 ```rust
-pub const STABLE_LIMIT: u64 = 8;       // Blocks for finality
-pub const STABLE_HEIGHT_LIMIT: u64 = 50;  // Max rewind depth
+pub const STABLE_LIMIT: u64 = 24;           // Blocks for finality
+pub const PRUNE_SAFETY_LIMIT: u64 = STABLE_LIMIT * 10;  // = 240, max rewind depth
 ```
 
 ### Stability Check
@@ -184,7 +184,7 @@ Once stable, blocks cannot be orphaned by new blocks.
 
 A block is a "side block" if:
 - It is topologically ordered (has assigned topoheight)
-- Its block height ≤ any block in the past 8 topographical blocks
+- Its block height ≤ any block in the past STABLE_LIMIT (24) topographical blocks
 - Not genesis block
 
 Side blocks receive reduced mining rewards to incentivize building on the main chain.
@@ -220,9 +220,10 @@ TOS BlockDAG characteristics:
 
 | Feature | Value |
 |---------|-------|
-| Max Parents (Tips) | 3 |
+| Max Parents (Tips) | 3 (TIPS_LIMIT) |
 | Ordering Method | Cumulative difficulty sort |
-| Finality Depth | 8 blocks |
+| Finality Depth | 24 blocks (STABLE_LIMIT) |
+| Prune Safety | 240 blocks (PRUNE_SAFETY_LIMIT) |
 | Tip Difficulty Threshold | 91% of best |
 | Protocol | Custom (NOT GHOSTDAG) |
 

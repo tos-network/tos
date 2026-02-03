@@ -1,234 +1,192 @@
-# Code Syscall Conformance Specifications
-# Tests for code operations: CODESIZE, CODECOPY, EXTCODESIZE, EXTCODECOPY, EXTCODEHASH
+# TOS TAKO Code Operations Syscalls Conformance Specifications
+# Based on: daemon/src/tako_integration/loader.rs
+#
+# TAKO uses get_external_code_* syscalls for contract inspection
+# All contracts must be TOS Kernel(TAKO) ELF format
+# ELF magic validation: bytecode must start with 0x7F 'E' 'L' 'F'
 
 ---
 spec:
-  name: syscall_codesize_basic
+  name: syscall_get_external_code_size
   version: "1.0"
   category: syscalls
   subcategory: code
-  description: "Get size of executing contract code"
-  priority: P0
-
-preconditions:
-  - contract:
-      code_size: 100
-
-action:
-  type: syscall
-  name: codesize
-
-expected:
-  status: success
-  result: 100
-  gas_used: 2
-
----
-spec:
-  name: syscall_codecopy_basic
-  version: "1.0"
-  category: syscalls
-  subcategory: code
-  description: "Copy executing contract code to memory"
-  priority: P0
-
-preconditions:
-  - contract:
-      code: "0x6080604052..."
-  - memory: empty
-
-action:
-  type: syscall
-  name: codecopy
-  params:
-    dest_offset: 0
-    code_offset: 0
-    length: 32
-
-expected:
-  status: success
-  gas_used: "<= 9"  # 3 + 3 * ceil(32/32)
-
-postconditions:
-  - memory:
-      offset: 0
-      matches_code: true
-
----
-spec:
-  name: syscall_codecopy_beyond_code
-  version: "1.0"
-  category: syscalls
-  subcategory: code
-  description: "CODECOPY beyond code size pads with zeros"
-  priority: P1
-
-preconditions:
-  - contract:
-      code_size: 10
-  - memory: empty
-
-action:
-  type: syscall
-  name: codecopy
-  params:
-    dest_offset: 0
-    code_offset: 0
-    length: 32
-
-expected:
-  status: success
-
-postconditions:
-  - memory:
-      offset: 10
-      length: 22
-      value: "zeros"
-
----
-spec:
-  name: syscall_extcodesize_basic
-  version: "1.0"
-  category: syscalls
-  subcategory: code
-  description: "Get external contract code size"
+  description: "Get bytecode size of external contract"
   priority: P0
 
 preconditions:
   - external_contract:
-      address: "0x1234567890123456789012345678901234567890"
-      code_size: 500
+      hash: "contract_hash_abc..."  # 32-byte Hash
+      bytecode_size: 1024
 
 action:
   type: syscall
-  name: extcodesize
+  name: get_external_code_size
   params:
-    address: "0x1234567890123456789012345678901234567890"
+    contract: "contract_hash_abc..."  # &[u8; 32]
 
 expected:
   status: success
-  result: 500
-  gas_used: "<= 2600"  # Warm/cold access
+  result: 1024  # u64
+  compute_units: 1000  # ~1000 CU
 
 ---
 spec:
-  name: syscall_extcodesize_eoa
+  name: syscall_get_external_code_size_nonexistent
   version: "1.0"
   category: syscalls
   subcategory: code
-  description: "EXTCODESIZE of EOA returns 0"
-  priority: P1
+  description: "Code size of non-existent contract returns 0"
+  priority: P0
 
 preconditions:
-  - eoa:
-      address: "0xabcdef0123456789abcdef0123456789abcdef01"
+  - contract_not_exists: "unknown_hash..."
 
 action:
   type: syscall
-  name: extcodesize
+  name: get_external_code_size
   params:
-    address: "0xabcdef0123456789abcdef0123456789abcdef01"
+    contract: "unknown_hash..."
 
 expected:
   status: success
-  result: 0
+  result: 0  # Non-existent contracts have zero size
+  compute_units: 1000
 
 ---
 spec:
-  name: syscall_extcodecopy_basic
+  name: syscall_get_external_code_hash
   version: "1.0"
   category: syscalls
   subcategory: code
-  description: "Copy external contract code to memory"
+  description: "Get BLAKE3 hash of external contract bytecode"
   priority: P0
 
 preconditions:
   - external_contract:
-      address: "0x1234567890123456789012345678901234567890"
-      code: "0x6080604052..."
-  - memory: empty
+      hash: "contract_hash_abc..."
+      bytecode: "0x7f454c46..."  # ELF bytecode
 
 action:
   type: syscall
-  name: extcodecopy
+  name: get_external_code_hash
   params:
-    address: "0x1234567890123456789012345678901234567890"
-    dest_offset: 0
-    code_offset: 0
-    length: 32
+    contract: "contract_hash_abc..."
 
 expected:
   status: success
-  gas_used: "<= 2609"  # 2600 + 3 * ceil(32/32)
+  result: "[u8; 32]"  # BLAKE3 hash of bytecode (NOT keccak256)
+  compute_units: 1500  # ~1500 CU
 
 ---
 spec:
-  name: syscall_extcodehash_basic
+  name: syscall_get_external_code_copy
   version: "1.0"
   category: syscalls
   subcategory: code
-  description: "Get keccak256 hash of external contract code"
+  description: "Copy portion of external contract bytecode"
   priority: P0
 
 preconditions:
   - external_contract:
-      address: "0x1234567890123456789012345678901234567890"
-      code: "0x6080604052"
+      hash: "contract_hash_abc..."
+      bytecode_size: 1024
 
 action:
   type: syscall
-  name: extcodehash
+  name: get_external_code_copy
   params:
-    address: "0x1234567890123456789012345678901234567890"
+    contract: "contract_hash_abc..."  # &[u8; 32]
+    offset: 0                         # u64
+    size: 32                          # u64
 
 expected:
   status: success
-  result_type: hash
-  gas_used: "<= 2600"
+  result: "Vec<u8>"  # 32 bytes of bytecode
+  compute_units: 2000  # ~2000 CU
 
 ---
 spec:
-  name: syscall_extcodehash_eoa
+  name: syscall_get_external_code_copy_partial
   version: "1.0"
   category: syscalls
   subcategory: code
-  description: "EXTCODEHASH of EOA with balance"
+  description: "Copy beyond bytecode returns shorter result"
   priority: P1
 
 preconditions:
-  - eoa:
-      address: "0xabcdef0123456789abcdef0123456789abcdef01"
-      balance: 1000
+  - external_contract:
+      hash: "contract_hash_abc..."
+      bytecode_size: 10
 
 action:
   type: syscall
-  name: extcodehash
+  name: get_external_code_copy
   params:
-    address: "0xabcdef0123456789abcdef0123456789abcdef01"
+    contract: "contract_hash_abc..."
+    offset: 0
+    size: 100  # Requesting more than available
 
 expected:
   status: success
-  result: "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"  # keccak256("")
+  result_length: 10  # Returns only available bytes
 
 ---
 spec:
-  name: syscall_extcodehash_empty_account
+  name: syscall_code_elf_validation
   version: "1.0"
   category: syscalls
   subcategory: code
-  description: "EXTCODEHASH of non-existent account"
-  priority: P1
+  description: "Contract bytecode must be valid ELF format"
+  priority: P0
 
 preconditions:
-  - account_exists: false
-  - address: "0x0000000000000000000000000000000000000001"
+  - contract_bytecode: "0x7f454c46..."  # ELF magic: 0x7F 'E' 'L' 'F'
 
 action:
-  type: syscall
-  name: extcodehash
-  params:
-    address: "0x0000000000000000000000000000000000000001"
+  type: validate_contract
+  bytecode: "0x7f454c46..."
 
 expected:
   status: success
-  result: "0x0000000000000000000000000000000000000000000000000000000000000000"
+  elf_magic_valid: true
+
+---
+spec:
+  name: syscall_code_reject_non_elf
+  version: "1.0"
+  category: syscalls
+  subcategory: code
+  description: "Non-ELF bytecode is rejected"
+  priority: P0
+
+preconditions:
+  - invalid_bytecode: "0xdeadbeef..."  # Not ELF magic
+
+action:
+  type: deploy_contract
+  bytecode: "0xdeadbeef..."
+
+expected:
+  status: error
+  error: "InvalidElfFormat"
+
+---
+spec:
+  name: syscall_code_reject_legacy_format
+  version: "1.0"
+  category: syscalls
+  subcategory: code
+  description: "Legacy contract format is rejected"
+  priority: P1
+
+preconditions:
+  - legacy_bytecode: "0x6080604052..."  # EVM-style bytecode
+
+action:
+  type: deploy_contract
+  bytecode: "0x6080604052..."
+
+expected:
+  status: error
+  error: "LegacyFormatNotSupported"
