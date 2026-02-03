@@ -106,7 +106,7 @@ The Hybrid Mode methodology consists of three complementary layers:
 - Decision matrices for edge cases
 - Examples with hex-encoded data
 
-**Location**: `~/tos/docs/specs/` or inline in `MULTI_CLIENT_ALIGNMENT_SCHEME.md`
+**Location**: `~/tos/tck/specs/` (see TCK Directory Structure in `MULTI_CLIENT_ALIGNMENT_SCHEME.md`)
 
 ### 2.2 Layer 2: Test Vector Infrastructure
 
@@ -328,8 +328,11 @@ TOS Rust             YAML Vectors            Avatar C
 | Document | Purpose |
 |----------|---------|
 | `MULTI_CLIENT_ALIGNMENT_SCHEME.md` | Technical specifications (this methodology's Layer 1) |
-| `~/tos/tck/README.md` | TCK architecture and usage |
-| `~/avatar/src/tck/README.md` | Avatar TCK integration guide |
+| `tck/README.md` | TCK architecture and usage |
+| `tck/specs/*.md` | Critical Path Specifications |
+| `tck/conformance/README.md` | Conformance testing guide |
+| `tck/fuzz/README.md` | Fuzzing infrastructure guide |
+| `avatar/src/tck/README.md` | Avatar TCK integration guide |
 
 ---
 
@@ -374,9 +377,11 @@ Hybrid mode succeeds because:
 | **Test Vector** | A test case with input and expected output |
 | **State Transition Vector** | Vector including pre-state, transaction, and post-state |
 | **Differential Testing** | Running same inputs through multiple implementations |
+| **Conformance Testing** | Verifying implementations match reference behavior |
 | **TCK** | Technology Compatibility Kit (test vector infrastructure) |
 | **Wire Format** | Binary serialization format for network transmission |
 | **State Digest** | Cryptographic hash of canonical state representation |
+| **Fuzz Testing** | Randomized input generation to discover edge cases |
 
 ---
 

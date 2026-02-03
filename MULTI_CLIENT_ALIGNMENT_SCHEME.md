@@ -1285,40 +1285,119 @@ test_vectors:
           nonce: 5
 ```
 
-### 3.5 Vector File Organization
+### 3.5 TCK Directory Structure
+
+The TCK (Technology Compatibility Kit) follows a professional, industry-standard organization:
 
 ```
 tck/
-├── vectors/
-│   ├── crypto/                    # Existing crypto vectors
+├── README.md                        # TCK overview and usage guide
+│
+├── specs/                           # Critical Path Specifications (Layer 1)
+│   ├── wire-format.md               # Binary serialization rules
+│   ├── hash-algorithms.md           # Hash function assignments
+│   ├── blockdag-ordering.md         # DAG execution order algorithm
+│   ├── failed-tx-semantics.md       # Failure handling rules
+│   ├── nonce-rules.md               # Nonce validation and processing
+│   ├── state-digest.md              # Canonical state representation
+│   └── error-codes.md               # Standardized error codes
+│
+├── vectors/                         # Test Vectors (Layer 2)
+│   ├── crypto/                      # Cryptographic primitives (existing)
 │   │   ├── sha256.yaml
+│   │   ├── sha3-256.yaml
 │   │   ├── blake3.yaml
+│   │   ├── ed25519.yaml
 │   │   └── ...
-│   ├── wire_format/               # Transaction encoding
+│   ├── wire/                        # Wire format encoding (existing)
 │   │   ├── transfer.yaml
 │   │   ├── burn.yaml
+│   │   ├── energy.yaml
 │   │   └── ...
-│   ├── state_transitions/         # New: state change vectors
-│   │   ├── transfer_basic.yaml
-│   │   ├── transfer_edge_cases.yaml
-│   │   ├── energy_operations.yaml
+│   ├── state/                       # State transition vectors (new)
+│   │   ├── transfer.yaml
+│   │   ├── transfer-edge-cases.yaml
+│   │   ├── energy-buy.yaml
+│   │   ├── energy-delegate.yaml
+│   │   ├── escrow-lifecycle.yaml
 │   │   └── ...
-│   ├── block_execution/           # New: block-level vectors
-│   │   ├── single_tx_block.yaml
-│   │   ├── multi_tx_ordering.yaml
-│   │   ├── conflict_resolution.yaml
+│   ├── execution/                   # Block execution vectors (new)
+│   │   ├── single-tx-block.yaml
+│   │   ├── multi-tx-ordering.yaml
+│   │   ├── nonce-ordering.yaml
+│   │   ├── dag-reorg.yaml
 │   │   └── ...
-│   └── failure_scenarios/         # New: error handling vectors
-│       ├── validation_errors.yaml
-│       ├── resource_errors.yaml
-│       ├── state_errors.yaml
+│   └── errors/                      # Error scenario vectors (new)
+│       ├── validation-errors.yaml
+│       ├── resource-errors.yaml
+│       ├── state-errors.yaml
+│       ├── contract-errors.yaml
 │       └── ...
-└── generators/
-    ├── crypto/                    # Existing generators
-    ├── wire_format/               # Existing generators
-    ├── state_transitions/         # New generators
-    └── block_execution/           # New generators
+│
+├── generators/                      # Rust Vector Generators
+│   ├── crypto/                      # Cryptographic vector generators (existing)
+│   │   ├── gen_sha256_vectors.rs
+│   │   ├── gen_blake3_vectors.rs
+│   │   └── ...
+│   ├── wire/                        # Wire format generators (existing)
+│   │   ├── gen_transfer_vectors.rs
+│   │   ├── gen_burn_vectors.rs
+│   │   └── ...
+│   ├── state/                       # State transition generators (new)
+│   │   ├── gen_transfer_state.rs
+│   │   ├── gen_energy_state.rs
+│   │   └── ...
+│   └── execution/                   # Block execution generators (new)
+│       ├── gen_block_ordering.rs
+│       └── ...
+│
+├── conformance/                     # Conformance Testing Infrastructure (Layer 3)
+│   ├── README.md                    # Conformance testing guide
+│   ├── docker-compose.yml           # Multi-client orchestration
+│   ├── Dockerfile.tos-rust          # TOS Rust test image
+│   │
+│   ├── harness/                     # Test Driver (Python)
+│   │   ├── requirements.txt
+│   │   ├── __init__.py
+│   │   ├── runner.py                # Main test runner
+│   │   ├── comparator.py            # Result comparison logic
+│   │   ├── reporter.py              # Report generation (HTML/JSON)
+│   │   └── config.py                # Configuration management
+│   │
+│   ├── api/                         # Diff-Test API Specification
+│   │   ├── openapi.yaml             # OpenAPI 3.0 schema
+│   │   └── README.md                # API usage guide
+│   │
+│   └── results/                     # Test Results (gitignored)
+│       └── .gitkeep
+│
+└── fuzz/                            # Fuzz Testing Infrastructure
+    ├── README.md                    # Fuzzing guide
+    ├── corpus/                      # Seed corpus
+    │   ├── transactions/            # Valid transaction seeds
+    │   └── blocks/                  # Valid block seeds
+    ├── targets/                     # Fuzz Targets (Rust)
+    │   ├── tx_parse.rs              # Transaction parsing fuzzer
+    │   ├── tx_execute.rs            # Transaction execution fuzzer
+    │   ├── block_execute.rs         # Block execution fuzzer
+    │   └── wire_roundtrip.rs        # Serialization roundtrip fuzzer
+    └── scripts/
+        ├── run-libfuzzer.sh         # LibFuzzer runner
+        ├── run-afl.sh               # AFL++ runner
+        └── minimize-corpus.sh       # Corpus minimization
 ```
+
+#### Directory Naming Rationale
+
+| Directory | Industry Reference | Purpose |
+|-----------|-------------------|---------|
+| `specs/` | OpenAPI, gRPC | Human-readable specifications |
+| `vectors/` | Ethereum, Bitcoin | Machine-readable test cases |
+| `generators/` | Standard practice | Code that produces vectors |
+| `conformance/` | Kubernetes, CNCF | Multi-client compatibility testing |
+| `fuzz/` | Security industry | Randomized testing infrastructure |
+| `harness/` | Testing frameworks | Test execution driver |
+| `corpus/` | Fuzzing standard | Seed inputs for fuzzers |
 
 ---
 
@@ -1361,15 +1440,17 @@ Differential testing runs the same inputs through multiple implementations and c
 
 ### 4.2 Docker Compose Setup
 
+Located at `tck/conformance/docker-compose.yml`:
+
 ```yaml
-# docker-compose.diff-test.yml
+# tck/conformance/docker-compose.yml
 version: '3.8'
 
 services:
   orchestrator:
-    build: ./diff-test/orchestrator
+    build: ./harness
     volumes:
-      - ./vectors:/vectors:ro
+      - ../vectors:/vectors:ro
       - ./results:/results
     depends_on:
       - tos-rust
@@ -1382,23 +1463,23 @@ services:
 
   tos-rust:
     build:
-      context: ../tos
-      dockerfile: Dockerfile.diff-test
+      context: ../../..
+      dockerfile: tck/conformance/Dockerfile.tos-rust
     ports:
       - "8081:8080"
     volumes:
       - tos-rust-state:/state
-    command: ["--diff-test-mode", "--state-dir=/state"]
+    command: ["--conformance-mode", "--state-dir=/state"]
 
   avatar-c:
     build:
-      context: ../avatar
-      dockerfile: Dockerfile.diff-test
+      context: ../../../../avatar
+      dockerfile: Dockerfile.conformance
     ports:
       - "8082:8080"
     volumes:
       - avatar-c-state:/state
-    command: ["--diff-test-mode", "--state-dir=/state"]
+    command: ["--conformance-mode", "--state-dir=/state"]
 
 volumes:
   tos-rust-state:
@@ -1452,8 +1533,10 @@ GET /state/account/{address_hex}
 
 ### 4.4 Test Harness Implementation
 
+Located at `tck/conformance/harness/runner.py`:
+
 ```python
-# diff_test/orchestrator/harness.py
+# tck/conformance/harness/runner.py
 
 import asyncio
 import aiohttp
@@ -1580,8 +1663,10 @@ class DivergenceError(Exception):
 
 **LibFuzzer Integration** (for Rust):
 
+Located at `tck/fuzz/targets/tx_execute.rs`:
+
 ```rust
-// diff_test/fuzz/fuzz_targets/tx_execution.rs
+// tck/fuzz/targets/tx_execute.rs
 
 #![no_main]
 use libfuzzer_sys::fuzz_target;
@@ -1606,8 +1691,10 @@ fuzz_target!(|data: &[u8]| {
 
 **AFL++ Integration** (for C):
 
+Located at `avatar/tck/fuzz/tx_harness.c` (in Avatar repository):
+
 ```c
-// diff_test/fuzz/avatar_harness.c
+// avatar/tck/fuzz/tx_harness.c
 
 #include <at/core/transaction.h>
 #include <at/core/state.h>
@@ -1643,14 +1730,20 @@ int main(int argc, char **argv) {
 
 ### 4.6 CI/CD Integration
 
-```yaml
-# .github/workflows/diff-test.yml
+Located at `.github/workflows/conformance.yml`:
 
-name: Differential Testing
+```yaml
+# .github/workflows/conformance.yml
+
+name: Conformance Testing
 
 on:
   pull_request:
     branches: [main]
+    paths:
+      - 'tck/**'
+      - 'common/**'
+      - 'daemon/**'
   schedule:
     - cron: '0 2 * * *'  # Daily at 2 AM
 
@@ -1661,19 +1754,21 @@ jobs:
       - uses: actions/checkout@v3
 
       - name: Build containers
-        run: docker-compose -f docker-compose.diff-test.yml build
+        working-directory: tck/conformance
+        run: docker-compose build
 
-      - name: Run vector tests
+      - name: Run conformance tests
+        working-directory: tck/conformance
         run: |
-          docker-compose -f docker-compose.diff-test.yml up -d
-          docker-compose exec orchestrator python harness.py --vectors=/vectors
+          docker-compose up -d
+          docker-compose exec orchestrator python runner.py --vectors=/vectors
           docker-compose down
 
       - name: Upload results
         uses: actions/upload-artifact@v3
         with:
-          name: diff-test-results
-          path: results/
+          name: conformance-results
+          path: tck/conformance/results/
 
   fuzz-tests:
     runs-on: ubuntu-latest
@@ -1682,19 +1777,20 @@ jobs:
       - uses: actions/checkout@v3
 
       - name: Run fuzzing (4 hours)
+        working-directory: tck/fuzz
         run: |
-          docker-compose -f docker-compose.fuzz.yml up --timeout 14400
+          ./scripts/run-libfuzzer.sh --timeout 14400
 
       - name: Check for divergences
         run: |
-          python scripts/check_fuzz_results.py
+          python tck/fuzz/scripts/check_results.py
 
       - name: Upload crash artifacts
         if: failure()
         uses: actions/upload-artifact@v3
         with:
           name: fuzz-crashes
-          path: crashes/
+          path: tck/fuzz/crashes/
 ```
 
 ---
@@ -1770,8 +1866,10 @@ jobs:
 
 ## Appendix A: Vector Generator Template
 
+Located at `tck/generators/state/gen_transfer_state.rs`:
+
 ```rust
-// tck/generators/state_transitions/gen_transfer_vectors.rs
+// tck/generators/state/gen_transfer_state.rs
 
 use serde::Serialize;
 use std::fs::File;
@@ -1859,7 +1957,7 @@ fn main() {
     };
 
     let yaml = serde_yaml::to_string(&file).expect("Failed to serialize");
-    let mut f = File::create("transfer_vectors.yaml").expect("Failed to create file");
+    let mut f = File::create("../vectors/state/transfer.yaml").expect("Failed to create file");
     f.write_all(yaml.as_bytes()).expect("Failed to write");
 }
 
@@ -1894,8 +1992,10 @@ fn generate_basic_transfer() -> TestVector {
 
 ## Appendix B: Vector Consumer Template
 
+Located at `avatar/src/tck/test_state_yaml.c` (in Avatar repository):
+
 ```c
-// avatar/src/tck/test_state_transitions_yaml.c
+// avatar/src/tck/test_state_yaml.c
 
 #include <at/core/infra/runtime/at_yaml.h>
 #include <at/core/state.h>
@@ -1981,7 +2081,7 @@ test_vector(at_yaml_obj_t const *vec) {
 }
 
 int main(int argc, char **argv) {
-    char const *yaml_path = "tck/vectors/state_transitions/transfer.yaml";
+    char const *yaml_path = "tck/vectors/state/transfer.yaml";
     if (argc > 1) yaml_path = argv[1];
 
     if (at_yaml_parse_file(&doc, yaml_path) != 0) {
