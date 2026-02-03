@@ -1,0 +1,292 @@
+# Block Execution Vectors: Multi-Transaction Ordering
+# Schema Version: 1.0
+# Generator: TOS Rust (template)
+# Generated: 2026-02-03
+
+schema_version: 1
+domain: "execution"
+generator: "TOS Rust v1.0.0 (template)"
+generated_at: "2026-02-03T00:00:00Z"
+
+test_vectors:
+  - name: "same_sender_nonce_ordering"
+    description: "Transactions from same sender ordered by nonce"
+
+    pre_state:
+      accounts:
+        - address_hex: "01aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          alias: "alice"
+          balance: 1000
+          nonce: 0
+          frozen: 0
+          energy: 100
+          flags: 0
+        - address_hex: "01bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          alias: "bob"
+          balance: 0
+          nonce: 0
+          frozen: 0
+          energy: 0
+          flags: 0
+        - address_hex: "01cccccccccccccccccccccccccccccccccccccccc"
+          alias: "carol"
+          balance: 0
+          nonce: 0
+          frozen: 0
+          energy: 0
+          flags: 0
+      global:
+        total_supply: 1000
+        total_burned: 0
+        block_height: 100
+
+    block:
+      height: 101
+      parent_hashes:
+        - "0000000000000000000000000000000000000000000000000000000000000001"
+      timestamp: 1700000001000
+      transactions:
+        - name: "tx1"
+          type: "Transfer"
+          sender: "alice"
+          nonce: 1
+          fee: 2
+          payload:
+            recipient: "carol"
+            amount: 200
+        - name: "tx2"
+          type: "Transfer"
+          sender: "alice"
+          nonce: 0
+          fee: 1
+          payload:
+            recipient: "bob"
+            amount: 100
+
+    expected_execution_order:
+      - "tx2"
+      - "tx1"
+
+    transaction_results:
+      - name: "tx2"
+        status: "success"
+        error_code: 0x0000
+      - name: "tx1"
+        status: "success"
+        error_code: 0x0000
+
+    post_state:
+      accounts:
+        - address_hex: "01aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          alias: "alice"
+          balance: 697
+          nonce: 2
+          frozen: 0
+          energy: 100
+          flags: 0
+        - address_hex: "01bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          alias: "bob"
+          balance: 100
+          nonce: 0
+          frozen: 0
+          energy: 0
+          flags: 0
+        - address_hex: "01cccccccccccccccccccccccccccccccccccccccc"
+          alias: "carol"
+          balance: 200
+          nonce: 0
+          frozen: 0
+          energy: 0
+          flags: 0
+      global:
+        total_supply: 997
+        total_burned: 3
+        block_height: 101
+
+  - name: "fee_priority_different_senders"
+    description: "Higher fee transactions prioritized across different senders"
+
+    pre_state:
+      accounts:
+        - address_hex: "01aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          alias: "alice"
+          balance: 500
+          nonce: 0
+          frozen: 0
+          energy: 100
+          flags: 0
+        - address_hex: "01bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          alias: "bob"
+          balance: 500
+          nonce: 0
+          frozen: 0
+          energy: 100
+          flags: 0
+        - address_hex: "01cccccccccccccccccccccccccccccccccccccccc"
+          alias: "carol"
+          balance: 0
+          nonce: 0
+          frozen: 0
+          energy: 0
+          flags: 0
+      global:
+        total_supply: 1000
+        total_burned: 0
+        block_height: 100
+
+    block:
+      height: 101
+      parent_hashes:
+        - "0000000000000000000000000000000000000000000000000000000000000001"
+      timestamp: 1700000001000
+      transactions:
+        - name: "tx_alice"
+          type: "Transfer"
+          sender: "alice"
+          nonce: 0
+          fee: 1
+          payload:
+            recipient: "carol"
+            amount: 100
+        - name: "tx_bob"
+          type: "Transfer"
+          sender: "bob"
+          nonce: 0
+          fee: 5
+          payload:
+            recipient: "carol"
+            amount: 200
+
+    expected_execution_order:
+      - "tx_bob"
+      - "tx_alice"
+
+    transaction_results:
+      - name: "tx_bob"
+        status: "success"
+        error_code: 0x0000
+      - name: "tx_alice"
+        status: "success"
+        error_code: 0x0000
+
+    post_state:
+      accounts:
+        - address_hex: "01aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          alias: "alice"
+          balance: 399
+          nonce: 1
+          frozen: 0
+          energy: 100
+          flags: 0
+        - address_hex: "01bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          alias: "bob"
+          balance: 295
+          nonce: 1
+          frozen: 0
+          energy: 100
+          flags: 0
+        - address_hex: "01cccccccccccccccccccccccccccccccccccccccc"
+          alias: "carol"
+          balance: 300
+          nonce: 0
+          frozen: 0
+          energy: 0
+          flags: 0
+      global:
+        total_supply: 994
+        total_burned: 6
+        block_height: 101
+
+  - name: "failed_tx_in_block"
+    description: "Failed transaction still advances nonce and charges fee"
+
+    pre_state:
+      accounts:
+        - address_hex: "01aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          alias: "alice"
+          balance: 1000
+          nonce: 0
+          frozen: 0
+          energy: 100
+          flags: 0
+        - address_hex: "01bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          alias: "bob"
+          balance: 50
+          nonce: 0
+          frozen: 0
+          energy: 50
+          flags: 0
+        - address_hex: "01cccccccccccccccccccccccccccccccccccccccc"
+          alias: "carol"
+          balance: 0
+          nonce: 0
+          frozen: 0
+          energy: 0
+          flags: 0
+      global:
+        total_supply: 1050
+        total_burned: 0
+        block_height: 100
+
+    block:
+      height: 101
+      parent_hashes:
+        - "0000000000000000000000000000000000000000000000000000000000000001"
+      timestamp: 1700000001000
+      transactions:
+        - name: "tx_alice"
+          type: "Transfer"
+          sender: "alice"
+          nonce: 0
+          fee: 1
+          payload:
+            recipient: "carol"
+            amount: 500
+        - name: "tx_bob_fail"
+          type: "Transfer"
+          sender: "bob"
+          nonce: 0
+          fee: 1
+          payload:
+            recipient: "carol"
+            amount: 100
+
+    expected_execution_order:
+      - "tx_alice"
+      - "tx_bob_fail"
+
+    transaction_results:
+      - name: "tx_alice"
+        status: "success"
+        error_code: 0x0000
+      - name: "tx_bob_fail"
+        status: "failure"
+        error_code: 0x0300
+
+    post_state:
+      accounts:
+        - address_hex: "01aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          alias: "alice"
+          balance: 499
+          nonce: 1
+          frozen: 0
+          energy: 100
+          flags: 0
+        - address_hex: "01bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          alias: "bob"
+          balance: 49
+          nonce: 1
+          frozen: 0
+          energy: 50
+          flags: 0
+        - address_hex: "01cccccccccccccccccccccccccccccccccccccccc"
+          alias: "carol"
+          balance: 500
+          nonce: 0
+          frozen: 0
+          energy: 0
+          flags: 0
+      global:
+        total_supply: 1048
+        total_burned: 2
+        block_height: 101

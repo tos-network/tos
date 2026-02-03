@@ -1,0 +1,256 @@
+# Error Scenario Vectors: Validation Errors
+# Schema Version: 1.0
+# Generator: TOS Rust (template)
+# Generated: 2026-02-03
+
+schema_version: 1
+domain: "errors"
+generator: "TOS Rust v1.0.0 (template)"
+generated_at: "2026-02-03T00:00:00Z"
+
+test_vectors:
+  - name: "nonce_too_low"
+    description: "Transaction rejected due to already-used nonce"
+
+    pre_state:
+      accounts:
+        - address_hex: "01aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          alias: "alice"
+          balance: 1000
+          nonce: 5
+          frozen: 0
+          energy: 100
+          flags: 0
+      global:
+        total_supply: 1000
+        total_burned: 0
+        block_height: 100
+
+    transaction:
+      type: "Transfer"
+      type_id: 1
+      sender: "alice"
+      nonce: 4
+      fee: 1
+      timestamp: 1700000000000
+      payload:
+        recipient: "bob"
+        amount: 100
+
+    expected:
+      status: "rejected"
+      error_code: 0x0110
+      error_name: "NONCE_TOO_LOW"
+      fee_charged: false
+      nonce_advanced: false
+
+    post_state:
+      accounts:
+        - address_hex: "01aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          alias: "alice"
+          balance: 1000
+          nonce: 5
+          frozen: 0
+          energy: 100
+          flags: 0
+      global:
+        total_supply: 1000
+        total_burned: 0
+        block_height: 100
+
+  - name: "nonce_too_high"
+    description: "Transaction rejected due to nonce gap exceeding maximum"
+
+    pre_state:
+      accounts:
+        - address_hex: "01aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          alias: "alice"
+          balance: 1000
+          nonce: 5
+          frozen: 0
+          energy: 100
+          flags: 0
+      global:
+        total_supply: 1000
+        total_burned: 0
+        block_height: 100
+
+    transaction:
+      type: "Transfer"
+      type_id: 1
+      sender: "alice"
+      nonce: 100
+      fee: 1
+      timestamp: 1700000000000
+      payload:
+        recipient: "bob"
+        amount: 100
+
+    expected:
+      status: "rejected"
+      error_code: 0x0111
+      error_name: "NONCE_TOO_HIGH"
+      fee_charged: false
+      nonce_advanced: false
+
+    post_state:
+      accounts:
+        - address_hex: "01aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          alias: "alice"
+          balance: 1000
+          nonce: 5
+          frozen: 0
+          energy: 100
+          flags: 0
+      global:
+        total_supply: 1000
+        total_burned: 0
+        block_height: 100
+
+  - name: "invalid_amount_zero"
+    description: "Transaction rejected due to zero transfer amount"
+
+    pre_state:
+      accounts:
+        - address_hex: "01aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          alias: "alice"
+          balance: 1000
+          nonce: 0
+          frozen: 0
+          energy: 100
+          flags: 0
+      global:
+        total_supply: 1000
+        total_burned: 0
+        block_height: 100
+
+    transaction:
+      type: "Transfer"
+      type_id: 1
+      sender: "alice"
+      nonce: 0
+      fee: 1
+      timestamp: 1700000000000
+      payload:
+        recipient: "bob"
+        amount: 0
+
+    expected:
+      status: "rejected"
+      error_code: 0x0105
+      error_name: "INVALID_AMOUNT"
+      fee_charged: false
+      nonce_advanced: false
+
+    post_state:
+      accounts:
+        - address_hex: "01aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          alias: "alice"
+          balance: 1000
+          nonce: 0
+          frozen: 0
+          energy: 100
+          flags: 0
+      global:
+        total_supply: 1000
+        total_burned: 0
+        block_height: 100
+
+  - name: "invalid_address"
+    description: "Transaction rejected due to malformed recipient address"
+
+    pre_state:
+      accounts:
+        - address_hex: "01aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          alias: "alice"
+          balance: 1000
+          nonce: 0
+          frozen: 0
+          energy: 100
+          flags: 0
+      global:
+        total_supply: 1000
+        total_burned: 0
+        block_height: 100
+
+    transaction:
+      type: "Transfer"
+      type_id: 1
+      sender: "alice"
+      nonce: 0
+      fee: 1
+      timestamp: 1700000000000
+      payload:
+        recipient_hex: "ffbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        amount: 100
+
+    expected:
+      status: "rejected"
+      error_code: 0x0106
+      error_name: "INVALID_ADDRESS"
+      fee_charged: false
+      nonce_advanced: false
+
+    post_state:
+      accounts:
+        - address_hex: "01aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          alias: "alice"
+          balance: 1000
+          nonce: 0
+          frozen: 0
+          energy: 100
+          flags: 0
+      global:
+        total_supply: 1000
+        total_burned: 0
+        block_height: 100
+
+  - name: "invalid_signature"
+    description: "Transaction rejected due to invalid signature"
+
+    pre_state:
+      accounts:
+        - address_hex: "01aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          alias: "alice"
+          balance: 1000
+          nonce: 0
+          frozen: 0
+          energy: 100
+          flags: 0
+      global:
+        total_supply: 1000
+        total_burned: 0
+        block_height: 100
+
+    transaction:
+      type: "Transfer"
+      type_id: 1
+      sender: "alice"
+      nonce: 0
+      fee: 1
+      timestamp: 1700000000000
+      payload:
+        recipient: "bob"
+        amount: 100
+      signature_hex: "0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+
+    expected:
+      status: "rejected"
+      error_code: 0x0103
+      error_name: "INVALID_SIGNATURE"
+      fee_charged: false
+      nonce_advanced: false
+
+    post_state:
+      accounts:
+        - address_hex: "01aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          alias: "alice"
+          balance: 1000
+          nonce: 0
+          frozen: 0
+          energy: 100
+          flags: 0
+      global:
+        total_supply: 1000
+        total_burned: 0
+        block_height: 100

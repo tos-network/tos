@@ -98,12 +98,87 @@ tck/
 │   └── templates/
 ├── fuzz/                         # cargo-fuzz targets
 │   └── fuzz_targets/
-├── specs/                        # Conformance specifications (YAML)
-│   ├── syscalls/
-│   ├── consensus/
-│   └── api/
-└── benches/                      # Performance benchmarks
+├── specs/                        # Critical Path Specifications
+│   ├── wire-format.md            # Binary serialization rules
+│   ├── hash-algorithms.md        # Hash function assignments
+│   ├── blockdag-ordering.md      # DAG execution order
+│   ├── failed-tx-semantics.md    # Failure handling
+│   ├── nonce-rules.md            # Nonce validation
+│   ├── state-digest.md           # Canonical state format
+│   ├── error-codes.md            # Standardized errors
+│   ├── syscalls/                 # Syscall specs (YAML)
+│   ├── consensus/                # Consensus specs (YAML)
+│   └── api/                      # API specs (YAML)
+├── vectors/                      # Test Vectors (YAML)
+│   ├── crypto/                   # Cryptographic vectors
+│   ├── wire/                     # Wire format vectors
+│   ├── state/                    # State transition vectors
+│   ├── execution/                # Block execution vectors
+│   └── errors/                   # Error scenario vectors
+├── conformance/                  # Multi-Client Conformance Testing
+│   ├── docker-compose.yml        # Multi-client orchestration
+│   ├── harness/                  # Python test driver
+│   └── api/                      # Conformance API spec
+├── benches/                      # Performance benchmarks
+└── crypto/                       # Vector generators + legacy vectors
 ```
+
+---
+
+## Multi-Client Alignment
+
+The TCK includes infrastructure for ensuring alignment between multiple TOS implementations (TOS Rust, Avatar C, and future clients).
+
+### Three-Layer Framework
+
+```
++-----------------------------------------------------------+
+|             Layer 1: Critical Path Specifications          |
+|                    (tck/specs/*.md)                        |
+|  Wire Format | Hashing | BlockDAG Order | Error Codes     |
++-----------------------------------------------------------+
+                              |
+                              v
++-----------------------------------------------------------+
+|             Layer 2: Test Vector Infrastructure            |
+|                    (tck/vectors/)                          |
+|  Crypto Vectors | State Vectors | Execution Vectors       |
++-----------------------------------------------------------+
+                              |
+                              v
++-----------------------------------------------------------+
+|             Layer 3: Differential Testing                  |
+|                    (tck/conformance/)                      |
+|  Docker Harness | Result Comparison | Fuzzing             |
++-----------------------------------------------------------+
+```
+
+### Quick Start
+
+```bash
+# Run conformance tests (requires Docker)
+cd tck/conformance
+docker-compose up
+
+# Generate test vectors
+cd tck/crypto
+cargo run --release --bin gen_sha256_vectors
+
+# Run fuzz tests
+cd tck/fuzz
+cargo fuzz run fuzz_transaction
+```
+
+### Key Documentation
+
+| Document | Purpose |
+|----------|---------|
+| `MULTI_CLIENT_ALIGNMENT.md` | Methodology overview |
+| `MULTI_CLIENT_ALIGNMENT_SCHEME.md` | Technical specifications |
+| `tck/specs/*.md` | Critical path specifications |
+| `tck/vectors/README.md` | Test vector guide |
+| `tck/conformance/README.md` | Conformance testing guide |
+| `tck/fuzz/README.md` | Fuzzing guide |
 
 ---
 

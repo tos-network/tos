@@ -1,0 +1,248 @@
+# Error Scenario Vectors: Resource Errors
+# Schema Version: 1.0
+# Generator: TOS Rust (template)
+# Generated: 2026-02-03
+
+schema_version: 1
+domain: "errors"
+generator: "TOS Rust v1.0.0 (template)"
+generated_at: "2026-02-03T00:00:00Z"
+
+test_vectors:
+  - name: "insufficient_balance_transfer"
+    description: "Transfer fails due to insufficient balance"
+
+    pre_state:
+      accounts:
+        - address_hex: "01aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          alias: "alice"
+          balance: 50
+          nonce: 0
+          frozen: 0
+          energy: 100
+          flags: 0
+        - address_hex: "01bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          alias: "bob"
+          balance: 0
+          nonce: 0
+          frozen: 0
+          energy: 0
+          flags: 0
+      global:
+        total_supply: 50
+        total_burned: 0
+        block_height: 100
+
+    transaction:
+      type: "Transfer"
+      type_id: 1
+      sender: "alice"
+      nonce: 0
+      fee: 1
+      timestamp: 1700000000000
+      payload:
+        recipient: "bob"
+        amount: 100
+
+    expected:
+      status: "failure"
+      error_code: 0x0300
+      error_name: "INSUFFICIENT_BALANCE"
+      fee_charged: true
+      nonce_advanced: true
+
+    post_state:
+      accounts:
+        - address_hex: "01aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          alias: "alice"
+          balance: 49
+          nonce: 1
+          frozen: 0
+          energy: 100
+          flags: 0
+        - address_hex: "01bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          alias: "bob"
+          balance: 0
+          nonce: 0
+          frozen: 0
+          energy: 0
+          flags: 0
+      global:
+        total_supply: 49
+        total_burned: 1
+        block_height: 100
+
+  - name: "insufficient_fee"
+    description: "Transaction rejected due to insufficient fee balance"
+
+    pre_state:
+      accounts:
+        - address_hex: "01aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          alias: "alice"
+          balance: 0
+          nonce: 0
+          frozen: 0
+          energy: 100
+          flags: 0
+      global:
+        total_supply: 0
+        total_burned: 0
+        block_height: 100
+
+    transaction:
+      type: "Transfer"
+      type_id: 1
+      sender: "alice"
+      nonce: 0
+      fee: 1
+      timestamp: 1700000000000
+      payload:
+        recipient: "bob"
+        amount: 0
+
+    expected:
+      status: "rejected"
+      error_code: 0x0301
+      error_name: "INSUFFICIENT_FEE"
+      fee_charged: false
+      nonce_advanced: false
+
+    post_state:
+      accounts:
+        - address_hex: "01aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          alias: "alice"
+          balance: 0
+          nonce: 0
+          frozen: 0
+          energy: 100
+          flags: 0
+      global:
+        total_supply: 0
+        total_burned: 0
+        block_height: 100
+
+  - name: "insufficient_energy_delegate"
+    description: "Delegation fails due to insufficient energy"
+
+    pre_state:
+      accounts:
+        - address_hex: "01aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          alias: "alice"
+          balance: 1000
+          nonce: 0
+          frozen: 100
+          energy: 50
+          flags: 0
+        - address_hex: "01bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          alias: "bob"
+          balance: 0
+          nonce: 0
+          frozen: 0
+          energy: 0
+          flags: 0
+      global:
+        total_supply: 1000
+        total_burned: 0
+        block_height: 100
+
+    transaction:
+      type: "Delegate"
+      type_id: 7
+      sender: "alice"
+      nonce: 0
+      fee: 1
+      timestamp: 1700000000000
+      payload:
+        recipient: "bob"
+        amount: 200
+
+    expected:
+      status: "failure"
+      error_code: 0x0303
+      error_name: "INSUFFICIENT_FROZEN"
+      fee_charged: true
+      nonce_advanced: true
+
+    post_state:
+      accounts:
+        - address_hex: "01aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          alias: "alice"
+          balance: 999
+          nonce: 1
+          frozen: 100
+          energy: 50
+          flags: 0
+        - address_hex: "01bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          alias: "bob"
+          balance: 0
+          nonce: 0
+          frozen: 0
+          energy: 0
+          flags: 0
+      global:
+        total_supply: 999
+        total_burned: 1
+        block_height: 100
+
+  - name: "arithmetic_overflow"
+    description: "Operation would cause arithmetic overflow"
+
+    pre_state:
+      accounts:
+        - address_hex: "01aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          alias: "alice"
+          balance: 1000
+          nonce: 0
+          frozen: 0
+          energy: 100
+          flags: 0
+        - address_hex: "01bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          alias: "bob"
+          balance: 18446744073709551615
+          nonce: 0
+          frozen: 0
+          energy: 0
+          flags: 0
+      global:
+        total_supply: 18446744073709551615
+        total_burned: 0
+        block_height: 100
+
+    transaction:
+      type: "Transfer"
+      type_id: 1
+      sender: "alice"
+      nonce: 0
+      fee: 1
+      timestamp: 1700000000000
+      payload:
+        recipient: "bob"
+        amount: 100
+
+    expected:
+      status: "failure"
+      error_code: 0x0304
+      error_name: "OVERFLOW"
+      fee_charged: true
+      nonce_advanced: true
+
+    post_state:
+      accounts:
+        - address_hex: "01aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          alias: "alice"
+          balance: 999
+          nonce: 1
+          frozen: 0
+          energy: 100
+          flags: 0
+        - address_hex: "01bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          alias: "bob"
+          balance: 18446744073709551615
+          nonce: 0
+          frozen: 0
+          energy: 0
+          flags: 0
+      global:
+        total_supply: 18446744073709551614
+        total_burned: 1
+        block_height: 100
