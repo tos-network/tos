@@ -1363,7 +1363,8 @@ tck/
 │       └── ...
 │
 ├── generators/                      # Rust Vector Generators
-│   ├── crypto/                      # Cryptographic vector generators (existing)
+│   ├── crypto/                      # Cryptographic vector generators (moved)
+│   │   ├── /Users/tomisetsu/tos-spec/rust_generators/crypto/
 │   │   ├── gen_sha256_vectors.rs
 │   │   ├── gen_blake3_vectors.rs
 │   │   └── ...

@@ -160,8 +160,8 @@ The TCK includes infrastructure for ensuring alignment between multiple TOS impl
 cd tck/conformance
 docker-compose up
 
-# Generate test vectors
-cd tck/crypto
+# Generate test vectors (Rust generators moved)
+cd /Users/tomisetsu/tos-spec/rust_generators/crypto
 cargo run --release --bin gen_sha256_vectors
 
 # Run fuzz tests
