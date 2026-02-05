@@ -130,7 +130,7 @@ struct AccountEntry {
 }
 
 fn default_accounts_path() -> Option<PathBuf> {
-    if let Ok(path) = std::env::var("LAB_ACCOUNTS_PATH") {
+    if let Ok(path) = std::env::var("LABU_ACCOUNTS_PATH") {
         return Some(PathBuf::from(path));
     }
     let cwd = std::env::current_dir().ok()?;
@@ -868,8 +868,8 @@ async fn build_export(engine: &Engine) -> PreState {
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    let state_dir = std::env::var("LAB_STATE_DIR").unwrap_or_else(|_| "/state".to_string());
-    let network = std::env::var("LAB_NETWORK").unwrap_or_else(|_| "dev".to_string());
+    let state_dir = std::env::var("LABU_STATE_DIR").unwrap_or_else(|_| "/state".to_string());
+    let network = std::env::var("LABU_NETWORK").unwrap_or_else(|_| "dev".to_string());
     let network: Network = network.parse().unwrap_or(Network::Devnet);
 
     let base_dir = PathBuf::from(state_dir);
