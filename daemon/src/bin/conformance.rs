@@ -414,6 +414,12 @@ async fn handle_state_load(state: web::Data<AppState>, body: web::Json<PreState>
         }
 
         for (key, acc) in &loaded_accounts {
+            if acc.frozen > 0 {
+                return HttpResponse::BadRequest().json(json!({
+                    "success": false,
+                    "error": "frozen_tos is not supported in conformance state/load (genesis semantics require frozen_tos = 0)"
+                }));
+            }
             if let Err(err) = storage
                 .set_account_registration_topoheight(key, topoheight)
                 .await
@@ -434,15 +440,12 @@ async fn handle_state_load(state: web::Data<AppState>, body: web::Json<PreState>
                 return HttpResponse::InternalServerError()
                     .json(json!({ "success": false, "error": err.to_string() }));
             }
-            if acc.energy > 0 || acc.frozen > 0 {
-                let mut energy = EnergyResource::new();
-                energy.energy = acc.energy;
-                energy.frozen_tos = acc.frozen;
-                energy.last_update = topoheight;
-                if let Err(err) = storage.set_energy_resource(&key, topoheight, &energy).await {
-                    return HttpResponse::InternalServerError()
-                        .json(json!({ "success": false, "error": err.to_string() }));
-                }
+            let mut energy = EnergyResource::new();
+            energy.energy = acc.energy;
+            energy.last_update = topoheight;
+            if let Err(err) = storage.set_energy_resource(&key, topoheight, &energy).await {
+                return HttpResponse::InternalServerError()
+                    .json(json!({ "success": false, "error": err.to_string() }));
             }
         }
 
@@ -457,6 +460,11 @@ async fn handle_state_load(state: web::Data<AppState>, body: web::Json<PreState>
         let miner_balance = VersionedBalance::new(0, None);
         let _ = storage
             .set_last_balance_to(&miner_key, &TOS_ASSET, topoheight, &miner_balance)
+            .await;
+        let mut miner_energy = EnergyResource::new();
+        miner_energy.last_update = topoheight;
+        let _ = storage
+            .set_energy_resource(&miner_key, topoheight, &miner_energy)
             .await;
     }
     if let Err(err) = engine.blockchain.reload_from_disk().await {
