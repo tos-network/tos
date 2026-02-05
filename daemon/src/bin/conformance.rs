@@ -122,6 +122,7 @@ struct AccountsFile {
     accounts: Vec<AccountEntry>,
 }
 
+#[allow(dead_code)]
 #[derive(Deserialize)]
 struct AccountEntry {
     name: String,
