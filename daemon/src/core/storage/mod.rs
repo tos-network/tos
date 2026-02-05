@@ -62,6 +62,7 @@ pub trait Storage:
     + NftStorageProvider
     + UnoBalanceProvider
     + TnsProvider
+    + GenesisStateHashProvider
     + Sync
     + Send
     + 'static

@@ -418,6 +418,76 @@ impl<S: Storage> Blockchain<S> {
                 )
                 .await?;
         } else if !config.recovery_mode {
+            // Verify genesis state hash on restart if genesis_state is configured
+            if let Some(ref genesis_state_path) = config.genesis_state {
+                let storage = blockchain.get_storage().read().await;
+
+                // Get the stored genesis state hash
+                if let Some(stored_hash) = storage.get_genesis_state_hash().await? {
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("Verifying genesis state hash on restart");
+                    }
+
+                    // Load and compute state hash from the genesis state file
+                    let path = Path::new(genesis_state_path);
+                    let state = genesis::load_genesis_state(path).map_err(|e| {
+                        if log::log_enabled!(log::Level::Error) {
+                            error!("Failed to load genesis state for verification: {}", e);
+                        }
+                        BlockchainError::InvalidGenesisBlock
+                    })?;
+
+                    let (computed_hash, _) =
+                        genesis::validate_genesis_state(&state).map_err(|e| {
+                            if log::log_enabled!(log::Level::Error) {
+                                error!("Genesis state validation failed on restart: {}", e);
+                            }
+                            BlockchainError::InvalidGenesisBlock
+                        })?;
+
+                    // Verify computed hash matches stored hash
+                    if computed_hash != stored_hash {
+                        if log::log_enabled!(log::Level::Error) {
+                            error!(
+                                "Genesis state hash mismatch on restart! Stored: {}, Computed: {}",
+                                stored_hash, computed_hash
+                            );
+                        }
+                        return Err(BlockchainError::StoredGenesisHashMismatch.into());
+                    }
+
+                    // Also verify genesis block's extra_nonce matches stored hash
+                    let genesis_hash = storage.get_hash_at_topo_height(0).await?;
+                    let genesis_block = storage.get_block_header_by_hash(&genesis_hash).await?;
+                    let block_extra_nonce = genesis_block.get_extra_nonce();
+
+                    if block_extra_nonce != stored_hash.as_bytes() {
+                        if log::log_enabled!(log::Level::Error) {
+                            error!(
+                                "Genesis block extra_nonce does not match stored state hash! Block: {:?}, Stored: {}",
+                                hex::encode(block_extra_nonce),
+                                stored_hash
+                            );
+                        }
+                        return Err(BlockchainError::StoredGenesisHashMismatch.into());
+                    }
+
+                    if log::log_enabled!(log::Level::Info) {
+                        info!("Genesis state hash verified on restart: {}", stored_hash);
+                    }
+                } else {
+                    // genesis_state is configured but no stored hash found
+                    // This could happen if upgrading from an older version without genesis state
+                    if log::log_enabled!(log::Level::Warn) {
+                        warn!(
+                            "Genesis state path configured but no stored hash found. \
+                            This may indicate a mismatch between config and database."
+                        );
+                    }
+                }
+                drop(storage);
+            }
+
             if log::log_enabled!(log::Level::Debug) {
                 debug!("Retrieving tips for computing current difficulty");
             }
@@ -1072,8 +1142,19 @@ impl<S: Storage> Blockchain<S> {
                             e
                         })?;
 
+                    // Store the genesis state hash in the database for verification on restart
+                    storage
+                        .set_genesis_state_hash(&state_hash)
+                        .await
+                        .map_err(|e| {
+                            if log::log_enabled!(log::Level::Error) {
+                                error!("Failed to store genesis state hash: {}", e);
+                            }
+                            e
+                        })?;
+
                     if log::log_enabled!(log::Level::Info) {
-                        info!("Genesis state applied. State hash: {}", state_hash);
+                        info!("Genesis state applied and hash stored: {}", state_hash);
                     }
 
                     // Return state hash, timestamp and miner from genesis config
@@ -1138,6 +1219,25 @@ impl<S: Storage> Blockchain<S> {
 
             if *genesis_block.get_miner() != genesis_miner {
                 return Err(BlockchainError::GenesisBlockMiner);
+            }
+
+            // Verify pre-baked genesis block's extra_nonce matches computed state hash
+            // This ensures the genesis block was generated for this specific genesis state
+            if genesis_state_path.is_some() {
+                let block_extra_nonce = genesis_block.get_extra_nonce();
+                if *block_extra_nonce != extra_nonce {
+                    if log::log_enabled!(log::Level::Error) {
+                        error!(
+                            "Genesis block extra_nonce mismatch! Block has {:?}, but computed state hash is {:?}",
+                            hex::encode(block_extra_nonce),
+                            hex::encode(extra_nonce)
+                        );
+                    }
+                    return Err(BlockchainError::GenesisStateHashMismatch);
+                }
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!("Genesis block extra_nonce matches computed state hash");
+                }
             }
 
             if let Some(expected_hash) = get_genesis_block_hash(&self.network) {
