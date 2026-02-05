@@ -410,9 +410,8 @@ async fn handle_state_load(state: web::Data<AppState>, body: web::Json<PreState>
 
     let mut engine = state.engine.lock().await;
     let topoheight = 0u64;
-    {
+    let pending_meta = {
         let mut storage = engine.blockchain.get_storage().write().await;
-
         if !storage.has_asset(&TOS_ASSET).await.unwrap_or(false) {
             let _ = storage
                 .add_asset(
@@ -450,7 +449,7 @@ async fn handle_state_load(state: web::Data<AppState>, body: web::Json<PreState>
                 .await;
         }
 
-        if let Ok(path) = std::env::var("LABU_GENESIS_STATE_PATH") {
+        let pending_meta = if let Ok(path) = std::env::var("LABU_GENESIS_STATE_PATH") {
             let path = PathBuf::from(path);
             let genesis = match load_genesis_state(&path) {
                 Ok(state) => state,
@@ -482,23 +481,26 @@ async fn handle_state_load(state: web::Data<AppState>, body: web::Json<PreState>
                     }));
                 }
             };
-            engine.meta = match build_meta_from_genesis(
-                engine.network,
-                chain_id,
-                validated.genesis_timestamp_ms,
-                &validated.parsed_alloc,
-            ) {
-                Ok(meta) => meta,
-                Err(err) => {
-                    return HttpResponse::InternalServerError()
-                        .json(json!({ "success": false, "error": err }));
-                }
-            };
+            Some(
+                match build_meta_from_genesis(
+                    engine.network,
+                    chain_id,
+                    validated.genesis_timestamp_ms,
+                    &validated.parsed_alloc,
+                ) {
+                    Ok(meta) => meta,
+                    Err(err) => {
+                        return HttpResponse::InternalServerError()
+                            .json(json!({ "success": false, "error": err }));
+                    }
+                },
+            )
         } else {
             let pre_state = body.into_inner();
-            engine.meta.network_chain_id = pre_state.network_chain_id;
-            engine.meta.global_state = pre_state.global_state.clone();
-            engine.meta.account_meta = pre_state
+            let mut meta = MetaState::default();
+            meta.network_chain_id = pre_state.network_chain_id;
+            meta.global_state = pre_state.global_state.clone();
+            meta.account_meta = pre_state
                 .accounts
                 .iter()
                 .map(|acc| (acc.address.clone(), acc.clone()))
@@ -551,7 +553,8 @@ async fn handle_state_load(state: web::Data<AppState>, body: web::Json<PreState>
                         .json(json!({ "success": false, "error": err.to_string() }));
                 }
             }
-        }
+            Some(meta)
+        };
 
         let miner_key = miner_public_key();
         let _ = storage
@@ -570,6 +573,10 @@ async fn handle_state_load(state: web::Data<AppState>, body: web::Json<PreState>
         let _ = storage
             .set_energy_resource(&miner_key, topoheight, &miner_energy)
             .await;
+        pending_meta
+    };
+    if let Some(meta) = pending_meta {
+        engine.meta = meta;
     }
     if let Err(err) = engine.blockchain.reload_from_disk().await {
         return HttpResponse::InternalServerError()
