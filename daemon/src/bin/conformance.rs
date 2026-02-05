@@ -9,9 +9,10 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use tos_common::account::{EnergyResource, VersionedBalance, VersionedNonce};
+use tos_common::asset::{AssetData, VersionedAssetData};
 use tos_common::block::Block;
-use tos_common::config::TOS_ASSET;
-use tos_common::crypto::{hash as blake3_hash, Hash, PublicKey, Signature};
+use tos_common::config::{COIN_DECIMALS, MAXIMUM_SUPPLY, TOS_ASSET, UNO_ASSET};
+use tos_common::crypto::{hash as blake3_hash, Hash, Hashable, PublicKey, Signature};
 use tos_common::network::Network;
 use tos_common::serializer::Serializer;
 use tos_common::transaction::{
@@ -24,8 +25,12 @@ use tos_daemon::core::blockchain::Blockchain;
 use tos_daemon::core::blockchain::BroadcastOption;
 use tos_daemon::core::config::Config;
 use tos_daemon::core::error::BlockchainError;
+use tos_daemon::core::state::ApplicableChainState;
 use tos_daemon::core::storage::rocksdb::RocksStorage;
-use tos_daemon::core::storage::{AccountProvider, BalanceProvider, EnergyProvider, NonceProvider};
+use tos_daemon::core::storage::{
+    AccountProvider, AssetProvider, BalanceProvider, EnergyProvider, NonceProvider,
+};
+use tos_daemon::vrf::WrappedMinerSecret;
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 struct GlobalState {
@@ -111,6 +116,62 @@ struct ExecResult {
     state_digest: String,
 }
 
+#[derive(Deserialize)]
+struct AccountsFile {
+    accounts: Vec<AccountEntry>,
+}
+
+#[derive(Deserialize)]
+struct AccountEntry {
+    name: String,
+    private_key: String,
+    public_key: String,
+    address: String,
+}
+
+fn default_accounts_path() -> Option<PathBuf> {
+    if let Ok(path) = std::env::var("LAB_ACCOUNTS_PATH") {
+        return Some(PathBuf::from(path));
+    }
+    let cwd = std::env::current_dir().ok()?;
+    let candidate = cwd.join("../tos-spec/vectors/accounts.json");
+    if candidate.exists() {
+        return Some(candidate);
+    }
+    None
+}
+
+fn load_accounts() -> Vec<AccountEntry> {
+    let Some(path) = default_accounts_path() else {
+        return Vec::new();
+    };
+    let Ok(raw) = fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    serde_json::from_str::<AccountsFile>(&raw)
+        .map(|f| f.accounts)
+        .unwrap_or_default()
+}
+
+fn miner_private_key_hex() -> String {
+    if let Ok(value) = std::env::var("MINER_PRIVATE_KEY") {
+        return value;
+    }
+    for acc in load_accounts() {
+        if acc.name == "Miner" && !acc.private_key.is_empty() {
+            return acc.private_key;
+        }
+    }
+    "0100000000000000000000000000000000000000000000000000000000000000".to_string()
+}
+
+fn miner_public_key() -> PublicKey {
+    let miner_secret = miner_private_key_hex();
+    WrappedMinerSecret::from_str(&miner_secret)
+        .map(|k| k.keypair().get_public_key().compress())
+        .unwrap_or_else(|_| KeyPair::new().get_public_key().compress())
+}
+
 fn ensure_trailing_slash(mut path: String) -> String {
     if !path.ends_with('/') {
         path.push('/');
@@ -193,6 +254,38 @@ fn map_error_code(err: &BlockchainError) -> u16 {
         BlockchainError::InvalidTxInBlock(_) => 0x0107,
         BlockchainError::InvalidTransactionExtraData => 0x0107,
         BlockchainError::InvalidTransferExtraData => 0x0107,
+        BlockchainError::Any(err) => {
+            let msg = err.to_string();
+            if msg.contains("Insufficient funds") {
+                0x0400
+            } else if msg.contains("Invalid chain ID") {
+                0x0102
+            } else {
+                0xFFFF
+            }
+        }
+        _ => 0xFFFF,
+    }
+}
+
+fn map_verify_error_code(
+    err: &tos_common::transaction::verify::VerificationError<BlockchainError>,
+) -> u16 {
+    use tos_common::transaction::verify::VerificationError as VE;
+    match err {
+        VE::State(inner) => map_error_code(inner),
+        VE::InvalidNonce(_, got, expected) => {
+            if got > expected {
+                0x0111
+            } else {
+                0x0110
+            }
+        }
+        VE::InvalidSignature => 0x0103,
+        VE::InvalidChainId { .. } => 0x0102,
+        VE::InvalidFee(_, _) => 0x0301,
+        VE::InsufficientFunds { .. } => 0x0400,
+        VE::TransferExtraDataSize | VE::TransactionExtraDataSize | VE::InvalidFormat => 0x0100,
         _ => 0xFFFF,
     }
 }
@@ -215,6 +308,8 @@ async fn create_blockchain(
     });
     let mut config: Config = serde_json::from_value(cfg_value)?;
     config.skip_pow_verification = true;
+    let miner_key = miner_private_key_hex();
+    config.vrf.miner_private_key = WrappedMinerSecret::from_str(&miner_key).ok();
 
     let run_dir = base_dir.join(format!("run{}", reset_nonce));
     fs::create_dir_all(&run_dir)?;
@@ -268,6 +363,45 @@ async fn handle_state_load(state: web::Data<AppState>, body: web::Json<PreState>
     let topoheight = 0u64;
     {
         let mut storage = engine.blockchain.get_storage().write().await;
+
+        if !storage.has_asset(&TOS_ASSET).await.unwrap_or(false) {
+            let _ = storage
+                .add_asset(
+                    &TOS_ASSET,
+                    0,
+                    VersionedAssetData::new(
+                        AssetData::new(
+                            COIN_DECIMALS,
+                            "TOS".to_owned(),
+                            "TOS".to_owned(),
+                            Some(MAXIMUM_SUPPLY),
+                            None,
+                        ),
+                        None,
+                    ),
+                )
+                .await;
+        }
+        if !storage.has_asset(&UNO_ASSET).await.unwrap_or(false) {
+            let _ = storage
+                .add_asset(
+                    &UNO_ASSET,
+                    1,
+                    VersionedAssetData::new(
+                        AssetData::new(
+                            COIN_DECIMALS,
+                            "UNO".to_owned(),
+                            "UNO".to_owned(),
+                            None,
+                            None,
+                        ),
+                        None,
+                    ),
+                )
+                .await;
+        }
+
+        let mut loaded_accounts = Vec::with_capacity(pre_state.accounts.len());
         for acc in &pre_state.accounts {
             let key = match to_public_key(&acc.address) {
                 Ok(key) => key,
@@ -276,14 +410,25 @@ async fn handle_state_load(state: web::Data<AppState>, body: web::Json<PreState>
                         .json(json!({ "success": false, "error": err }));
                 }
             };
+            loaded_accounts.push((key, acc.clone()));
+        }
+
+        for (key, acc) in &loaded_accounts {
+            if let Err(err) = storage
+                .set_account_registration_topoheight(key, topoheight)
+                .await
+            {
+                return HttpResponse::InternalServerError()
+                    .json(json!({ "success": false, "error": err.to_string() }));
+            }
             let nonce = VersionedNonce::new(acc.nonce, None);
-            if let Err(err) = storage.set_last_nonce_to(&key, topoheight, &nonce).await {
+            if let Err(err) = storage.set_last_nonce_to(key, topoheight, &nonce).await {
                 return HttpResponse::InternalServerError()
                     .json(json!({ "success": false, "error": err.to_string() }));
             }
             let balance = VersionedBalance::new(acc.balance, None);
             if let Err(err) = storage
-                .set_last_balance_to(&key, &TOS_ASSET, topoheight, &balance)
+                .set_last_balance_to(key, &TOS_ASSET, topoheight, &balance)
                 .await
             {
                 return HttpResponse::InternalServerError()
@@ -300,6 +445,23 @@ async fn handle_state_load(state: web::Data<AppState>, body: web::Json<PreState>
                 }
             }
         }
+
+        let miner_key = miner_public_key();
+        let _ = storage
+            .set_account_registration_topoheight(&miner_key, topoheight)
+            .await;
+        let miner_nonce = VersionedNonce::new(0, None);
+        let _ = storage
+            .set_last_nonce_to(&miner_key, topoheight, &miner_nonce)
+            .await;
+        let miner_balance = VersionedBalance::new(0, None);
+        let _ = storage
+            .set_last_balance_to(&miner_key, &TOS_ASSET, topoheight, &miner_balance)
+            .await;
+    }
+    if let Err(err) = engine.blockchain.reload_from_disk().await {
+        return HttpResponse::InternalServerError()
+            .json(json!({ "success": false, "error": err.to_string() }));
     }
 
     let export = build_export(&engine).await;
@@ -352,8 +514,34 @@ async fn handle_tx_execute(
         );
     };
 
-    let engine = state.engine.lock().await;
+    let tx_hash = tx.hash();
+    let tx_for_apply = tx.clone();
+
+    let mut engine = state.engine.lock().await;
+    if let TransactionType::Transfers(payloads) = tx_for_apply.get_data() {
+        let source_addr = public_key_to_hex(tx_for_apply.get_source());
+        engine
+            .meta
+            .account_meta
+            .entry(source_addr.clone())
+            .or_insert_with(|| AccountState {
+                address: source_addr,
+                ..AccountState::default()
+            });
+        for payload in payloads {
+            let dest_addr = public_key_to_hex(payload.get_destination());
+            engine
+                .meta
+                .account_meta
+                .entry(dest_addr.clone())
+                .or_insert_with(|| AccountState {
+                    address: dest_addr,
+                    ..AccountState::default()
+                });
+        }
+    }
     if let Err(err) = engine.blockchain.add_tx_to_mempool(tx, false).await {
+        eprintln!("conformance tx_execute add_tx_to_mempool error: {err}");
         let code = map_error_code(&err);
         return HttpResponse::Ok().json(ExecResult {
             success: false,
@@ -362,7 +550,7 @@ async fn handle_tx_execute(
         });
     }
 
-    let miner_key = KeyPair::new().get_public_key().compress();
+    let miner_key = miner_public_key();
     let header = {
         let storage = engine.blockchain.get_storage().read().await;
         match engine
@@ -372,6 +560,7 @@ async fn handle_tx_execute(
         {
             Ok(header) => header,
             Err(err) => {
+                eprintln!("conformance tx_execute get_block_template error: {err}");
                 let code = map_error_code(&err);
                 return HttpResponse::Ok().json(ExecResult {
                     success: false,
@@ -389,6 +578,7 @@ async fn handle_tx_execute(
     {
         Ok(block) => block,
         Err(err) => {
+            eprintln!("conformance tx_execute build_block_from_header error: {err}");
             let code = map_error_code(&err);
             return HttpResponse::Ok().json(ExecResult {
                 success: false,
@@ -398,17 +588,45 @@ async fn handle_tx_execute(
         }
     };
 
-    if let Err(err) = engine
-        .blockchain
-        .add_new_block(block, None, BroadcastOption::None, true)
-        .await
+    let block_hash = block.hash();
+    let stable_topoheight = engine.blockchain.get_stable_topoheight().await;
+    let current_topoheight = engine.blockchain.get_topo_height();
+    let next_topoheight = current_topoheight.saturating_add(1);
     {
-        let code = map_error_code(&err);
-        return HttpResponse::Ok().json(ExecResult {
-            success: false,
-            error_code: code,
-            state_digest: String::new(),
-        });
+        let mut storage = engine.blockchain.get_storage().write().await;
+        let mut chain_state = ApplicableChainState::new(
+            &mut *storage,
+            engine.blockchain.get_contract_environment(),
+            stable_topoheight,
+            next_topoheight,
+            block.get_version(),
+            0,
+            &block_hash,
+            &block,
+            engine.blockchain.get_executor(),
+        );
+
+        let tx_arc = Arc::new(tx_for_apply);
+        if let Err(err) = tx_arc
+            .apply_with_partial_verify(&tx_hash, &mut chain_state)
+            .await
+        {
+            let code = map_verify_error_code(&err);
+            return HttpResponse::Ok().json(ExecResult {
+                success: false,
+                error_code: code,
+                state_digest: String::new(),
+            });
+        }
+
+        if let Err(err) = chain_state.apply_changes().await {
+            let code = map_error_code(&err);
+            return HttpResponse::Ok().json(ExecResult {
+                success: false,
+                error_code: code,
+                state_digest: String::new(),
+            });
+        }
     }
 
     let export = build_export(&engine).await;
@@ -580,7 +798,33 @@ async fn handle_block_execute(
 async fn build_export(engine: &Engine) -> PreState {
     let mut accounts = Vec::new();
     let storage = engine.blockchain.get_storage().read().await;
-    if let Ok(iter) = storage.get_registered_keys(None, None).await {
+    if !engine.meta.account_meta.is_empty() {
+        for (addr, meta) in &engine.meta.account_meta {
+            let key = match to_public_key(addr) {
+                Ok(key) => key,
+                Err(_) => continue,
+            };
+            let balance = storage
+                .get_last_balance(&key, &TOS_ASSET)
+                .await
+                .map(|(_, v)| v.get_balance())
+                .unwrap_or(0);
+            let nonce = storage
+                .get_last_nonce(&key)
+                .await
+                .map(|(_, v)| v.get_nonce())
+                .unwrap_or(0);
+            accounts.push(AccountState {
+                address: addr.clone(),
+                balance,
+                nonce,
+                frozen: meta.frozen,
+                energy: meta.energy,
+                flags: meta.flags,
+                data: meta.data.clone(),
+            });
+        }
+    } else if let Ok(iter) = storage.get_registered_keys(None, None).await {
         for entry in iter {
             let key = match entry {
                 Ok(key) => key,
