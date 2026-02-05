@@ -275,14 +275,6 @@ pub enum BlockchainError {
     GenesisBlockMiner,
     #[error("Invalid genesis block")]
     InvalidGenesisBlock,
-    #[error("Genesis state hash mismatch: block extra_nonce does not match computed state hash")]
-    GenesisStateHashMismatch,
-    #[error("Genesis block timestamp mismatch: block timestamp does not match genesis config")]
-    GenesisBlockTimestampMismatch,
-    #[error(
-        "Stored genesis state hash mismatch: database hash does not match computed/block hash"
-    )]
-    StoredGenesisHashMismatch,
     #[error("Not enough blocks")]
     NotEnoughBlocks,
     #[error("Unknown data store error")]

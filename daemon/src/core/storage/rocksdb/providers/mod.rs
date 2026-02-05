@@ -18,7 +18,6 @@ mod dag_order;
 mod difficulty;
 mod energy;
 mod escrow;
-mod genesis_state_hash;
 mod kyc;
 mod merkle;
 mod multisig;
