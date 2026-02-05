@@ -79,6 +79,7 @@ struct MetaState {
 struct Engine {
     base_dir: PathBuf,
     network: Network,
+    reset_nonce: u64,
     blockchain: Arc<Blockchain<RocksStorage>>,
     meta: MetaState,
 }
@@ -199,6 +200,7 @@ fn map_error_code(err: &BlockchainError) -> u16 {
 async fn create_blockchain(
     base_dir: &PathBuf,
     network: Network,
+    reset_nonce: u64,
 ) -> anyhow::Result<Arc<Blockchain<RocksStorage>>> {
     let cfg_value = json!({
         "rpc": {
@@ -213,7 +215,11 @@ async fn create_blockchain(
     });
     let mut config: Config = serde_json::from_value(cfg_value)?;
     config.skip_pow_verification = true;
-    config.dir_path = Some(ensure_trailing_slash(base_dir.display().to_string()));
+
+    let run_dir = base_dir.join(format!("run{}", reset_nonce));
+    fs::create_dir_all(&run_dir)?;
+    config.dir_path = Some(ensure_trailing_slash(run_dir.display().to_string()));
+
     let storage = RocksStorage::new(config.dir_path.as_ref().unwrap(), network, &config.rocksdb);
     let blockchain = Blockchain::new(config, network, storage).await?;
     Ok(blockchain)
@@ -221,11 +227,12 @@ async fn create_blockchain(
 
 async fn reset_engine(state: &AppState) -> anyhow::Result<()> {
     let mut engine = state.engine.lock().await;
-    if engine.base_dir.exists() {
-        fs::remove_dir_all(&engine.base_dir)?;
+    if !engine.base_dir.exists() {
+        fs::create_dir_all(&engine.base_dir)?;
     }
-    fs::create_dir_all(&engine.base_dir)?;
-    engine.blockchain = create_blockchain(&engine.base_dir, engine.network).await?;
+    engine.reset_nonce = engine.reset_nonce.wrapping_add(1);
+    engine.blockchain =
+        create_blockchain(&engine.base_dir, engine.network, engine.reset_nonce).await?;
     engine.meta = MetaState::default();
     Ok(())
 }
@@ -626,13 +633,14 @@ async fn main() -> std::io::Result<()> {
         fs::create_dir_all(&base_dir)?;
     }
 
-    let blockchain = create_blockchain(&base_dir, network)
+    let blockchain = create_blockchain(&base_dir, network, 0)
         .await
         .expect("init blockchain");
 
     let engine = Engine {
         base_dir,
         network,
+        reset_nonce: 0,
         blockchain,
         meta: MetaState::default(),
     };
