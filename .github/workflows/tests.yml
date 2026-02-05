@@ -149,13 +149,6 @@ jobs:
           echo "=========================================="
           cargo test --workspace --tests --release --no-fail-fast
 
-      - name: Run TCK integration tests in Release mode
-        run: |
-          echo "=========================================="
-          echo "Running TCK Integration Tests"
-          echo "=========================================="
-          cargo test --package tos-tck --tests --release --no-fail-fast
-
   # Security tests (must run in Release mode for realistic attack scenarios)
   security-tests:
     name: Security Tests (Release Mode)
