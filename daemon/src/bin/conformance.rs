@@ -25,6 +25,7 @@ use tos_daemon::core::blockchain::Blockchain;
 use tos_daemon::core::blockchain::BroadcastOption;
 use tos_daemon::core::config::Config;
 use tos_daemon::core::error::BlockchainError;
+use tos_daemon::core::genesis::{apply_genesis_state, load_genesis_state, validate_genesis_state};
 use tos_daemon::core::state::ApplicableChainState;
 use tos_daemon::core::storage::rocksdb::RocksStorage;
 use tos_daemon::core::storage::{
@@ -121,6 +122,7 @@ struct AccountsFile {
     accounts: Vec<AccountEntry>,
 }
 
+#[allow(dead_code)]
 #[derive(Deserialize)]
 struct AccountEntry {
     name: String,
@@ -130,7 +132,7 @@ struct AccountEntry {
 }
 
 fn default_accounts_path() -> Option<PathBuf> {
-    if let Ok(path) = std::env::var("LAB_ACCOUNTS_PATH") {
+    if let Ok(path) = std::env::var("LABU_ACCOUNTS_PATH") {
         return Some(PathBuf::from(path));
     }
     let cwd = std::env::current_dir().ok()?;
@@ -163,6 +165,63 @@ fn miner_private_key_hex() -> String {
         }
     }
     "0100000000000000000000000000000000000000000000000000000000000000".to_string()
+}
+
+fn build_meta_from_genesis(
+    network: Network,
+    chain_id: u64,
+    genesis_timestamp_ms: u64,
+    alloc: &[tos_daemon::core::genesis::ParsedAllocEntry],
+) -> Result<MetaState, String> {
+    let mut account_meta = HashMap::new();
+    let mut total_supply: u128 = 0;
+    let mut total_energy: u128 = 0;
+
+    for entry in alloc {
+        total_supply = total_supply
+            .checked_add(entry.balance as u128)
+            .ok_or_else(|| "total_supply overflow".to_string())?;
+        total_energy = total_energy
+            .checked_add(entry.energy_available as u128)
+            .ok_or_else(|| "total_energy overflow".to_string())?;
+
+        let address = tos_common::crypto::Address::new(
+            network.is_mainnet(),
+            tos_common::crypto::AddressType::Normal,
+            entry.public_key.clone(),
+        )
+        .as_string()
+        .map_err(|e| format!("address derivation failed: {e}"))?;
+
+        account_meta.insert(
+            address.clone(),
+            AccountState {
+                address,
+                balance: entry.balance,
+                nonce: entry.nonce,
+                frozen: 0,
+                energy: entry.energy_available,
+                flags: 0,
+                data: String::new(),
+            },
+        );
+    }
+
+    let global_state = GlobalState {
+        total_supply: u64::try_from(total_supply)
+            .map_err(|_| "total_supply overflow".to_string())?,
+        total_burned: 0,
+        total_energy: u64::try_from(total_energy)
+            .map_err(|_| "total_energy overflow".to_string())?,
+        block_height: 0,
+        timestamp: genesis_timestamp_ms,
+    };
+
+    Ok(MetaState {
+        network_chain_id: chain_id,
+        global_state,
+        account_meta,
+    })
 }
 
 fn miner_public_key() -> PublicKey {
@@ -350,20 +409,10 @@ async fn handle_state_load(state: web::Data<AppState>, body: web::Json<PreState>
             .json(json!({ "success": false, "error": err.to_string() }));
     }
 
-    let pre_state = body.into_inner();
     let mut engine = state.engine.lock().await;
-    engine.meta.network_chain_id = pre_state.network_chain_id;
-    engine.meta.global_state = pre_state.global_state.clone();
-    engine.meta.account_meta = pre_state
-        .accounts
-        .iter()
-        .map(|acc| (acc.address.clone(), acc.clone()))
-        .collect();
-
     let topoheight = 0u64;
-    {
+    let pending_meta = {
         let mut storage = engine.blockchain.get_storage().write().await;
-
         if !storage.has_asset(&TOS_ASSET).await.unwrap_or(false) {
             let _ = storage
                 .add_asset(
@@ -401,50 +450,112 @@ async fn handle_state_load(state: web::Data<AppState>, body: web::Json<PreState>
                 .await;
         }
 
-        let mut loaded_accounts = Vec::with_capacity(pre_state.accounts.len());
-        for acc in &pre_state.accounts {
-            let key = match to_public_key(&acc.address) {
-                Ok(key) => key,
+        let pending_meta = if let Ok(path) = std::env::var("LABU_GENESIS_STATE_PATH") {
+            let path = PathBuf::from(path);
+            let genesis = match load_genesis_state(&path) {
+                Ok(state) => state,
                 Err(err) => {
                     return HttpResponse::BadRequest()
-                        .json(json!({ "success": false, "error": err }));
+                        .json(json!({ "success": false, "error": err.to_string() }));
                 }
             };
-            loaded_accounts.push((key, acc.clone()));
-        }
+            let (state_hash, validated) = match validate_genesis_state(&genesis) {
+                Ok(result) => result,
+                Err(err) => {
+                    return HttpResponse::BadRequest()
+                        .json(json!({ "success": false, "error": err.to_string() }));
+                }
+            };
+            let _ = state_hash; // validated in loader; keep for future diagnostics
 
-        for (key, acc) in &loaded_accounts {
-            if let Err(err) = storage
-                .set_account_registration_topoheight(key, topoheight)
-                .await
-            {
+            if let Err(err) = apply_genesis_state(&mut *storage, &validated.parsed_alloc).await {
                 return HttpResponse::InternalServerError()
                     .json(json!({ "success": false, "error": err.to_string() }));
             }
-            let nonce = VersionedNonce::new(acc.nonce, None);
-            if let Err(err) = storage.set_last_nonce_to(key, topoheight, &nonce).await {
-                return HttpResponse::InternalServerError()
-                    .json(json!({ "success": false, "error": err.to_string() }));
+
+            let chain_id = match genesis.config.chain_id.parse::<u64>() {
+                Ok(value) => value,
+                Err(_) => {
+                    return HttpResponse::BadRequest().json(json!({
+                        "success": false,
+                        "error": "invalid chain_id in genesis config"
+                    }));
+                }
+            };
+            Some(
+                match build_meta_from_genesis(
+                    engine.network,
+                    chain_id,
+                    validated.genesis_timestamp_ms,
+                    &validated.parsed_alloc,
+                ) {
+                    Ok(meta) => meta,
+                    Err(err) => {
+                        return HttpResponse::InternalServerError()
+                            .json(json!({ "success": false, "error": err }));
+                    }
+                },
+            )
+        } else {
+            let pre_state = body.into_inner();
+            let mut meta = MetaState::default();
+            meta.network_chain_id = pre_state.network_chain_id;
+            meta.global_state = pre_state.global_state.clone();
+            meta.account_meta = pre_state
+                .accounts
+                .iter()
+                .map(|acc| (acc.address.clone(), acc.clone()))
+                .collect();
+
+            let mut loaded_accounts = Vec::with_capacity(pre_state.accounts.len());
+            for acc in &pre_state.accounts {
+                let key = match to_public_key(&acc.address) {
+                    Ok(key) => key,
+                    Err(err) => {
+                        return HttpResponse::BadRequest()
+                            .json(json!({ "success": false, "error": err }));
+                    }
+                };
+                loaded_accounts.push((key, acc.clone()));
             }
-            let balance = VersionedBalance::new(acc.balance, None);
-            if let Err(err) = storage
-                .set_last_balance_to(key, &TOS_ASSET, topoheight, &balance)
-                .await
-            {
-                return HttpResponse::InternalServerError()
-                    .json(json!({ "success": false, "error": err.to_string() }));
-            }
-            if acc.energy > 0 || acc.frozen > 0 {
+
+            for (key, acc) in &loaded_accounts {
+                if acc.frozen > 0 {
+                    return HttpResponse::BadRequest().json(json!({
+                        "success": false,
+                        "error": "frozen_tos is not supported in conformance state/load (genesis semantics require frozen_tos = 0)"
+                    }));
+                }
+                if let Err(err) = storage
+                    .set_account_registration_topoheight(key, topoheight)
+                    .await
+                {
+                    return HttpResponse::InternalServerError()
+                        .json(json!({ "success": false, "error": err.to_string() }));
+                }
+                let nonce = VersionedNonce::new(acc.nonce, None);
+                if let Err(err) = storage.set_last_nonce_to(key, topoheight, &nonce).await {
+                    return HttpResponse::InternalServerError()
+                        .json(json!({ "success": false, "error": err.to_string() }));
+                }
+                let balance = VersionedBalance::new(acc.balance, None);
+                if let Err(err) = storage
+                    .set_last_balance_to(key, &TOS_ASSET, topoheight, &balance)
+                    .await
+                {
+                    return HttpResponse::InternalServerError()
+                        .json(json!({ "success": false, "error": err.to_string() }));
+                }
                 let mut energy = EnergyResource::new();
                 energy.energy = acc.energy;
-                energy.frozen_tos = acc.frozen;
                 energy.last_update = topoheight;
                 if let Err(err) = storage.set_energy_resource(&key, topoheight, &energy).await {
                     return HttpResponse::InternalServerError()
                         .json(json!({ "success": false, "error": err.to_string() }));
                 }
             }
-        }
+            Some(meta)
+        };
 
         let miner_key = miner_public_key();
         let _ = storage
@@ -458,6 +569,15 @@ async fn handle_state_load(state: web::Data<AppState>, body: web::Json<PreState>
         let _ = storage
             .set_last_balance_to(&miner_key, &TOS_ASSET, topoheight, &miner_balance)
             .await;
+        let mut miner_energy = EnergyResource::new();
+        miner_energy.last_update = topoheight;
+        let _ = storage
+            .set_energy_resource(&miner_key, topoheight, &miner_energy)
+            .await;
+        pending_meta
+    };
+    if let Some(meta) = pending_meta {
+        engine.meta = meta;
     }
     if let Err(err) = engine.blockchain.reload_from_disk().await {
         return HttpResponse::InternalServerError()
@@ -868,8 +988,8 @@ async fn build_export(engine: &Engine) -> PreState {
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    let state_dir = std::env::var("LAB_STATE_DIR").unwrap_or_else(|_| "/state".to_string());
-    let network = std::env::var("LAB_NETWORK").unwrap_or_else(|_| "dev".to_string());
+    let state_dir = std::env::var("LABU_STATE_DIR").unwrap_or_else(|_| "/state".to_string());
+    let network = std::env::var("LABU_NETWORK").unwrap_or_else(|_| "dev".to_string());
     let network: Network = network.parse().unwrap_or(Network::Devnet);
 
     let base_dir = PathBuf::from(state_dir);
