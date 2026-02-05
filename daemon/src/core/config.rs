@@ -779,6 +779,12 @@ pub struct Config {
     /// This is useful for testing and development.
     #[clap(long)]
     pub genesis_block_hex: Option<String>,
+    /// Path to genesis state JSON file for pre-configured account states.
+    /// This enables setting up initial balances, nonces, and energy for accounts
+    /// similar to Ethereum's alloc section. Only used during genesis block creation.
+    #[clap(long)]
+    #[serde(default)]
+    pub genesis_state: Option<String>,
     /// Blocks hashes checkpoints
     /// No rewind can go below any of those checkpoints
     #[serde(default)]

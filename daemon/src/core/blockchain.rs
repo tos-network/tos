@@ -10,6 +10,7 @@ use crate::{
         config::Config,
         difficulty,
         error::BlockchainError,
+        genesis,
         hard_fork::*,
         mempool::Mempool,
         nonce_checker::NonceChecker,
@@ -43,6 +44,7 @@ use std::{
     cmp::Reverse,
     collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
     net::{IpAddr, SocketAddr},
+    path::Path,
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
@@ -410,7 +412,10 @@ impl<S: Storage> Blockchain<S> {
         // include genesis block
         if !on_disk {
             blockchain
-                .create_genesis_block(config.genesis_block_hex.as_deref())
+                .create_genesis_block(
+                    config.genesis_block_hex.as_deref(),
+                    config.genesis_state.as_deref(),
+                )
                 .await?;
         } else if !config.recovery_mode {
             if log::log_enabled!(log::Level::Debug) {
@@ -972,7 +977,11 @@ impl<S: Storage> Blockchain<S> {
     }
 
     // function to include the genesis block and register the public dev key.
-    async fn create_genesis_block(&self, genesis_hex: Option<&str>) -> Result<(), BlockchainError> {
+    async fn create_genesis_block(
+        &self,
+        genesis_hex: Option<&str>,
+        genesis_state_path: Option<&str>,
+    ) -> Result<(), BlockchainError> {
         if log::log_enabled!(log::Level::Debug) {
             debug!("create genesis block");
         }
@@ -1023,6 +1032,64 @@ impl<S: Storage> Blockchain<S> {
                 )
                 .await?;
 
+            // Load and apply genesis state if provided
+            let extra_nonce = if let Some(state_path) = genesis_state_path {
+                if log::log_enabled!(log::Level::Info) {
+                    info!("Loading genesis state from: {}", state_path);
+                }
+
+                let path = Path::new(state_path);
+                let state = genesis::load_genesis_state(path).map_err(|e| {
+                    if log::log_enabled!(log::Level::Error) {
+                        error!("Failed to load genesis state: {}", e);
+                    }
+                    BlockchainError::InvalidGenesisBlock
+                })?;
+
+                // Validate the genesis state
+                let state_hash = genesis::validate_genesis_state(&state).map_err(|e| {
+                    if log::log_enabled!(log::Level::Error) {
+                        error!("Genesis state validation failed: {}", e);
+                    }
+                    BlockchainError::InvalidGenesisBlock
+                })?;
+
+                // Parse allocations
+                let is_mainnet = genesis::is_mainnet_network(&state.config.network);
+                let parsed_alloc =
+                    genesis::parse_allocations(&state.alloc, is_mainnet).map_err(|e| {
+                        if log::log_enabled!(log::Level::Error) {
+                            error!("Failed to parse genesis allocations: {}", e);
+                        }
+                        BlockchainError::InvalidGenesisBlock
+                    })?;
+
+                // Apply allocations to storage
+                if log::log_enabled!(log::Level::Info) {
+                    info!(
+                        "Applying {} genesis allocations to storage",
+                        parsed_alloc.len()
+                    );
+                }
+                genesis::apply_genesis_state(&mut *storage, &parsed_alloc)
+                    .await
+                    .map_err(|e| {
+                        if log::log_enabled!(log::Level::Error) {
+                            error!("Failed to apply genesis state: {}", e);
+                        }
+                        e
+                    })?;
+
+                if log::log_enabled!(log::Level::Info) {
+                    info!("Genesis state applied. State hash: {}", state_hash);
+                }
+
+                // Use state hash as extra_nonce in genesis block
+                state_hash.to_bytes()
+            } else {
+                [0u8; EXTRA_NONCE_SIZE]
+            };
+
             let (genesis_block, genesis_hash) =
                 if let Some(genesis_block) = get_hex_genesis_block(&self.network) {
                     if log::log_enabled!(log::Level::Info) {
@@ -1052,7 +1119,7 @@ impl<S: Storage> Blockchain<S> {
                         0,
                         get_current_time_in_millis(),
                         IndexSet::new(),
-                        [0u8; EXTRA_NONCE_SIZE],
+                        extra_nonce,
                         DEV_PUBLIC_KEY.clone(),
                         IndexSet::new(),
                     );

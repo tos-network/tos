@@ -5,6 +5,7 @@ pub mod blockdag;
 pub mod config;
 pub mod difficulty;
 pub mod error;
+pub mod genesis;
 pub mod mempool;
 pub mod merkle;
 pub mod nonce_checker;
