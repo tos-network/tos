@@ -44,6 +44,9 @@ pub struct GenesisConfig {
 /// Asset configuration
 #[derive(Debug, Deserialize)]
 pub struct AssetConfig {
+    /// Asset hash identifier (64 hex chars = 32 bytes)
+    pub hash: String,
+
     /// Number of decimal places
     pub decimals: u8,
 
@@ -90,11 +93,8 @@ pub struct ComputedValues {
     /// State hash for integrity verification
     pub state_hash: Option<Hash>,
 
-    /// Total supply allocated
-    pub total_supply: Option<String>,
-
-    /// Number of accounts
-    pub account_count: Option<u32>,
+    /// Genesis block hash (for reference, not used in v1)
+    pub genesis_block_hash: Option<Hash>,
 }
 
 /// Parsed allocation entry with validated types

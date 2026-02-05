@@ -1018,7 +1018,7 @@ impl<S: Storage> Blockchain<S> {
             storage
                 .add_asset(
                     &UNO_ASSET,
-                    1,
+                    0,
                     VersionedAssetData::new(
                         AssetData::new(
                             COIN_DECIMALS,
@@ -1033,62 +1033,62 @@ impl<S: Storage> Blockchain<S> {
                 .await?;
 
             // Load and apply genesis state if provided
-            let extra_nonce = if let Some(state_path) = genesis_state_path {
-                if log::log_enabled!(log::Level::Info) {
-                    info!("Loading genesis state from: {}", state_path);
-                }
-
-                let path = Path::new(state_path);
-                let state = genesis::load_genesis_state(path).map_err(|e| {
-                    if log::log_enabled!(log::Level::Error) {
-                        error!("Failed to load genesis state: {}", e);
+            let (extra_nonce, genesis_timestamp, genesis_miner) =
+                if let Some(state_path) = genesis_state_path {
+                    if log::log_enabled!(log::Level::Info) {
+                        info!("Loading genesis state from: {}", state_path);
                     }
-                    BlockchainError::InvalidGenesisBlock
-                })?;
 
-                // Validate the genesis state
-                let state_hash = genesis::validate_genesis_state(&state).map_err(|e| {
-                    if log::log_enabled!(log::Level::Error) {
-                        error!("Genesis state validation failed: {}", e);
-                    }
-                    BlockchainError::InvalidGenesisBlock
-                })?;
-
-                // Parse allocations
-                let is_mainnet = genesis::is_mainnet_network(&state.config.network);
-                let parsed_alloc =
-                    genesis::parse_allocations(&state.alloc, is_mainnet).map_err(|e| {
+                    let path = Path::new(state_path);
+                    let state = genesis::load_genesis_state(path).map_err(|e| {
                         if log::log_enabled!(log::Level::Error) {
-                            error!("Failed to parse genesis allocations: {}", e);
+                            error!("Failed to load genesis state: {}", e);
                         }
                         BlockchainError::InvalidGenesisBlock
                     })?;
 
-                // Apply allocations to storage
-                if log::log_enabled!(log::Level::Info) {
-                    info!(
-                        "Applying {} genesis allocations to storage",
-                        parsed_alloc.len()
-                    );
-                }
-                genesis::apply_genesis_state(&mut *storage, &parsed_alloc)
-                    .await
-                    .map_err(|e| {
-                        if log::log_enabled!(log::Level::Error) {
-                            error!("Failed to apply genesis state: {}", e);
-                        }
-                        e
-                    })?;
+                    // Validate the genesis state and get parsed data
+                    let (state_hash, validated_data) = genesis::validate_genesis_state(&state)
+                        .map_err(|e| {
+                            if log::log_enabled!(log::Level::Error) {
+                                error!("Genesis state validation failed: {}", e);
+                            }
+                            BlockchainError::InvalidGenesisBlock
+                        })?;
 
-                if log::log_enabled!(log::Level::Info) {
-                    info!("Genesis state applied. State hash: {}", state_hash);
-                }
+                    // Apply allocations to storage
+                    if log::log_enabled!(log::Level::Info) {
+                        info!(
+                            "Applying {} genesis allocations to storage",
+                            validated_data.parsed_alloc.len()
+                        );
+                    }
+                    genesis::apply_genesis_state(&mut *storage, &validated_data.parsed_alloc)
+                        .await
+                        .map_err(|e| {
+                            if log::log_enabled!(log::Level::Error) {
+                                error!("Failed to apply genesis state: {}", e);
+                            }
+                            e
+                        })?;
 
-                // Use state hash as extra_nonce in genesis block
-                state_hash.to_bytes()
-            } else {
-                [0u8; EXTRA_NONCE_SIZE]
-            };
+                    if log::log_enabled!(log::Level::Info) {
+                        info!("Genesis state applied. State hash: {}", state_hash);
+                    }
+
+                    // Return state hash, timestamp and miner from genesis config
+                    (
+                        state_hash.to_bytes(),
+                        validated_data.genesis_timestamp_ms,
+                        validated_data.dev_public_key,
+                    )
+                } else {
+                    (
+                        [0u8; EXTRA_NONCE_SIZE],
+                        get_current_time_in_millis(),
+                        DEV_PUBLIC_KEY.clone(),
+                    )
+                };
 
             let (genesis_block, genesis_hash) =
                 if let Some(genesis_block) = get_hex_genesis_block(&self.network) {
@@ -1117,10 +1117,10 @@ impl<S: Storage> Blockchain<S> {
                     let header = BlockHeader::new(
                         BlockVersion::Nobunaga,
                         0,
-                        get_current_time_in_millis(),
+                        genesis_timestamp,
                         IndexSet::new(),
                         extra_nonce,
-                        DEV_PUBLIC_KEY.clone(),
+                        genesis_miner.clone(),
                         IndexSet::new(),
                     );
                     let block = Block::new(Immutable::Owned(header), Vec::new());
@@ -1136,7 +1136,7 @@ impl<S: Storage> Blockchain<S> {
                     (block, block_hash)
                 };
 
-            if *genesis_block.get_miner() != *DEV_PUBLIC_KEY {
+            if *genesis_block.get_miner() != genesis_miner {
                 return Err(BlockchainError::GenesisBlockMiner);
             }
 

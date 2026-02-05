@@ -58,4 +58,28 @@ pub enum GenesisError {
 
     #[error("Duplicate public key in allocations: {0}")]
     DuplicatePublicKey(String),
+
+    #[error("String too long for field {field}: length {length} exceeds maximum {max}")]
+    StringTooLong {
+        field: String,
+        length: usize,
+        max: usize,
+    },
+
+    #[error("Invalid asset hash: {0}")]
+    InvalidAssetHash(String),
+
+    #[error("Asset hash mismatch for {asset}: expected {expected}, got {provided}")]
+    AssetHashMismatch {
+        asset: String,
+        expected: String,
+        provided: String,
+    },
+
+    #[error("Invalid decimals for {asset}: expected {expected}, got {provided}")]
+    InvalidAssetDecimals {
+        asset: String,
+        expected: u8,
+        provided: u8,
+    },
 }
