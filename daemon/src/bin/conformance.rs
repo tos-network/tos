@@ -25,7 +25,9 @@ use tos_daemon::core::blockchain::Blockchain;
 use tos_daemon::core::blockchain::BroadcastOption;
 use tos_daemon::core::config::Config;
 use tos_daemon::core::error::BlockchainError;
-use tos_daemon::core::genesis::{apply_genesis_state, load_genesis_state, validate_genesis_state};
+use tos_daemon::core::genesis::{
+    apply_genesis_state, load_genesis_state, validate_genesis_state, ParsedAllocEntry,
+};
 use tos_daemon::core::state::ApplicableChainState;
 use tos_daemon::core::storage::rocksdb::RocksStorage;
 use tos_daemon::core::storage::{
@@ -224,6 +226,20 @@ fn build_meta_from_genesis(
     })
 }
 
+fn parsed_alloc_from_pre_state(accounts: &[AccountState]) -> Result<Vec<ParsedAllocEntry>, String> {
+    let mut out = Vec::with_capacity(accounts.len());
+    for acc in accounts {
+        let public_key = to_public_key(&acc.address)?;
+        out.push(ParsedAllocEntry {
+            public_key,
+            nonce: acc.nonce,
+            balance: acc.balance,
+            energy_available: acc.energy,
+        });
+    }
+    Ok(out)
+}
+
 fn miner_public_key() -> PublicKey {
     let miner_secret = miner_private_key_hex();
     WrappedMinerSecret::from_str(&miner_secret)
@@ -282,7 +298,15 @@ fn compute_state_digest(state: &PreState) -> String {
 
 fn map_error_code(err: &BlockchainError) -> u16 {
     match err {
-        BlockchainError::AccountNotFound(_) | BlockchainError::NoBalance(_) => 0x0400,
+        BlockchainError::AccountNotFound(_)
+        | BlockchainError::UnknownAccount
+        | BlockchainError::NoTxSender(_)
+        | BlockchainError::NoNonce(_) => 0x0400,
+        BlockchainError::NoBalance(_)
+        | BlockchainError::NoSenderOutput
+        | BlockchainError::NoContractBalance
+        | BlockchainError::BalanceOverflow
+        | BlockchainError::Overflow => 0x0300,
         BlockchainError::InvalidNonce(_, got, expected) => {
             if got > expected {
                 0x0111
@@ -297,6 +321,7 @@ fn map_error_code(err: &BlockchainError) -> u16 {
                 0x0110
             }
         }
+        BlockchainError::TxNonceAlreadyUsed(_, _) => 0x0112,
         BlockchainError::InvalidTransactionNonce(got, expected) => {
             if got > expected {
                 0x0111
@@ -304,19 +329,28 @@ fn map_error_code(err: &BlockchainError) -> u16 {
                 0x0110
             }
         }
-        BlockchainError::InvalidTransactionSignature => 0x0103,
+        BlockchainError::InvalidTransactionSignature | BlockchainError::NoTxSignature => 0x0103,
         BlockchainError::InvalidTransactionFormat => 0x0100,
-        BlockchainError::InvalidTxFee(_, _) => 0x0301,
+        BlockchainError::InvalidTransactionExtraData
+        | BlockchainError::InvalidTransferExtraData
+        | BlockchainError::InvalidTxInBlock(_)
+        | BlockchainError::InvalidTransactionMultiThread => 0x0107,
+        BlockchainError::InvalidTxFee(_, _) | BlockchainError::FeesToLowToOverride(_, _) => 0x0301,
         BlockchainError::InvalidTxVersion => 0x0101,
         BlockchainError::InvalidTransactionToSender(_) => 0x0409,
         BlockchainError::TxTooBig(_, _) => 0x0100,
-        BlockchainError::InvalidTxInBlock(_) => 0x0107,
-        BlockchainError::InvalidTransactionExtraData => 0x0107,
-        BlockchainError::InvalidTransferExtraData => 0x0107,
+        BlockchainError::InvalidReferenceHash
+        | BlockchainError::InvalidReferenceTopoheight(_, _)
+        | BlockchainError::NoStableReferenceFound => 0x0107,
+        BlockchainError::InvalidPublicKey => 0x0106,
+        BlockchainError::InvalidNetwork => 0x0102,
+        BlockchainError::NotImplemented | BlockchainError::UnsupportedOperation => 0xFF01,
         BlockchainError::Any(err) => {
             let msg = err.to_string();
             if msg.contains("Insufficient funds") {
-                0x0400
+                0x0300
+            } else if msg.contains("Insufficient energy") {
+                0x0302
             } else if msg.contains("Invalid chain ID") {
                 0x0102
             } else {
@@ -343,7 +377,7 @@ fn map_verify_error_code(
         VE::InvalidSignature => 0x0103,
         VE::InvalidChainId { .. } => 0x0102,
         VE::InvalidFee(_, _) => 0x0301,
-        VE::InsufficientFunds { .. } => 0x0400,
+        VE::InsufficientFunds { .. } => 0x0300,
         VE::TransferExtraDataSize | VE::TransactionExtraDataSize | VE::InvalidFormat => 0x0100,
         _ => 0xFFFF,
     }
@@ -498,6 +532,26 @@ async fn handle_state_load(state: web::Data<AppState>, body: web::Json<PreState>
             )
         } else {
             let pre_state = body.into_inner();
+            if pre_state.accounts.iter().any(|acc| acc.frozen > 0) {
+                return HttpResponse::BadRequest().json(json!({
+                    "success": false,
+                    "error": "frozen_tos is not supported in conformance state/load (genesis semantics require frozen_tos = 0)"
+                }));
+            }
+
+            let alloc = match parsed_alloc_from_pre_state(&pre_state.accounts) {
+                Ok(entries) => entries,
+                Err(err) => {
+                    return HttpResponse::BadRequest()
+                        .json(json!({ "success": false, "error": err }));
+                }
+            };
+
+            if let Err(err) = apply_genesis_state(&mut *storage, &alloc).await {
+                return HttpResponse::InternalServerError()
+                    .json(json!({ "success": false, "error": err.to_string() }));
+            }
+
             let mut meta = MetaState::default();
             meta.network_chain_id = pre_state.network_chain_id;
             meta.global_state = pre_state.global_state.clone();
@@ -506,54 +560,6 @@ async fn handle_state_load(state: web::Data<AppState>, body: web::Json<PreState>
                 .iter()
                 .map(|acc| (acc.address.clone(), acc.clone()))
                 .collect();
-
-            let mut loaded_accounts = Vec::with_capacity(pre_state.accounts.len());
-            for acc in &pre_state.accounts {
-                let key = match to_public_key(&acc.address) {
-                    Ok(key) => key,
-                    Err(err) => {
-                        return HttpResponse::BadRequest()
-                            .json(json!({ "success": false, "error": err }));
-                    }
-                };
-                loaded_accounts.push((key, acc.clone()));
-            }
-
-            for (key, acc) in &loaded_accounts {
-                if acc.frozen > 0 {
-                    return HttpResponse::BadRequest().json(json!({
-                        "success": false,
-                        "error": "frozen_tos is not supported in conformance state/load (genesis semantics require frozen_tos = 0)"
-                    }));
-                }
-                if let Err(err) = storage
-                    .set_account_registration_topoheight(key, topoheight)
-                    .await
-                {
-                    return HttpResponse::InternalServerError()
-                        .json(json!({ "success": false, "error": err.to_string() }));
-                }
-                let nonce = VersionedNonce::new(acc.nonce, None);
-                if let Err(err) = storage.set_last_nonce_to(key, topoheight, &nonce).await {
-                    return HttpResponse::InternalServerError()
-                        .json(json!({ "success": false, "error": err.to_string() }));
-                }
-                let balance = VersionedBalance::new(acc.balance, None);
-                if let Err(err) = storage
-                    .set_last_balance_to(key, &TOS_ASSET, topoheight, &balance)
-                    .await
-                {
-                    return HttpResponse::InternalServerError()
-                        .json(json!({ "success": false, "error": err.to_string() }));
-                }
-                let mut energy = EnergyResource::new();
-                energy.energy = acc.energy;
-                energy.last_update = topoheight;
-                if let Err(err) = storage.set_energy_resource(&key, topoheight, &energy).await {
-                    return HttpResponse::InternalServerError()
-                        .json(json!({ "success": false, "error": err.to_string() }));
-                }
-            }
             Some(meta)
         };
 
