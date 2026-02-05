@@ -477,13 +477,14 @@ impl<S: Storage> Blockchain<S> {
                     }
                 } else {
                     // genesis_state is configured but no stored hash found
-                    // This could happen if upgrading from an older version without genesis state
-                    if log::log_enabled!(log::Level::Warn) {
-                        warn!(
-                            "Genesis state path configured but no stored hash found. \
-                            This may indicate a mismatch between config and database."
+                    // PLAN-B v1.5 requires strict verification - fail if hash is missing
+                    if log::log_enabled!(log::Level::Error) {
+                        error!(
+                            "Genesis state path configured but no stored hash found in database. \
+                            This indicates a mismatch between config and database state."
                         );
                     }
+                    return Err(BlockchainError::StoredGenesisHashMismatch.into());
                 }
                 drop(storage);
             }
@@ -1058,50 +1059,6 @@ impl<S: Storage> Blockchain<S> {
         let genesis_block = {
             let mut storage = self.storage.write().await;
 
-            // register TOS asset
-            if log::log_enabled!(log::Level::Debug) {
-                debug!("Registering TOS asset: {} at topoheight 0", TOS_ASSET);
-            }
-            let ticker = "TOS".to_owned();
-
-            storage
-                .add_asset(
-                    &TOS_ASSET,
-                    0,
-                    VersionedAssetData::new(
-                        AssetData::new(
-                            COIN_DECIMALS,
-                            "TOS".to_owned(),
-                            ticker,
-                            Some(MAXIMUM_SUPPLY),
-                            None,
-                        ),
-                        None,
-                    ),
-                )
-                .await?;
-
-            // register UNO asset (privacy balance)
-            if log::log_enabled!(log::Level::Debug) {
-                debug!("Registering UNO asset: {} at topoheight 0", UNO_ASSET);
-            }
-            storage
-                .add_asset(
-                    &UNO_ASSET,
-                    0,
-                    VersionedAssetData::new(
-                        AssetData::new(
-                            COIN_DECIMALS,
-                            "UNO".to_owned(),
-                            "UNO".to_owned(),
-                            None,
-                            None,
-                        ),
-                        None,
-                    ),
-                )
-                .await?;
-
             // Load and apply genesis state if provided
             let (extra_nonce, genesis_timestamp, genesis_miner) =
                 if let Some(state_path) = genesis_state_path {
@@ -1125,6 +1082,39 @@ impl<S: Storage> Blockchain<S> {
                             }
                             BlockchainError::InvalidGenesisBlock
                         })?;
+
+                    // Register assets from genesis state (PLAN-B v1.5: use assets from state file)
+                    if log::log_enabled!(log::Level::Info) {
+                        info!(
+                            "Registering {} assets from genesis state",
+                            validated_data.parsed_assets.len()
+                        );
+                    }
+                    for asset in &validated_data.parsed_assets {
+                        let asset_hash = Hash::new(asset.hash);
+                        if log::log_enabled!(log::Level::Debug) {
+                            debug!(
+                                "Registering asset {} ({}) at topoheight 0",
+                                asset.ticker, asset_hash
+                            );
+                        }
+                        storage
+                            .add_asset(
+                                &asset_hash,
+                                0,
+                                VersionedAssetData::new(
+                                    AssetData::new(
+                                        asset.decimals,
+                                        asset.name.clone(),
+                                        asset.ticker.clone(),
+                                        asset.max_supply,
+                                        None,
+                                    ),
+                                    None,
+                                ),
+                            )
+                            .await?;
+                    }
 
                     // Apply allocations to storage
                     if log::log_enabled!(log::Level::Info) {
@@ -1164,6 +1154,47 @@ impl<S: Storage> Blockchain<S> {
                         validated_data.dev_public_key,
                     )
                 } else {
+                    // No genesis state file - use hardcoded defaults for TOS and UNO assets
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("Registering TOS asset: {} at topoheight 0", TOS_ASSET);
+                    }
+                    storage
+                        .add_asset(
+                            &TOS_ASSET,
+                            0,
+                            VersionedAssetData::new(
+                                AssetData::new(
+                                    COIN_DECIMALS,
+                                    "TOS".to_owned(),
+                                    "TOS".to_owned(),
+                                    Some(MAXIMUM_SUPPLY),
+                                    None,
+                                ),
+                                None,
+                            ),
+                        )
+                        .await?;
+
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("Registering UNO asset: {} at topoheight 0", UNO_ASSET);
+                    }
+                    storage
+                        .add_asset(
+                            &UNO_ASSET,
+                            0,
+                            VersionedAssetData::new(
+                                AssetData::new(
+                                    COIN_DECIMALS,
+                                    "UNO".to_owned(),
+                                    "UNO".to_owned(),
+                                    None,
+                                    None,
+                                ),
+                                None,
+                            ),
+                        )
+                        .await?;
+
                     (
                         [0u8; EXTRA_NONCE_SIZE],
                         get_current_time_in_millis(),
@@ -1221,9 +1252,10 @@ impl<S: Storage> Blockchain<S> {
                 return Err(BlockchainError::GenesisBlockMiner);
             }
 
-            // Verify pre-baked genesis block's extra_nonce matches computed state hash
-            // This ensures the genesis block was generated for this specific genesis state
+            // Verify pre-baked genesis block matches genesis state config
+            // PLAN-B v1.5: Validate extra_nonce, timestamp, and other header fields
             if genesis_state_path.is_some() {
+                // Verify extra_nonce matches computed state hash
                 let block_extra_nonce = genesis_block.get_extra_nonce();
                 if *block_extra_nonce != extra_nonce {
                     if log::log_enabled!(log::Level::Error) {
@@ -1235,8 +1267,42 @@ impl<S: Storage> Blockchain<S> {
                     }
                     return Err(BlockchainError::GenesisStateHashMismatch);
                 }
+
+                // Verify timestamp matches genesis config (PLAN-B v1.5 requirement)
+                let block_timestamp = genesis_block.get_timestamp();
+                if block_timestamp != genesis_timestamp {
+                    if log::log_enabled!(log::Level::Error) {
+                        error!(
+                            "Genesis block timestamp mismatch! Block has {}, but genesis config specifies {}",
+                            block_timestamp, genesis_timestamp
+                        );
+                    }
+                    return Err(BlockchainError::GenesisBlockTimestampMismatch);
+                }
+
+                // Verify other genesis block invariants (height=0, tips empty)
+                if genesis_block.get_height() != 0 {
+                    if log::log_enabled!(log::Level::Error) {
+                        error!(
+                            "Genesis block height must be 0, got {}",
+                            genesis_block.get_height()
+                        );
+                    }
+                    return Err(BlockchainError::InvalidGenesisBlock);
+                }
+
+                if !genesis_block.get_tips().is_empty() {
+                    if log::log_enabled!(log::Level::Error) {
+                        error!(
+                            "Genesis block must have no tips, got {} tips",
+                            genesis_block.get_tips().len()
+                        );
+                    }
+                    return Err(BlockchainError::InvalidGenesisBlock);
+                }
+
                 if log::log_enabled!(log::Level::Debug) {
-                    debug!("Genesis block extra_nonce matches computed state hash");
+                    debug!("Pre-baked genesis block validated against genesis state config");
                 }
             }
 
