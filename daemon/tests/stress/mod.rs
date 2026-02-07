@@ -1,6 +1,7 @@
 // TOS Daemon Stress Tests
 // Tests system limits and performance under extreme conditions
 
+pub mod bootstrap_stress;
 pub mod high_load;
 pub mod memory_tests;
 pub mod network_stress;

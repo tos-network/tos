@@ -1101,7 +1101,13 @@ fn map_error_code(err: &BlockchainError) -> u16 {
         | BlockchainError::InvalidTxInBlock(_)
         | BlockchainError::InvalidTransactionMultiThread
         | BlockchainError::MultiSigNotConfigured
-        | BlockchainError::MultiSigNotFound => 0x0107,
+        | BlockchainError::MultiSigNotFound
+        | BlockchainError::MultiSigParticipants
+        | BlockchainError::MultiSigThreshold
+        | BlockchainError::TransferCount
+        | BlockchainError::Commitments
+        | BlockchainError::InvalidInvokeContract
+        | BlockchainError::DepositNotFound => 0x0107,
         BlockchainError::InvalidTxFee(_, _) | BlockchainError::FeesToLowToOverride(_, _) => 0x0301,
         BlockchainError::InvalidTxVersion => 0x0101,
         BlockchainError::InvalidTransactionToSender(_)
@@ -1169,20 +1175,42 @@ fn map_error_code(err: &BlockchainError) -> u16 {
                 || msg.contains("challenge deposit too low")
                 || msg.contains("appeal deposit too low")
                 || msg.contains("deposit too low")
+                || msg.contains("Slash amount must be greater than 0")
             {
                 0x0105
             }
-            // === Account not found (0x0400) ===
+            // === Escrow not found (0x0402) ===
+            else if msg.contains("escrow not found") {
+                0x0402
+            }
+            // === Unauthorized (0x0200) ===
+            else if msg.contains("unauthorized caller")
+                || msg.contains("only be submitted by BOOTSTRAP_ADDRESS")
+                || msg.contains("only be submitted by the network bootstrap")
+            {
+                0x0200
+            }
+            // === Invalid format (0x0100) — reason/task length ===
+            else if msg.contains("invalid reason length") || msg.contains("invalid task id") {
+                0x0100
+            }
+            // === Account / record not found (0x0400) ===
             else if msg.contains("Agent account invalid parameter")
                 || msg.contains("does not exist")
                 || msg.contains("Arbiter not found")
                 || msg.contains("Recipient name not registered")
+                || msg.contains("no KYC record")
+                || msg.contains("Committee not found")
+                || msg.contains("committee not found")
             {
                 0x0400
             }
+            // === Account already exists (0x0401) ===
+            else if msg.contains("Agent account already registered") {
+                0x0401
+            }
             // === Agent account errors (0x0400) ===
-            else if msg.contains("Agent account already registered")
-                || msg.contains("Agent account is frozen")
+            else if msg.contains("Agent account is frozen")
                 || msg.contains("Agent account unauthorized")
                 || msg.contains("Agent account policy violation")
                 || msg.contains("Agent session key")
@@ -1210,7 +1238,7 @@ fn map_error_code(err: &BlockchainError) -> u16 {
             {
                 0x0403
             }
-            // === Invalid format / payload (0x0107) ===
+            // === Invalid format / payload (0x0107) — catch-all for validation ===
             // TNS name validation errors
             else if msg.contains("Invalid name length")
                 || msg.contains("must start with")
@@ -1257,6 +1285,7 @@ fn map_error_code(err: &BlockchainError) -> u16 {
                 || msg.contains("Approval timestamp")
                 || msg.contains("Suspension reason")
                 || msg.contains("Cannot register committee")
+                || msg.contains("must be different")
                 || msg.contains("BootstrapCommittee")
                 || msg.contains("Cannot remove member")
                 || msg.contains("Cannot add member")
@@ -1271,6 +1300,7 @@ fn map_error_code(err: &BlockchainError) -> u16 {
                 || msg.contains("Revocation reason")
                 || msg.contains("Verification timestamp")
                 || msg.contains("data hash cannot be empty")
+                || msg.contains("only Revoked status can be appealed")
             // Arbiter errors
                 || msg.contains("Arbiter name")
                 || msg.contains("Arbiter fee basis points")
@@ -1288,23 +1318,21 @@ fn map_error_code(err: &BlockchainError) -> u16 {
                 || msg.contains("appeal not allowed")
                 || msg.contains("optimistic_release requires")
                 || msg.contains("dispute record required")
-                || msg.contains("invalid task id")
                 || msg.contains("invalid challenge")
                 || msg.contains("invalid timeout")
-                || msg.contains("unauthorized caller")
                 || msg.contains("timeout not reached")
                 || msg.contains("challenge window expired")
                 || msg.contains("appeal window expired")
                 || msg.contains("invalid verdict")
                 || msg.contains("threshold not met")
+                || msg.contains("Threshold not met")
                 || msg.contains("arbiter not active")
                 || msg.contains("arbiter not assigned")
-                || msg.contains("invalid reason length")
                 || msg.contains("insufficient escrow balance")
                 || msg.contains("invalid arbitration config")
-                || msg.contains("escrow not found")
                 || msg.contains("coordinator deadline")
                 || msg.contains("juror submit window")
+                || msg.contains("payload too large")
             // Commit/arbitration errors
                 || msg.contains("CommitArbitrationOpen missing")
                 || msg.contains("CommitVoteRequest missing")
@@ -1395,12 +1423,13 @@ fn map_verify_error_code(
         | VE::MessageAlreadyExists
         | VE::InvalidMessageNonce
         | VE::InvalidReceiverHandle => 0x0107,
-        // Arbiter errors
+        // Arbiter not found (0x0400)
+        VE::ArbiterNotFound => 0x0400,
+        // Arbiter validation errors (0x0107)
         VE::ArbiterNameLength { .. }
         | VE::ArbiterInvalidFee(_)
         | VE::ArbiterStakeTooLow { .. }
         | VE::ArbiterEscrowRangeInvalid { .. }
-        | VE::ArbiterNotFound
         | VE::ArbiterInvalidStatus
         | VE::ArbiterDeactivateWithStake
         | VE::ArbiterNoStakeToWithdraw
