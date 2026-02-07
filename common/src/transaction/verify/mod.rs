@@ -3092,7 +3092,7 @@ impl Transaction {
                 let amount = payload.amount;
 
                 if amount == 0 {
-                    return Err(VerificationError::InvalidFormat);
+                    return Err(VerificationError::InvalidTransferAmount);
                 }
 
                 let total = fee

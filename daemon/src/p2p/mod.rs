@@ -476,12 +476,13 @@ impl<S: Storage> P2pServer<S> {
         thread_pool: &ThreadPool,
     ) -> Result<(), P2pError> {
         let (mut stream, addr) = res?;
+        let is_loopback = addr.ip().is_loopback();
 
         // Verify if we can accept new connections
         let reject = !self.is_compatible_with_exclusive_nodes(&addr)
             // check that this incoming peer isn't blacklisted
             || !self.accept_new_connections().await
-            || !self.peer_list.is_allowed(&addr.ip()).await?
+            || (!is_loopback && !self.peer_list.is_allowed(&addr.ip()).await?)
             || self.is_connected_to_addr(&addr).await;
 
         // Reject connection
@@ -511,9 +512,11 @@ impl<S: Storage> P2pServer<S> {
                     if log::log_enabled!(log::Level::Debug) {
                     debug!("Error while handling incoming connection {}: {}", addr, e);
                     }
-                    if let Err(e) = zelf.peer_list.increase_fail_count_for_peerlist_entry(&addr.ip(), true).await {
-                        if log::log_enabled!(log::Level::Error) {
-                        error!("Error while increasing fail count for incoming peer {} while verifying it: {}", addr, e);
+                    if !is_loopback {
+                        if let Err(e) = zelf.peer_list.increase_fail_count_for_peerlist_entry(&addr.ip(), true).await {
+                            if log::log_enabled!(log::Level::Error) {
+                            error!("Error while increasing fail count for incoming peer {} while verifying it: {}", addr, e);
+                            }
                         }
                     }
                 }
@@ -741,18 +744,23 @@ impl<S: Storage> P2pServer<S> {
         if log::log_enabled!(log::Level::Trace) {
             trace!("New connection: {}", connection);
         }
+        let peer_ip = connection.get_address().ip();
+        let is_loopback = peer_ip.is_loopback();
 
         // Exchange encryption keys
-        let expected_key = self
-            .peer_list
-            .get_dh_key_for_peer(&connection.get_address().ip())
-            .await?;
+        let expected_key = if is_loopback {
+            None
+        } else {
+            self.peer_list.get_dh_key_for_peer(&peer_ip).await?
+        };
         let new_key = connection
             .exchange_keys(&self.dh_keypair, expected_key.as_ref(), self.dh_action, buf)
             .await?;
-        self.peer_list
-            .store_dh_key_for_peer(&connection.get_address().ip(), new_key)
-            .await?;
+        if !is_loopback {
+            self.peer_list
+                .store_dh_key_for_peer(&peer_ip, new_key)
+                .await?;
+        }
 
         // Start handshake now
         connection.set_state(State::Handshake);

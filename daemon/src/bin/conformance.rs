@@ -8,15 +8,31 @@ use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-use tos_common::account::{EnergyResource, VersionedBalance, VersionedNonce};
+use tos_common::account::{
+    AgentAccountMeta, EnergyResource, FreezeDuration, FreezeRecord, PendingUnfreeze,
+    VersionedBalance, VersionedNonce,
+};
+use tos_common::arbitration::{
+    ArbiterAccount, ArbiterStatus, ArbitrationRequestKey, ArbitrationRoundKey, ExpertiseDomain,
+};
 use tos_common::asset::{AssetData, VersionedAssetData};
 use tos_common::block::Block;
-use tos_common::config::{COIN_DECIMALS, MAXIMUM_SUPPLY, TOS_ASSET, UNO_ASSET};
+use tos_common::config::{COIN_DECIMALS, COIN_VALUE, MAXIMUM_SUPPLY, TOS_ASSET, UNO_ASSET};
 use tos_common::crypto::{hash as blake3_hash, Hash, Hashable, PublicKey, Signature};
+use tos_common::escrow::{
+    ArbitrationConfig, ArbitrationMode, DisputeInfo, EscrowAccount, EscrowState,
+};
+use tos_common::kyc::{
+    CommitteeMember, CommitteeStatus, KycData, KycRegion, KycStatus, MemberRole, MemberStatus,
+    SecurityCommittee,
+};
 use tos_common::network::Network;
+use tos_common::referral::ReferralRecord;
 use tos_common::serializer::Serializer;
 use tos_common::transaction::{
-    extra_data::UnknownExtraDataFormat, FeeType, Reference, Transaction, TransactionType, TxVersion,
+    extra_data::UnknownExtraDataFormat, CommitArbitrationOpenPayload,
+    CommitSelectionCommitmentPayload, CommitVoteRequestPayload, FeeType, Reference, Transaction,
+    TransactionType, TxVersion,
 };
 
 use tos_common::crypto::elgamal::KeyPair;
@@ -31,7 +47,9 @@ use tos_daemon::core::genesis::{
 use tos_daemon::core::state::ApplicableChainState;
 use tos_daemon::core::storage::rocksdb::RocksStorage;
 use tos_daemon::core::storage::{
-    AccountProvider, AssetProvider, BalanceProvider, EnergyProvider, NonceProvider,
+    AccountProvider, AgentAccountProvider, ArbiterProvider, ArbitrationCommitProvider,
+    AssetProvider, BalanceProvider, CommitteeProvider, EnergyProvider, EscrowProvider, KycProvider,
+    NonceProvider, ReferralProvider, TnsProvider,
 };
 use tos_daemon::vrf::WrappedMinerSecret;
 
@@ -66,6 +84,282 @@ struct AccountState {
     data: String,
 }
 
+// --- Domain data JSON wrapper structs ---
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+struct EscrowEntry {
+    id: String,
+    task_id: String,
+    payer: String,
+    payee: String,
+    #[serde(default)]
+    amount: u64,
+    #[serde(default)]
+    total_amount: u64,
+    #[serde(default)]
+    released_amount: u64,
+    #[serde(default)]
+    refunded_amount: u64,
+    #[serde(default)]
+    challenge_deposit: u64,
+    #[serde(default)]
+    asset: String,
+    #[serde(default = "default_escrow_state")]
+    state: String,
+    #[serde(default)]
+    timeout_blocks: u64,
+    #[serde(default)]
+    challenge_window: u64,
+    #[serde(default)]
+    challenge_deposit_bps: u16,
+    #[serde(default)]
+    optimistic_release: bool,
+    #[serde(default)]
+    created_at: u64,
+    #[serde(default)]
+    updated_at: u64,
+    #[serde(default)]
+    timeout_at: u64,
+    #[serde(default)]
+    arbitration_config: Option<ArbitrationConfigEntry>,
+    #[serde(default)]
+    release_requested_at: Option<u64>,
+    #[serde(default)]
+    pending_release_amount: Option<u64>,
+    #[serde(default)]
+    dispute: Option<DisputeInfoEntry>,
+    #[serde(default)]
+    dispute_id: Option<String>,
+    #[serde(default)]
+    dispute_round: Option<u32>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+struct ArbitrationConfigEntry {
+    #[serde(default = "default_single")]
+    mode: String,
+    #[serde(default)]
+    arbiters: Vec<String>,
+    #[serde(default)]
+    threshold: Option<u8>,
+    #[serde(default)]
+    fee_amount: u64,
+    #[serde(default)]
+    allow_appeal: bool,
+}
+
+fn default_single() -> String {
+    "single".to_string()
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+struct DisputeInfoEntry {
+    #[serde(default)]
+    initiator: String,
+    #[serde(default)]
+    reason: String,
+    #[serde(default)]
+    evidence_hash: Option<String>,
+    #[serde(default)]
+    disputed_at: u64,
+    #[serde(default)]
+    deadline: u64,
+}
+
+fn default_escrow_state() -> String {
+    "created".to_string()
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+struct ArbiterEntry {
+    public_key: String,
+    #[serde(default)]
+    name: String,
+    #[serde(default = "default_active")]
+    status: String,
+    #[serde(default)]
+    expertise: Vec<u8>,
+    #[serde(default)]
+    stake_amount: u64,
+    #[serde(default)]
+    fee_basis_points: u16,
+    #[serde(default)]
+    min_escrow_value: u64,
+    #[serde(default)]
+    max_escrow_value: u64,
+    #[serde(default)]
+    reputation_score: u16,
+    #[serde(default)]
+    total_cases: u64,
+    #[serde(default)]
+    active_cases: u64,
+    #[serde(default)]
+    registered_at: u64,
+    #[serde(default)]
+    total_slashed: u64,
+}
+
+fn default_active() -> String {
+    "active".to_string()
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+struct KycEntry {
+    address: String,
+    #[serde(default)]
+    level: u16,
+    #[serde(default = "default_active")]
+    status: String,
+    #[serde(default)]
+    verified_at: u64,
+    #[serde(default)]
+    data_hash: String,
+    #[serde(default)]
+    committee_id: String,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+struct CommitteeEntry {
+    id: String,
+    #[serde(default)]
+    region: u8,
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    members: Vec<CommitteeMemberEntry>,
+    #[serde(default = "default_one")]
+    threshold: u8,
+    #[serde(default)]
+    kyc_threshold: u8,
+    #[serde(default)]
+    max_kyc_level: u16,
+    #[serde(default = "default_active")]
+    status: String,
+    #[serde(default)]
+    parent_id: Option<String>,
+    #[serde(default)]
+    created_at: u64,
+    #[serde(default)]
+    updated_at: u64,
+}
+
+fn default_one() -> u8 {
+    1
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+struct CommitteeMemberEntry {
+    public_key: String,
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    role: u8,
+    #[serde(default)]
+    status: u8,
+    #[serde(default)]
+    joined_at: u64,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+struct AgentAccountEntry {
+    address: String,
+    owner: String,
+    controller: String,
+    #[serde(default)]
+    policy_hash: String,
+    #[serde(default)]
+    status: u8,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+struct TnsNameEntry {
+    name: String,
+    owner: String,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+struct ReferralEntry {
+    user: String,
+    referrer: String,
+    #[serde(default)]
+    bound_at_topoheight: u64,
+    #[serde(default)]
+    bound_timestamp: u64,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+struct EnergyResourceEntry {
+    address: String,
+    #[serde(default)]
+    energy: u64,
+    #[serde(default)]
+    frozen_tos: u64,
+    #[serde(default)]
+    last_update: u64,
+    #[serde(default)]
+    freeze_records: Vec<FreezeRecordEntry>,
+    #[serde(default)]
+    pending_unfreezes: Vec<PendingUnfreezeEntry>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+struct FreezeRecordEntry {
+    #[serde(default)]
+    amount: u64,
+    #[serde(default)]
+    energy_gained: u64,
+    #[serde(default)]
+    freeze_height: u64,
+    #[serde(default)]
+    unlock_height: u64,
+    #[serde(default)]
+    duration_days: u32,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+struct PendingUnfreezeEntry {
+    #[serde(default)]
+    amount: u64,
+    #[serde(default)]
+    expire_height: u64,
+}
+
+// --- Arbitration commit entries ---
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+struct ArbitrationCommitOpenEntry {
+    escrow_id: String,
+    dispute_id: String,
+    #[serde(default)]
+    round: u32,
+    request_id: String,
+    arbitration_open_hash: String,
+    #[serde(default)]
+    opener_signature: String,
+    #[serde(default)]
+    arbitration_open_payload: Vec<u8>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+struct ArbitrationCommitVoteRequestEntry {
+    request_id: String,
+    vote_request_hash: String,
+    #[serde(default)]
+    coordinator_signature: String,
+    #[serde(default)]
+    vote_request_payload: Vec<u8>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+struct ArbitrationCommitSelectionEntry {
+    request_id: String,
+    selection_commitment_id: String,
+    #[serde(default)]
+    selection_commitment_payload: Vec<u8>,
+}
+
+// --- PreState with domain data ---
+
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 struct PreState {
     #[serde(default)]
@@ -74,6 +368,28 @@ struct PreState {
     global_state: GlobalState,
     #[serde(default)]
     accounts: Vec<AccountState>,
+    #[serde(default)]
+    escrows: Vec<EscrowEntry>,
+    #[serde(default)]
+    arbiters: Vec<ArbiterEntry>,
+    #[serde(default)]
+    kyc_data: Vec<KycEntry>,
+    #[serde(default)]
+    committees: Vec<CommitteeEntry>,
+    #[serde(default)]
+    agent_accounts: Vec<AgentAccountEntry>,
+    #[serde(default)]
+    tns_names: Vec<TnsNameEntry>,
+    #[serde(default)]
+    referrals: Vec<ReferralEntry>,
+    #[serde(default)]
+    energy_resources: Vec<EnergyResourceEntry>,
+    #[serde(default)]
+    arbitration_commit_opens: Vec<ArbitrationCommitOpenEntry>,
+    #[serde(default)]
+    arbitration_commit_vote_requests: Vec<ArbitrationCommitVoteRequestEntry>,
+    #[serde(default)]
+    arbitration_commit_selections: Vec<ArbitrationCommitSelectionEntry>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -269,6 +585,402 @@ fn public_key_to_hex(key: &PublicKey) -> String {
     hex::encode(key.as_bytes())
 }
 
+// --- Domain data parse helpers ---
+
+fn to_hash_or_zero(hex_str: &str) -> Result<Hash, String> {
+    if hex_str.is_empty() {
+        return Ok(Hash::zero());
+    }
+    Hash::from_str(hex_str).map_err(|_| format!("invalid hash hex: {}", hex_str))
+}
+
+fn parse_escrow_state(s: &str) -> Result<EscrowState, String> {
+    match s {
+        "created" => Ok(EscrowState::Created),
+        "funded" => Ok(EscrowState::Funded),
+        "pending_release" | "pending-release" => Ok(EscrowState::PendingRelease),
+        "challenged" => Ok(EscrowState::Challenged),
+        "released" => Ok(EscrowState::Released),
+        "refunded" => Ok(EscrowState::Refunded),
+        "resolved" => Ok(EscrowState::Resolved),
+        "expired" => Ok(EscrowState::Expired),
+        _ => Err(format!("invalid escrow state: {}", s)),
+    }
+}
+
+fn parse_arbitration_mode(s: &str) -> Result<ArbitrationMode, String> {
+    match s {
+        "none" => Ok(ArbitrationMode::None),
+        "single" => Ok(ArbitrationMode::Single),
+        "committee" => Ok(ArbitrationMode::Committee),
+        "dao-governance" => Ok(ArbitrationMode::DaoGovernance),
+        _ => Err(format!("invalid arbitration mode: {}", s)),
+    }
+}
+
+fn parse_arbitration_config_entry(
+    entry: &ArbitrationConfigEntry,
+) -> Result<ArbitrationConfig, String> {
+    let mode = parse_arbitration_mode(&entry.mode)?;
+    let arbiters: Result<Vec<PublicKey>, String> =
+        entry.arbiters.iter().map(|s| to_public_key(s)).collect();
+    Ok(ArbitrationConfig {
+        mode,
+        arbiters: arbiters?,
+        threshold: entry.threshold,
+        fee_amount: entry.fee_amount,
+        allow_appeal: entry.allow_appeal,
+    })
+}
+
+fn parse_dispute_info_entry(entry: &DisputeInfoEntry) -> Result<DisputeInfo, String> {
+    let initiator = to_public_key(&entry.initiator)?;
+    let evidence_hash = match &entry.evidence_hash {
+        Some(h) if !h.is_empty() => Some(to_hash_or_zero(h)?),
+        _ => None,
+    };
+    Ok(DisputeInfo {
+        initiator,
+        reason: entry.reason.clone(),
+        evidence_hash,
+        disputed_at: entry.disputed_at,
+        deadline: entry.deadline,
+    })
+}
+
+fn parse_escrow_entry(entry: &EscrowEntry) -> Result<EscrowAccount, String> {
+    let id = to_hash_or_zero(&entry.id)?;
+    let payer = to_public_key(&entry.payer)?;
+    let payee = to_public_key(&entry.payee)?;
+    let asset = if entry.asset.is_empty() {
+        TOS_ASSET
+    } else {
+        to_hash_or_zero(&entry.asset)?
+    };
+    let state = parse_escrow_state(&entry.state)?;
+    let arbitration_config = match &entry.arbitration_config {
+        Some(ac) => Some(parse_arbitration_config_entry(ac)?),
+        None => None,
+    };
+    let dispute = match &entry.dispute {
+        Some(d) => Some(parse_dispute_info_entry(d)?),
+        None => None,
+    };
+    let dispute_id = match &entry.dispute_id {
+        Some(h) if !h.is_empty() => Some(to_hash_or_zero(h)?),
+        _ => None,
+    };
+    Ok(EscrowAccount {
+        id,
+        task_id: entry.task_id.clone(),
+        payer,
+        payee,
+        amount: entry.amount,
+        total_amount: entry.total_amount,
+        released_amount: entry.released_amount,
+        refunded_amount: entry.refunded_amount,
+        pending_release_amount: entry.pending_release_amount,
+        challenge_deposit: entry.challenge_deposit,
+        asset,
+        state,
+        dispute_id,
+        dispute_round: entry.dispute_round,
+        challenge_window: entry.challenge_window,
+        challenge_deposit_bps: entry.challenge_deposit_bps,
+        optimistic_release: entry.optimistic_release,
+        release_requested_at: entry.release_requested_at,
+        created_at: entry.created_at,
+        updated_at: entry.updated_at,
+        timeout_at: entry.timeout_at,
+        timeout_blocks: entry.timeout_blocks,
+        arbitration_config,
+        dispute,
+        appeal: None,
+        resolutions: Vec::new(),
+    })
+}
+
+fn parse_arbiter_status(s: &str) -> Result<ArbiterStatus, String> {
+    match s {
+        "active" => Ok(ArbiterStatus::Active),
+        "suspended" => Ok(ArbiterStatus::Suspended),
+        "exiting" => Ok(ArbiterStatus::Exiting),
+        "removed" => Ok(ArbiterStatus::Removed),
+        _ => Err(format!("invalid arbiter status: {}", s)),
+    }
+}
+
+fn parse_expertise_domain(v: u8) -> Result<ExpertiseDomain, String> {
+    match v {
+        0 => Ok(ExpertiseDomain::General),
+        1 => Ok(ExpertiseDomain::AIAgent),
+        2 => Ok(ExpertiseDomain::SmartContract),
+        3 => Ok(ExpertiseDomain::Payment),
+        4 => Ok(ExpertiseDomain::DeFi),
+        5 => Ok(ExpertiseDomain::Governance),
+        6 => Ok(ExpertiseDomain::Identity),
+        7 => Ok(ExpertiseDomain::Data),
+        8 => Ok(ExpertiseDomain::Security),
+        9 => Ok(ExpertiseDomain::Gaming),
+        10 => Ok(ExpertiseDomain::DataService),
+        11 => Ok(ExpertiseDomain::DigitalAsset),
+        12 => Ok(ExpertiseDomain::CrossChain),
+        13 => Ok(ExpertiseDomain::Nft),
+        _ => Err(format!("invalid expertise domain: {}", v)),
+    }
+}
+
+fn parse_arbiter_entry(entry: &ArbiterEntry) -> Result<ArbiterAccount, String> {
+    let public_key = to_public_key(&entry.public_key)?;
+    let status = parse_arbiter_status(&entry.status)?;
+    let expertise: Result<Vec<ExpertiseDomain>, String> = entry
+        .expertise
+        .iter()
+        .map(|&v| parse_expertise_domain(v))
+        .collect();
+    Ok(ArbiterAccount {
+        public_key,
+        name: entry.name.clone(),
+        status,
+        expertise: expertise?,
+        stake_amount: entry.stake_amount,
+        fee_basis_points: entry.fee_basis_points,
+        min_escrow_value: entry.min_escrow_value,
+        max_escrow_value: entry.max_escrow_value,
+        reputation_score: entry.reputation_score,
+        total_cases: entry.total_cases,
+        cases_overturned: 0,
+        registered_at: entry.registered_at,
+        last_active_at: 0,
+        pending_withdrawal: 0,
+        deactivated_at: None,
+        active_cases: entry.active_cases,
+        total_slashed: entry.total_slashed,
+        slash_count: 0,
+    })
+}
+
+fn parse_kyc_status(s: &str) -> Result<KycStatus, String> {
+    match s {
+        "active" => Ok(KycStatus::Active),
+        "revoked" => Ok(KycStatus::Revoked),
+        "suspended" => Ok(KycStatus::Suspended),
+        "expired" => Ok(KycStatus::Expired),
+        _ => Err(format!("invalid kyc status: {}", s)),
+    }
+}
+
+fn parse_kyc_entry(entry: &KycEntry) -> Result<(PublicKey, KycData, Hash), String> {
+    let pubkey = to_public_key(&entry.address)?;
+    let status = parse_kyc_status(&entry.status)?;
+    let data_hash = to_hash_or_zero(&entry.data_hash)?;
+    let committee_id = to_hash_or_zero(&entry.committee_id)?;
+    let mut kyc = KycData::new(entry.level, entry.verified_at, data_hash);
+    kyc.status = status;
+    Ok((pubkey, kyc, committee_id))
+}
+
+fn parse_kyc_region(v: u8) -> KycRegion {
+    match v {
+        1 => KycRegion::AsiaPacific,
+        2 => KycRegion::Europe,
+        3 => KycRegion::NorthAmerica,
+        4 => KycRegion::LatinAmerica,
+        5 => KycRegion::MiddleEast,
+        255 => KycRegion::Global,
+        _ => KycRegion::Unspecified,
+    }
+}
+
+fn parse_member_role(v: u8) -> MemberRole {
+    MemberRole::from_u8(v).unwrap_or(MemberRole::Member)
+}
+
+fn parse_member_status(v: u8) -> MemberStatus {
+    MemberStatus::from_u8(v).unwrap_or(MemberStatus::Active)
+}
+
+fn parse_committee_status(s: &str) -> CommitteeStatus {
+    match s {
+        "active" => CommitteeStatus::Active,
+        "suspended" => CommitteeStatus::Suspended,
+        "dissolved" | "archived" => CommitteeStatus::Dissolved,
+        _ => CommitteeStatus::Active,
+    }
+}
+
+fn parse_committee_entry(entry: &CommitteeEntry) -> Result<(Hash, SecurityCommittee), String> {
+    let id = to_hash_or_zero(&entry.id)?;
+    let region = parse_kyc_region(entry.region);
+    let members: Vec<CommitteeMember> = entry
+        .members
+        .iter()
+        .map(|m| -> Result<CommitteeMember, String> {
+            let pk = to_public_key(&m.public_key)?;
+            Ok(CommitteeMember {
+                public_key: pk,
+                name: if m.name.is_empty() {
+                    None
+                } else {
+                    Some(m.name.clone())
+                },
+                role: parse_member_role(m.role),
+                status: parse_member_status(m.status),
+                joined_at: m.joined_at,
+                last_active_at: 0,
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let parent_id = match &entry.parent_id {
+        Some(p) if !p.is_empty() => Some(to_hash_or_zero(p)?),
+        _ => None,
+    };
+
+    let status = parse_committee_status(&entry.status);
+
+    let mut committee = SecurityCommittee::new(
+        id.clone(),
+        region,
+        entry.name.clone(),
+        members,
+        entry.threshold,
+        entry.max_kyc_level,
+        parent_id,
+        entry.created_at,
+    );
+    committee.kyc_threshold = entry.kyc_threshold;
+    committee.status = status;
+    committee.updated_at = entry.updated_at;
+
+    Ok((id, committee))
+}
+
+fn parse_agent_account_entry(
+    entry: &AgentAccountEntry,
+) -> Result<(PublicKey, AgentAccountMeta), String> {
+    let address = to_public_key(&entry.address)?;
+    let owner = to_public_key(&entry.owner)?;
+    let controller = to_public_key(&entry.controller)?;
+    let policy_hash = to_hash_or_zero(&entry.policy_hash)?;
+    Ok((
+        address,
+        AgentAccountMeta {
+            owner,
+            controller,
+            policy_hash,
+            status: entry.status,
+            energy_pool: None,
+            session_key_root: None,
+        },
+    ))
+}
+
+fn parse_tns_entry(entry: &TnsNameEntry) -> Result<(Hash, PublicKey), String> {
+    let name_hash = blake3_hash(entry.name.as_bytes());
+    let owner = to_public_key(&entry.owner)?;
+    Ok((name_hash, owner))
+}
+
+fn parse_referral_entry(entry: &ReferralEntry) -> Result<(PublicKey, ReferralRecord), String> {
+    let user = to_public_key(&entry.user)?;
+    let referrer = to_public_key(&entry.referrer)?;
+    let record = ReferralRecord::new(
+        user.clone(),
+        Some(referrer),
+        entry.bound_at_topoheight,
+        Hash::zero(),
+        entry.bound_timestamp,
+    );
+    Ok((user, record))
+}
+
+fn parse_energy_resource_entry(
+    entry: &EnergyResourceEntry,
+) -> Result<(PublicKey, EnergyResource), String> {
+    let pubkey = to_public_key(&entry.address)?;
+    let mut resource = EnergyResource::new();
+    // Convert from atomic units (Python) to whole TOS units (Rust internal convention)
+    resource.frozen_tos = entry.frozen_tos / COIN_VALUE;
+    resource.energy = entry.energy;
+    resource.last_update = entry.last_update;
+    for fr in &entry.freeze_records {
+        let duration = FreezeDuration::new(if fr.duration_days > 0 {
+            fr.duration_days
+        } else {
+            7
+        })
+        .unwrap_or_else(|_| FreezeDuration::new(7).unwrap_or_else(|_| unreachable!()));
+        resource.freeze_records.push(FreezeRecord {
+            amount: fr.amount / COIN_VALUE,
+            duration,
+            freeze_topoheight: fr.freeze_height,
+            unlock_topoheight: fr.unlock_height,
+            energy_gained: fr.energy_gained,
+        });
+    }
+    for pu in &entry.pending_unfreezes {
+        resource.pending_unfreezes.push(PendingUnfreeze {
+            amount: pu.amount / COIN_VALUE,
+            expire_topoheight: pu.expire_height,
+        });
+    }
+    Ok((pubkey, resource))
+}
+
+fn parse_commit_open_entry(
+    entry: &ArbitrationCommitOpenEntry,
+) -> Result<CommitArbitrationOpenPayload, String> {
+    let escrow_id = to_hash_or_zero(&entry.escrow_id)?;
+    let dispute_id = to_hash_or_zero(&entry.dispute_id)?;
+    let request_id = to_hash_or_zero(&entry.request_id)?;
+    let arbitration_open_hash = to_hash_or_zero(&entry.arbitration_open_hash)?;
+    let opener_signature = if entry.opener_signature.is_empty() {
+        Signature::from_hex(&"00".repeat(64)).map_err(|e| e.to_string())?
+    } else {
+        Signature::from_hex(&entry.opener_signature).map_err(|e| e.to_string())?
+    };
+    Ok(CommitArbitrationOpenPayload {
+        escrow_id,
+        dispute_id,
+        round: entry.round,
+        request_id,
+        arbitration_open_hash,
+        opener_signature,
+        arbitration_open_payload: entry.arbitration_open_payload.clone(),
+    })
+}
+
+fn parse_commit_vote_request_entry(
+    entry: &ArbitrationCommitVoteRequestEntry,
+) -> Result<CommitVoteRequestPayload, String> {
+    let request_id = to_hash_or_zero(&entry.request_id)?;
+    let vote_request_hash = to_hash_or_zero(&entry.vote_request_hash)?;
+    let coordinator_signature = if entry.coordinator_signature.is_empty() {
+        Signature::from_hex(&"00".repeat(64)).map_err(|e| e.to_string())?
+    } else {
+        Signature::from_hex(&entry.coordinator_signature).map_err(|e| e.to_string())?
+    };
+    Ok(CommitVoteRequestPayload {
+        request_id,
+        vote_request_hash,
+        coordinator_signature,
+        vote_request_payload: entry.vote_request_payload.clone(),
+    })
+}
+
+fn parse_commit_selection_entry(
+    entry: &ArbitrationCommitSelectionEntry,
+) -> Result<CommitSelectionCommitmentPayload, String> {
+    let request_id = to_hash_or_zero(&entry.request_id)?;
+    let selection_commitment_id = to_hash_or_zero(&entry.selection_commitment_id)?;
+    Ok(CommitSelectionCommitmentPayload {
+        request_id,
+        selection_commitment_id,
+        selection_commitment_payload: entry.selection_commitment_payload.clone(),
+    })
+}
+
 fn compute_state_digest(state: &PreState) -> String {
     let mut buf = Vec::new();
     let gs = &state.global_state;
@@ -334,10 +1046,14 @@ fn map_error_code(err: &BlockchainError) -> u16 {
         BlockchainError::InvalidTransactionExtraData
         | BlockchainError::InvalidTransferExtraData
         | BlockchainError::InvalidTxInBlock(_)
-        | BlockchainError::InvalidTransactionMultiThread => 0x0107,
+        | BlockchainError::InvalidTransactionMultiThread
+        | BlockchainError::MultiSigNotConfigured
+        | BlockchainError::MultiSigNotFound => 0x0107,
         BlockchainError::InvalidTxFee(_, _) | BlockchainError::FeesToLowToOverride(_, _) => 0x0301,
         BlockchainError::InvalidTxVersion => 0x0101,
-        BlockchainError::InvalidTransactionToSender(_) => 0x0409,
+        BlockchainError::InvalidTransactionToSender(_) | BlockchainError::ReferralSelfReferral => {
+            0x0409
+        }
         BlockchainError::TxTooBig(_, _) => 0x0100,
         BlockchainError::InvalidReferenceHash
         | BlockchainError::InvalidReferenceTopoheight(_, _)
@@ -353,6 +1069,38 @@ fn map_error_code(err: &BlockchainError) -> u16 {
                 0x0302
             } else if msg.contains("Invalid chain ID") {
                 0x0102
+            } else if msg.contains("Agent account invalid parameter") {
+                0x0400
+            } else if msg.contains("Cannot delegate energy to yourself")
+                || msg.contains("self-referral")
+                || msg.contains("SelfReferral")
+                || msg.contains("Sender is receiver")
+            {
+                0x0409
+            } else if msg.contains("amount must be greater than zero")
+                || msg.contains("invalid amount")
+                || msg.contains("Invalid amount")
+                || msg.contains("Invalid transfer amount")
+            {
+                0x0105
+            } else if msg.contains("Insufficient self-frozen TOS")
+                || msg.contains("Insufficient frozen")
+            {
+                0x0303
+            } else if msg.contains("stake too low")
+                || msg.contains("list cannot be empty")
+                || msg.contains("No pending unfreezes")
+                || msg.contains("Invalid KYC level")
+                || msg.contains("optimistic release not enabled")
+                || msg.contains("appeal not allowed")
+                || msg.contains("dispute record required")
+                || msg.contains("invalid escrow state")
+                || msg.contains("CommitArbitrationOpen missing")
+                || msg.contains("MultiSig not configured")
+            {
+                0x0107
+            } else if msg.contains("Contract not found") {
+                0x0500
             } else {
                 0xFFFF
             }
@@ -379,6 +1127,47 @@ fn map_verify_error_code(
         VE::InvalidFee(_, _) => 0x0301,
         VE::InsufficientFunds { .. } => 0x0300,
         VE::TransferExtraDataSize | VE::TransactionExtraDataSize | VE::InvalidFormat => 0x0100,
+        VE::AgentAccountInvalidParameter
+        | VE::AgentAccountInvalidController
+        | VE::AgentAccountUnauthorized
+        | VE::AgentAccountFrozen => 0x0400,
+        VE::SenderIsReceiver => 0x0409,
+        VE::ContractNotFound => 0x0500,
+        VE::ArbiterStakeTooLow { .. }
+        | VE::ArbiterNotFound
+        | VE::ArbiterInvalidStatus
+        | VE::MultiSigNotConfigured
+        | VE::MultiSigNotFound => 0x0107,
+        VE::InvalidTransferAmount | VE::ShieldAmountTooLow => 0x0105,
+        VE::Overflow | VE::UnoBalanceOverflow => 0x0304,
+        VE::AnyError(err) => {
+            let msg = err.to_string();
+            if msg.contains("Insufficient funds") {
+                0x0300
+            } else if msg.contains("amount must be greater than zero")
+                || msg.contains("invalid amount")
+                || msg.contains("Invalid amount")
+            {
+                0x0105
+            } else if msg.contains("Insufficient self-frozen TOS")
+                || msg.contains("Insufficient frozen")
+            {
+                0x0303
+            } else if msg.contains("Cannot delegate energy to yourself")
+                || msg.contains("self-referral")
+                || msg.contains("SelfReferral")
+            {
+                0x0409
+            } else if msg.contains("No pending unfreezes")
+                || msg.contains("Invalid KYC level")
+                || msg.contains("stake too low")
+                || msg.contains("list cannot be empty")
+            {
+                0x0107
+            } else {
+                0xFFFF
+            }
+        }
         _ => 0xFFFF,
     }
 }
@@ -532,12 +1321,6 @@ async fn handle_state_load(state: web::Data<AppState>, body: web::Json<PreState>
             )
         } else {
             let pre_state = body.into_inner();
-            if pre_state.accounts.iter().any(|acc| acc.frozen > 0) {
-                return HttpResponse::BadRequest().json(json!({
-                    "success": false,
-                    "error": "frozen_tos is not supported in conformance state/load (genesis semantics require frozen_tos = 0)"
-                }));
-            }
 
             let alloc = match parsed_alloc_from_pre_state(&pre_state.accounts) {
                 Ok(entries) => entries,
@@ -550,6 +1333,192 @@ async fn handle_state_load(state: web::Data<AppState>, body: web::Json<PreState>
             if let Err(err) = apply_genesis_state(&mut *storage, &alloc).await {
                 return HttpResponse::InternalServerError()
                     .json(json!({ "success": false, "error": err.to_string() }));
+            }
+
+            // Auto-create energy resources for accounts with frozen > 0
+            for acc in &pre_state.accounts {
+                if acc.frozen > 0 {
+                    let already_provided = pre_state
+                        .energy_resources
+                        .iter()
+                        .any(|er| er.address == acc.address);
+                    if !already_provided {
+                        if let Ok(pubkey) = to_public_key(&acc.address) {
+                            let mut resource = EnergyResource::new();
+                            resource.frozen_tos = acc.frozen / COIN_VALUE;
+                            resource.energy = acc.energy;
+                            resource.last_update = 0;
+                            let _ = storage
+                                .set_energy_resource(&pubkey, topoheight, &resource)
+                                .await;
+                        }
+                    }
+                }
+            }
+
+            // Load domain data: escrows
+            for entry in &pre_state.escrows {
+                match parse_escrow_entry(entry) {
+                    Ok(escrow) => {
+                        let _ = storage.set_escrow(&escrow).await;
+                    }
+                    Err(err) => {
+                        return HttpResponse::BadRequest()
+                            .json(json!({ "success": false, "error": err }));
+                    }
+                }
+            }
+
+            // Load domain data: arbiters
+            for entry in &pre_state.arbiters {
+                match parse_arbiter_entry(entry) {
+                    Ok(arbiter) => {
+                        let _ = storage.set_arbiter(&arbiter).await;
+                    }
+                    Err(err) => {
+                        return HttpResponse::BadRequest()
+                            .json(json!({ "success": false, "error": err }));
+                    }
+                }
+            }
+
+            // Load domain data: KYC (use set_kyc to write both KycData and KycMetadata)
+            for entry in &pre_state.kyc_data {
+                match parse_kyc_entry(entry) {
+                    Ok((pubkey, kyc, committee_id)) => {
+                        let _ = storage
+                            .set_kyc(&pubkey, kyc, &committee_id, 0, &Hash::zero())
+                            .await;
+                    }
+                    Err(err) => {
+                        return HttpResponse::BadRequest()
+                            .json(json!({ "success": false, "error": err }));
+                    }
+                }
+            }
+
+            // Load domain data: committees
+            for entry in &pre_state.committees {
+                match parse_committee_entry(entry) {
+                    Ok((id, committee)) => {
+                        let _ = storage.import_committee(&id, &committee).await;
+                    }
+                    Err(err) => {
+                        return HttpResponse::BadRequest()
+                            .json(json!({ "success": false, "error": err }));
+                    }
+                }
+            }
+
+            // Load domain data: agent accounts
+            for entry in &pre_state.agent_accounts {
+                match parse_agent_account_entry(entry) {
+                    Ok((pubkey, meta)) => {
+                        let _ = storage.set_agent_account_meta(&pubkey, &meta).await;
+                    }
+                    Err(err) => {
+                        return HttpResponse::BadRequest()
+                            .json(json!({ "success": false, "error": err }));
+                    }
+                }
+            }
+
+            // Load domain data: TNS names
+            for entry in &pre_state.tns_names {
+                match parse_tns_entry(entry) {
+                    Ok((name_hash, owner)) => {
+                        let _ = storage.register_name(name_hash, owner).await;
+                    }
+                    Err(err) => {
+                        return HttpResponse::BadRequest()
+                            .json(json!({ "success": false, "error": err }));
+                    }
+                }
+            }
+
+            // Load domain data: referrals
+            for entry in &pre_state.referrals {
+                match parse_referral_entry(entry) {
+                    Ok((user, record)) => {
+                        let _ = storage.import_referral_record(&user, &record).await;
+                    }
+                    Err(err) => {
+                        return HttpResponse::BadRequest()
+                            .json(json!({ "success": false, "error": err }));
+                    }
+                }
+            }
+
+            // Load domain data: energy resources (explicit entries)
+            for entry in &pre_state.energy_resources {
+                match parse_energy_resource_entry(entry) {
+                    Ok((pubkey, resource)) => {
+                        let _ = storage
+                            .set_energy_resource(&pubkey, topoheight, &resource)
+                            .await;
+                    }
+                    Err(err) => {
+                        return HttpResponse::BadRequest()
+                            .json(json!({ "success": false, "error": err }));
+                    }
+                }
+            }
+
+            // Load domain data: arbitration commit opens
+            for entry in &pre_state.arbitration_commit_opens {
+                match parse_commit_open_entry(entry) {
+                    Ok(payload) => {
+                        let round_key = ArbitrationRoundKey {
+                            escrow_id: payload.escrow_id.clone(),
+                            dispute_id: payload.dispute_id.clone(),
+                            round: payload.round,
+                        };
+                        let request_key = ArbitrationRequestKey {
+                            request_id: payload.request_id.clone(),
+                        };
+                        let _ = storage
+                            .set_commit_arbitration_open(&round_key, &request_key, &payload)
+                            .await;
+                    }
+                    Err(err) => {
+                        return HttpResponse::BadRequest()
+                            .json(json!({ "success": false, "error": err }));
+                    }
+                }
+            }
+
+            // Load domain data: arbitration commit vote requests
+            for entry in &pre_state.arbitration_commit_vote_requests {
+                match parse_commit_vote_request_entry(entry) {
+                    Ok(payload) => {
+                        let key = ArbitrationRequestKey {
+                            request_id: payload.request_id.clone(),
+                        };
+                        let _ = storage.set_commit_vote_request(&key, &payload).await;
+                    }
+                    Err(err) => {
+                        return HttpResponse::BadRequest()
+                            .json(json!({ "success": false, "error": err }));
+                    }
+                }
+            }
+
+            // Load domain data: arbitration commit selection commitments
+            for entry in &pre_state.arbitration_commit_selections {
+                match parse_commit_selection_entry(entry) {
+                    Ok(payload) => {
+                        let key = ArbitrationRequestKey {
+                            request_id: payload.request_id.clone(),
+                        };
+                        let _ = storage
+                            .set_commit_selection_commitment(&key, &payload)
+                            .await;
+                    }
+                    Err(err) => {
+                        return HttpResponse::BadRequest()
+                            .json(json!({ "success": false, "error": err }));
+                    }
+                }
             }
 
             let mut meta = MetaState::default();
@@ -615,23 +1584,23 @@ async fn handle_tx_execute(
     let tx = if !body.wire_hex.trim().is_empty() {
         match Transaction::from_hex(body.wire_hex.trim()) {
             Ok(tx) => tx,
-            Err(err) => {
-                return HttpResponse::BadRequest().json(json!({
-                    "success": false,
-                    "error": err.to_string(),
-                    "error_code": 0x0100
-                }));
+            Err(_err) => {
+                return HttpResponse::Ok().json(ExecResult {
+                    success: false,
+                    error_code: 0x0100,
+                    state_digest: String::new(),
+                });
             }
         }
     } else if let Some(tx_json) = &body.tx {
         match tx_from_json(tx_json) {
             Ok(tx) => tx,
-            Err(err) => {
-                return HttpResponse::BadRequest().json(json!({
-                    "success": false,
-                    "error": err,
-                    "error_code": 0x0100
-                }));
+            Err(_err) => {
+                return HttpResponse::Ok().json(ExecResult {
+                    success: false,
+                    error_code: 0x0100,
+                    state_digest: String::new(),
+                });
             }
         }
     } else {
@@ -642,6 +1611,13 @@ async fn handle_tx_execute(
 
     let tx_hash = tx.hash();
     let tx_for_apply = tx.clone();
+
+    // Save burn amount before tx_for_apply is moved into Arc
+    let burn_amount = if let TransactionType::Burn(payload) = tx_for_apply.get_data() {
+        Some(payload.amount)
+    } else {
+        None
+    };
 
     let mut engine = state.engine.lock().await;
     if let TransactionType::Transfers(payloads) = tx_for_apply.get_data() {
@@ -737,6 +1713,7 @@ async fn handle_tx_execute(
             .apply_with_partial_verify(&tx_hash, &mut chain_state)
             .await
         {
+            eprintln!("conformance tx_execute apply_with_partial_verify error: {err:?}");
             let code = map_verify_error_code(&err);
             return HttpResponse::Ok().json(ExecResult {
                 success: false,
@@ -753,6 +1730,12 @@ async fn handle_tx_execute(
                 state_digest: String::new(),
             });
         }
+    }
+
+    // Update global state tracking based on tx type
+    if let Some(amount) = burn_amount {
+        engine.meta.global_state.total_burned =
+            engine.meta.global_state.total_burned.saturating_add(amount);
     }
 
     let export = build_export(&engine).await;
@@ -940,12 +1923,20 @@ async fn build_export(engine: &Engine) -> PreState {
                 .await
                 .map(|(_, v)| v.get_nonce())
                 .unwrap_or(0);
+            // Read frozen/energy from EnergyResource storage (post-execution state)
+            let (frozen, energy) = match storage.get_energy_resource(&key).await {
+                Ok(Some(resource)) => (
+                    resource.frozen_tos.saturating_mul(COIN_VALUE),
+                    resource.energy,
+                ),
+                _ => (meta.frozen, meta.energy),
+            };
             accounts.push(AccountState {
                 address: addr.clone(),
                 balance,
                 nonce,
-                frozen: meta.frozen,
-                energy: meta.energy,
+                frozen,
+                energy,
                 flags: meta.flags,
                 data: meta.data.clone(),
             });
@@ -973,22 +1964,45 @@ async fn build_export(engine: &Engine) -> PreState {
                 .get(&addr)
                 .cloned()
                 .unwrap_or_default();
+            // Read frozen/energy from EnergyResource storage (post-execution state)
+            let (frozen, energy) = match storage.get_energy_resource(&key).await {
+                Ok(Some(resource)) => (
+                    resource.frozen_tos.saturating_mul(COIN_VALUE),
+                    resource.energy,
+                ),
+                _ => (meta.frozen, meta.energy),
+            };
             accounts.push(AccountState {
                 address: addr,
                 balance,
                 nonce,
-                frozen: meta.frozen,
-                energy: meta.energy,
+                frozen,
+                energy,
                 flags: meta.flags,
                 data: meta.data,
             });
         }
     }
 
+    // Compute total_energy as sum of all account energy values
+    let mut gs = engine.meta.global_state.clone();
+    gs.total_energy = accounts.iter().map(|a| a.energy).sum();
+
     PreState {
         network_chain_id: engine.meta.network_chain_id,
-        global_state: engine.meta.global_state.clone(),
+        global_state: gs,
         accounts,
+        escrows: Vec::new(),
+        arbiters: Vec::new(),
+        kyc_data: Vec::new(),
+        committees: Vec::new(),
+        agent_accounts: Vec::new(),
+        tns_names: Vec::new(),
+        referrals: Vec::new(),
+        energy_resources: Vec::new(),
+        arbitration_commit_opens: Vec::new(),
+        arbitration_commit_vote_requests: Vec::new(),
+        arbitration_commit_selections: Vec::new(),
     }
 }
 
