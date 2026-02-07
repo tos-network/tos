@@ -1114,8 +1114,8 @@ impl Transaction {
                 kyc::verify_transfer_kyc(payload, current_time)?;
             }
             TransactionType::BootstrapCommittee(payload) => {
-                // SECURITY FIX (Issue #33): Pass sender to verify only BOOTSTRAP_ADDRESS can bootstrap
-                kyc::verify_bootstrap_committee(payload, &self.source)?;
+                let network = state.get_network();
+                kyc::verify_bootstrap_committee(payload, &self.source, &network)?;
             }
             TransactionType::RegisterCommittee(payload) => {
                 let current_time = state.get_verification_timestamp();
@@ -3251,8 +3251,8 @@ impl Transaction {
                 kyc::verify_appeal_kyc(payload, current_time)?;
             }
             TransactionType::BootstrapCommittee(payload) => {
-                // SECURITY FIX (Issue #33): Pass sender to verify only BOOTSTRAP_ADDRESS can bootstrap
-                kyc::verify_bootstrap_committee(payload, &self.source)?;
+                let network = state.get_network();
+                kyc::verify_bootstrap_committee(payload, &self.source, &network)?;
             }
             TransactionType::RegisterCommittee(payload) => {
                 let current_time = state.get_verification_timestamp();
@@ -6754,21 +6754,21 @@ impl Transaction {
             }
             TransactionType::BootstrapCommittee(payload) => {
                 // Defense-in-depth: Re-verify authorization in apply phase
+                let network = state.get_network();
                 let bootstrap_pubkey = {
                     use crate::crypto::Address;
-                    let addr =
-                        Address::from_string(crate::config::BOOTSTRAP_ADDRESS).map_err(|e| {
-                            VerificationError::AnyError(anyhow::anyhow!(
-                                "Invalid bootstrap address configuration: {}",
-                                e
-                            ))
-                        })?;
+                    let addr = Address::from_string(network.bootstrap_address()).map_err(|e| {
+                        VerificationError::AnyError(anyhow::anyhow!(
+                            "Invalid bootstrap address configuration: {}",
+                            e
+                        ))
+                    })?;
                     addr.to_public_key()
                 };
 
                 if self.get_source() != &bootstrap_pubkey {
                     return Err(VerificationError::AnyError(anyhow::anyhow!(
-                        "BootstrapCommittee can only be submitted by BOOTSTRAP_ADDRESS"
+                        "BootstrapCommittee can only be submitted by the network bootstrap address"
                     )));
                 }
 

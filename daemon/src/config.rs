@@ -156,8 +156,8 @@ pub const SIDE_BLOCK_REWARD_MIN_PERCENT: u64 = 5;
 // It is used to calculate based on the supply the block reward
 pub const EMISSION_SPEED_FACTOR: u64 = 20;
 
-// Developer address for paying dev fees until Smart Contracts integration
-// (testnet/mainnet format is converted lazily later)
+/// Mainnet developer address (for backward compatibility).
+/// Prefer `get_dev_public_key(network)` for network-aware code.
 pub const DEV_ADDRESS: &str = "tos1qsl6sj2u0gp37tr6drrq964rd4d8gnaxnezgytmt0cfltnp2wsgqqak28je";
 
 // Chain sync config
@@ -416,6 +416,22 @@ fn create_dev_public_key() -> PublicKey {
 
 lazy_static! {
     pub static ref DEV_PUBLIC_KEY: PublicKey = create_dev_public_key();
+}
+
+/// Get the developer public key for a given network.
+/// Panics on invalid address - daemon cannot start with invalid dev address.
+#[allow(clippy::expect_used, clippy::panic)]
+pub fn get_dev_public_key(network: &Network) -> PublicKey {
+    let addr_str = network.dev_address();
+    match Address::from_string(addr_str) {
+        Ok(address) => address.to_public_key(),
+        Err(err) => {
+            panic!(
+                "FATAL: Invalid dev address '{}': {} - daemon cannot start with invalid developer address",
+                addr_str, err
+            );
+        }
+    }
 }
 
 // Genesis block hash based on network selected

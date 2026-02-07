@@ -6,6 +6,20 @@ use std::{
 
 use crate::serializer::{Reader, ReaderError, Serializer, Writer};
 
+/// Mainnet bootstrap / dev address (bech32m, `tos` prefix)
+pub(crate) const MAINNET_BOOTSTRAP_ADDRESS: &str =
+    "tos1qsl6sj2u0gp37tr6drrq964rd4d8gnaxnezgytmt0cfltnp2wsgqqak28je";
+
+/// Testnet bootstrap / dev address (bech32m, `tst` prefix, same underlying public key as mainnet)
+pub(crate) const TESTNET_BOOTSTRAP_ADDRESS: &str =
+    "tst1qsl6sj2u0gp37tr6drrq964rd4d8gnaxnezgytmt0cfltnp2wsgqqxxrx64";
+
+/// Devnet bootstrap / dev address.
+/// Private key: `0100000000000000000000000000000000000000000000000000000000000000`
+/// Public key derived via: Scalar::from_bytes_mod_order(private_key).invert() * H
+pub(crate) const DEVNET_BOOTSTRAP_ADDRESS: &str =
+    "tos13jfypdzk48ndcewrw7ssfrt5t722prxm0azvhntmgme5qjy8zy6qq83fpue";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Network {
     // Production network
@@ -97,6 +111,26 @@ impl Network {
     pub fn unfreeze_cooldown_blocks(&self) -> u64 {
         crate::config::UNFREEZE_COOLDOWN_DAYS * self.blocks_per_day()
     }
+
+    /// Get the bootstrap address for this network.
+    /// Only the bootstrap address holder can create the Global Committee.
+    pub fn bootstrap_address(&self) -> &'static str {
+        match self {
+            Self::Mainnet => MAINNET_BOOTSTRAP_ADDRESS,
+            Self::Testnet | Self::Stagenet => TESTNET_BOOTSTRAP_ADDRESS,
+            Self::Devnet => DEVNET_BOOTSTRAP_ADDRESS,
+        }
+    }
+
+    /// Get the developer team address for this network.
+    /// Used for dev fee distribution and genesis block miner.
+    pub fn dev_address(&self) -> &'static str {
+        match self {
+            Self::Mainnet => MAINNET_BOOTSTRAP_ADDRESS,
+            Self::Testnet | Self::Stagenet => TESTNET_BOOTSTRAP_ADDRESS,
+            Self::Devnet => DEVNET_BOOTSTRAP_ADDRESS,
+        }
+    }
 }
 
 impl Serialize for Network {
@@ -167,5 +201,47 @@ impl Serializer for Network {
 
     fn size(&self) -> usize {
         1
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_bootstrap_addresses_parse() {
+        use crate::crypto::Address;
+        for network in [
+            Network::Mainnet,
+            Network::Testnet,
+            Network::Stagenet,
+            Network::Devnet,
+        ] {
+            let addr = Address::from_string(network.bootstrap_address()).unwrap_or_else(|e| {
+                panic!("Failed to parse bootstrap address for {:?}: {}", network, e)
+            });
+            let pk = addr.to_public_key();
+            eprintln!(
+                "{:?} bootstrap pubkey: {}",
+                network,
+                hex::encode(pk.as_bytes())
+            );
+        }
+    }
+
+    #[test]
+    fn test_dev_addresses_parse() {
+        use crate::crypto::Address;
+        for network in [
+            Network::Mainnet,
+            Network::Testnet,
+            Network::Stagenet,
+            Network::Devnet,
+        ] {
+            let addr = Address::from_string(network.dev_address())
+                .unwrap_or_else(|e| panic!("Failed to parse dev address for {:?}: {}", network, e));
+            let pk = addr.to_public_key();
+            eprintln!("{:?} dev pubkey: {}", network, hex::encode(pk.as_bytes()));
+        }
     }
 }

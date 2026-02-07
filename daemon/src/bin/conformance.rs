@@ -48,8 +48,8 @@ use tos_daemon::core::state::ApplicableChainState;
 use tos_daemon::core::storage::rocksdb::RocksStorage;
 use tos_daemon::core::storage::{
     AccountProvider, AgentAccountProvider, ArbiterProvider, ArbitrationCommitProvider,
-    AssetProvider, BalanceProvider, CommitteeProvider, EnergyProvider, EscrowProvider, KycProvider,
-    NonceProvider, ReferralProvider, TnsProvider,
+    AssetProvider, BalanceProvider, CommitteeProvider, ContractProvider, EnergyProvider,
+    EscrowProvider, KycProvider, NonceProvider, ReferralProvider, TnsProvider, VersionedContract,
 };
 use tos_daemon::vrf::WrappedMinerSecret;
 
@@ -358,6 +358,15 @@ struct ArbitrationCommitSelectionEntry {
     selection_commitment_payload: Vec<u8>,
 }
 
+// Contract entry for pre-loading deployed contracts
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+struct ContractEntry {
+    // Contract address hash (hex)
+    hash: String,
+    // ELF bytecode (hex-encoded)
+    module: String,
+}
+
 // --- PreState with domain data ---
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -390,6 +399,8 @@ struct PreState {
     arbitration_commit_vote_requests: Vec<ArbitrationCommitVoteRequestEntry>,
     #[serde(default)]
     arbitration_commit_selections: Vec<ArbitrationCommitSelectionEntry>,
+    #[serde(default)]
+    contracts: Vec<ContractEntry>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -1273,7 +1284,9 @@ async fn handle_state_load(state: web::Data<AppState>, body: web::Json<PreState>
                 .await;
         }
 
-        let pending_meta = if let Ok(path) = std::env::var("LABU_GENESIS_STATE_PATH") {
+        let (pending_meta, skip_miner_registration) = if let Ok(path) =
+            std::env::var("LABU_GENESIS_STATE_PATH")
+        {
             let path = PathBuf::from(path);
             let genesis = match load_genesis_state(&path) {
                 Ok(state) => state,
@@ -1305,19 +1318,22 @@ async fn handle_state_load(state: web::Data<AppState>, body: web::Json<PreState>
                     }));
                 }
             };
-            Some(
-                match build_meta_from_genesis(
-                    engine.network,
-                    chain_id,
-                    validated.genesis_timestamp_ms,
-                    &validated.parsed_alloc,
-                ) {
-                    Ok(meta) => meta,
-                    Err(err) => {
-                        return HttpResponse::InternalServerError()
-                            .json(json!({ "success": false, "error": err }));
-                    }
-                },
+            (
+                Some(
+                    match build_meta_from_genesis(
+                        engine.network,
+                        chain_id,
+                        validated.genesis_timestamp_ms,
+                        &validated.parsed_alloc,
+                    ) {
+                        Ok(meta) => meta,
+                        Err(err) => {
+                            return HttpResponse::InternalServerError()
+                                .json(json!({ "success": false, "error": err }));
+                        }
+                    },
+                ),
+                false,
             )
         } else {
             let pre_state = body.into_inner();
@@ -1521,6 +1537,36 @@ async fn handle_state_load(state: web::Data<AppState>, body: web::Json<PreState>
                 }
             }
 
+            // Load domain data: deployed contracts
+            for entry in &pre_state.contracts {
+                let contract_hash = match Hash::from_hex(&entry.hash) {
+                    Ok(h) => h,
+                    Err(e) => {
+                        return HttpResponse::BadRequest().json(json!({
+                            "success": false,
+                            "error": format!("invalid contract hash '{}': {}", entry.hash, e)
+                        }));
+                    }
+                };
+                let bytecode = match hex::decode(&entry.module) {
+                    Ok(b) => b,
+                    Err(e) => {
+                        return HttpResponse::BadRequest().json(json!({
+                            "success": false,
+                            "error": format!("invalid contract module hex: {}", e)
+                        }));
+                    }
+                };
+                let module = tos_kernel::Module::from_bytecode(bytecode);
+                let versioned: VersionedContract<'_> = tos_common::versioned_type::Versioned::new(
+                    Some(std::borrow::Cow::Owned(module)),
+                    None,
+                );
+                let _ = storage
+                    .set_last_contract_to(&contract_hash, topoheight, &versioned)
+                    .await;
+            }
+
             let mut meta = MetaState::default();
             meta.network_chain_id = pre_state.network_chain_id;
             meta.global_state = pre_state.global_state.clone();
@@ -1529,26 +1575,38 @@ async fn handle_state_load(state: web::Data<AppState>, body: web::Json<PreState>
                 .iter()
                 .map(|acc| (acc.address.clone(), acc.clone()))
                 .collect();
-            Some(meta)
+
+            // Check if the conformance miner key is already in pre_state
+            // before pre_state goes out of scope.
+            let miner_key = miner_public_key();
+            let miner_hex = public_key_to_hex(&miner_key);
+            let skip_miner_registration = pre_state.accounts.iter().any(|a| a.address == miner_hex);
+
+            (Some(meta), skip_miner_registration)
         };
 
-        let miner_key = miner_public_key();
-        let _ = storage
-            .set_account_registration_topoheight(&miner_key, topoheight)
-            .await;
-        let miner_nonce = VersionedNonce::new(0, None);
-        let _ = storage
-            .set_last_nonce_to(&miner_key, topoheight, &miner_nonce)
-            .await;
-        let miner_balance = VersionedBalance::new(0, None);
-        let _ = storage
-            .set_last_balance_to(&miner_key, &TOS_ASSET, topoheight, &miner_balance)
-            .await;
-        let mut miner_energy = EnergyResource::new();
-        miner_energy.last_update = topoheight;
-        let _ = storage
-            .set_energy_resource(&miner_key, topoheight, &miner_energy)
-            .await;
+        // Register the conformance miner key only if it was NOT already
+        // loaded as part of the pre_state accounts (avoids overwriting
+        // nonce/balance that the test vector expects).
+        if !skip_miner_registration {
+            let miner_key = miner_public_key();
+            let _ = storage
+                .set_account_registration_topoheight(&miner_key, topoheight)
+                .await;
+            let miner_nonce = VersionedNonce::new(0, None);
+            let _ = storage
+                .set_last_nonce_to(&miner_key, topoheight, &miner_nonce)
+                .await;
+            let miner_balance = VersionedBalance::new(0, None);
+            let _ = storage
+                .set_last_balance_to(&miner_key, &TOS_ASSET, topoheight, &miner_balance)
+                .await;
+            let mut miner_energy = EnergyResource::new();
+            miner_energy.last_update = topoheight;
+            let _ = storage
+                .set_energy_resource(&miner_key, topoheight, &miner_energy)
+                .await;
+        }
         pending_meta
     };
     if let Some(meta) = pending_meta {
@@ -1988,6 +2046,30 @@ async fn build_export(engine: &Engine) -> PreState {
     let mut gs = engine.meta.global_state.clone();
     gs.total_energy = accounts.iter().map(|a| a.energy).sum();
 
+    // Export deployed contracts from storage
+    let mut contracts = Vec::new();
+    if let Ok(iter) = storage.get_contracts(0, u64::MAX).await {
+        for entry in iter {
+            let hash = match entry {
+                Ok(h) => h,
+                Err(_) => continue,
+            };
+            if let Ok(Some((_, versioned))) = storage
+                .get_contract_at_maximum_topoheight_for(&hash, u64::MAX)
+                .await
+            {
+                if let Some(cow_module) = versioned.get() {
+                    if let Some(bytecode) = cow_module.get_bytecode() {
+                        contracts.push(ContractEntry {
+                            hash: hash.to_hex(),
+                            module: hex::encode(bytecode),
+                        });
+                    }
+                }
+            }
+        }
+    }
+
     PreState {
         network_chain_id: engine.meta.network_chain_id,
         global_state: gs,
@@ -2003,6 +2085,7 @@ async fn build_export(engine: &Engine) -> PreState {
         arbitration_commit_opens: Vec::new(),
         arbitration_commit_vote_requests: Vec::new(),
         arbitration_commit_selections: Vec::new(),
+        contracts,
     }
 }
 

@@ -311,19 +311,18 @@ pub fn verify_appeal_kyc<E>(
 
 /// Verify BootstrapCommittee transaction payload
 ///
-/// SECURITY (Issue #33): Requires sender to be BOOTSTRAP_ADDRESS to prevent
+/// Requires sender to be the network's bootstrap address to prevent
 /// unauthorized accounts from seizing control of the global committee.
 pub fn verify_bootstrap_committee<E>(
     payload: &BootstrapCommitteePayload,
     sender: &crate::crypto::elgamal::CompressedPublicKey,
+    network: &crate::network::Network,
 ) -> Result<(), VerificationError<E>> {
-    // SECURITY FIX (Issue #33): Verify sender is BOOTSTRAP_ADDRESS
+    // Verify sender is the bootstrap address for this network
     // Only the designated bootstrap address can create the global committee
     let bootstrap_pubkey = {
         use crate::crypto::Address;
-        // Parse bootstrap address - this is a compile-time constant
-        // Note: PublicKey is an alias for CompressedPublicKey, no compression needed
-        let addr = Address::from_string(crate::config::BOOTSTRAP_ADDRESS).map_err(|e| {
+        let addr = Address::from_string(network.bootstrap_address()).map_err(|e| {
             VerificationError::AnyError(anyhow::anyhow!(
                 "Invalid bootstrap address configuration: {}",
                 e
@@ -1133,11 +1132,10 @@ mod tests {
         })
     }
 
-    fn create_bootstrap_sender() -> CompressedPublicKey {
+    fn create_bootstrap_sender(network: crate::network::Network) -> CompressedPublicKey {
         use crate::crypto::Address;
-        let addr = Address::from_string(crate::config::BOOTSTRAP_ADDRESS)
+        let addr = Address::from_string(network.bootstrap_address())
             .expect("Bootstrap address should be valid");
-        // PublicKey is an alias for CompressedPublicKey
         addr.to_public_key()
     }
 
@@ -1250,9 +1248,10 @@ mod tests {
             32767, // Max level
         );
 
-        let bootstrap_sender = create_bootstrap_sender();
+        let network = crate::network::Network::Mainnet;
+        let bootstrap_sender = create_bootstrap_sender(network);
         let result: Result<(), VerificationError<()>> =
-            verify_bootstrap_committee(&payload, &bootstrap_sender);
+            verify_bootstrap_committee(&payload, &bootstrap_sender, &network);
         assert!(result.is_ok());
     }
 
@@ -1266,9 +1265,10 @@ mod tests {
             BootstrapCommitteePayload::new("Global Committee".to_string(), members, 4, 1, 32767);
 
         // Use a random sender instead of bootstrap address
+        let network = crate::network::Network::Mainnet;
         let wrong_sender = create_test_pubkey(99);
         let result: Result<(), VerificationError<()>> =
-            verify_bootstrap_committee(&payload, &wrong_sender);
+            verify_bootstrap_committee(&payload, &wrong_sender, &network);
         assert!(result.is_err());
     }
 
@@ -1281,9 +1281,10 @@ mod tests {
         let payload =
             BootstrapCommitteePayload::new("Test Committee".to_string(), members, 2, 1, 32767);
 
-        let bootstrap_sender = create_bootstrap_sender();
+        let network = crate::network::Network::Mainnet;
+        let bootstrap_sender = create_bootstrap_sender(network);
         let result: Result<(), VerificationError<()>> =
-            verify_bootstrap_committee(&payload, &bootstrap_sender);
+            verify_bootstrap_committee(&payload, &bootstrap_sender, &network);
         assert!(result.is_err());
     }
 
@@ -1301,9 +1302,10 @@ mod tests {
             32767,
         );
 
-        let bootstrap_sender = create_bootstrap_sender();
+        let network = crate::network::Network::Mainnet;
+        let bootstrap_sender = create_bootstrap_sender(network);
         let result: Result<(), VerificationError<()>> =
-            verify_bootstrap_committee(&payload, &bootstrap_sender);
+            verify_bootstrap_committee(&payload, &bootstrap_sender, &network);
         assert!(result.is_err());
     }
 
@@ -1936,9 +1938,10 @@ mod tests {
             32767,
         );
 
-        let bootstrap_sender = create_bootstrap_sender();
+        let network = crate::network::Network::Mainnet;
+        let bootstrap_sender = create_bootstrap_sender(network);
         let result: Result<(), VerificationError<()>> =
-            verify_bootstrap_committee(&payload, &bootstrap_sender);
+            verify_bootstrap_committee(&payload, &bootstrap_sender, &network);
         assert!(result.is_err());
         let err_msg = format!("{:?}", result.unwrap_err());
         assert!(
@@ -1969,9 +1972,10 @@ mod tests {
             32767,
         );
 
-        let bootstrap_sender = create_bootstrap_sender();
+        let network = crate::network::Network::Mainnet;
+        let bootstrap_sender = create_bootstrap_sender(network);
         let result: Result<(), VerificationError<()>> =
-            verify_bootstrap_committee(&payload, &bootstrap_sender);
+            verify_bootstrap_committee(&payload, &bootstrap_sender, &network);
         assert!(result.is_ok());
     }
 
