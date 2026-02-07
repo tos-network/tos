@@ -20,7 +20,7 @@ use tos_common::block::Block;
 use tos_common::config::{COIN_DECIMALS, COIN_VALUE, MAXIMUM_SUPPLY, TOS_ASSET, UNO_ASSET};
 use tos_common::crypto::{hash as blake3_hash, Hash, Hashable, PublicKey, Signature};
 use tos_common::escrow::{
-    ArbitrationConfig, ArbitrationMode, DisputeInfo, EscrowAccount, EscrowState,
+    AppealInfo, ArbitrationConfig, ArbitrationMode, DisputeInfo, EscrowAccount, EscrowState,
 };
 use tos_common::kyc::{
     CommitteeMember, CommitteeStatus, KycData, KycRegion, KycStatus, MemberRole, MemberStatus,
@@ -132,6 +132,8 @@ struct EscrowEntry {
     dispute_id: Option<String>,
     #[serde(default)]
     dispute_round: Option<u32>,
+    #[serde(default)]
+    appeal: Option<AppealInfoEntry>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -164,6 +166,24 @@ struct DisputeInfoEntry {
     disputed_at: u64,
     #[serde(default)]
     deadline: u64,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+struct AppealInfoEntry {
+    #[serde(default)]
+    appellant: String,
+    #[serde(default)]
+    reason: String,
+    #[serde(default)]
+    new_evidence_hash: Option<String>,
+    #[serde(default)]
+    deposit: u64,
+    #[serde(default)]
+    appealed_at: u64,
+    #[serde(default)]
+    deadline: u64,
+    #[serde(default)]
+    threshold: u8,
 }
 
 fn default_escrow_state() -> String {
@@ -659,6 +679,25 @@ fn parse_dispute_info_entry(entry: &DisputeInfoEntry) -> Result<DisputeInfo, Str
     })
 }
 
+fn parse_appeal_info_entry(entry: &AppealInfoEntry) -> Result<AppealInfo, String> {
+    let appellant = to_public_key(&entry.appellant)?;
+    let new_evidence_hash = match &entry.new_evidence_hash {
+        Some(h) if !h.is_empty() => Some(to_hash_or_zero(h)?),
+        _ => None,
+    };
+    Ok(AppealInfo {
+        appellant,
+        reason: entry.reason.clone(),
+        new_evidence_hash,
+        deposit: entry.deposit,
+        appealed_at: entry.appealed_at,
+        deadline: entry.deadline,
+        votes: Vec::new(),
+        committee: Vec::new(),
+        threshold: entry.threshold,
+    })
+}
+
 fn parse_escrow_entry(entry: &EscrowEntry) -> Result<EscrowAccount, String> {
     let id = to_hash_or_zero(&entry.id)?;
     let payer = to_public_key(&entry.payer)?;
@@ -675,6 +714,10 @@ fn parse_escrow_entry(entry: &EscrowEntry) -> Result<EscrowAccount, String> {
     };
     let dispute = match &entry.dispute {
         Some(d) => Some(parse_dispute_info_entry(d)?),
+        None => None,
+    };
+    let appeal = match &entry.appeal {
+        Some(a) => Some(parse_appeal_info_entry(a)?),
         None => None,
     };
     let dispute_id = match &entry.dispute_id {
@@ -706,7 +749,7 @@ fn parse_escrow_entry(entry: &EscrowEntry) -> Result<EscrowAccount, String> {
         timeout_blocks: entry.timeout_blocks,
         arbitration_config,
         dispute,
-        appeal: None,
+        appeal,
         resolutions: Vec::new(),
     })
 }
@@ -1026,7 +1069,6 @@ fn map_error_code(err: &BlockchainError) -> u16 {
         | BlockchainError::NoTxSender(_)
         | BlockchainError::NoNonce(_) => 0x0400,
         BlockchainError::NoBalance(_)
-        | BlockchainError::NoSenderOutput
         | BlockchainError::NoContractBalance
         | BlockchainError::BalanceOverflow
         | BlockchainError::Overflow => 0x0300,
@@ -1062,9 +1104,10 @@ fn map_error_code(err: &BlockchainError) -> u16 {
         | BlockchainError::MultiSigNotFound => 0x0107,
         BlockchainError::InvalidTxFee(_, _) | BlockchainError::FeesToLowToOverride(_, _) => 0x0301,
         BlockchainError::InvalidTxVersion => 0x0101,
-        BlockchainError::InvalidTransactionToSender(_) | BlockchainError::ReferralSelfReferral => {
-            0x0409
-        }
+        BlockchainError::InvalidTransactionToSender(_)
+        | BlockchainError::ReferralSelfReferral
+        | BlockchainError::NoSenderOutput => 0x0409,
+        BlockchainError::ReferralAlreadyBound => 0x0408,
         BlockchainError::TxTooBig(_, _) => 0x0100,
         BlockchainError::InvalidReferenceHash
         | BlockchainError::InvalidReferenceTopoheight(_, _)
@@ -1074,44 +1117,225 @@ fn map_error_code(err: &BlockchainError) -> u16 {
         BlockchainError::NotImplemented | BlockchainError::UnsupportedOperation => 0xFF01,
         BlockchainError::Any(err) => {
             let msg = err.to_string();
+
+            // === Balance / funds errors (0x0300) ===
             if msg.contains("Insufficient funds") {
                 0x0300
-            } else if msg.contains("Insufficient energy") {
+            }
+            // === Insufficient energy (0x0302) ===
+            else if msg.contains("Insufficient energy") {
                 0x0302
-            } else if msg.contains("Invalid chain ID") {
-                0x0102
-            } else if msg.contains("Agent account invalid parameter") {
-                0x0400
-            } else if msg.contains("Cannot delegate energy to yourself")
-                || msg.contains("self-referral")
-                || msg.contains("SelfReferral")
-                || msg.contains("Sender is receiver")
-            {
-                0x0409
-            } else if msg.contains("amount must be greater than zero")
-                || msg.contains("invalid amount")
-                || msg.contains("Invalid amount")
-                || msg.contains("Invalid transfer amount")
-            {
-                0x0105
-            } else if msg.contains("Insufficient self-frozen TOS")
+            }
+            // === Insufficient frozen / self-frozen (0x0303) ===
+            else if msg.contains("Insufficient self-frozen TOS")
                 || msg.contains("Insufficient frozen")
             {
                 0x0303
-            } else if msg.contains("stake too low")
+            }
+            // === Insufficient fee (0x0301) ===
+            else if msg.contains("Insufficient TNS fee") || msg.contains("registration fee") {
+                0x0301
+            }
+            // === Overflow (0x0304) ===
+            else if msg.contains("Arithmetic overflow") || msg.contains("UNO balance overflow") {
+                0x0304
+            }
+            // === Invalid chain ID (0x0102) ===
+            else if msg.contains("Invalid chain ID") {
+                0x0102
+            }
+            // === Invalid signature (0x0103) ===
+            else if msg.contains("Invalid signature") {
+                0x0103
+            }
+            // === Self-referential operations (0x0409) ===
+            else if msg.contains("Cannot delegate energy to yourself")
+                || msg.contains("self-referral")
+                || msg.contains("SelfReferral")
+                || msg.contains("Sender is receiver")
+                || msg.contains("Cannot send message to yourself")
+            {
+                0x0409
+            }
+            // === Invalid amount (0x0105) ===
+            else if msg.contains("amount must be greater than zero")
+                || msg.contains("invalid amount")
+                || msg.contains("Invalid amount")
+                || msg.contains("Invalid transfer amount")
+                || msg.contains("Shield amount must be at least")
+                || msg.contains("must be a whole number")
+                || msg.contains("must be at least 1 TOS")
+                || msg.contains("must be at least")
+                || msg.contains("challenge deposit too low")
+                || msg.contains("appeal deposit too low")
+                || msg.contains("deposit too low")
+            {
+                0x0105
+            }
+            // === Account not found (0x0400) ===
+            else if msg.contains("Agent account invalid parameter")
+                || msg.contains("does not exist")
+                || msg.contains("Arbiter not found")
+                || msg.contains("Recipient name not registered")
+            {
+                0x0400
+            }
+            // === Agent account errors (0x0400) ===
+            else if msg.contains("Agent account already registered")
+                || msg.contains("Agent account is frozen")
+                || msg.contains("Agent account unauthorized")
+                || msg.contains("Agent account policy violation")
+                || msg.contains("Agent session key")
+            {
+                0x0400
+            }
+            // === Already exists (0x0405) ===
+            else if msg.contains("already registered")
+                || msg.contains("already has a registered name")
+                || msg.contains("already exists")
+            {
+                0x0405
+            }
+            // === Already bound (0x0408) ===
+            else if msg.contains("already bound") {
+                0x0408
+            }
+            // === Contract not found (0x0500) ===
+            else if msg.contains("Contract not found") {
+                0x0500
+            }
+            // === Invalid state (0x0403) ===
+            else if msg.contains("invalid escrow state")
+                || msg.contains("optimistic release not enabled")
+            {
+                0x0403
+            }
+            // === Invalid format / payload (0x0107) ===
+            // TNS name validation errors
+            else if msg.contains("Invalid name length")
+                || msg.contains("must start with")
+                || msg.contains("cannot end with")
+                || msg.contains("Invalid character")
+                || msg.contains("Consecutive separators")
+                || msg.contains("Reserved name")
+                || msg.contains("Confusing name")
+            // Energy transaction errors
+                || msg.contains("must have zero fee")
+                || msg.contains("Energy transactions")
+                || msg.contains("Duplicate delegatee")
+                || msg.contains("Too many delegatees")
+                || msg.contains("Freeze duration must be")
+                || msg.contains("Invalid fee: expected")
+                || msg.contains("Maximum freeze records")
+                || msg.contains("Maximum pending unfreezes")
+                || msg.contains("No energy resource found")
+                || msg.contains("No expired unfreezes")
+                || msg.contains("No delegated records")
+                || msg.contains("Record index out of bounds")
+                || msg.contains("record_index required")
+                || msg.contains("Delegatee address required")
+                || msg.contains("Delegatee not found")
+                || msg.contains("delegatee_address usage")
+            // KYC errors
+                || msg.contains("requires at least")
+                || msg.contains("Duplicate approver")
+                || msg.contains("Duplicate member")
+                || msg.contains("Too many approvals")
+                || msg.contains("hash cannot be empty")
+                || msg.contains("Invalid KYC level")
+                || msg.contains("Invalid max KYC level")
+                || msg.contains("Committee name")
+                || msg.contains("Member name too long")
+                || msg.contains("KYC threshold")
+                || msg.contains("Governance threshold")
+                || msg.contains("too long")
+                || msg.contains("too many members")
+                || msg.contains("can have at most")
+                || msg.contains("EmergencySuspend")
+                || msg.contains("timestamp too far")
+                || msg.contains("has expired")
+                || msg.contains("Approval timestamp")
+                || msg.contains("Suspension reason")
+                || msg.contains("Cannot register committee")
+                || msg.contains("BootstrapCommittee")
+                || msg.contains("Cannot remove member")
+                || msg.contains("Cannot add member")
+                || msg.contains("Appeal reason")
+                || msg.contains("Appeal documents")
+                || msg.contains("Appeal submission")
+                || msg.contains("committees must be different")
+                || msg.contains("combined approval count")
+                || msg.contains("Same member cannot approve")
+                || msg.contains("Transfer data hash")
+                || msg.contains("Renewal data hash")
+                || msg.contains("Revocation reason")
+                || msg.contains("Verification timestamp")
+                || msg.contains("data hash cannot be empty")
+            // Arbiter errors
+                || msg.contains("Arbiter name")
+                || msg.contains("Arbiter fee basis points")
+                || msg.contains("Arbiter escrow range")
+                || msg.contains("Arbiter already removed")
+                || msg.contains("Arbiter status update")
+                || msg.contains("Arbiter deactivation cannot add stake")
+                || msg.contains("Arbiter has no stake")
+                || msg.contains("Arbiter not in exit")
+                || msg.contains("Arbiter cooldown")
+                || msg.contains("Arbiter has active cases")
+                || msg.contains("arbiter stake too low")
+            // Escrow errors
+                || msg.contains("arbitration not configured")
+                || msg.contains("appeal not allowed")
+                || msg.contains("optimistic_release requires")
+                || msg.contains("dispute record required")
+                || msg.contains("invalid task id")
+                || msg.contains("invalid challenge")
+                || msg.contains("invalid timeout")
+                || msg.contains("unauthorized caller")
+                || msg.contains("timeout not reached")
+                || msg.contains("challenge window expired")
+                || msg.contains("appeal window expired")
+                || msg.contains("invalid verdict")
+                || msg.contains("threshold not met")
+                || msg.contains("arbiter not active")
+                || msg.contains("arbiter not assigned")
+                || msg.contains("invalid reason length")
+                || msg.contains("insufficient escrow balance")
+                || msg.contains("invalid arbitration config")
+                || msg.contains("escrow not found")
+                || msg.contains("coordinator deadline")
+                || msg.contains("juror submit window")
+            // Commit/arbitration errors
+                || msg.contains("CommitArbitrationOpen missing")
+                || msg.contains("CommitVoteRequest missing")
+                || msg.contains("CommitSelectionCommitment missing")
+                || msg.contains("insufficient committed juror")
+                || msg.contains("missing committed juror")
+            // Agent account errors
+                || msg.contains("Invalid agent account controller")
+            // Contract gas errors
+                || msg.contains("Configured max gas")
+            // Other validation errors
+                || msg.contains("stake too low")
                 || msg.contains("list cannot be empty")
                 || msg.contains("No pending unfreezes")
-                || msg.contains("Invalid KYC level")
-                || msg.contains("optimistic release not enabled")
-                || msg.contains("appeal not allowed")
-                || msg.contains("dispute record required")
-                || msg.contains("invalid escrow state")
-                || msg.contains("CommitArbitrationOpen missing")
                 || msg.contains("MultiSig not configured")
+                || msg.contains("Invalid batch referral")
+                || msg.contains("multisig")
+                || msg.contains("Invalid invoke contract")
+            // Ephemeral message errors
+                || msg.contains("Invalid message TTL")
+                || msg.contains("Message too large")
+                || msg.contains("Message cannot be empty")
+                || msg.contains("Sender must have a registered")
+                || msg.contains("Sender name hash mismatch")
+                || msg.contains("Message with this nonce already")
+                || msg.contains("Message nonce must equal")
+                || msg.contains("Invalid receiver handle")
+            // Privacy/Shield errors
+                || msg.contains("Shield transfers only")
             {
                 0x0107
-            } else if msg.contains("Contract not found") {
-                0x0500
             } else {
                 0xFFFF
             }
@@ -1137,49 +1361,74 @@ fn map_verify_error_code(
         VE::InvalidChainId { .. } => 0x0102,
         VE::InvalidFee(_, _) => 0x0301,
         VE::InsufficientFunds { .. } => 0x0300,
+        VE::InsufficientEnergy(_) => 0x0302,
         VE::TransferExtraDataSize | VE::TransactionExtraDataSize | VE::InvalidFormat => 0x0100,
         VE::AgentAccountInvalidParameter
-        | VE::AgentAccountInvalidController
         | VE::AgentAccountUnauthorized
-        | VE::AgentAccountFrozen => 0x0400,
-        VE::SenderIsReceiver => 0x0409,
+        | VE::AgentAccountFrozen
+        | VE::AgentAccountPolicyViolation
+        | VE::AgentAccountSessionKeyExpired
+        | VE::AgentAccountSessionKeyNotFound
+        | VE::AgentAccountSessionKeyExists => 0x0400,
+        VE::AgentAccountInvalidController => 0x0107,
+        VE::AgentAccountAlreadyRegistered => 0x0405,
+        VE::SenderIsReceiver | VE::SelfMessage => 0x0409,
         VE::ContractNotFound => 0x0500,
-        VE::ArbiterStakeTooLow { .. }
+        VE::ContractAlreadyExists(_) => 0x0405,
+        // TNS name registration errors
+        VE::InvalidNameLength(_)
+        | VE::InvalidNameStart
+        | VE::InvalidNameEnd
+        | VE::InvalidNameCharacter(_)
+        | VE::ConsecutiveSeparators
+        | VE::ReservedName(_)
+        | VE::ConfusingName(_) => 0x0107,
+        VE::NameAlreadyRegistered | VE::AccountAlreadyHasName => 0x0405,
+        VE::InsufficientTnsFee { .. } => 0x0301,
+        // Ephemeral message errors
+        VE::InvalidMessageTTL(_)
+        | VE::MessageTooLarge(_)
+        | VE::EmptyMessage
+        | VE::RecipientNotFound
+        | VE::SenderNotRegistered
+        | VE::InvalidSender
+        | VE::MessageAlreadyExists
+        | VE::InvalidMessageNonce
+        | VE::InvalidReceiverHandle => 0x0107,
+        // Arbiter errors
+        VE::ArbiterNameLength { .. }
+        | VE::ArbiterInvalidFee(_)
+        | VE::ArbiterStakeTooLow { .. }
+        | VE::ArbiterEscrowRangeInvalid { .. }
         | VE::ArbiterNotFound
         | VE::ArbiterInvalidStatus
-        | VE::MultiSigNotConfigured
-        | VE::MultiSigNotFound => 0x0107,
+        | VE::ArbiterDeactivateWithStake
+        | VE::ArbiterNoStakeToWithdraw
+        | VE::ArbiterNotInExitProcess
+        | VE::ArbiterCooldownNotComplete { .. }
+        | VE::ArbiterHasActiveCases { .. }
+        | VE::ArbiterAlreadyRemoved => 0x0107,
+        VE::ArbiterAlreadyRegistered => 0x0405,
+        // Other validation errors
+        VE::MultiSigNotConfigured
+        | VE::MultiSigNotFound
+        | VE::MultiSigParticipants
+        | VE::MultiSigThreshold
+        | VE::TransferCount
+        | VE::DepositCount
+        | VE::Commitments
+        | VE::InvalidInvokeContract
+        | VE::MaxGasReached
+        | VE::TooManyContractEvents { .. } => 0x0107,
+        VE::DepositNotFound => 0x0107,
         VE::InvalidTransferAmount | VE::ShieldAmountTooLow => 0x0105,
-        VE::Overflow | VE::UnoBalanceOverflow => 0x0304,
+        VE::Overflow | VE::UnoBalanceOverflow | VE::GasOverflow | VE::GasRefundOverflow => 0x0304,
+        VE::Proof(_) | VE::ModuleError(_) => 0x0107,
         VE::AnyError(err) => {
-            let msg = err.to_string();
-            if msg.contains("Insufficient funds") {
-                0x0300
-            } else if msg.contains("amount must be greater than zero")
-                || msg.contains("invalid amount")
-                || msg.contains("Invalid amount")
-            {
-                0x0105
-            } else if msg.contains("Insufficient self-frozen TOS")
-                || msg.contains("Insufficient frozen")
-            {
-                0x0303
-            } else if msg.contains("Cannot delegate energy to yourself")
-                || msg.contains("self-referral")
-                || msg.contains("SelfReferral")
-            {
-                0x0409
-            } else if msg.contains("No pending unfreezes")
-                || msg.contains("Invalid KYC level")
-                || msg.contains("stake too low")
-                || msg.contains("list cannot be empty")
-            {
-                0x0107
-            } else {
-                0xFFFF
-            }
+            // Delegate to map_error_code's BlockchainError::Any logic
+            let as_blockchain_err = BlockchainError::Any(anyhow::anyhow!("{}", err));
+            map_error_code(&as_blockchain_err)
         }
-        _ => 0xFFFF,
     }
 }
 
