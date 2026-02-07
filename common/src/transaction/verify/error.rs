@@ -164,4 +164,6 @@ pub enum VerificationError<T> {
     ArbiterHasActiveCases { count: u64 },
     #[error("Arbiter already removed")]
     ArbiterAlreadyRemoved,
+    #[error("Arbiter already exiting")]
+    ArbiterAlreadyExiting,
 }

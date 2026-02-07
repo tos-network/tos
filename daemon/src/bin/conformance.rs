@@ -1068,10 +1068,8 @@ fn map_error_code(err: &BlockchainError) -> u16 {
         | BlockchainError::UnknownAccount
         | BlockchainError::NoTxSender(_)
         | BlockchainError::NoNonce(_) => 0x0400,
-        BlockchainError::NoBalance(_)
-        | BlockchainError::NoContractBalance
-        | BlockchainError::BalanceOverflow
-        | BlockchainError::Overflow => 0x0300,
+        BlockchainError::NoBalance(_) | BlockchainError::NoContractBalance => 0x0300,
+        BlockchainError::BalanceOverflow | BlockchainError::Overflow => 0x0304,
         BlockchainError::InvalidNonce(_, got, expected) => {
             if got > expected {
                 0x0111
@@ -1143,7 +1141,12 @@ fn map_error_code(err: &BlockchainError) -> u16 {
                 0x0301
             }
             // === Overflow (0x0304) ===
-            else if msg.contains("Arithmetic overflow") || msg.contains("UNO balance overflow") {
+            else if msg.contains("Arithmetic overflow")
+                || msg.contains("UNO balance overflow")
+                || msg.contains("Energy overflow")
+                || msg.contains("Frozen TOS overflow")
+                || msg.contains("Overflow detected")
+            {
                 0x0304
             }
             // === Invalid chain ID (0x0102) ===
@@ -1436,7 +1439,8 @@ fn map_verify_error_code(
         | VE::ArbiterNotInExitProcess
         | VE::ArbiterCooldownNotComplete { .. }
         | VE::ArbiterHasActiveCases { .. }
-        | VE::ArbiterAlreadyRemoved => 0x0107,
+        | VE::ArbiterAlreadyRemoved
+        | VE::ArbiterAlreadyExiting => 0x0107,
         VE::ArbiterAlreadyRegistered => 0x0405,
         // Other validation errors
         VE::MultiSigNotConfigured
@@ -1895,6 +1899,13 @@ async fn handle_state_load(state: web::Data<AppState>, body: web::Json<PreState>
             .json(json!({ "success": false, "error": err.to_string() }));
     }
 
+    // Override blockchain topoheight with pre_state block_height for mempool verify
+    if engine.meta.global_state.block_height > 0 {
+        engine
+            .blockchain
+            .set_topo_height(engine.meta.global_state.block_height);
+    }
+
     let export = build_export(&engine).await;
     let digest = compute_state_digest(&export);
     HttpResponse::Ok().json(json!({ "success": true, "state_digest": digest }))
@@ -1956,16 +1967,19 @@ async fn handle_tx_execute(
     };
 
     let mut engine = state.engine.lock().await;
+
+    // Check sender existence: if sender is not in pre_state, return ACCOUNT_NOT_FOUND
+    let sender_hex = public_key_to_hex(tx_for_apply.get_source());
+    if !engine.meta.account_meta.contains_key(&sender_hex) {
+        return HttpResponse::Ok().json(ExecResult {
+            success: false,
+            error_code: 0x0400, // ACCOUNT_NOT_FOUND
+            state_digest: String::new(),
+        });
+    }
+
     if let TransactionType::Transfers(payloads) = tx_for_apply.get_data() {
-        let source_addr = public_key_to_hex(tx_for_apply.get_source());
-        engine
-            .meta
-            .account_meta
-            .entry(source_addr.clone())
-            .or_insert_with(|| AccountState {
-                address: source_addr,
-                ..AccountState::default()
-            });
+        // Only auto-create receiver accounts (not sender — sender must be in pre_state)
         for payload in payloads {
             let dest_addr = public_key_to_hex(payload.get_destination());
             engine
@@ -2028,8 +2042,13 @@ async fn handle_tx_execute(
 
     let block_hash = block.hash();
     let stable_topoheight = engine.blockchain.get_stable_topoheight().await;
-    let current_topoheight = engine.blockchain.get_topo_height();
-    let next_topoheight = current_topoheight.saturating_add(1);
+    // Use pre_state block_height as verification topoheight when available
+    let next_topoheight = if engine.meta.global_state.block_height > 0 {
+        engine.meta.global_state.block_height
+    } else {
+        let current_topoheight = engine.blockchain.get_topo_height();
+        current_topoheight.saturating_add(1)
+    };
     {
         let mut storage = engine.blockchain.get_storage().write().await;
         let mut chain_state = ApplicableChainState::new(
@@ -2038,7 +2057,7 @@ async fn handle_tx_execute(
             stable_topoheight,
             next_topoheight,
             block.get_version(),
-            0,
+            engine.meta.global_state.total_burned,
             &block_hash,
             &block,
             engine.blockchain.get_executor(),

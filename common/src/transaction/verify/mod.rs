@@ -5624,6 +5624,15 @@ impl Transaction {
                     .map_err(VerificationError::State)?;
             }
             TransactionType::RegisterArbiter(payload) => {
+                // State check: reject if already registered
+                if state
+                    .get_arbiter(&self.source)
+                    .await
+                    .map_err(VerificationError::State)?
+                    .is_some()
+                {
+                    return Err(VerificationError::ArbiterAlreadyRegistered);
+                }
                 let current_height = state.get_verification_topoheight();
                 let arbiter = crate::arbitration::ArbiterAccount {
                     public_key: self.source.clone(),
@@ -5657,7 +5666,15 @@ impl Transaction {
                     .map_err(VerificationError::State)?
                     .ok_or(VerificationError::ArbiterNotFound)?;
 
+                // State check: reject if arbiter has been removed
+                if arbiter.status == crate::arbitration::ArbiterStatus::Removed {
+                    return Err(VerificationError::ArbiterAlreadyRemoved);
+                }
+
                 if payload.is_deactivate() {
+                    if arbiter.status != crate::arbitration::ArbiterStatus::Active {
+                        return Err(VerificationError::ArbiterInvalidStatus);
+                    }
                     let current_height = state.get_verification_topoheight();
                     arbiter.status = crate::arbitration::ArbiterStatus::Exiting;
                     arbiter.deactivated_at = Some(current_height);
@@ -5751,6 +5768,24 @@ impl Transaction {
                     .await
                     .map_err(VerificationError::State)?
                     .ok_or(VerificationError::ArbiterNotFound)?;
+
+                // State check: must be Active (not Suspended, Exiting, or Removed)
+                if arbiter.status == crate::arbitration::ArbiterStatus::Suspended {
+                    return Err(VerificationError::ArbiterInvalidStatus);
+                }
+                if arbiter.status == crate::arbitration::ArbiterStatus::Exiting {
+                    return Err(VerificationError::ArbiterAlreadyExiting);
+                }
+                if arbiter.status == crate::arbitration::ArbiterStatus::Removed {
+                    return Err(VerificationError::ArbiterAlreadyRemoved);
+                }
+                // State check: must not have active cases
+                if arbiter.active_cases > 0 {
+                    return Err(VerificationError::ArbiterHasActiveCases {
+                        count: arbiter.active_cases,
+                    });
+                }
+
                 let current_height = state.get_verification_topoheight();
                 arbiter.status = crate::arbitration::ArbiterStatus::Exiting;
                 arbiter.deactivated_at = Some(current_height);
@@ -5767,6 +5802,12 @@ impl Transaction {
                     .await
                     .map_err(VerificationError::State)?
                     .ok_or(VerificationError::ArbiterNotFound)?;
+
+                // State check: must not be still active
+                if arbiter.status == crate::arbitration::ArbiterStatus::Active {
+                    return Err(VerificationError::ArbiterNotInExitProcess);
+                }
+
                 let withdraw_amount = if payload.amount == 0 {
                     arbiter.stake_amount
                 } else {
@@ -5802,6 +5843,15 @@ impl Transaction {
                     .await
                     .map_err(VerificationError::State)?
                     .ok_or(VerificationError::ArbiterNotFound)?;
+
+                // State check: must be Exiting
+                if arbiter.status != crate::arbitration::ArbiterStatus::Exiting {
+                    if arbiter.status == crate::arbitration::ArbiterStatus::Removed {
+                        return Err(VerificationError::ArbiterAlreadyRemoved);
+                    }
+                    return Err(VerificationError::ArbiterNotInExitProcess);
+                }
+
                 let current_height = state.get_verification_topoheight();
                 arbiter.status = crate::arbitration::ArbiterStatus::Active;
                 arbiter.deactivated_at = None;

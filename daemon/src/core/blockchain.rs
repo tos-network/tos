@@ -1289,6 +1289,11 @@ impl<S: Storage> Blockchain<S> {
         self.topoheight.load(Ordering::Acquire)
     }
 
+    // Override the topoheight (used by conformance testing to inject block height)
+    pub fn set_topo_height(&self, height: TopoHeight) {
+        self.topoheight.store(height, Ordering::Release);
+    }
+
     // Get the current block height stable
     // No blocks can be added at or below this height
     pub async fn get_stable_height(&self) -> u64 {
