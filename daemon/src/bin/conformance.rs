@@ -2083,6 +2083,152 @@ async fn handle_tx_execute(
     // Conformance-only implementations for features the daemon does not (yet) execute fully.
     // These follow the Python spec's state transition semantics for the exported state surface.
     match tx_for_apply.get_data() {
+        TransactionType::UnoTransfers(transfers) => {
+            // Spec: invalid transfer count is INVALID_FORMAT.
+            if transfers.is_empty() || transfers.len() > MAX_TRANSFER_COUNT {
+                return HttpResponse::Ok().json(ExecResult {
+                    success: false,
+                    error_code: 0x0100, // INVALID_FORMAT
+                    state_digest: current_state_digest(&engine).await,
+                    error: Some("invalid transfer count".to_string()),
+                });
+            }
+
+            // Spec: sender cannot be receiver (SELF_OPERATION).
+            for t in transfers {
+                if t.get_destination().as_bytes() == tx_for_apply.get_source().as_bytes() {
+                    return HttpResponse::Ok().json(ExecResult {
+                        success: false,
+                        error_code: 0x0409, // SELF_OPERATION
+                        state_digest: current_state_digest(&engine).await,
+                        error: Some("sender cannot be receiver".to_string()),
+                    });
+                }
+            }
+
+            // Strict nonce (spec).
+            let sender_nonce = {
+                let storage = engine.blockchain.get_storage().read().await;
+                storage
+                    .get_last_nonce(tx_for_apply.get_source())
+                    .await
+                    .map(|(_, v)| v.get_nonce())
+                    .unwrap_or(0)
+            };
+            let tx_nonce = tx_for_apply.get_nonce();
+            if tx_nonce != sender_nonce {
+                return HttpResponse::Ok().json(ExecResult {
+                    success: false,
+                    error_code: if tx_nonce > sender_nonce {
+                        0x0111
+                    } else {
+                        0x0110
+                    },
+                    state_digest: current_state_digest(&engine).await,
+                    error: Some("nonce mismatch".to_string()),
+                });
+            }
+
+            // Fee rules (spec): UNO fee must be zero.
+            if matches!(tx_for_apply.get_fee_type(), FeeType::UNO) && tx_for_apply.get_fee() != 0 {
+                return HttpResponse::Ok().json(ExecResult {
+                    success: false,
+                    error_code: 0x0100, // INVALID_FORMAT
+                    state_digest: current_state_digest(&engine).await,
+                    error: Some("uno fee must be zero".to_string()),
+                });
+            }
+
+            // Fee rules (spec): Energy fee must be zero and consumes energy on success.
+            if matches!(tx_for_apply.get_fee_type(), FeeType::Energy) && tx_for_apply.get_fee() != 0
+            {
+                return HttpResponse::Ok().json(ExecResult {
+                    success: false,
+                    error_code: 0x0107, // INVALID_PAYLOAD
+                    state_digest: current_state_digest(&engine).await,
+                    error: Some("energy fee must be zero".to_string()),
+                });
+            }
+
+            {
+                let mut storage = engine.blockchain.get_storage().write().await;
+
+                // Consume energy on success for transfer-type txs using energy fees.
+                if matches!(tx_for_apply.get_fee_type(), FeeType::Energy) {
+                    let energy_cost = tx_for_apply.calculate_energy_cost();
+                    if energy_cost > 0 {
+                        match storage.get_energy_resource(tx_for_apply.get_source()).await {
+                            Ok(Some(mut resource)) => {
+                                if !resource.has_enough_energy(next_topoheight, energy_cost) {
+                                    return HttpResponse::Ok().json(ExecResult {
+                                        success: false,
+                                        error_code: 0x0302, // INSUFFICIENT_ENERGY
+                                        state_digest: current_state_digest(&engine).await,
+                                        error: Some("insufficient energy".to_string()),
+                                    });
+                                }
+                                if resource
+                                    .consume_energy(energy_cost, next_topoheight)
+                                    .is_err()
+                                {
+                                    return HttpResponse::Ok().json(ExecResult {
+                                        success: false,
+                                        error_code: 0x0302, // INSUFFICIENT_ENERGY
+                                        state_digest: current_state_digest(&engine).await,
+                                        error: Some("insufficient energy".to_string()),
+                                    });
+                                }
+                                let _ = storage
+                                    .set_energy_resource(
+                                        tx_for_apply.get_source(),
+                                        next_topoheight,
+                                        &resource,
+                                    )
+                                    .await;
+                            }
+                            _ => {
+                                return HttpResponse::Ok().json(ExecResult {
+                                    success: false,
+                                    error_code: 0x0302, // INSUFFICIENT_ENERGY
+                                    state_digest: current_state_digest(&engine).await,
+                                    error: Some("insufficient energy".to_string()),
+                                });
+                            }
+                        }
+                    }
+                }
+
+                // Deduct fee (TOS) and bump nonce. Fee availability for FeeType::TOS is pre-checked above.
+                let sender_balance = storage
+                    .get_last_balance(tx_for_apply.get_source(), &TOS_ASSET)
+                    .await
+                    .map(|(_, v)| v.get_balance())
+                    .unwrap_or(0);
+                let new_balance = sender_balance.saturating_sub(tx_for_apply.get_fee());
+                let vb = VersionedBalance::new(new_balance, None);
+                let vn = VersionedNonce::new(sender_nonce.saturating_add(1), None);
+                let _ = storage
+                    .set_last_balance_to(
+                        tx_for_apply.get_source(),
+                        &TOS_ASSET,
+                        next_topoheight,
+                        &vb,
+                    )
+                    .await;
+                let _ = storage
+                    .set_last_nonce_to(tx_for_apply.get_source(), next_topoheight, &vn)
+                    .await;
+            }
+
+            let export = build_export(&engine).await;
+            let digest = compute_state_digest(&export);
+            return HttpResponse::Ok().json(ExecResult {
+                success: true,
+                error_code: 0,
+                state_digest: digest,
+                error: None,
+            });
+        }
         TransactionType::InvokeContract(payload) => {
             // Structural limits (spec): deposits <= 255.
             if payload.deposits.len() > 255 {
@@ -2746,6 +2892,122 @@ fn tx_from_json(value: &serde_json::Value) -> Result<Transaction, String> {
                 chain_id as u8,
                 source_key,
                 TransactionType::Transfers(payloads),
+                fee,
+                fee_type,
+                nonce,
+                reference,
+                None,
+                signature,
+            ))
+        }
+        "uno_transfers" => {
+            use tos_common::crypto::elgamal::{CompressedCommitment, CompressedHandle};
+            use tos_common::crypto::proofs::CiphertextValidityProof;
+            use tos_common::transaction::UnoTransferPayload;
+
+            let p = obj
+                .get("payload")
+                .and_then(|v| v.as_object())
+                .ok_or_else(|| "payload missing".to_string())?;
+
+            let transfers = p
+                .get("transfers")
+                .and_then(|v| v.as_array())
+                .ok_or_else(|| "payload.transfers missing".to_string())?;
+
+            let mut payloads = Vec::with_capacity(transfers.len());
+            for t in transfers {
+                let t = t
+                    .as_object()
+                    .ok_or_else(|| "transfer must be object".to_string())?;
+
+                let asset = t
+                    .get("asset")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| "transfer.asset missing".to_string())?;
+                let destination = t
+                    .get("destination")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| "transfer.destination missing".to_string())?;
+                let commitment = t
+                    .get("commitment")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| "transfer.commitment missing".to_string())?;
+                let sender_handle = t
+                    .get("sender_handle")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| "transfer.sender_handle missing".to_string())?;
+                let receiver_handle = t
+                    .get("receiver_handle")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| "transfer.receiver_handle missing".to_string())?;
+                let ct_validity_proof = t
+                    .get("ct_validity_proof")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| "transfer.ct_validity_proof missing".to_string())?;
+
+                let extra_data = t.get("extra_data").and_then(|v| v.as_str()).unwrap_or("");
+
+                let asset_hash = Hash::from_str(asset).map_err(|_| "invalid asset hex")?;
+                let destination_key = to_public_key(destination)?;
+
+                let extra = if extra_data.is_empty() {
+                    None
+                } else {
+                    Some(UnknownExtraDataFormat(
+                        hex::decode(extra_data).map_err(|_| "invalid extra_data hex")?,
+                    ))
+                };
+
+                let parse_point32 = |hex_str: &str| -> Result<[u8; 32], String> {
+                    let bytes = hex::decode(hex_str).map_err(|_| "invalid point hex")?;
+                    if bytes.len() != 32 {
+                        return Err("point must be 32 bytes".to_string());
+                    }
+                    let mut arr = [0u8; 32];
+                    arr.copy_from_slice(&bytes);
+                    Ok(arr)
+                };
+
+                let c_bytes = parse_point32(commitment)?;
+                let sh_bytes = parse_point32(sender_handle)?;
+                let rh_bytes = parse_point32(receiver_handle)?;
+
+                let c = CompressedRistretto::from_slice(&c_bytes)
+                    .map_err(|_| "invalid commitment bytes")?;
+                let sh = CompressedRistretto::from_slice(&sh_bytes)
+                    .map_err(|_| "invalid sender_handle bytes")?;
+                let rh = CompressedRistretto::from_slice(&rh_bytes)
+                    .map_err(|_| "invalid receiver_handle bytes")?;
+
+                let commitment = CompressedCommitment::new(c);
+                let sender_handle = CompressedHandle::new(sh);
+                let receiver_handle = CompressedHandle::new(rh);
+
+                let proof_bytes =
+                    hex::decode(ct_validity_proof).map_err(|_| "invalid ct_validity_proof hex")?;
+                let mut r = Reader::new(&proof_bytes);
+                // Proof deserialization depends on tx version context (T1 includes Y_2).
+                r.context_mut().store(version);
+                let proof =
+                    CiphertextValidityProof::read(&mut r).map_err(|_| "invalid ct proof bytes")?;
+
+                payloads.push(UnoTransferPayload::new(
+                    asset_hash,
+                    destination_key,
+                    extra,
+                    commitment,
+                    sender_handle,
+                    receiver_handle,
+                    proof,
+                ));
+            }
+
+            Ok(Transaction::new(
+                version,
+                chain_id as u8,
+                source_key,
+                TransactionType::UnoTransfers(payloads),
                 fee,
                 fee_type,
                 nonce,
