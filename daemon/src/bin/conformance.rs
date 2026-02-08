@@ -3245,6 +3245,82 @@ async fn handle_block_execute(
         engine.blockchain.get_topo_height().saturating_add(1)
     };
 
+    // Strict nonce (spec semantics): validate per-sender nonce sequence before any other checks
+    // so that nonce mismatch takes precedence over fee/balance checks.
+    let mut expected_nonce_by_sender: HashMap<String, u64> = HashMap::new();
+    {
+        let storage = engine.blockchain.get_storage().read().await;
+        for tx in &txs {
+            let sender_hex = public_key_to_hex(tx.get_source());
+            if expected_nonce_by_sender.contains_key(&sender_hex) {
+                continue;
+            }
+            let n = storage
+                .get_last_nonce(tx.get_source())
+                .await
+                .map(|(_, v)| v.get_nonce())
+                .unwrap_or(0);
+            expected_nonce_by_sender.insert(sender_hex, n);
+        }
+    }
+    for tx in &txs {
+        let sender_hex = public_key_to_hex(tx.get_source());
+        let expected_nonce = *expected_nonce_by_sender.get(&sender_hex).unwrap_or(&0);
+        let tx_nonce = tx.get_nonce();
+        if tx_nonce != expected_nonce {
+            let code = if tx_nonce > expected_nonce {
+                0x0111
+            } else {
+                0x0110
+            };
+            engine.meta = meta_before;
+            return HttpResponse::Ok().json(ExecResult {
+                success: false,
+                error_code: code,
+                state_digest: current_state_digest(&engine).await,
+                error: Some("nonce mismatch".to_string()),
+            });
+        }
+        expected_nonce_by_sender.insert(sender_hex, expected_nonce.saturating_add(1));
+    }
+
+    // Use the daemon's transaction verification logic (mempool verification) so that block-level
+    // vectors see the same fee/balance/error-code behavior as L1.
+    //
+    // Note: this only mutates the mempool (not exported state). Clear it afterwards.
+    {
+        let mut mempool = engine.blockchain.get_mempool().write().await;
+        mempool.clear();
+    }
+    for tx in &txs {
+        let tx_val = tx.as_ref().clone();
+        let add_res = if engine.meta.global_state.timestamp > 0 {
+            engine
+                .blockchain
+                .add_tx_to_mempool_with_verification_timestamp(
+                    tx_val,
+                    false,
+                    engine.meta.global_state.timestamp,
+                )
+                .await
+        } else {
+            engine.blockchain.add_tx_to_mempool(tx_val, false).await
+        };
+        if let Err(err) = add_res {
+            let code = map_error_code(&err);
+            engine.meta = meta_before;
+            // Clear mempool before returning to keep the endpoint side-effect free.
+            let mut mempool = engine.blockchain.get_mempool().write().await;
+            mempool.clear();
+            return HttpResponse::Ok().json(ExecResult {
+                success: false,
+                error_code: code,
+                state_digest: current_state_digest(&engine).await,
+                error: Some(err.to_string()),
+            });
+        }
+    }
+
     // Build a synthetic block header that matches the ordered tx list.
     let miner_key = miner_public_key();
     let header_res = {
@@ -3285,25 +3361,6 @@ async fn handle_block_execute(
         .collect();
 
     // Apply all txs in a single ApplicableChainState, then commit once.
-    // Conformance rule: strict nonce within a block (must match current sender nonce, then +1).
-    // The daemon's internal block apply may allow gaps; enforce spec semantics here.
-    let mut expected_nonce_by_sender: HashMap<String, u64> = HashMap::new();
-    {
-        let storage = engine.blockchain.get_storage().read().await;
-        for tx in block.get_transactions() {
-            let sender_hex = public_key_to_hex(tx.get_source());
-            if expected_nonce_by_sender.contains_key(&sender_hex) {
-                continue;
-            }
-            let n = storage
-                .get_last_nonce(tx.get_source())
-                .await
-                .map(|(_, v)| v.get_nonce())
-                .unwrap_or(0);
-            expected_nonce_by_sender.insert(sender_hex, n);
-        }
-    }
-
     let stable_topoheight = engine.blockchain.get_stable_topoheight().await;
     let mut burned_delta: u64 = 0;
     let mut apply_error: Option<(u16, String)> = None;
@@ -3323,20 +3380,6 @@ async fn handle_block_execute(
         );
 
         for (idx, tx) in block.get_transactions().iter().enumerate() {
-            // Enforce strict nonce per-sender.
-            let sender_hex = public_key_to_hex(tx.get_source());
-            let expected_nonce = *expected_nonce_by_sender.get(&sender_hex).unwrap_or(&0);
-            let tx_nonce = tx.get_nonce();
-            if tx_nonce != expected_nonce {
-                let code = if tx_nonce > expected_nonce {
-                    0x0111
-                } else {
-                    0x0110
-                };
-                apply_error = Some((code, "nonce mismatch".to_string()));
-                break;
-            }
-
             if let TransactionType::Burn(payload) = tx.get_data() {
                 burned_delta = burned_delta.saturating_add(payload.amount);
             }
@@ -3348,8 +3391,6 @@ async fn handle_block_execute(
                 apply_error = Some((code, format!("{err:?}")));
                 break;
             }
-
-            expected_nonce_by_sender.insert(sender_hex, expected_nonce.saturating_add(1));
         }
 
         if apply_error.is_none() {
@@ -3362,6 +3403,8 @@ async fn handle_block_execute(
 
     if let Some((code, msg)) = apply_error {
         engine.meta = meta_before;
+        let mut mempool = engine.blockchain.get_mempool().write().await;
+        mempool.clear();
         return HttpResponse::Ok().json(ExecResult {
             success: false,
             error_code: code,
@@ -3371,6 +3414,8 @@ async fn handle_block_execute(
     }
     if let Some((code, msg)) = commit_error {
         engine.meta = meta_before;
+        let mut mempool = engine.blockchain.get_mempool().write().await;
+        mempool.clear();
         return HttpResponse::Ok().json(ExecResult {
             success: false,
             error_code: code,
@@ -3387,6 +3432,10 @@ async fn handle_block_execute(
         .total_burned
         .saturating_add(burned_delta);
     engine.blockchain.set_topo_height(next_topoheight);
+    {
+        let mut mempool = engine.blockchain.get_mempool().write().await;
+        mempool.clear();
+    }
 
     let export = build_export(&engine).await;
     let digest = compute_state_digest(&export);
