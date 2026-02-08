@@ -185,7 +185,12 @@ fn spec_wire_format_vectors_roundtrip_and_headers() {
         let hdr: TxHeaderFixture =
             serde_json::from_value(v.tx).unwrap_or_else(|e| panic!("{}: bad tx json: {e}", v.name));
 
-        assert_eq!(u8::from(tx.get_version()), hdr.version, "{}: version", v.name);
+        assert_eq!(
+            u8::from(tx.get_version()),
+            hdr.version,
+            "{}: version",
+            v.name
+        );
         assert_eq!(tx.get_chain_id(), hdr.chain_id, "{}: chain_id", v.name);
         assert_eq!(tx.get_nonce(), hdr.nonce, "{}: nonce", v.name);
         assert_eq!(tx.get_fee(), hdr.fee, "{}: fee", v.name);

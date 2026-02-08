@@ -57,7 +57,8 @@ fn parse_prefix(
     ),
     tos_common::serializer::ReaderError,
 > {
-    let bytes = hex::decode(expected_hex).map_err(|_| tos_common::serializer::ReaderError::InvalidHex)?;
+    let bytes =
+        hex::decode(expected_hex).map_err(|_| tos_common::serializer::ReaderError::InvalidHex)?;
     let mut reader = Reader::new(&bytes);
     let version = TxVersion::read(&mut reader)?;
     // CiphertextValidityProof decoding depends on tx version.
@@ -77,16 +78,23 @@ fn dummy_range_proof() -> RangeProof {
     let values = vec![0u64, 1u64]; // power-of-two length
     let openings = vec![Scalar::from(7u64), Scalar::from(42u64)];
 
-    let (rp, _commitments) =
-        RangeProof::prove_multiple(&BP_GENS, &PC_GENS, &mut transcript, &values, &openings, BULLET_PROOF_SIZE)
-            .expect("range proof generation must succeed");
+    let (rp, _commitments) = RangeProof::prove_multiple(
+        &BP_GENS,
+        &PC_GENS,
+        &mut transcript,
+        &values,
+        &openings,
+        BULLET_PROOF_SIZE,
+    )
+    .expect("range proof generation must succeed");
     rp
 }
 
 fn main() {
     let path = fixture_path();
     let raw = fs::read_to_string(&path).expect("read wire_format.json");
-    let mut fixture: WireFormatFixture = serde_json::from_str(&raw).expect("parse wire_format.json");
+    let mut fixture: WireFormatFixture =
+        serde_json::from_str(&raw).expect("parse wire_format.json");
 
     let mut updated = 0usize;
 
@@ -129,18 +137,12 @@ fn main() {
                 None,
                 signature,
             ),
-            TransactionType::ShieldTransfers(_) | TransactionType::UnshieldTransfers(_) => Transaction::new(
-                version,
-                chain_id,
-                source,
-                data,
-                fee,
-                fee_type,
-                nonce,
-                reference,
-                None,
-                signature,
-            ),
+            TransactionType::ShieldTransfers(_) | TransactionType::UnshieldTransfers(_) => {
+                Transaction::new(
+                    version, chain_id, source, data, fee, fee_type, nonce, reference, None,
+                    signature,
+                )
+            }
             _ => panic!("{name}: unexpected tx type in fixture"),
         };
 
@@ -148,7 +150,10 @@ fn main() {
         updated += 1;
     }
 
-    assert_eq!(updated, 3, "expected to patch exactly 3 vectors, patched={updated}");
+    assert_eq!(
+        updated, 3,
+        "expected to patch exactly 3 vectors, patched={updated}"
+    );
 
     let out = serde_json::to_string_pretty(&fixture).expect("serialize wire_format.json");
     fs::write(&path, format!("{out}\n")).expect("write wire_format.json");
