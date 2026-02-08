@@ -78,6 +78,9 @@ pub struct MempoolState<'a, S: Storage> {
     topoheight: TopoHeight,
     // Block header version
     block_version: BlockVersion,
+    // Optional timestamp override (seconds) used for deterministic verification (e.g. conformance).
+    // When None, mempool verification uses the current system time.
+    verification_timestamp_override: Option<u64>,
 }
 
 impl<'a, S: Storage> MempoolState<'a, S> {
@@ -89,6 +92,7 @@ impl<'a, S: Storage> MempoolState<'a, S> {
         topoheight: TopoHeight,
         block_version: BlockVersion,
         mainnet: bool,
+        verification_timestamp_override: Option<u64>,
     ) -> Self {
         Self {
             mainnet,
@@ -110,6 +114,7 @@ impl<'a, S: Storage> MempoolState<'a, S> {
             stable_topoheight,
             topoheight,
             block_version,
+            verification_timestamp_override,
         }
     }
 
@@ -953,6 +958,9 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Mempoo
 
     /// Get the timestamp to use for verification (uses current system time for mempool)
     fn get_verification_timestamp(&self) -> u64 {
+        if let Some(ts) = self.verification_timestamp_override {
+            return ts;
+        }
         std::time::SystemTime::now()
             .duration_since(std::time::SystemTime::UNIX_EPOCH)
             .map(|d| d.as_secs())
@@ -1395,6 +1403,7 @@ mod tests {
             0,
             BlockVersion::Nobunaga,
             network.is_mainnet(),
+            None,
         );
 
         let result = state.apply_energy_payload(&tx).await;
@@ -1444,6 +1453,7 @@ mod tests {
             0,
             BlockVersion::Nobunaga,
             network.is_mainnet(),
+            None,
         );
 
         let result = state.apply_energy_payload(&tx).await;
@@ -1502,6 +1512,7 @@ mod tests {
             0,
             BlockVersion::Nobunaga,
             network.is_mainnet(),
+            None,
         );
 
         state.apply_energy_payload(&tx).await.unwrap();
@@ -1563,6 +1574,7 @@ mod tests {
             unlock_topoheight,
             BlockVersion::Nobunaga,
             network.is_mainnet(),
+            None,
         );
 
         let tx1 = build_energy_tx(
@@ -1638,6 +1650,7 @@ mod tests {
             unlock_topoheight,
             BlockVersion::Nobunaga,
             network.is_mainnet(),
+            None,
         );
 
         let tx1 = build_energy_tx(

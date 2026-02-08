@@ -2519,7 +2519,16 @@ async fn handle_tx_execute(
         _ => {}
     }
 
-    if let Err(err) = engine.blockchain.add_tx_to_mempool(tx, false).await {
+    let verification_ts = engine.meta.global_state.timestamp;
+    let add_res = if verification_ts > 0 {
+        engine
+            .blockchain
+            .add_tx_to_mempool_with_verification_timestamp(tx, false, verification_ts)
+            .await
+    } else {
+        engine.blockchain.add_tx_to_mempool(tx, false).await
+    };
+    if let Err(err) = add_res {
         eprintln!("conformance tx_execute add_tx_to_mempool error: {err}");
         let code = map_error_code(&err);
         return HttpResponse::Ok().json(ExecResult {
@@ -2531,7 +2540,7 @@ async fn handle_tx_execute(
     }
 
     let miner_key = miner_public_key();
-    let header = {
+    let mut header = {
         let storage = engine.blockchain.get_storage().read().await;
         match engine
             .blockchain
@@ -2551,6 +2560,11 @@ async fn handle_tx_execute(
             }
         }
     };
+    // Deterministic time: if pre_state provides a timestamp (seconds), force block header timestamp (millis)
+    // so that consensus verification uses the same time reference as the fixtures.
+    if engine.meta.global_state.timestamp > 0 {
+        header.timestamp = engine.meta.global_state.timestamp.saturating_mul(1000);
+    }
 
     let block = match engine
         .blockchain

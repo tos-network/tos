@@ -2533,8 +2533,30 @@ impl<S: Storage> Blockchain<S> {
         }
         let storage = self.storage.read().await;
         debug!("storage read acquired to add tx to mempool with hash");
-        self.add_tx_to_mempool_with_storage_and_hash(&storage, tx, hash, broadcast)
+        self.add_tx_to_mempool_with_storage_and_hash(&storage, tx, hash, broadcast, None)
             .await
+    }
+
+    // Conformance/testing helper: add a TX to the mempool but verify it using a provided
+    // deterministic timestamp (seconds) instead of wall clock time.
+    pub async fn add_tx_to_mempool_with_verification_timestamp(
+        &self,
+        tx: Transaction,
+        broadcast: bool,
+        verification_timestamp_secs: u64,
+    ) -> Result<(), BlockchainError> {
+        let hash = tx.hash();
+        let tx = Arc::new(tx);
+        let storage = self.storage.read().await;
+        debug!("storage read acquired to add tx to mempool with verification timestamp");
+        self.add_tx_to_mempool_with_storage_and_hash(
+            &storage,
+            tx,
+            Immutable::Owned(hash),
+            broadcast,
+            Some(verification_timestamp_secs),
+        )
+        .await
     }
 
     // Add a tx to the mempool with the given hash, it will verify the TX and check that it is not already in mempool or in blockchain
@@ -2545,6 +2567,7 @@ impl<S: Storage> Blockchain<S> {
         tx: Arc<Transaction>,
         hash: Immutable<Hash>,
         broadcast: bool,
+        verification_timestamp_override: Option<u64>,
     ) -> Result<(), BlockchainError> {
         if log::log_enabled!(log::Level::Debug) {
             debug!(
@@ -2622,6 +2645,7 @@ impl<S: Storage> Blockchain<S> {
                     tx.clone(),
                     tx_size,
                     version,
+                    verification_timestamp_override,
                 )
                 .await?;
 
@@ -4955,6 +4979,7 @@ impl<S: Storage> Blockchain<S> {
                             tx.clone(),
                             Immutable::Owned(tx_hash.clone()),
                             false,
+                            None,
                         )
                         .await
                     {
@@ -5406,6 +5431,7 @@ impl<S: Storage> Blockchain<S> {
                         tx.make_arc(),
                         Immutable::Owned(hash.clone()),
                         false,
+                        None,
                     )
                     .await
                 {

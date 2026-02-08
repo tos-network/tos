@@ -143,6 +143,7 @@ impl Mempool {
         tx: Arc<Transaction>,
         size: usize,
         block_version: BlockVersion,
+        verification_timestamp_override: Option<u64>,
     ) -> Result<(), BlockchainError> {
         let mut state = MempoolState::new(
             &self,
@@ -152,6 +153,7 @@ impl Mempool {
             topoheight,
             block_version,
             self.mainnet,
+            verification_timestamp_override,
         );
         let tx_cache = TxCache::new(storage, self, self.disable_zkp_cache);
         tx.verify(&hash, &mut state, &tx_cache).await?;
@@ -614,6 +616,7 @@ impl Mempool {
                             topoheight,
                             block_version,
                             self.mainnet,
+                            None,
                         );
                         if let Err(e) =
                             Transaction::verify(next_tx.get_tx(), &tx_hash, &mut state, &tx_cache)
