@@ -458,6 +458,16 @@ struct TxExecuteRequest {
 struct BlockExecuteRequest {
     #[serde(default)]
     wire_hex: String,
+    #[serde(default)]
+    txs: Vec<BlockExecuteTx>,
+}
+
+#[derive(Deserialize)]
+struct BlockExecuteTx {
+    #[serde(default)]
+    wire_hex: String,
+    #[serde(default)]
+    tx: Option<serde_json::Value>,
 }
 
 #[derive(Serialize)]
@@ -3098,35 +3108,285 @@ async fn handle_block_execute(
     state: web::Data<AppState>,
     body: web::Json<BlockExecuteRequest>,
 ) -> HttpResponse {
+    // Backwards-compatible behavior: if wire_hex is provided and txs is empty, treat this as a
+    // full-block import request.
     let wire_hex = body.wire_hex.trim();
-    if wire_hex.is_empty() {
-        return HttpResponse::BadRequest()
-            .json(json!({ "success": false, "error": "missing wire_hex", "error_code": 0xFF00 }));
+    if !wire_hex.is_empty() && body.txs.is_empty() {
+        let block = match Block::from_hex(wire_hex) {
+            Ok(block) => block,
+            Err(err) => {
+                return HttpResponse::BadRequest().json(
+                    json!({ "success": false, "error": format!("{err:?}"), "error_code": 0x0100 }),
+                );
+            }
+        };
+
+        let engine = state.engine.lock().await;
+        if let Err(err) = engine
+            .blockchain
+            .add_new_block(block, None, BroadcastOption::None, false)
+            .await
+        {
+            let code = map_error_code(&err);
+            return HttpResponse::Ok().json(ExecResult {
+                success: false,
+                error_code: code,
+                state_digest: String::new(),
+                error: Some(err.to_string()),
+            });
+        }
+
+        let export = build_export(&engine).await;
+        let digest = compute_state_digest(&export);
+        return HttpResponse::Ok().json(ExecResult {
+            success: true,
+            error_code: 0,
+            state_digest: digest,
+            error: None,
+        });
     }
 
-    let block = match Block::from_hex(wire_hex) {
-        Ok(block) => block,
-        Err(err) => {
+    if body.txs.is_empty() {
+        return HttpResponse::BadRequest().json(
+            json!({ "success": false, "error": "missing wire_hex or txs", "error_code": 0xFF00 }),
+        );
+    }
+
+    // L2: synthetic block execution built from a provided ordered tx list. The block is applied
+    // atomically: on any tx failure, no storage/meta changes are committed.
+    let mut engine = state.engine.lock().await;
+    let meta_before = engine.meta.clone();
+
+    // Decode transactions first (no side effects).
+    let mut txs: Vec<Arc<Transaction>> = Vec::with_capacity(body.txs.len());
+    for item in &body.txs {
+        let tx = if !item.wire_hex.trim().is_empty() {
+            match decode_tx_strict(item.wire_hex.trim()) {
+                Ok(tx) => tx,
+                Err(_err) => {
+                    if let Some(tx_json) = &item.tx {
+                        match tx_from_json(tx_json) {
+                            Ok(tx) => tx,
+                            Err(err) => {
+                                engine.meta = meta_before.clone();
+                                return HttpResponse::Ok().json(ExecResult {
+                                    success: false,
+                                    error_code: 0x0100,
+                                    state_digest: current_state_digest(&engine).await,
+                                    error: Some(err),
+                                });
+                            }
+                        }
+                    } else {
+                        engine.meta = meta_before.clone();
+                        return HttpResponse::Ok().json(ExecResult {
+                            success: false,
+                            error_code: 0x0100,
+                            state_digest: current_state_digest(&engine).await,
+                            error: Some("invalid tx wire_hex".to_string()),
+                        });
+                    }
+                }
+            }
+        } else if let Some(tx_json) = &item.tx {
+            match tx_from_json(tx_json) {
+                Ok(tx) => tx,
+                Err(err) => {
+                    engine.meta = meta_before.clone();
+                    return HttpResponse::Ok().json(ExecResult {
+                        success: false,
+                        error_code: 0x0100,
+                        state_digest: current_state_digest(&engine).await,
+                        error: Some(err),
+                    });
+                }
+            }
+        } else {
+            engine.meta = meta_before.clone();
             return HttpResponse::BadRequest().json(
-                json!({ "success": false, "error": format!("{err:?}"), "error_code": 0x0100 }),
+                json!({ "success": false, "error": "tx item missing wire_hex or tx", "error_code": 0xFF00 }),
             );
+        };
+        txs.push(Arc::new(tx));
+    }
+
+    // Sender existence + receiver meta population (keeps export stable when meta.account_meta is set).
+    for tx in &txs {
+        let sender_hex = public_key_to_hex(tx.get_source());
+        if !engine.meta.account_meta.contains_key(&sender_hex) {
+            engine.meta = meta_before.clone();
+            return HttpResponse::Ok().json(ExecResult {
+                success: false,
+                error_code: 0x0400, // ACCOUNT_NOT_FOUND
+                state_digest: current_state_digest(&engine).await,
+                error: Some("sender not found".to_string()),
+            });
         }
+
+        if let TransactionType::Transfers(payloads) = tx.get_data() {
+            for payload in payloads {
+                let dest_addr = public_key_to_hex(payload.get_destination());
+                engine
+                    .meta
+                    .account_meta
+                    .entry(dest_addr.clone())
+                    .or_insert_with(|| AccountState {
+                        address: dest_addr,
+                        ..AccountState::default()
+                    });
+            }
+        }
+    }
+
+    // Topoheight bookkeeping: apply at the next block height, and advance height on success.
+    let next_topoheight = if engine.meta.global_state.block_height > 0 {
+        engine.meta.global_state.block_height.saturating_add(1)
+    } else {
+        engine.blockchain.get_topo_height().saturating_add(1)
     };
 
-    let engine = state.engine.lock().await;
-    if let Err(err) = engine
-        .blockchain
-        .add_new_block(block, None, BroadcastOption::None, false)
-        .await
+    // Build a synthetic block header that matches the ordered tx list.
+    let miner_key = miner_public_key();
+    let header_res = {
+        let storage = engine.blockchain.get_storage().read().await;
+        engine
+            .blockchain
+            .get_block_template_for_storage(&*storage, miner_key)
+            .await
+    };
+    let mut header = match header_res {
+        Ok(header) => header,
+        Err(err) => {
+            engine.meta = meta_before.clone();
+            let code = map_error_code(&err);
+            return HttpResponse::Ok().json(ExecResult {
+                success: false,
+                error_code: code,
+                state_digest: current_state_digest(&engine).await,
+                error: Some(err.to_string()),
+            });
+        }
+    };
+    if engine.meta.global_state.timestamp > 0 {
+        header.timestamp = engine.meta.global_state.timestamp.saturating_mul(1000);
+    }
+    header.height = next_topoheight;
+    let mut txs_hashes = indexmap::IndexSet::with_capacity(txs.len());
+    for tx in &txs {
+        txs_hashes.insert(tx.hash());
+    }
+    header.txs_hashes = txs_hashes;
+    let block = Block::new(tos_common::immutable::Immutable::Owned(header), txs.clone());
+    let block_hash = block.hash();
+    let tx_hashes: Vec<Hash> = block
+        .get_transactions()
+        .iter()
+        .map(|tx| tx.hash())
+        .collect();
+
+    // Apply all txs in a single ApplicableChainState, then commit once.
+    // Conformance rule: strict nonce within a block (must match current sender nonce, then +1).
+    // The daemon's internal block apply may allow gaps; enforce spec semantics here.
+    let mut expected_nonce_by_sender: HashMap<String, u64> = HashMap::new();
     {
-        let code = map_error_code(&err);
+        let storage = engine.blockchain.get_storage().read().await;
+        for tx in block.get_transactions() {
+            let sender_hex = public_key_to_hex(tx.get_source());
+            if expected_nonce_by_sender.contains_key(&sender_hex) {
+                continue;
+            }
+            let n = storage
+                .get_last_nonce(tx.get_source())
+                .await
+                .map(|(_, v)| v.get_nonce())
+                .unwrap_or(0);
+            expected_nonce_by_sender.insert(sender_hex, n);
+        }
+    }
+
+    let stable_topoheight = engine.blockchain.get_stable_topoheight().await;
+    let mut burned_delta: u64 = 0;
+    let mut apply_error: Option<(u16, String)> = None;
+    let mut commit_error: Option<(u16, String)> = None;
+    {
+        let mut storage = engine.blockchain.get_storage().write().await;
+        let mut chain_state = ApplicableChainState::new(
+            &mut *storage,
+            engine.blockchain.get_contract_environment(),
+            stable_topoheight,
+            next_topoheight,
+            block.get_version(),
+            engine.meta.global_state.total_burned,
+            &block_hash,
+            &block,
+            engine.blockchain.get_executor(),
+        );
+
+        for (idx, tx) in block.get_transactions().iter().enumerate() {
+            // Enforce strict nonce per-sender.
+            let sender_hex = public_key_to_hex(tx.get_source());
+            let expected_nonce = *expected_nonce_by_sender.get(&sender_hex).unwrap_or(&0);
+            let tx_nonce = tx.get_nonce();
+            if tx_nonce != expected_nonce {
+                let code = if tx_nonce > expected_nonce {
+                    0x0111
+                } else {
+                    0x0110
+                };
+                apply_error = Some((code, "nonce mismatch".to_string()));
+                break;
+            }
+
+            if let TransactionType::Burn(payload) = tx.get_data() {
+                burned_delta = burned_delta.saturating_add(payload.amount);
+            }
+            if let Err(err) = tx
+                .apply_with_partial_verify(&tx_hashes[idx], &mut chain_state)
+                .await
+            {
+                let code = map_verify_error_code(&err);
+                apply_error = Some((code, format!("{err:?}")));
+                break;
+            }
+
+            expected_nonce_by_sender.insert(sender_hex, expected_nonce.saturating_add(1));
+        }
+
+        if apply_error.is_none() {
+            if let Err(err) = chain_state.apply_changes().await {
+                let code = map_error_code(&err);
+                commit_error = Some((code, err.to_string()));
+            }
+        }
+    }
+
+    if let Some((code, msg)) = apply_error {
+        engine.meta = meta_before;
         return HttpResponse::Ok().json(ExecResult {
             success: false,
             error_code: code,
-            state_digest: String::new(),
-            error: Some(err.to_string()),
+            state_digest: current_state_digest(&engine).await,
+            error: Some(msg),
         });
     }
+    if let Some((code, msg)) = commit_error {
+        engine.meta = meta_before;
+        return HttpResponse::Ok().json(ExecResult {
+            success: false,
+            error_code: code,
+            state_digest: current_state_digest(&engine).await,
+            error: Some(msg),
+        });
+    }
+
+    // Success: advance height and update burned total.
+    engine.meta.global_state.block_height = next_topoheight;
+    engine.meta.global_state.total_burned = engine
+        .meta
+        .global_state
+        .total_burned
+        .saturating_add(burned_delta);
+    engine.blockchain.set_topo_height(next_topoheight);
 
     let export = build_export(&engine).await;
     let digest = compute_state_digest(&export);
