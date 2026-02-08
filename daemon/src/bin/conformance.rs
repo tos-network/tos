@@ -2384,6 +2384,17 @@ async fn handle_tx_execute(
                 });
             }
 
+            // Fee rules (spec): Energy fee must be zero and consumes energy on success.
+            if matches!(tx_for_apply.get_fee_type(), FeeType::Energy) && tx_for_apply.get_fee() != 0
+            {
+                return HttpResponse::Ok().json(ExecResult {
+                    success: false,
+                    error_code: 0x0107, // INVALID_PAYLOAD
+                    state_digest: current_state_digest(&engine).await,
+                    error: Some("energy fee must be zero".to_string()),
+                });
+            }
+
             // Amount rules (spec) and apply: credit receiver balances; fee+nonce applied here.
             let mut outs: Vec<(PublicKey, String, u64)> = Vec::with_capacity(transfers.len());
             for t in transfers {
@@ -2427,6 +2438,51 @@ async fn handle_tx_execute(
                     let _ = storage
                         .set_last_balance_to(dest, &TOS_ASSET, next_topoheight, &vb)
                         .await;
+                }
+
+                // Consume 1 energy on success for transfer-type txs using energy fees.
+                if matches!(tx_for_apply.get_fee_type(), FeeType::Energy) {
+                    let energy_cost = tx_for_apply.calculate_energy_cost();
+                    if energy_cost > 0 {
+                        match storage.get_energy_resource(tx_for_apply.get_source()).await {
+                            Ok(Some(mut resource)) => {
+                                if !resource.has_enough_energy(next_topoheight, energy_cost) {
+                                    return HttpResponse::Ok().json(ExecResult {
+                                        success: false,
+                                        error_code: 0x0302, // INSUFFICIENT_ENERGY
+                                        state_digest: current_state_digest(&engine).await,
+                                        error: Some("insufficient energy".to_string()),
+                                    });
+                                }
+                                if resource
+                                    .consume_energy(energy_cost, next_topoheight)
+                                    .is_err()
+                                {
+                                    return HttpResponse::Ok().json(ExecResult {
+                                        success: false,
+                                        error_code: 0x0302, // INSUFFICIENT_ENERGY
+                                        state_digest: current_state_digest(&engine).await,
+                                        error: Some("insufficient energy".to_string()),
+                                    });
+                                }
+                                let _ = storage
+                                    .set_energy_resource(
+                                        tx_for_apply.get_source(),
+                                        next_topoheight,
+                                        &resource,
+                                    )
+                                    .await;
+                            }
+                            _ => {
+                                return HttpResponse::Ok().json(ExecResult {
+                                    success: false,
+                                    error_code: 0x0302, // INSUFFICIENT_ENERGY
+                                    state_digest: current_state_digest(&engine).await,
+                                    error: Some("insufficient energy".to_string()),
+                                });
+                            }
+                        }
+                    }
                 }
 
                 // Deduct fee and bump nonce.
