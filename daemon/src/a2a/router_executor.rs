@@ -219,6 +219,8 @@ mod tests {
                 content: PartContent::Text {
                     text: "hi".to_string(),
                 },
+                filename: None,
+                media_type: None,
                 metadata: None,
             }],
             metadata: Some(metadata),

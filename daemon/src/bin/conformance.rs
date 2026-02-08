@@ -39,9 +39,9 @@ use tos_common::transaction::{
 
 use tos_common::crypto::elgamal::KeyPair;
 use tos_crypto::curve25519_dalek::ristretto::CompressedRistretto;
-use tos_daemon::core::blockdag;
 use tos_daemon::core::blockchain::Blockchain;
 use tos_daemon::core::blockchain::BroadcastOption;
+use tos_daemon::core::blockdag;
 use tos_daemon::core::config::Config;
 use tos_daemon::core::error::BlockchainError;
 use tos_daemon::core::genesis::{
@@ -51,8 +51,8 @@ use tos_daemon::core::state::ApplicableChainState;
 use tos_daemon::core::storage::rocksdb::RocksStorage;
 use tos_daemon::core::storage::{
     AccountProvider, AgentAccountProvider, ArbiterProvider, ArbitrationCommitProvider,
-    AssetProvider, BalanceProvider, CommitteeProvider, ContractProvider, EnergyProvider,
-    DagOrderProvider, DifficultyProvider, EscrowProvider, KycProvider, NonceProvider,
+    AssetProvider, BalanceProvider, CommitteeProvider, ContractProvider, DagOrderProvider,
+    DifficultyProvider, EnergyProvider, EscrowProvider, KycProvider, NonceProvider,
     ReferralProvider, TipsProvider, TnsProvider, VersionedContract,
 };
 use tos_daemon::vrf::WrappedMinerSecret;
@@ -3647,7 +3647,10 @@ async fn handle_chain_execute(
 
         let miner_key = miner_public_key();
         let mut header = BlockHeader::new(
-            tos_daemon::core::hard_fork::get_version_at_height(engine.blockchain.get_network(), height),
+            tos_daemon::core::hard_fork::get_version_at_height(
+                engine.blockchain.get_network(),
+                height,
+            ),
             height,
             timestamp_ms,
             tips,
@@ -3676,11 +3679,8 @@ async fn handle_chain_execute(
                     .global_state
                     .total_burned
                     .saturating_add(burned_delta);
-                engine.meta.global_state.block_height = engine
-                    .meta
-                    .global_state
-                    .block_height
-                    .saturating_add(1);
+                engine.meta.global_state.block_height =
+                    engine.meta.global_state.block_height.saturating_add(1);
                 results.push(ChainBlockResult {
                     id: blk.id.clone(),
                     success: true,

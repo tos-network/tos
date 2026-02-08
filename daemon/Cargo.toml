@@ -110,11 +110,13 @@ rcgen = "0.13"
 tonic-build = "0.12"
 
 [features]
-default = ["rocksdb"]
+default = ["rocksdb", "rpc", "a2a"]
 rocksdb = []
 # Test utilities feature - exposes test-only functions for external test crates
 testutils = []
 sled = []
+a2a = []
+rpc = []
 
 [[bin]]
 name = "tps_benchmark"

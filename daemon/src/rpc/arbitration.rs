@@ -13,8 +13,10 @@ use tos_common::{
     rpc::{parse_params, InternalRpcError, RPCHandler},
 };
 
-use crate::a2a::arbitration::coordinator::CoordinatorService;
 use crate::core::{blockchain::Blockchain, error::BlockchainError, storage::Storage};
+
+#[cfg(feature = "a2a")]
+use crate::a2a::arbitration::coordinator::CoordinatorService;
 
 pub fn register_methods<S: Storage>(handler: &mut RPCHandler<Arc<Blockchain<S>>>) {
     handler.register_method(
@@ -25,8 +27,11 @@ pub fn register_methods<S: Storage>(handler: &mut RPCHandler<Arc<Blockchain<S>>>
         "estimate_withdrawable_amount",
         async_handler!(estimate_withdrawable_amount::<S>),
     );
-    handler.register_method("arbitration_open", async_handler!(arbitration_open::<S>));
-    handler.register_method("submit_juror_vote", async_handler!(submit_juror_vote::<S>));
+    #[cfg(feature = "a2a")]
+    {
+        handler.register_method("arbitration_open", async_handler!(arbitration_open::<S>));
+        handler.register_method("submit_juror_vote", async_handler!(submit_juror_vote::<S>));
+    }
 }
 
 async fn get_arbiter_withdraw_status<S: Storage>(
@@ -118,6 +123,7 @@ async fn estimate_withdrawable_amount<S: Storage>(
     Ok(json!(EstimateWithdrawableAmountResult { available }))
 }
 
+#[cfg(feature = "a2a")]
 async fn arbitration_open<S: Storage>(
     context: &Context,
     body: Value,
@@ -132,6 +138,7 @@ async fn arbitration_open<S: Storage>(
     Ok(json!(vote_request))
 }
 
+#[cfg(feature = "a2a")]
 async fn submit_juror_vote<S: Storage>(
     context: &Context,
     body: Value,

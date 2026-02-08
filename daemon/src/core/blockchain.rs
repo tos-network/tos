@@ -5659,6 +5659,7 @@ pub fn get_block_dev_fee(height: u64) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use async_trait::async_trait;
 
     #[test]
     fn test_reward_side_block_percentage() {
@@ -5692,5 +5693,455 @@ mod tests {
         assert_eq!(get_block_dev_fee(DEV_FEES[0].height), 10);
         assert_eq!(get_block_dev_fee(DEV_FEES[1].height), 5);
         assert_eq!(get_block_dev_fee(DEV_FEES[1].height + 1), 5);
+    }
+
+    // Structural DAG tests for cumulative difficulty (find_tip_work_score algorithm)
+    //
+    // These tests build real DAG topologies using a mock provider and verify
+    // the BFS/dedup algorithm produces correct cumulative difficulty scores.
+    // They exercise the same logic as find_tip_work_score + find_common_base.
+
+    /// Mock block data for testing cumulative difficulty
+    struct MockBlock {
+        height: u64,
+        difficulty: Difficulty,
+        cumulative_difficulty: CumulativeDifficulty,
+        tips: IndexSet<Hash>,
+        topoheight: TopoHeight,
+    }
+
+    /// Mock provider implementing the traits needed by the cumulative difficulty algorithm
+    struct MockDagProvider {
+        blocks: HashMap<Hash, MockBlock>,
+    }
+
+    impl MockDagProvider {
+        fn new() -> Self {
+            Self {
+                blocks: HashMap::new(),
+            }
+        }
+
+        fn add_block(
+            &mut self,
+            hash: Hash,
+            height: u64,
+            difficulty: u64,
+            cumulative_difficulty: u64,
+            tips: Vec<Hash>,
+        ) {
+            let mut tip_set = IndexSet::new();
+            for t in tips {
+                tip_set.insert(t);
+            }
+            self.blocks.insert(
+                hash,
+                MockBlock {
+                    height,
+                    difficulty: VarUint::from_u64(difficulty),
+                    cumulative_difficulty: VarUint::from_u64(cumulative_difficulty),
+                    tips: tip_set,
+                    topoheight: height,
+                },
+            );
+        }
+    }
+
+    #[async_trait]
+    impl DifficultyProvider for MockDagProvider {
+        async fn get_height_for_block_hash(&self, hash: &Hash) -> Result<u64, BlockchainError> {
+            self.blocks
+                .get(hash)
+                .map(|b| b.height)
+                .ok_or(BlockchainError::BlockNotFound(hash.clone()))
+        }
+
+        async fn get_version_for_block_hash(
+            &self,
+            _hash: &Hash,
+        ) -> Result<BlockVersion, BlockchainError> {
+            Ok(BlockVersion::Nobunaga)
+        }
+
+        async fn get_timestamp_for_block_hash(
+            &self,
+            _hash: &Hash,
+        ) -> Result<TimestampMillis, BlockchainError> {
+            Ok(0)
+        }
+
+        async fn get_difficulty_for_block_hash(
+            &self,
+            hash: &Hash,
+        ) -> Result<Difficulty, BlockchainError> {
+            self.blocks
+                .get(hash)
+                .map(|b| b.difficulty)
+                .ok_or(BlockchainError::BlockNotFound(hash.clone()))
+        }
+
+        async fn get_cumulative_difficulty_for_block_hash(
+            &self,
+            hash: &Hash,
+        ) -> Result<CumulativeDifficulty, BlockchainError> {
+            self.blocks
+                .get(hash)
+                .map(|b| b.cumulative_difficulty)
+                .ok_or(BlockchainError::BlockNotFound(hash.clone()))
+        }
+
+        async fn get_past_blocks_for_block_hash(
+            &self,
+            hash: &Hash,
+        ) -> Result<Immutable<IndexSet<Hash>>, BlockchainError> {
+            self.blocks
+                .get(hash)
+                .map(|b| Immutable::from(b.tips.clone()))
+                .ok_or(BlockchainError::BlockNotFound(hash.clone()))
+        }
+
+        async fn get_block_header_by_hash(
+            &self,
+            _hash: &Hash,
+        ) -> Result<Immutable<BlockHeader>, BlockchainError> {
+            Err(BlockchainError::Unknown)
+        }
+
+        async fn get_estimated_covariance_for_block_hash(
+            &self,
+            _hash: &Hash,
+        ) -> Result<VarUint, BlockchainError> {
+            Ok(VarUint::from_u64(0))
+        }
+    }
+
+    #[async_trait]
+    impl DagOrderProvider for MockDagProvider {
+        async fn get_topo_height_for_hash(
+            &self,
+            hash: &Hash,
+        ) -> Result<TopoHeight, BlockchainError> {
+            self.blocks
+                .get(hash)
+                .map(|b| b.topoheight)
+                .ok_or(BlockchainError::BlockNotFound(hash.clone()))
+        }
+
+        async fn set_topo_height_for_block(
+            &mut self,
+            _hash: &Hash,
+            _topoheight: TopoHeight,
+        ) -> Result<(), BlockchainError> {
+            Ok(())
+        }
+
+        async fn is_block_topological_ordered(&self, hash: &Hash) -> Result<bool, BlockchainError> {
+            Ok(self.blocks.contains_key(hash))
+        }
+
+        async fn get_hash_at_topo_height(
+            &self,
+            _topoheight: TopoHeight,
+        ) -> Result<Hash, BlockchainError> {
+            Err(BlockchainError::Unknown)
+        }
+
+        async fn has_hash_at_topoheight(
+            &self,
+            _topoheight: TopoHeight,
+        ) -> Result<bool, BlockchainError> {
+            Ok(false)
+        }
+
+        async fn get_orphaned_blocks<'a>(
+            &'a self,
+        ) -> Result<impl Iterator<Item = Result<Hash, BlockchainError>> + 'a, BlockchainError>
+        {
+            Ok(std::iter::empty())
+        }
+    }
+
+    /// Helper: create a deterministic hash from a single byte ID
+    fn test_hash(id: u8) -> Hash {
+        let mut bytes = [0u8; HASH_SIZE];
+        bytes[0] = id;
+        Hash::new(bytes)
+    }
+
+    /// Standalone implementation of the find_tip_work_score BFS algorithm.
+    ///
+    /// Replicates the exact logic from Blockchain::find_tip_work_score +
+    /// find_tip_work_score_internal without requiring a Blockchain instance.
+    ///
+    /// Parameters match the C at_difficulty_cumulative() interface:
+    /// - tips: parent block hashes of the new block
+    /// - block_difficulty: difficulty of the new block
+    /// - base: common base block hash
+    ///
+    /// Returns the cumulative difficulty for the new block.
+    async fn compute_cumulative_difficulty(
+        provider: &MockDagProvider,
+        tips: &[Hash],
+        block_difficulty: u64,
+        base: &Hash,
+    ) -> CumulativeDifficulty {
+        // This hash is a placeholder for the new block being created
+        let new_block = test_hash(255);
+        let base_topoheight = provider.get_topo_height_for_hash(base).await.unwrap();
+
+        let mut map: HashMap<Hash, CumulativeDifficulty> = HashMap::new();
+
+        // Insert the new block's difficulty
+        map.insert(new_block.clone(), VarUint::from_u64(block_difficulty));
+
+        // BFS from each tip, collecting individual difficulties
+        for tip in tips {
+            if map.contains_key(tip) {
+                continue;
+            }
+            let is_ordered = provider.is_block_topological_ordered(tip).await.unwrap();
+            if !is_ordered
+                || (is_ordered
+                    && provider.get_topo_height_for_hash(tip).await.unwrap() >= base_topoheight)
+            {
+                // BFS walk (same as find_tip_work_score_internal)
+                let mut stack: VecDeque<Hash> = VecDeque::new();
+                stack.push_back(tip.clone());
+
+                while let Some(current_hash) = stack.pop_back() {
+                    let past_blocks = provider
+                        .get_past_blocks_for_block_hash(&current_hash)
+                        .await
+                        .unwrap();
+
+                    for tip_hash in past_blocks.iter() {
+                        if !map.contains_key(tip_hash) {
+                            let is_ord = provider
+                                .is_block_topological_ordered(tip_hash)
+                                .await
+                                .unwrap();
+                            if !is_ord
+                                || (is_ord
+                                    && provider.get_topo_height_for_hash(tip_hash).await.unwrap()
+                                        >= base_topoheight)
+                            {
+                                stack.push_back(tip_hash.clone());
+                            }
+                        }
+                    }
+
+                    if !map.contains_key(&current_hash) {
+                        map.insert(
+                            current_hash.clone(),
+                            provider
+                                .get_difficulty_for_block_hash(&current_hash)
+                                .await
+                                .unwrap()
+                                .into(),
+                        );
+                    }
+                }
+            }
+        }
+
+        // Add the base block's cumulative difficulty
+        if *base != new_block {
+            map.insert(
+                base.clone(),
+                provider
+                    .get_cumulative_difficulty_for_block_hash(base)
+                    .await
+                    .unwrap(),
+            );
+        }
+
+        // Sum all values
+        let mut score = CumulativeDifficulty::zero();
+        for (_, value) in &map {
+            score += *value;
+        }
+
+        score
+    }
+
+    // Test 1: Single tip linear chain
+    // G(h=0,d=100000,c=100000) -> A(h=1,d=105000,c=205000) -> B(h=2,d=110000,c=315000)
+    // New block tips={B}, d=10000, base=G
+    // Algorithm: new_block.diff(10000) + B.diff(110000) + A.diff(105000) + G.cum(100000) = 325000
+    #[tokio::test]
+    async fn test_cumulative_difficulty_single_tip_linear() {
+        let mut p = MockDagProvider::new();
+        let g = test_hash(1);
+        let a = test_hash(2);
+        let b = test_hash(3);
+
+        p.add_block(g.clone(), 0, 100_000, 100_000, vec![]);
+        p.add_block(a.clone(), 1, 105_000, 205_000, vec![g.clone()]);
+        p.add_block(b.clone(), 2, 110_000, 315_000, vec![a.clone()]);
+
+        let result = compute_cumulative_difficulty(&p, &[b.clone()], 10_000, &g).await;
+        assert_eq!(result, VarUint::from_u64(325_000));
+    }
+
+    // Test 2: Diamond with shared parent (THE bug case)
+    // G(h=0,d=100000,c=100000) -> A(h=1,d=100000,c=200000)
+    // A -> B(h=2,d=110000,c=310000), A -> C(h=2,d=120000,c=320000)
+    // New block tips={B,C}, d=10000, base=G
+    // Algorithm: 10000 + B.diff(110000) + C.diff(120000) + A.diff(100000) + G.cum(100000) = 440000
+    #[tokio::test]
+    async fn test_cumulative_difficulty_diamond_shared_parent() {
+        let mut p = MockDagProvider::new();
+        let g = test_hash(1);
+        let a = test_hash(2);
+        let b = test_hash(3);
+        let c = test_hash(4);
+
+        p.add_block(g.clone(), 0, 100_000, 100_000, vec![]);
+        p.add_block(a.clone(), 1, 100_000, 200_000, vec![g.clone()]);
+        p.add_block(b.clone(), 2, 110_000, 310_000, vec![a.clone()]);
+        p.add_block(c.clone(), 2, 120_000, 320_000, vec![a.clone()]);
+
+        let result = compute_cumulative_difficulty(&p, &[b.clone(), c.clone()], 10_000, &g).await;
+        assert_eq!(result, VarUint::from_u64(440_000));
+    }
+
+    // Test 3: Diamond with equal cumulative difficulty
+    // Same as test 2 but B.diff == C.diff == 110000
+    // Algorithm: 10000 + B.diff(110000) + C.diff(110000) + A.diff(100000) + G.cum(100000) = 430000
+    #[tokio::test]
+    async fn test_cumulative_difficulty_diamond_equal() {
+        let mut p = MockDagProvider::new();
+        let g = test_hash(1);
+        let a = test_hash(2);
+        let b = test_hash(3);
+        let c = test_hash(4);
+
+        p.add_block(g.clone(), 0, 100_000, 100_000, vec![]);
+        p.add_block(a.clone(), 1, 100_000, 200_000, vec![g.clone()]);
+        p.add_block(b.clone(), 2, 110_000, 310_000, vec![a.clone()]);
+        p.add_block(c.clone(), 2, 110_000, 310_000, vec![a.clone()]);
+
+        let result = compute_cumulative_difficulty(&p, &[b.clone(), c.clone()], 10_000, &g).await;
+        assert_eq!(result, VarUint::from_u64(430_000));
+    }
+
+    // Test 4: Asymmetric fork
+    // G -> A -> B -> D, A -> C. Tips={D,C}, d=10000, base=G
+    // Algorithm: 10000 + D.diff(105000) + B.diff(110000) + C.diff(120000) + A.diff(100000)
+    //           + G.cum(100000) = 545000
+    #[tokio::test]
+    async fn test_cumulative_difficulty_asymmetric_fork() {
+        let mut p = MockDagProvider::new();
+        let g = test_hash(1);
+        let a = test_hash(2);
+        let b = test_hash(3);
+        let c = test_hash(4);
+        let d = test_hash(5);
+
+        p.add_block(g.clone(), 0, 100_000, 100_000, vec![]);
+        p.add_block(a.clone(), 1, 100_000, 200_000, vec![g.clone()]);
+        p.add_block(b.clone(), 2, 110_000, 310_000, vec![a.clone()]);
+        p.add_block(c.clone(), 2, 120_000, 320_000, vec![a.clone()]);
+        p.add_block(d.clone(), 3, 105_000, 415_000, vec![b.clone()]);
+
+        let result = compute_cumulative_difficulty(&p, &[d.clone(), c.clone()], 10_000, &g).await;
+        assert_eq!(result, VarUint::from_u64(545_000));
+    }
+
+    // Test 5: Deep fork (2 blocks deep on each side)
+    // G -> A -> B -> D, A -> C -> E. Tips={D,E}, d=10000, base=G
+    // Algorithm: 10000 + D.diff(105000) + B.diff(110000) + E.diff(120000) + C.diff(115000)
+    //           + A.diff(100000) + G.cum(100000) = 660000
+    #[tokio::test]
+    async fn test_cumulative_difficulty_deep_fork() {
+        let mut p = MockDagProvider::new();
+        let g = test_hash(1);
+        let a = test_hash(2);
+        let b = test_hash(3);
+        let c = test_hash(4);
+        let d = test_hash(5);
+        let e = test_hash(6);
+
+        p.add_block(g.clone(), 0, 100_000, 100_000, vec![]);
+        p.add_block(a.clone(), 1, 100_000, 200_000, vec![g.clone()]);
+        p.add_block(b.clone(), 2, 110_000, 310_000, vec![a.clone()]);
+        p.add_block(c.clone(), 2, 115_000, 315_000, vec![a.clone()]);
+        p.add_block(d.clone(), 3, 105_000, 415_000, vec![b.clone()]);
+        p.add_block(e.clone(), 3, 120_000, 435_000, vec![c.clone()]);
+
+        let result = compute_cumulative_difficulty(&p, &[d.clone(), e.clone()], 10_000, &g).await;
+        assert_eq!(result, VarUint::from_u64(660_000));
+    }
+
+    // Test 6: Three tips with shared ancestors
+    // G -> A -> {B, C, D}. Tips={B,C,D}, d=10000, base=G
+    // Algorithm: 10000 + B.diff(110000) + C.diff(120000) + D.diff(115000) + A.diff(100000)
+    //           + G.cum(100000) = 555000
+    #[tokio::test]
+    async fn test_cumulative_difficulty_three_tips() {
+        let mut p = MockDagProvider::new();
+        let g = test_hash(1);
+        let a = test_hash(2);
+        let b = test_hash(3);
+        let c = test_hash(4);
+        let d = test_hash(5);
+
+        p.add_block(g.clone(), 0, 100_000, 100_000, vec![]);
+        p.add_block(a.clone(), 1, 100_000, 200_000, vec![g.clone()]);
+        p.add_block(b.clone(), 2, 110_000, 310_000, vec![a.clone()]);
+        p.add_block(c.clone(), 2, 120_000, 320_000, vec![a.clone()]);
+        p.add_block(d.clone(), 2, 115_000, 315_000, vec![a.clone()]);
+
+        let result =
+            compute_cumulative_difficulty(&p, &[b.clone(), c.clone(), d.clone()], 10_000, &g).await;
+        assert_eq!(result, VarUint::from_u64(555_000));
+    }
+
+    // Test 7: Genesis parent (minimal case)
+    // G(h=0,d=100000,c=100000) -> [new], d=50000, base=G
+    // Single-tip: G.cum(100000) + 50000 = 150000
+    // But with BFS approach from base=G: 50000 + G.cum(100000) = 150000
+    // Wait -- if base=G, the BFS won't walk past G, so map only has new_block + G.cum
+    // Actually the BFS collects difficulties for blocks with topo >= base_topo.
+    // G.topo=0, base_topo=0, so G.topo >= base_topo is true.
+    // But G is the base, and we insert base's cumulative_diff (not individual diff).
+    // Hmm, let me trace through more carefully:
+    //   base = G, base_topo = 0
+    //   map = {new_block: 50000}
+    //   BFS from tip G: G.topo(0) >= base_topo(0) -> yes, walk
+    //     G's tips = [] (genesis), nothing to enqueue
+    //     map = {new_block: 50000, G: G.diff(100000)}
+    //   Then: base != new_block, so insert G.cum(100000) overwriting G.diff
+    //   map = {new_block: 50000, G: 100000}
+    //   score = 150000 ✓
+    #[tokio::test]
+    async fn test_cumulative_difficulty_genesis_parent() {
+        let mut p = MockDagProvider::new();
+        let g = test_hash(1);
+        p.add_block(g.clone(), 0, 100_000, 100_000, vec![]);
+
+        let result = compute_cumulative_difficulty(&p, &[g.clone()], 50_000, &g).await;
+        assert_eq!(result, VarUint::from_u64(150_000));
+    }
+
+    // Test 8: Tip order independence
+    // Diamond with B,C -> verify order doesn't matter
+    #[tokio::test]
+    async fn test_cumulative_difficulty_tip_order_independence() {
+        let mut p = MockDagProvider::new();
+        let g = test_hash(1);
+        let a = test_hash(2);
+        let b = test_hash(3);
+        let c = test_hash(4);
+
+        p.add_block(g.clone(), 0, 100_000, 100_000, vec![]);
+        p.add_block(a.clone(), 1, 100_000, 200_000, vec![g.clone()]);
+        p.add_block(b.clone(), 2, 110_000, 310_000, vec![a.clone()]);
+        p.add_block(c.clone(), 2, 120_000, 320_000, vec![a.clone()]);
+
+        let r1 = compute_cumulative_difficulty(&p, &[b.clone(), c.clone()], 10_000, &g).await;
+        let r2 = compute_cumulative_difficulty(&p, &[c.clone(), b.clone()], 10_000, &g).await;
+        assert_eq!(r1, r2);
+        assert_eq!(r1, VarUint::from_u64(440_000));
     }
 }

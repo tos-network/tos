@@ -1,4 +1,7 @@
+#[cfg(feature = "a2a")]
 use super::{a2a as a2a_rpc, agent_registry as agent_registry_rpc, ApiError, InternalRpcError};
+#[cfg(not(feature = "a2a"))]
+use super::{ApiError, InternalRpcError};
 use crate::{
     config::{
         get_hard_forks as get_configured_hard_forks, DEV_FEES, DEV_PUBLIC_KEY, MILLIS_PER_SECOND,
@@ -952,10 +955,13 @@ pub fn register_methods<S: Storage>(
     handler.register_method("get_message_count", async_handler!(get_message_count::<S>));
     handler.register_method("get_message_by_id", async_handler!(get_message_by_id::<S>));
 
+    #[cfg(feature = "a2a")]
     if enable_a2a {
         a2a_rpc::register_a2a_methods::<S>(handler);
         agent_registry_rpc::register_agent_registry_methods::<S>(handler);
     }
+    #[cfg(not(feature = "a2a"))]
+    let _ = enable_a2a;
 
     if allow_mining_methods {
         handler.register_method(

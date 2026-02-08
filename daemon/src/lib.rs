@@ -12,6 +12,7 @@
 
 extern crate log;
 
+#[cfg(feature = "a2a")]
 pub mod a2a;
 pub mod config;
 
@@ -25,6 +26,7 @@ pub mod discovery;
 pub mod core;
 pub mod escrow;
 pub mod p2p;
+#[cfg(feature = "rpc")]
 pub mod rpc;
 
 // TOS Kernel(TAKO) integration module
