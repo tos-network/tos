@@ -1491,6 +1491,13 @@ async fn create_blockchain(
     config.vrf.miner_private_key = WrappedMinerSecret::from_str(&miner_key).ok();
 
     let run_dir = base_dir.join(format!("run{}", reset_nonce));
+    // Ensure resets are deterministic even across conformance process restarts.
+    // Without this, a reused `runN` directory can cause RocksDB to load old state,
+    // and `/state/reset` would not actually reset the chain state.
+    if run_dir.exists() {
+        // Best-effort cleanup; failure should surface (it indicates a real problem).
+        fs::remove_dir_all(&run_dir)?;
+    }
     fs::create_dir_all(&run_dir)?;
     config.dir_path = Some(ensure_trailing_slash(run_dir.display().to_string()));
 
