@@ -1,4 +1,6 @@
+#[cfg(feature = "a2a")]
 pub mod a2a;
+#[cfg(feature = "a2a")]
 pub mod agent_registry;
 pub mod arbitration;
 pub mod callback;
@@ -7,12 +9,16 @@ pub mod getwork;
 pub mod rpc;
 pub mod ws_security;
 
+#[cfg(feature = "a2a")]
 use crate::a2a::nonce_store::{A2ANonceStore, StorageNonceStore};
+#[cfg(feature = "a2a")]
 use crate::a2a::registry::router::{RouterConfig, RoutingStrategy};
+#[cfg(feature = "a2a")]
 use crate::a2a::router_executor::AgentRouterExecutor;
 use crate::core::{
     blockchain::Blockchain, config::RPCConfig, error::BlockchainError, storage::Storage,
 };
+#[cfg(feature = "a2a")]
 use crate::rpc::agent_registry::RegistrationRateLimitConfig;
 use actix_web::{
     dev::ServerHandle,
@@ -112,6 +118,11 @@ impl<S: Storage> DaemonRpcServer<S> {
         if log::log_enabled!(log::Level::Info) {
             info!("A2A service enabled: {}", config.enable_a2a);
         }
+        #[cfg(not(feature = "a2a"))]
+        if config.enable_a2a && log::log_enabled!(log::Level::Warn) {
+            warn!("A2A requested by config, but this binary was built without feature `a2a`");
+        }
+        #[cfg(feature = "a2a")]
         if config.enable_a2a {
             let _ = crate::a2a::registry::spawn_health_checks();
             let nonce_store: Option<Arc<dyn A2ANonceStore>> =
@@ -196,7 +207,7 @@ impl<S: Storage> DaemonRpcServer<S> {
             &mut rpc_handler,
             !config.getwork.disable,
             config.enable_admin_rpc,
-            config.enable_a2a,
+            config.enable_a2a && cfg!(feature = "a2a"),
         );
 
         // create the default websocket server (support event & rpc methods)
@@ -268,6 +279,10 @@ impl<S: Storage> DaemonRpcServer<S> {
                     )
                     .service(index);
 
+                #[cfg(not(feature = "a2a"))]
+                let _ = enable_a2a;
+
+                #[cfg(feature = "a2a")]
                 if enable_a2a {
                     // Unversioned A2A endpoints
                     app = app
@@ -344,7 +359,7 @@ impl<S: Storage> DaemonRpcServer<S> {
                         )
                         .route(
                             "/tasks/{id}/pushNotificationConfigs",
-                            web::post().to(a2a::set_task_push_config_http::<S>),
+                            web::post().to(a2a::create_task_push_config_http::<S>),
                         )
                         .route(
                             "/tasks/{id}/pushNotificationConfigs",
@@ -436,7 +451,7 @@ impl<S: Storage> DaemonRpcServer<S> {
                         )
                         .route(
                             "/v1/tasks/{id}/pushNotificationConfigs",
-                            web::post().to(a2a::set_task_push_config_http::<S>),
+                            web::post().to(a2a::create_task_push_config_http::<S>),
                         )
                         .route(
                             "/v1/tasks/{id}/pushNotificationConfigs",
@@ -474,6 +489,7 @@ impl<S: Storage> DaemonRpcServer<S> {
             }
             spawn_task("rpc-server", http_server);
         }
+        #[cfg(feature = "a2a")]
         if config.enable_a2a {
             let addr: SocketAddr = config
                 .a2a_grpc_bind_address

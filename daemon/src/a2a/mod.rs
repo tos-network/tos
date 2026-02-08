@@ -22,11 +22,11 @@ use tos_common::{
     a2a::{
         A2AError, A2AResult, A2AService, AgentCapabilities, AgentCard, AgentInterface,
         AgentProvider, ApiKeySecurityScheme, Artifact, CancelTaskRequest,
-        GetExtendedAgentCardRequest, GetTaskRequest, HttpAuthSecurityScheme, ListTasksRequest,
-        ListTasksResponse, Message, OAuth2SecurityScheme, OAuthFlows, PartContent,
-        PushNotificationConfig, Role, Security, SecurityScheme, SendMessageConfiguration,
-        SendMessageRequest, SendMessageResponse, SetTaskPushNotificationConfigRequest,
-        SettlementStatus, StreamResponse, SubscribeToTaskRequest, Task, TaskArtifactUpdateEvent,
+        CreateTaskPushNotificationConfigRequest, GetExtendedAgentCardRequest, GetTaskRequest,
+        HttpAuthSecurityScheme, ListTasksRequest, ListTasksResponse, Message, OAuth2SecurityScheme,
+        OAuthFlows, PartContent, PushNotificationConfig, Role, SecurityRequirement, SecurityScheme,
+        SendMessageConfiguration, SendMessageRequest, SendMessageResponse, SettlementStatus,
+        StreamResponse, SubscribeToTaskRequest, Task, TaskArtifactUpdateEvent,
         TaskPushNotificationConfig, TaskState, TaskStatus, TaskStatusUpdateEvent,
         TosSignatureSecurityScheme, TosTaskAnchor, MAX_ARTIFACTS_PER_TASK, MAX_DATA_PART_BYTES,
         MAX_FILE_INLINE_BYTES, MAX_HISTORY_LENGTH, MAX_METADATA_KEYS, MAX_PARTS_PER_MESSAGE,
@@ -39,10 +39,7 @@ use tos_common::{
 use crate::core::blockchain::Blockchain;
 use crate::core::storage::Storage;
 
-use storage::{
-    get_or_init, is_terminal, make_push_name, normalize_push_name, normalize_task_name,
-    now_iso_timestamp, A2AStoreError,
-};
+use storage::{get_or_init, is_terminal, now_iso_timestamp, A2AStoreError};
 
 pub fn set_base_dir(dir: &str) {
     storage::set_base_dir(dir);
@@ -317,7 +314,7 @@ impl<S: Storage> A2ADaemonService<S> {
             .unwrap_or_else(|_| "http://127.0.0.1:9090".to_string());
         let auth_config = auth::get_auth_config();
         let mut security_schemes = std::collections::HashMap::new();
-        let mut security = Vec::new();
+        let mut security_requirements = Vec::new();
         if auth_config
             .as_ref()
             .map(|cfg| !cfg.api_keys.is_empty())
@@ -333,7 +330,7 @@ impl<S: Storage> A2ADaemonService<S> {
                     },
                 },
             );
-            security.push(Security {
+            security_requirements.push(SecurityRequirement {
                 schemes: std::collections::HashMap::from([(
                     "apiKey".to_string(),
                     tos_common::a2a::StringList { list: Vec::new() },
@@ -349,7 +346,7 @@ impl<S: Storage> A2ADaemonService<S> {
                     },
                 },
             );
-            security.push(Security {
+            security_requirements.push(SecurityRequirement {
                 schemes: std::collections::HashMap::from([(
                     "httpBearer".to_string(),
                     tos_common::a2a::StringList { list: Vec::new() },
@@ -384,7 +381,7 @@ impl<S: Storage> A2ADaemonService<S> {
                     },
                 },
             );
-            security.push(Security {
+            security_requirements.push(SecurityRequirement {
                 schemes: std::collections::HashMap::from([(
                     "oauth2".to_string(),
                     tos_common::a2a::StringList { list: Vec::new() },
@@ -408,27 +405,30 @@ impl<S: Storage> A2ADaemonService<S> {
         // "extensions MUST NOT be required by default"
 
         AgentCard {
-            protocol_version: "1.0".to_string(),
             name: "TOS A2A Service".to_string(),
             description: "TOS A2A bridge service".to_string(),
             version: VERSION.to_string(),
             supported_interfaces: vec![
                 AgentInterface {
+                    protocol_version: "1.0".to_string(),
                     url: format!("{base_url}/json_rpc"),
                     protocol_binding: "JSONRPC".to_string(),
                     tenant: None,
                 },
                 AgentInterface {
+                    protocol_version: "1.0".to_string(),
                     url: format!("{base_url}/message:send"),
                     protocol_binding: "HTTP+JSON".to_string(),
                     tenant: None,
                 },
                 AgentInterface {
+                    protocol_version: "1.0".to_string(),
                     url: format!("{base_url}/a2a/ws"),
-                    protocol_binding: "JSONRPC".to_string(), // WebSocket uses JSON-RPC protocol
+                    protocol_binding: "JSONRPC".to_string(),
                     tenant: None,
                 },
                 AgentInterface {
+                    protocol_version: "1.0".to_string(),
                     url: grpc_url,
                     protocol_binding: "GRPC".to_string(),
                     tenant: None,
@@ -443,16 +443,15 @@ impl<S: Storage> A2ADaemonService<S> {
             capabilities: AgentCapabilities {
                 streaming: Some(true),
                 push_notifications: Some(true),
-                state_transition_history: Some(true),
+                extended_agent_card: Some(true),
                 extensions: Vec::new(),
                 tos_on_chain_settlement: Some(false),
             },
             security_schemes,
-            security,
+            security_requirements,
             default_input_modes: vec!["text/plain".to_string(), "application/json".to_string()],
             default_output_modes: vec!["text/plain".to_string(), "application/json".to_string()],
             skills: Vec::new(),
-            supports_extended_agent_card: Some(true),
             signatures: Vec::new(),
             tos_identity: None,
             arbitration: None,
@@ -735,24 +734,17 @@ fn make_status_event(task: &Task) -> StreamResponse {
             task_id: task.id.clone(),
             context_id: task.context_id.clone(),
             status: task.status.clone(),
-            r#final: is_terminal(&task.status.state),
             metadata: None,
         },
     }
 }
 
-fn make_status_event_with(
-    task_id: &str,
-    context_id: &str,
-    status: TaskStatus,
-    final_flag: bool,
-) -> StreamResponse {
+fn make_status_event_with(task_id: &str, context_id: &str, status: TaskStatus) -> StreamResponse {
     StreamResponse::StatusUpdate {
         status_update: TaskStatusUpdateEvent {
             task_id: task_id.to_string(),
             context_id: context_id.to_string(),
             status,
-            r#final: final_flag,
             metadata: None,
         },
     }
@@ -857,15 +849,8 @@ fn validate_message_limits(message: &Message) -> A2AResult<()> {
                     });
                 }
             }
-            PartContent::File { file } => {
-                let size = match &file.file {
-                    tos_common::a2a::FileContent::Bytes { file_with_bytes } => {
-                        // Calculate decoded size from base64: approximately (len * 3) / 4
-                        // Account for padding by being conservative
-                        file_with_bytes.len().saturating_mul(3) / 4
-                    }
-                    tos_common::a2a::FileContent::Uri { .. } => 0, // URI references don't count
-                };
+            PartContent::Bytes { raw } => {
+                let size = raw.len().saturating_mul(3) / 4;
                 if size > MAX_FILE_INLINE_BYTES {
                     return Err(A2AError::InvalidParams {
                         message: format!(
@@ -875,10 +860,11 @@ fn validate_message_limits(message: &Message) -> A2AResult<()> {
                     });
                 }
             }
+            PartContent::Url { .. } => {
+                // URI references don't count toward size limits
+            }
             PartContent::Data { data } => {
-                let size = serde_json::to_string(&data.data)
-                    .map(|s| s.len())
-                    .unwrap_or(0);
+                let size = serde_json::to_string(&data).map(|s| s.len()).unwrap_or(0);
                 if size > MAX_DATA_PART_BYTES {
                     return Err(A2AError::InvalidParams {
                         message: format!(
@@ -931,10 +917,12 @@ fn validate_arbitration_evidence(message: &Message) -> A2AResult<()> {
             }
         }
     }
-    let has_file = message
-        .parts
-        .iter()
-        .any(|part| matches!(part.content, PartContent::File { .. }));
+    let has_file = message.parts.iter().any(|part| {
+        matches!(
+            part.content,
+            PartContent::Bytes { .. } | PartContent::Url { .. }
+        )
+    });
     if !has_file {
         return Err(A2AError::InvalidParams {
             message: "evidence submission requires a file part".to_string(),
@@ -966,9 +954,9 @@ fn register_temp_push_configs(
         return Ok(Vec::new());
     };
     let config_id = config.id.clone().unwrap_or_else(|| new_id("push-"));
-    let name = make_push_name(task_id, &config_id);
     let task_config = TaskPushNotificationConfig {
-        name,
+        id: config_id.clone(),
+        task_id: task_id.to_string(),
         push_notification_config: config,
     };
     store.set_push_config(task_id, &config_id, task_config)?;
@@ -1000,7 +988,7 @@ async fn execute_task_flow(
             notify::notify_task_event(
                 store,
                 task_id,
-                make_status_event_with(task_id, context_id, task.status.clone(), true),
+                make_status_event_with(task_id, context_id, task.status.clone()),
             )
             .await;
             return Err(err);
@@ -1036,7 +1024,7 @@ async fn execute_task_flow(
     notify::notify_task_event(
         store,
         task_id,
-        make_status_event_with(task_id, context_id, task.status.clone(), true),
+        make_status_event_with(task_id, context_id, task.status.clone()),
     )
     .await;
 
@@ -1127,7 +1115,7 @@ impl<S: Storage + Send + Sync + 'static> A2AService for A2ADaemonService<S> {
         notify::notify_task_event(
             store,
             &task_id,
-            make_status_event_with(&task_id, &context_id, task.status.clone(), false),
+            make_status_event_with(&task_id, &context_id, task.status.clone()),
         )
         .await;
 
@@ -1285,7 +1273,7 @@ impl<S: Storage + Send + Sync + 'static> A2AService for A2ADaemonService<S> {
         notify::notify_task_event(
             store,
             &task_id,
-            make_status_event_with(&task_id, &context_id, working_status.clone(), false),
+            make_status_event_with(&task_id, &context_id, working_status.clone()),
         )
         .await;
 
@@ -1343,7 +1331,6 @@ impl<S: Storage + Send + Sync + 'static> A2AService for A2ADaemonService<S> {
             &task_id,
             &context_id,
             response_task.status.clone(),
-            true,
         ));
 
         // Final Task or Message based on output mode
@@ -1359,10 +1346,7 @@ impl<S: Storage + Send + Sync + 'static> A2AService for A2ADaemonService<S> {
     }
 
     async fn get_task(&self, request: GetTaskRequest) -> A2AResult<Task> {
-        let task_id =
-            normalize_task_name(&request.name).ok_or_else(|| A2AError::InvalidParams {
-                message: "invalid task name".to_string(),
-            })?;
+        let task_id = &request.id;
         let store = self.store()?;
         let Some(mut task) = store.get_task(task_id).map_err(map_store_error)? else {
             return Err(A2AError::TaskNotFoundError {
@@ -1385,23 +1369,20 @@ impl<S: Storage + Send + Sync + 'static> A2AService for A2ADaemonService<S> {
     }
 
     async fn cancel_task(&self, request: CancelTaskRequest) -> A2AResult<Task> {
-        let task_id =
-            normalize_task_name(&request.name).ok_or_else(|| A2AError::InvalidParams {
-                message: "invalid task name".to_string(),
-            })?;
+        let task_id = &request.id;
         let store = self.store()?;
         let Some(mut task) = store.get_task(task_id).map_err(map_store_error)? else {
             return Err(A2AError::TaskNotFoundError {
                 task_id: task_id.to_string(),
             });
         };
-        task.status.state = TaskState::Cancelled;
+        task.status.state = TaskState::Canceled;
         task.status.timestamp = Some(now_iso_timestamp());
         store.update_task(task.clone()).map_err(map_store_error)?;
         notify::notify_task_event(
             store,
             task_id,
-            make_status_event_with(&task.id, &task.context_id, task.status.clone(), true),
+            make_status_event_with(&task.id, &task.context_id, task.status.clone()),
         )
         .await;
         Ok(task)
@@ -1411,10 +1392,7 @@ impl<S: Storage + Send + Sync + 'static> A2AService for A2ADaemonService<S> {
         &self,
         request: SubscribeToTaskRequest,
     ) -> A2AResult<Self::TaskStream> {
-        let task_id =
-            normalize_task_name(&request.name).ok_or_else(|| A2AError::InvalidParams {
-                message: "invalid task name".to_string(),
-            })?;
+        let task_id = &request.id;
         let store = self.store()?;
         let Some(task) = store.get_task(task_id).map_err(map_store_error)? else {
             return Err(A2AError::TaskNotFoundError {
@@ -1428,17 +1406,14 @@ impl<S: Storage + Send + Sync + 'static> A2AService for A2ADaemonService<S> {
         Ok(stream::iter(events))
     }
 
-    async fn set_task_push_notification_config(
+    async fn create_task_push_notification_config(
         &self,
-        request: SetTaskPushNotificationConfigRequest,
+        request: CreateTaskPushNotificationConfigRequest,
     ) -> A2AResult<TaskPushNotificationConfig> {
-        let task_id =
-            normalize_task_name(&request.parent).ok_or_else(|| A2AError::InvalidParams {
-                message: "invalid task parent".to_string(),
-            })?;
-        let config_id = request.config_id.clone();
+        let task_id = &request.task_id;
+        let config_id = request.config.id.clone();
         let mut config = request.config.clone();
-        config.name = make_push_name(task_id, &config_id);
+        config.task_id = task_id.to_string();
         let store = self.store()?;
 
         // Check push config count limit
@@ -1465,10 +1440,8 @@ impl<S: Storage + Send + Sync + 'static> A2AService for A2ADaemonService<S> {
         &self,
         request: tos_common::a2a::GetTaskPushNotificationConfigRequest,
     ) -> A2AResult<TaskPushNotificationConfig> {
-        let (task_id, config_id) =
-            normalize_push_name(&request.name).ok_or_else(|| A2AError::InvalidParams {
-                message: "invalid push config name".to_string(),
-            })?;
+        let task_id = &request.task_id;
+        let config_id = &request.id;
         let store = self.store()?;
         let Some(config) = store
             .get_push_config(task_id, config_id)
@@ -1485,10 +1458,7 @@ impl<S: Storage + Send + Sync + 'static> A2AService for A2ADaemonService<S> {
         &self,
         request: tos_common::a2a::ListTaskPushNotificationConfigRequest,
     ) -> A2AResult<tos_common::a2a::ListTaskPushNotificationConfigResponse> {
-        let task_id =
-            normalize_task_name(&request.parent).ok_or_else(|| A2AError::InvalidParams {
-                message: "invalid task parent".to_string(),
-            })?;
+        let task_id = &request.task_id;
         let store = self.store()?;
         store
             .list_push_configs(task_id, request.page_size, request.page_token)
@@ -1499,10 +1469,8 @@ impl<S: Storage + Send + Sync + 'static> A2AService for A2ADaemonService<S> {
         &self,
         request: tos_common::a2a::DeleteTaskPushNotificationConfigRequest,
     ) -> A2AResult<()> {
-        let (task_id, config_id) =
-            normalize_push_name(&request.name).ok_or_else(|| A2AError::InvalidParams {
-                message: "invalid push config name".to_string(),
-            })?;
+        let task_id = &request.task_id;
+        let config_id = &request.id;
         let store = self.store()?;
         store
             .delete_push_config(task_id, config_id)

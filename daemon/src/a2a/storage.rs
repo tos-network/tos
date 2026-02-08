@@ -138,9 +138,11 @@ impl A2AStore {
                     continue;
                 }
             }
-            if let Some(last_updated_after) = request.last_updated_after {
-                if record.updated_at <= last_updated_after {
-                    continue;
+            if let Some(ref ts_str) = request.status_timestamp_after {
+                if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(ts_str) {
+                    if record.updated_at <= dt.timestamp() {
+                        continue;
+                    }
                 }
             }
             tasks.push(record);
@@ -274,30 +276,9 @@ pub fn now_iso_timestamp() -> String {
     Utc::now().to_rfc3339()
 }
 
-pub fn normalize_task_name(name: &str) -> Option<&str> {
-    name.strip_prefix("tasks/")
-}
-
-pub fn normalize_push_name(name: &str) -> Option<(&str, &str)> {
-    let mut parts = name.split('/');
-    if parts.next()? != "tasks" {
-        return None;
-    }
-    let task_id = parts.next()?;
-    if parts.next()? != "pushNotificationConfigs" {
-        return None;
-    }
-    let config_id = parts.next()?;
-    Some((task_id, config_id))
-}
-
-pub fn make_push_name(task_id: &str, config_id: &str) -> String {
-    format!("tasks/{task_id}/pushNotificationConfigs/{config_id}")
-}
-
 pub fn is_terminal(state: &TaskState) -> bool {
     matches!(
         state,
-        TaskState::Completed | TaskState::Failed | TaskState::Cancelled | TaskState::Rejected
+        TaskState::Completed | TaskState::Failed | TaskState::Canceled | TaskState::Rejected
     )
 }

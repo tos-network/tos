@@ -37,16 +37,24 @@ pub struct TaskStatus {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "kebab-case")]
 pub enum TaskState {
+    #[serde(rename = "TASK_STATE_UNSPECIFIED")]
     Unspecified,
+    #[serde(rename = "TASK_STATE_SUBMITTED")]
     Submitted,
+    #[serde(rename = "TASK_STATE_WORKING")]
     Working,
+    #[serde(rename = "TASK_STATE_COMPLETED")]
     Completed,
+    #[serde(rename = "TASK_STATE_FAILED")]
     Failed,
-    Cancelled,
+    #[serde(rename = "TASK_STATE_CANCELED")]
+    Canceled,
+    #[serde(rename = "TASK_STATE_INPUT_REQUIRED")]
     InputRequired,
+    #[serde(rename = "TASK_STATE_REJECTED")]
     Rejected,
+    #[serde(rename = "TASK_STATE_AUTH_REQUIRED")]
     AuthRequired,
 }
 
@@ -54,7 +62,7 @@ impl TaskState {
     pub fn is_terminal(&self) -> bool {
         matches!(
             self,
-            Self::Completed | Self::Failed | Self::Cancelled | Self::Rejected
+            Self::Completed | Self::Failed | Self::Canceled | Self::Rejected
         )
     }
 }
@@ -78,10 +86,12 @@ pub struct Message {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "kebab-case")]
 pub enum Role {
+    #[serde(rename = "ROLE_UNSPECIFIED")]
     Unspecified,
+    #[serde(rename = "ROLE_USER")]
     User,
+    #[serde(rename = "ROLE_AGENT")]
     Agent,
 }
 
@@ -91,6 +101,10 @@ pub struct Part {
     #[serde(flatten)]
     pub content: PartContent,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub filename: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub media_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<HashMap<String, Value>>,
 }
 
@@ -98,38 +112,9 @@ pub struct Part {
 #[serde(untagged)]
 pub enum PartContent {
     Text { text: String },
-    File { file: FilePart },
-    Data { data: DataPart },
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct FilePart {
-    #[serde(flatten)]
-    pub file: FileContent,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub media_type: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum FileContent {
-    Uri {
-        #[serde(rename = "fileWithUri")]
-        file_with_uri: String,
-    },
-    Bytes {
-        #[serde(rename = "fileWithBytes")]
-        file_with_bytes: String,
-    },
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DataPart {
-    pub data: HashMap<String, Value>,
+    Bytes { raw: String },
+    Url { url: String },
+    Data { data: Value },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -150,7 +135,6 @@ pub struct Artifact {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentCard {
-    pub protocol_version: String,
     pub name: String,
     pub description: String,
     pub version: String,
@@ -165,15 +149,13 @@ pub struct AgentCard {
     #[serde(default)]
     pub security_schemes: HashMap<String, SecurityScheme>,
     #[serde(default)]
-    pub security: Vec<Security>,
+    pub security_requirements: Vec<SecurityRequirement>,
     #[serde(default)]
     pub default_input_modes: Vec<String>,
     #[serde(default)]
     pub default_output_modes: Vec<String>,
     #[serde(default)]
     pub skills: Vec<AgentSkill>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub supports_extended_agent_card: Option<bool>,
     #[serde(default)]
     pub signatures: Vec<AgentCardSignature>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -185,6 +167,7 @@ pub struct AgentCard {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentInterface {
+    pub protocol_version: String,
     pub url: String,
     pub protocol_binding: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -206,7 +189,7 @@ pub struct AgentCapabilities {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub push_notifications: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub state_transition_history: Option<bool>,
+    pub extended_agent_card: Option<bool>,
     #[serde(default)]
     pub extensions: Vec<AgentExtension>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -239,7 +222,7 @@ pub struct AgentSkill {
     #[serde(default)]
     pub output_modes: Vec<String>,
     #[serde(default)]
-    pub security: Vec<Security>,
+    pub security_requirements: Vec<SecurityRequirement>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tos_base_cost: Option<u64>,
 }
@@ -313,7 +296,7 @@ pub struct StringList {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Security {
+pub struct SecurityRequirement {
     #[serde(default)]
     pub schemes: HashMap<String, StringList>,
 }
@@ -366,6 +349,10 @@ pub enum OAuthFlows {
         #[serde(rename = "password")]
         password: PasswordFlow,
     },
+    DeviceCode {
+        #[serde(rename = "deviceCode")]
+        device_code: DeviceCodeOAuthFlow,
+    },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -377,6 +364,8 @@ pub struct AuthorizationCodeFlow {
     pub refresh_url: Option<String>,
     #[serde(default)]
     pub scopes: HashMap<String, String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pkce_required: Option<bool>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -405,6 +394,15 @@ pub struct PasswordFlow {
     pub token_url: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub refresh_url: Option<String>,
+    #[serde(default)]
+    pub scopes: HashMap<String, String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceCodeOAuthFlow {
+    pub device_authorization_url: String,
+    pub token_url: String,
     #[serde(default)]
     pub scopes: HashMap<String, String>,
 }
@@ -489,7 +487,7 @@ pub enum SendMessageResponse {
 pub struct GetTaskRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tenant: Option<String>,
-    pub name: String,
+    pub id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub history_length: Option<i32>,
 }
@@ -510,7 +508,7 @@ pub struct ListTasksRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub history_length: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub last_updated_after: Option<i64>,
+    pub status_timestamp_after: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub include_artifacts: Option<bool>,
 }
@@ -530,7 +528,7 @@ pub struct ListTasksResponse {
 pub struct CancelTaskRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tenant: Option<String>,
-    pub name: String,
+    pub id: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -538,7 +536,7 @@ pub struct CancelTaskRequest {
 pub struct SubscribeToTaskRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tenant: Option<String>,
-    pub name: String,
+    pub id: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -573,8 +571,6 @@ pub struct TaskStatusUpdateEvent {
     pub task_id: String,
     pub context_id: String,
     pub status: TaskStatus,
-    #[serde(rename = "final")]
-    pub r#final: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<HashMap<String, Value>>,
 }
@@ -606,8 +602,7 @@ pub struct PushNotificationConfig {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AuthenticationInfo {
-    #[serde(default)]
-    pub schemes: Vec<String>,
+    pub scheme: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub credentials: Option<String>,
 }
@@ -615,17 +610,17 @@ pub struct AuthenticationInfo {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskPushNotificationConfig {
-    pub name: String,
+    pub id: String,
+    pub task_id: String,
     pub push_notification_config: PushNotificationConfig,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SetTaskPushNotificationConfigRequest {
+pub struct CreateTaskPushNotificationConfigRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tenant: Option<String>,
-    pub parent: String,
-    pub config_id: String,
+    pub task_id: String,
     pub config: TaskPushNotificationConfig,
 }
 
@@ -634,7 +629,8 @@ pub struct SetTaskPushNotificationConfigRequest {
 pub struct GetTaskPushNotificationConfigRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tenant: Option<String>,
-    pub name: String,
+    pub task_id: String,
+    pub id: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -642,7 +638,7 @@ pub struct GetTaskPushNotificationConfigRequest {
 pub struct ListTaskPushNotificationConfigRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tenant: Option<String>,
-    pub parent: String,
+    pub task_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub page_size: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -662,7 +658,8 @@ pub struct ListTaskPushNotificationConfigResponse {
 pub struct DeleteTaskPushNotificationConfigRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tenant: Option<String>,
-    pub name: String,
+    pub task_id: String,
+    pub id: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

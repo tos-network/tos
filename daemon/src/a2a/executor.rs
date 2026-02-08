@@ -6,8 +6,7 @@ use rand::RngCore;
 use tokio::sync::Semaphore;
 
 use tos_common::a2a::{
-    A2AError, A2AResult, Artifact, FileContent, Message, Part, PartContent, Role, Task, TaskState,
-    TaskStatus,
+    A2AError, A2AResult, Artifact, Message, Part, PartContent, Role, Task, TaskState, TaskStatus,
 };
 
 use super::now_iso_timestamp;
@@ -100,6 +99,8 @@ pub fn build_final_status(_task: &Task, assistant_message: Message) -> TaskStatu
 pub fn text_part(text: String) -> Part {
     Part {
         content: PartContent::Text { text },
+        filename: None,
+        media_type: None,
         metadata: None,
     }
 }
@@ -115,24 +116,27 @@ pub fn summarize_message(message: &Message) -> String {
                     texts.push(text.trim().to_string());
                 }
             }
-            PartContent::File { file } => {
-                let label = match &file.file {
-                    FileContent::Uri { file_with_uri } => {
-                        format!("uri={}", file_with_uri)
-                    }
-                    FileContent::Bytes { file_with_bytes } => {
-                        format!("bytes(base64_len={})", file_with_bytes.len())
-                    }
-                };
-                if let Some(name) = file.name.as_ref() {
+            PartContent::Bytes { raw } => {
+                let label = format!("bytes(base64_len={})", raw.len());
+                if let Some(name) = part.filename.as_ref() {
+                    files.push(format!("{name} ({label})"));
+                } else {
+                    files.push(label);
+                }
+            }
+            PartContent::Url { url } => {
+                let label = format!("uri={}", url);
+                if let Some(name) = part.filename.as_ref() {
                     files.push(format!("{name} ({label})"));
                 } else {
                     files.push(label);
                 }
             }
             PartContent::Data { data } => {
-                for key in data.data.keys() {
-                    data_keys.push(key.clone());
+                if let Some(obj) = data.as_object() {
+                    for key in obj.keys() {
+                        data_keys.push(key.clone());
+                    }
                 }
             }
         }

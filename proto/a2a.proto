@@ -11,7 +11,7 @@ service A2AService {
   rpc ListTasks(ListTasksRequest) returns (ListTasksResponse);
   rpc CancelTask(CancelTaskRequest) returns (Task);
   rpc SubscribeToTask(SubscribeToTaskRequest) returns (stream StreamResponse);
-  rpc SetTaskPushNotificationConfig(SetTaskPushNotificationConfigRequest) returns (TaskPushNotificationConfig);
+  rpc CreateTaskPushNotificationConfig(CreateTaskPushNotificationConfigRequest) returns (TaskPushNotificationConfig);
   rpc GetTaskPushNotificationConfig(GetTaskPushNotificationConfigRequest) returns (TaskPushNotificationConfig);
   rpc ListTaskPushNotificationConfig(ListTaskPushNotificationConfigRequest) returns (ListTaskPushNotificationConfigResponse);
   rpc DeleteTaskPushNotificationConfig(DeleteTaskPushNotificationConfigRequest) returns (Empty);
@@ -30,7 +30,7 @@ enum TaskState {
   TASK_STATE_WORKING = 2;
   TASK_STATE_COMPLETED = 3;
   TASK_STATE_FAILED = 4;
-  TASK_STATE_CANCELLED = 5;
+  TASK_STATE_CANCELED = 5;
   TASK_STATE_INPUT_REQUIRED = 6;
   TASK_STATE_REJECTED = 7;
   TASK_STATE_AUTH_REQUIRED = 8;
@@ -44,30 +44,16 @@ enum SettlementStatus {
   SETTLEMENT_STATUS_DISPUTED = 4;
 }
 
-message TextPart {
-  string text = 1;
-}
-
-message DataPart {
-  map<string, google.protobuf.Value> data = 1;
-}
-
-message FilePart {
-  oneof file {
-    string file_with_uri = 1;
-    bytes file_with_bytes = 2;
-  }
-  string media_type = 3;
-  string name = 4;
-}
-
 message Part {
   oneof content {
-    TextPart text = 1;
-    FilePart file = 2;
-    DataPart data = 3;
+    string text = 1;
+    string raw = 2;
+    string url = 3;
+    google.protobuf.Value data = 4;
   }
-  map<string, google.protobuf.Value> metadata = 4;
+  string filename = 5;
+  string media_type = 6;
+  map<string, google.protobuf.Value> metadata = 7;
 }
 
 message Message {
@@ -116,7 +102,6 @@ message TaskStatusUpdateEvent {
   string task_id = 1;
   string context_id = 2;
   TaskStatus status = 3;
-  bool final = 4;
   map<string, google.protobuf.Value> metadata = 5;
 }
 
@@ -161,7 +146,7 @@ message SendMessageResponse {
 
 message GetTaskRequest {
   string tenant = 1;
-  string name = 2;
+  string id = 2;
   int32 history_length = 3;
 }
 
@@ -172,7 +157,7 @@ message ListTasksRequest {
   int32 page_size = 4;
   string page_token = 5;
   int32 history_length = 6;
-  int64 last_updated_after = 7;
+  string status_timestamp_after = 7;
   bool include_artifacts = 8;
 }
 
@@ -185,12 +170,12 @@ message ListTasksResponse {
 
 message CancelTaskRequest {
   string tenant = 1;
-  string name = 2;
+  string id = 2;
 }
 
 message SubscribeToTaskRequest {
   string tenant = 1;
-  string name = 2;
+  string id = 2;
 }
 
 message PushNotificationConfig {
@@ -201,30 +186,31 @@ message PushNotificationConfig {
 }
 
 message AuthenticationInfo {
-  repeated string schemes = 1;
+  string scheme = 1;
   string credentials = 2;
 }
 
 message TaskPushNotificationConfig {
-  string name = 1;
-  PushNotificationConfig push_notification_config = 2;
+  string id = 1;
+  string task_id = 2;
+  PushNotificationConfig push_notification_config = 3;
 }
 
-message SetTaskPushNotificationConfigRequest {
+message CreateTaskPushNotificationConfigRequest {
   string tenant = 1;
-  string parent = 2;
-  string config_id = 3;
-  TaskPushNotificationConfig config = 4;
+  string task_id = 2;
+  TaskPushNotificationConfig config = 3;
 }
 
 message GetTaskPushNotificationConfigRequest {
   string tenant = 1;
-  string name = 2;
+  string task_id = 2;
+  string id = 3;
 }
 
 message ListTaskPushNotificationConfigRequest {
   string tenant = 1;
-  string parent = 2;
+  string task_id = 2;
   int32 page_size = 3;
   string page_token = 4;
 }
@@ -236,15 +222,17 @@ message ListTaskPushNotificationConfigResponse {
 
 message DeleteTaskPushNotificationConfigRequest {
   string tenant = 1;
-  string name = 2;
+  string task_id = 2;
+  string id = 3;
 }
 
 message Empty {}
 
 message AgentInterface {
-  string url = 1;
-  string protocol_binding = 2;
-  string tenant = 3;
+  string protocol_version = 1;
+  string url = 2;
+  string protocol_binding = 3;
+  string tenant = 4;
 }
 
 message AgentProvider {
@@ -262,7 +250,7 @@ message AgentExtension {
 message AgentCapabilities {
   bool streaming = 1;
   bool push_notifications = 2;
-  bool state_transition_history = 3;
+  bool extended_agent_card = 3;
   repeated AgentExtension extensions = 4;
   bool tos_on_chain_settlement = 5;
 }
@@ -271,7 +259,7 @@ message StringList {
   repeated string list = 1;
 }
 
-message Security {
+message SecurityRequirement {
   map<string, StringList> schemes = 1;
 }
 
@@ -293,6 +281,7 @@ message OAuthFlows {
     ClientCredentialsFlow client_credentials = 2;
     ImplicitFlow implicit = 3;
     PasswordFlow password = 4;
+    DeviceCodeOAuthFlow device_code = 5;
   }
 }
 
@@ -307,6 +296,7 @@ message AuthorizationCodeFlow {
   string token_url = 2;
   string refresh_url = 3;
   map<string, string> scopes = 4;
+  bool pkce_required = 5;
 }
 
 message ClientCredentialsFlow {
@@ -324,6 +314,12 @@ message ImplicitFlow {
 message PasswordFlow {
   string token_url = 1;
   string refresh_url = 2;
+  map<string, string> scopes = 3;
+}
+
+message DeviceCodeOAuthFlow {
+  string device_authorization_url = 1;
+  string token_url = 2;
   map<string, string> scopes = 3;
 }
 
@@ -361,7 +357,7 @@ message AgentSkill {
   repeated string examples = 5;
   repeated string input_modes = 6;
   repeated string output_modes = 7;
-  repeated Security security = 8;
+  repeated SecurityRequirement security_requirements = 8;
   uint64 tos_base_cost = 9;
 }
 
@@ -403,7 +399,8 @@ message ArbitrationExtension {
 }
 
 message AgentCard {
-  string protocol_version = 1;
+  reserved 1, 15;
+  reserved "protocol_version", "supports_extended_agent_card";
   string name = 2;
   string description = 3;
   string version = 4;
@@ -413,11 +410,10 @@ message AgentCard {
   string documentation_url = 8;
   AgentCapabilities capabilities = 9;
   map<string, SecurityScheme> security_schemes = 10;
-  repeated Security security = 11;
+  repeated SecurityRequirement security_requirements = 11;
   repeated string default_input_modes = 12;
   repeated string default_output_modes = 13;
   repeated AgentSkill skills = 14;
-  bool supports_extended_agent_card = 15;
   repeated AgentCardSignature signatures = 16;
   TosAgentIdentity tos_identity = 17;
   ArbitrationExtension arbitration = 18;

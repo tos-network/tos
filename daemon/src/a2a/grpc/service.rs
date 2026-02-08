@@ -2,8 +2,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
-use base64::Engine;
 use futures::StreamExt;
 use prost_types::{value, Struct, Value};
 use tokio_stream::wrappers::ReceiverStream;
@@ -182,15 +180,15 @@ impl<S: Storage + Send + Sync + 'static> A2aService for A2AGrpcService<S> {
         Ok(Response::new(ReceiverStream::new(rx)))
     }
 
-    async fn set_task_push_notification_config(
+    async fn create_task_push_notification_config(
         &self,
-        request: Request<proto::SetTaskPushNotificationConfigRequest>,
+        request: Request<proto::CreateTaskPushNotificationConfigRequest>,
     ) -> Result<Response<proto::TaskPushNotificationConfig>, Status> {
         verify_grpc_auth(&request).await?;
-        let request = proto_set_push_request_to_common(request.into_inner())?;
+        let request = proto_create_push_request_to_common(request.into_inner())?;
         let response = self
             .service
-            .set_task_push_notification_config(request)
+            .create_task_push_notification_config(request)
             .await
             .map_err(map_a2a_error)?;
         Ok(Response::new(common_push_config_to_proto(response)))
@@ -316,7 +314,7 @@ fn common_send_message_response_to_proto(
 fn proto_get_task_request_to_common(request: proto::GetTaskRequest) -> common::GetTaskRequest {
     common::GetTaskRequest {
         tenant: empty_to_none(request.tenant),
-        name: request.name,
+        id: request.id,
         history_length: if request.history_length == 0 {
             None
         } else {
@@ -343,11 +341,7 @@ fn proto_list_tasks_request_to_common(
         } else {
             Some(request.history_length)
         },
-        last_updated_after: if request.last_updated_after == 0 {
-            None
-        } else {
-            Some(request.last_updated_after)
-        },
+        status_timestamp_after: empty_to_none(request.status_timestamp_after),
         include_artifacts: Some(request.include_artifacts),
     }
 }
@@ -372,7 +366,7 @@ fn proto_cancel_task_request_to_common(
 ) -> common::CancelTaskRequest {
     common::CancelTaskRequest {
         tenant: empty_to_none(request.tenant),
-        name: request.name,
+        id: request.id,
     }
 }
 
@@ -381,17 +375,16 @@ fn proto_subscribe_request_to_common(
 ) -> common::SubscribeToTaskRequest {
     common::SubscribeToTaskRequest {
         tenant: empty_to_none(request.tenant),
-        name: request.name,
+        id: request.id,
     }
 }
 
-fn proto_set_push_request_to_common(
-    request: proto::SetTaskPushNotificationConfigRequest,
-) -> Result<common::SetTaskPushNotificationConfigRequest, Status> {
-    Ok(common::SetTaskPushNotificationConfigRequest {
+fn proto_create_push_request_to_common(
+    request: proto::CreateTaskPushNotificationConfigRequest,
+) -> Result<common::CreateTaskPushNotificationConfigRequest, Status> {
+    Ok(common::CreateTaskPushNotificationConfigRequest {
         tenant: empty_to_none(request.tenant),
-        parent: request.parent,
-        config_id: request.config_id,
+        task_id: request.task_id,
         config: proto_push_config_to_common(
             request
                 .config
@@ -405,7 +398,8 @@ fn proto_get_push_request_to_common(
 ) -> common::GetTaskPushNotificationConfigRequest {
     common::GetTaskPushNotificationConfigRequest {
         tenant: empty_to_none(request.tenant),
-        name: request.name,
+        task_id: request.task_id,
+        id: request.id,
     }
 }
 
@@ -414,7 +408,7 @@ fn proto_list_push_request_to_common(
 ) -> common::ListTaskPushNotificationConfigRequest {
     common::ListTaskPushNotificationConfigRequest {
         tenant: empty_to_none(request.tenant),
-        parent: request.parent,
+        task_id: request.task_id,
         page_size: if request.page_size == 0 {
             None
         } else {
@@ -429,7 +423,8 @@ fn proto_delete_push_request_to_common(
 ) -> common::DeleteTaskPushNotificationConfigRequest {
     common::DeleteTaskPushNotificationConfigRequest {
         tenant: empty_to_none(request.tenant),
-        name: request.name,
+        task_id: request.task_id,
+        id: request.id,
     }
 }
 
@@ -437,14 +432,15 @@ fn common_push_config_to_proto(
     config: common::TaskPushNotificationConfig,
 ) -> proto::TaskPushNotificationConfig {
     proto::TaskPushNotificationConfig {
-        name: config.name,
+        id: config.id,
+        task_id: config.task_id,
         push_notification_config: Some(proto::PushNotificationConfig {
             id: config.push_notification_config.id.unwrap_or_default(),
             url: config.push_notification_config.url,
             token: config.push_notification_config.token.unwrap_or_default(),
             authentication: config.push_notification_config.authentication.map(|auth| {
                 proto::AuthenticationInfo {
-                    schemes: auth.schemes,
+                    scheme: auth.scheme,
                     credentials: auth.credentials.unwrap_or_default(),
                 }
             }),
@@ -462,7 +458,7 @@ fn proto_push_notification_to_common(
         authentication: config
             .authentication
             .map(|auth| common::AuthenticationInfo {
-                schemes: auth.schemes,
+                scheme: auth.scheme,
                 credentials: empty_to_none(auth.credentials),
             }),
     }
@@ -475,7 +471,8 @@ fn proto_push_config_to_common(
         .push_notification_config
         .ok_or_else(|| Status::invalid_argument("push_notification_config is required"))?;
     Ok(common::TaskPushNotificationConfig {
-        name: config.name,
+        id: config.id,
+        task_id: config.task_id,
         push_notification_config: proto_push_notification_to_common(inner),
     })
 }
@@ -504,7 +501,6 @@ fn proto_get_extended_card_request_to_common(
 
 fn common_agent_card_to_proto(card: common::AgentCard) -> proto::AgentCard {
     proto::AgentCard {
-        protocol_version: card.protocol_version,
         name: card.name,
         description: card.description,
         version: card.version,
@@ -512,6 +508,7 @@ fn common_agent_card_to_proto(card: common::AgentCard) -> proto::AgentCard {
             .supported_interfaces
             .into_iter()
             .map(|iface| proto::AgentInterface {
+                protocol_version: iface.protocol_version,
                 url: iface.url,
                 protocol_binding: iface.protocol_binding,
                 tenant: iface.tenant.unwrap_or_default(),
@@ -526,7 +523,7 @@ fn common_agent_card_to_proto(card: common::AgentCard) -> proto::AgentCard {
         capabilities: Some(proto::AgentCapabilities {
             streaming: card.capabilities.streaming.unwrap_or(false),
             push_notifications: card.capabilities.push_notifications.unwrap_or(false),
-            state_transition_history: card.capabilities.state_transition_history.unwrap_or(false),
+            extended_agent_card: card.capabilities.extended_agent_card.unwrap_or(false),
             extensions: card
                 .capabilities
                 .extensions
@@ -548,15 +545,14 @@ fn common_agent_card_to_proto(card: common::AgentCard) -> proto::AgentCard {
             .into_iter()
             .map(|(key, scheme)| (key, common_security_scheme_to_proto(scheme)))
             .collect(),
-        security: card
-            .security
+        security_requirements: card
+            .security_requirements
             .into_iter()
-            .map(common_security_to_proto)
+            .map(common_security_requirement_to_proto)
             .collect(),
         default_input_modes: card.default_input_modes,
         default_output_modes: card.default_output_modes,
         skills: card.skills.into_iter().map(common_skill_to_proto).collect(),
-        supports_extended_agent_card: card.supports_extended_agent_card.unwrap_or(false),
         signatures: card
             .signatures
             .into_iter()
@@ -594,8 +590,10 @@ fn common_contact_preferences_to_proto(
     }
 }
 
-fn common_security_to_proto(security: common::Security) -> proto::Security {
-    proto::Security {
+fn common_security_requirement_to_proto(
+    security: common::SecurityRequirement,
+) -> proto::SecurityRequirement {
+    proto::SecurityRequirement {
         schemes: security
             .schemes
             .into_iter()
@@ -677,6 +675,7 @@ fn common_oauth_flows_to_proto(flows: common::OAuthFlows) -> proto::OAuthFlows {
                 token_url: authorization_code.token_url,
                 refresh_url: authorization_code.refresh_url.unwrap_or_default(),
                 scopes: authorization_code.scopes,
+                pkce_required: authorization_code.pkce_required.unwrap_or(false),
             })
         }
         common::OAuthFlows::ClientCredentials { client_credentials } => {
@@ -700,6 +699,13 @@ fn common_oauth_flows_to_proto(flows: common::OAuthFlows) -> proto::OAuthFlows {
                 scopes: password.scopes,
             })
         }
+        common::OAuthFlows::DeviceCode { device_code } => {
+            proto::o_auth_flows::Flow::DeviceCode(proto::DeviceCodeOAuthFlow {
+                device_authorization_url: device_code.device_authorization_url,
+                token_url: device_code.token_url,
+                scopes: device_code.scopes,
+            })
+        }
     };
     proto::OAuthFlows { flow: Some(flow) }
 }
@@ -713,10 +719,10 @@ fn common_skill_to_proto(skill: common::AgentSkill) -> proto::AgentSkill {
         examples: skill.examples,
         input_modes: skill.input_modes,
         output_modes: skill.output_modes,
-        security: skill
-            .security
+        security_requirements: skill
+            .security_requirements
             .into_iter()
-            .map(common_security_to_proto)
+            .map(common_security_requirement_to_proto)
             .collect(),
         tos_base_cost: skill.tos_base_cost.unwrap_or_default(),
     }
@@ -787,7 +793,7 @@ fn common_task_state_to_proto(state: common::TaskState) -> proto::TaskState {
         common::TaskState::Working => proto::TaskState::Working,
         common::TaskState::Completed => proto::TaskState::Completed,
         common::TaskState::Failed => proto::TaskState::Failed,
-        common::TaskState::Cancelled => proto::TaskState::Cancelled,
+        common::TaskState::Canceled => proto::TaskState::Canceled,
         common::TaskState::InputRequired => proto::TaskState::InputRequired,
         common::TaskState::Rejected => proto::TaskState::Rejected,
         common::TaskState::AuthRequired => proto::TaskState::AuthRequired,
@@ -801,7 +807,7 @@ fn proto_task_state_to_common(state: i32) -> Option<common::TaskState> {
         Some(proto::TaskState::Working) => Some(common::TaskState::Working),
         Some(proto::TaskState::Completed) => Some(common::TaskState::Completed),
         Some(proto::TaskState::Failed) => Some(common::TaskState::Failed),
-        Some(proto::TaskState::Cancelled) => Some(common::TaskState::Cancelled),
+        Some(proto::TaskState::Canceled) => Some(common::TaskState::Canceled),
         Some(proto::TaskState::InputRequired) => Some(common::TaskState::InputRequired),
         Some(proto::TaskState::Rejected) => Some(common::TaskState::Rejected),
         Some(proto::TaskState::AuthRequired) => Some(common::TaskState::AuthRequired),
@@ -849,33 +855,17 @@ fn common_message_to_proto(message: common::Message) -> proto::Message {
 
 fn common_part_to_proto(part: common::Part) -> proto::Part {
     let content = match part.content {
-        common::PartContent::Text { text } => proto::part::Content::Text(proto::TextPart { text }),
-        common::PartContent::File { file } => {
-            let media_type = file.media_type.unwrap_or_default();
-            let name = file.name.unwrap_or_default();
-            let file = match file.file {
-                common::FileContent::Uri { file_with_uri } => {
-                    proto::file_part::File::FileWithUri(file_with_uri)
-                }
-                common::FileContent::Bytes { file_with_bytes } => {
-                    let bytes = BASE64_STANDARD
-                        .decode(file_with_bytes.as_bytes())
-                        .unwrap_or_default();
-                    proto::file_part::File::FileWithBytes(bytes)
-                }
-            };
-            proto::part::Content::File(proto::FilePart {
-                file: Some(file),
-                media_type,
-                name,
-            })
+        common::PartContent::Text { text } => proto::part::Content::Text(text),
+        common::PartContent::Bytes { raw } => proto::part::Content::Raw(raw),
+        common::PartContent::Url { url } => proto::part::Content::Url(url),
+        common::PartContent::Data { data } => {
+            proto::part::Content::Data(json_to_proto_value(&data))
         }
-        common::PartContent::Data { data } => proto::part::Content::Data(proto::DataPart {
-            data: json_map_to_proto(&data.data),
-        }),
     };
     proto::Part {
         content: Some(content),
+        filename: part.filename.unwrap_or_default(),
+        media_type: part.media_type.unwrap_or_default(),
         metadata: part
             .metadata
             .map(|meta| json_map_to_proto(&meta))
@@ -932,7 +922,6 @@ fn common_status_update_to_proto(
         task_id: event.task_id,
         context_id: event.context_id,
         status: Some(common_task_status_to_proto(event.status)),
-        r#final: event.r#final,
         metadata: event
             .metadata
             .map(|meta| json_map_to_proto(&meta))
@@ -975,39 +964,18 @@ fn proto_message_to_common(message: proto::Message) -> Result<common::Message, S
 
 fn proto_part_to_common(part: proto::Part) -> Result<common::Part, Status> {
     let content = match part.content {
-        Some(proto::part::Content::Text(text)) => common::PartContent::Text { text: text.text },
-        Some(proto::part::Content::File(file)) => {
-            let file_content = match file.file {
-                Some(proto::file_part::File::FileWithUri(uri)) => {
-                    common::FileContent::Uri { file_with_uri: uri }
-                }
-                Some(proto::file_part::File::FileWithBytes(bytes)) => {
-                    let encoded = BASE64_STANDARD.encode(bytes);
-                    common::FileContent::Bytes {
-                        file_with_bytes: encoded,
-                    }
-                }
-                None => {
-                    return Err(Status::invalid_argument("file content missing"));
-                }
-            };
-            common::PartContent::File {
-                file: common::FilePart {
-                    file: file_content,
-                    media_type: empty_to_none(file.media_type),
-                    name: empty_to_none(file.name),
-                },
-            }
-        }
+        Some(proto::part::Content::Text(text)) => common::PartContent::Text { text },
+        Some(proto::part::Content::Raw(raw)) => common::PartContent::Bytes { raw },
+        Some(proto::part::Content::Url(url)) => common::PartContent::Url { url },
         Some(proto::part::Content::Data(data)) => common::PartContent::Data {
-            data: common::DataPart {
-                data: proto_map_to_json(&data.data).unwrap_or_default(),
-            },
+            data: proto_to_json_value(&data),
         },
         None => return Err(Status::invalid_argument("part content missing")),
     };
     Ok(common::Part {
         content,
+        filename: empty_to_none(part.filename),
+        media_type: empty_to_none(part.media_type),
         metadata: proto_map_to_json(&part.metadata),
     })
 }

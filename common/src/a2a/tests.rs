@@ -9,9 +9,6 @@ fn test_message_roundtrip() {
     let mut meta = HashMap::new();
     meta.insert("traceId".to_string(), json!("abc-123"));
 
-    let mut data = HashMap::new();
-    data.insert("key".to_string(), json!("value"));
-
     let message = Message {
         message_id: "msg-001".to_string(),
         context_id: Some("ctx-001".to_string()),
@@ -22,24 +19,24 @@ fn test_message_roundtrip() {
                 content: PartContent::Text {
                     text: "hello".to_string(),
                 },
+                filename: None,
+                media_type: None,
                 metadata: None,
             },
             Part {
-                content: PartContent::File {
-                    file: FilePart {
-                        file: FileContent::Uri {
-                            file_with_uri: "https://example.com/file.txt".to_string(),
-                        },
-                        media_type: Some("text/plain".to_string()),
-                        name: Some("file.txt".to_string()),
-                    },
+                content: PartContent::Url {
+                    url: "https://example.com/file.txt".to_string(),
                 },
+                filename: Some("file.txt".to_string()),
+                media_type: Some("text/plain".to_string()),
                 metadata: None,
             },
             Part {
                 content: PartContent::Data {
-                    data: DataPart { data },
+                    data: json!({"key": "value"}),
                 },
+                filename: None,
+                media_type: None,
                 metadata: Some(meta.clone()),
             },
         ],
@@ -50,13 +47,10 @@ fn test_message_roundtrip() {
 
     let value = serde_json::to_value(&message).expect("serialize message");
     assert_eq!(value["messageId"], "msg-001");
-    assert_eq!(value["role"], "user");
+    assert_eq!(value["role"], "ROLE_USER");
     assert_eq!(value["parts"][0]["text"], "hello");
-    assert_eq!(
-        value["parts"][1]["file"]["fileWithUri"],
-        "https://example.com/file.txt"
-    );
-    assert_eq!(value["parts"][2]["data"]["data"]["key"], "value");
+    assert_eq!(value["parts"][1]["url"], "https://example.com/file.txt");
+    assert_eq!(value["parts"][2]["data"]["key"], "value");
 
     let parsed: Message = serde_json::from_value(value.clone()).expect("deserialize message");
     let value2 = serde_json::to_value(&parsed).expect("serialize message again");
@@ -108,11 +102,11 @@ fn test_agent_card_roundtrip() {
     );
 
     let agent_card = AgentCard {
-        protocol_version: "1.0".to_string(),
         name: "Test Agent".to_string(),
         description: "Agent description".to_string(),
         version: "0.1.0".to_string(),
         supported_interfaces: vec![AgentInterface {
+            protocol_version: "1.0".to_string(),
             url: "https://agent.example.com/a2a".to_string(),
             protocol_binding: "JSONRPC".to_string(),
             tenant: None,
@@ -126,12 +120,12 @@ fn test_agent_card_roundtrip() {
         capabilities: AgentCapabilities {
             streaming: Some(true),
             push_notifications: Some(true),
-            state_transition_history: None,
+            extended_agent_card: Some(true),
             extensions: vec![],
             tos_on_chain_settlement: None,
         },
         security_schemes: schemes,
-        security: vec![Security {
+        security_requirements: vec![SecurityRequirement {
             schemes: HashMap::new(),
         }],
         default_input_modes: vec!["text/plain".to_string()],
@@ -144,17 +138,16 @@ fn test_agent_card_roundtrip() {
             examples: vec!["example".to_string()],
             input_modes: vec![],
             output_modes: vec![],
-            security: vec![],
+            security_requirements: vec![],
             tos_base_cost: None,
         }],
-        supports_extended_agent_card: Some(true),
         signatures: vec![],
         tos_identity: None,
         arbitration: None,
     };
 
     let value = serde_json::to_value(&agent_card).expect("serialize agent card");
-    assert_eq!(value["protocolVersion"], "1.0");
+    assert_eq!(value["supportedInterfaces"][0]["protocolVersion"], "1.0");
     assert_eq!(
         value["supportedInterfaces"][0]["protocolBinding"],
         "JSONRPC"
@@ -173,7 +166,11 @@ fn test_agent_card_roundtrip() {
 fn test_enum_serialization() {
     let state = TaskState::InputRequired;
     let state_value = serde_json::to_value(state).expect("serialize task state");
-    assert_eq!(state_value, json!("input-required"));
+    assert_eq!(state_value, json!("TASK_STATE_INPUT_REQUIRED"));
+
+    let state2 = TaskState::Canceled;
+    let state2_value = serde_json::to_value(state2).expect("serialize canceled state");
+    assert_eq!(state2_value, json!("TASK_STATE_CANCELED"));
 
     let signer = TosSignerType::SessionKey;
     let signer_value = serde_json::to_value(signer).expect("serialize signer");
@@ -196,6 +193,8 @@ fn test_task_roundtrip() {
                     content: PartContent::Text {
                         text: "processing".to_string(),
                     },
+                    filename: None,
+                    media_type: None,
                     metadata: None,
                 }],
                 metadata: None,
@@ -212,6 +211,8 @@ fn test_task_roundtrip() {
                 content: PartContent::Text {
                     text: "output".to_string(),
                 },
+                filename: None,
+                media_type: None,
                 metadata: None,
             }],
             metadata: None,
@@ -224,7 +225,7 @@ fn test_task_roundtrip() {
 
     let value = serde_json::to_value(&task).expect("serialize task");
     assert_eq!(value["contextId"], "ctx-123");
-    assert_eq!(value["status"]["state"], "working");
+    assert_eq!(value["status"]["state"], "TASK_STATE_WORKING");
     assert_eq!(value["artifacts"][0]["artifactId"], "art-1");
 
     let parsed: Task = serde_json::from_value(value.clone()).expect("deserialize task");
@@ -239,7 +240,7 @@ fn test_push_notification_config_roundtrip() {
         url: "https://client.example.com/hook".to_string(),
         token: Some("tok-123".to_string()),
         authentication: Some(AuthenticationInfo {
-            schemes: vec!["Bearer".to_string()],
+            scheme: "Bearer".to_string(),
             credentials: Some("secret".to_string()),
         }),
     };
@@ -247,7 +248,7 @@ fn test_push_notification_config_roundtrip() {
     let value = serde_json::to_value(&config).expect("serialize push config");
     assert_eq!(value["id"], "cfg-1");
     assert_eq!(value["url"], "https://client.example.com/hook");
-    assert_eq!(value["authentication"]["schemes"][0], "Bearer");
+    assert_eq!(value["authentication"]["scheme"], "Bearer");
 
     let parsed: PushNotificationConfig =
         serde_json::from_value(value.clone()).expect("deserialize push config");
@@ -266,7 +267,6 @@ fn test_stream_response_roundtrip() {
                 message: None,
                 timestamp: None,
             },
-            r#final: false,
             metadata: None,
         },
     };
@@ -295,6 +295,8 @@ fn test_stream_artifact_update_roundtrip() {
                     content: PartContent::Text {
                         text: "partial".to_string(),
                     },
+                    filename: None,
+                    media_type: None,
                     metadata: None,
                 }],
                 metadata: None,
@@ -342,6 +344,7 @@ fn test_security_scheme_roundtrip() {
                         token_url: "https://auth.example.com/token".to_string(),
                         refresh_url: None,
                         scopes: HashMap::new(),
+                        pkce_required: None,
                     },
                 },
                 oauth2_metadata_url: None,
@@ -387,6 +390,8 @@ fn test_send_message_roundtrip() {
                 content: PartContent::Text {
                     text: "hello".to_string(),
                 },
+                filename: None,
+                media_type: None,
                 metadata: None,
             }],
             metadata: None,
@@ -445,13 +450,13 @@ fn test_list_tasks_roundtrip() {
         page_size: Some(25),
         page_token: Some("token-1".to_string()),
         history_length: Some(5),
-        last_updated_after: Some(1_700_000_000),
+        status_timestamp_after: Some("2024-01-08T12:00:00Z".to_string()),
         include_artifacts: Some(false),
     };
 
     let value = serde_json::to_value(&request).expect("serialize list tasks request");
     assert_eq!(value["contextId"], "ctx-555");
-    assert_eq!(value["status"], "completed");
+    assert_eq!(value["status"], "TASK_STATE_COMPLETED");
     assert_eq!(value["pageSize"], 25);
 
     let parsed: ListTasksRequest =
@@ -491,7 +496,8 @@ fn test_list_tasks_roundtrip() {
 #[test]
 fn test_push_config_request_wrappers_roundtrip() {
     let config = TaskPushNotificationConfig {
-        name: "tasks/task-1/pushNotificationConfigs/cfg-1".to_string(),
+        id: "cfg-1".to_string(),
+        task_id: "task-1".to_string(),
         push_notification_config: PushNotificationConfig {
             id: Some("cfg-1".to_string()),
             url: "https://client.example.com/hook".to_string(),
@@ -500,30 +506,29 @@ fn test_push_config_request_wrappers_roundtrip() {
         },
     };
 
-    let set_request = SetTaskPushNotificationConfigRequest {
+    let set_request = CreateTaskPushNotificationConfigRequest {
         tenant: Some("tenant-1".to_string()),
-        parent: "tasks/task-1".to_string(),
-        config_id: "cfg-1".to_string(),
+        task_id: "task-1".to_string(),
         config: config.clone(),
     };
 
     let value = serde_json::to_value(&set_request).expect("serialize set push config request");
-    assert_eq!(value["parent"], "tasks/task-1");
-    assert_eq!(value["configId"], "cfg-1");
-    assert_eq!(value["config"]["name"], config.name);
+    assert_eq!(value["taskId"], "task-1");
+    assert_eq!(value["config"]["id"], config.id);
 
-    let parsed: SetTaskPushNotificationConfigRequest =
+    let parsed: CreateTaskPushNotificationConfigRequest =
         serde_json::from_value(value.clone()).expect("deserialize set request");
     let value2 = serde_json::to_value(&parsed).expect("serialize set push config request again");
     assert_eq!(value, value2);
 
     let get_request = GetTaskPushNotificationConfigRequest {
         tenant: Some("tenant-1".to_string()),
-        name: config.name.clone(),
+        task_id: "task-1".to_string(),
+        id: "cfg-1".to_string(),
     };
 
     let value = serde_json::to_value(&get_request).expect("serialize get push config request");
-    assert_eq!(value["name"], config.name);
+    assert_eq!(value["id"], "cfg-1");
 
     let parsed: GetTaskPushNotificationConfigRequest =
         serde_json::from_value(value.clone()).expect("deserialize get request");
@@ -532,13 +537,13 @@ fn test_push_config_request_wrappers_roundtrip() {
 
     let list_request = ListTaskPushNotificationConfigRequest {
         tenant: Some("tenant-1".to_string()),
-        parent: "tasks/task-1".to_string(),
+        task_id: "task-1".to_string(),
         page_size: Some(10),
         page_token: Some("page-1".to_string()),
     };
 
     let value = serde_json::to_value(&list_request).expect("serialize list push config request");
-    assert_eq!(value["parent"], "tasks/task-1");
+    assert_eq!(value["taskId"], "task-1");
     assert_eq!(value["pageSize"], 10);
 
     let parsed: ListTaskPushNotificationConfigRequest =
@@ -552,10 +557,8 @@ fn test_push_config_request_wrappers_roundtrip() {
     };
 
     let value = serde_json::to_value(&list_response).expect("serialize list response");
-    assert_eq!(
-        value["configs"][0]["name"],
-        "tasks/task-1/pushNotificationConfigs/cfg-1"
-    );
+    assert_eq!(value["configs"][0]["id"], "cfg-1");
+    assert_eq!(value["configs"][0]["taskId"], "task-1");
     assert_eq!(value["nextPageToken"], "next-1");
 
     let parsed: ListTaskPushNotificationConfigResponse =
@@ -565,11 +568,13 @@ fn test_push_config_request_wrappers_roundtrip() {
 
     let delete_request = DeleteTaskPushNotificationConfigRequest {
         tenant: Some("tenant-1".to_string()),
-        name: "tasks/task-1/pushNotificationConfigs/cfg-1".to_string(),
+        task_id: "task-1".to_string(),
+        id: "cfg-1".to_string(),
     };
 
     let value = serde_json::to_value(&delete_request).expect("serialize delete request");
-    assert_eq!(value["name"], "tasks/task-1/pushNotificationConfigs/cfg-1");
+    assert_eq!(value["taskId"], "task-1");
+    assert_eq!(value["id"], "cfg-1");
 
     let parsed: DeleteTaskPushNotificationConfigRequest =
         serde_json::from_value(value.clone()).expect("deserialize delete request");

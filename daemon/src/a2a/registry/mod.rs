@@ -1002,11 +1002,11 @@ mod tests {
 
     fn sample_card(name: &str, skill_id: &str) -> AgentCard {
         AgentCard {
-            protocol_version: "1.0".to_string(),
             name: name.to_string(),
             description: "test".to_string(),
             version: "0.0.1".to_string(),
             supported_interfaces: vec![AgentInterface {
+                protocol_version: "1.0".to_string(),
                 url: "http://example.com".to_string(),
                 protocol_binding: "HTTP+JSON".to_string(),
                 tenant: None,
@@ -1017,12 +1017,12 @@ mod tests {
             capabilities: AgentCapabilities {
                 streaming: None,
                 push_notifications: None,
-                state_transition_history: None,
+                extended_agent_card: None,
                 extensions: Vec::new(),
                 tos_on_chain_settlement: Some(false),
             },
             security_schemes: HashMap::new(),
-            security: Vec::new(),
+            security_requirements: Vec::new(),
             default_input_modes: vec!["text/plain".to_string()],
             default_output_modes: vec!["text/plain".to_string()],
             skills: vec![AgentSkill {
@@ -1033,10 +1033,9 @@ mod tests {
                 examples: Vec::new(),
                 input_modes: vec!["text/plain".to_string()],
                 output_modes: vec!["text/plain".to_string()],
-                security: Vec::new(),
+                security_requirements: Vec::new(),
                 tos_base_cost: None,
             }],
-            supports_extended_agent_card: Some(false),
             signatures: Vec::new(),
             tos_identity: None,
             arbitration: None,

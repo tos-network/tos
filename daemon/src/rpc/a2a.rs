@@ -16,11 +16,10 @@ use std::borrow::Cow;
 use tos_common::{
     a2a::A2AService,
     a2a::{
-        A2AError, CancelTaskRequest, GetExtendedAgentCardRequest,
-        GetTaskPushNotificationConfigRequest, GetTaskRequest,
+        A2AError, CancelTaskRequest, CreateTaskPushNotificationConfigRequest,
+        GetExtendedAgentCardRequest, GetTaskPushNotificationConfigRequest, GetTaskRequest,
         ListTaskPushNotificationConfigRequest, ListTasksRequest, SendMessageRequest,
-        SetTaskPushNotificationConfigRequest, SubscribeToTaskRequest, TaskPushNotificationConfig,
-        HEADER_VERSION, PROTOCOL_VERSION,
+        SubscribeToTaskRequest, TaskPushNotificationConfig, HEADER_VERSION, PROTOCOL_VERSION,
     },
     async_handler,
     context::Context,
@@ -119,8 +118,8 @@ pub fn register_a2a_methods<S: Storage>(handler: &mut RPCHandler<Arc<Blockchain<
     handler.register_method("CancelTask", async_handler!(cancel_task::<S>));
     handler.register_method("SubscribeToTask", async_handler!(subscribe_to_task::<S>));
     handler.register_method(
-        "SetTaskPushNotificationConfig",
-        async_handler!(set_task_push_notification_config::<S>),
+        "CreateTaskPushNotificationConfig",
+        async_handler!(create_task_push_notification_config::<S>),
     );
     handler.register_method(
         "GetTaskPushNotificationConfig",
@@ -202,15 +201,15 @@ async fn subscribe_to_task<S: Storage>(
     ))
 }
 
-async fn set_task_push_notification_config<S: Storage>(
+async fn create_task_push_notification_config<S: Storage>(
     context: &Context,
     body: Value,
 ) -> Result<Value, InternalRpcError> {
     require_a2a_auth_context(context).await?;
-    let request: SetTaskPushNotificationConfigRequest = parse_params(body)?;
+    let request: CreateTaskPushNotificationConfigRequest = parse_params(body)?;
     let service = service_from_context::<S>(context)?;
     let response = service
-        .set_task_push_notification_config(request)
+        .create_task_push_notification_config(request)
         .await
         .map_err(map_a2a_error)?;
     serde_json::to_value(response).map_err(InternalRpcError::SerializeResponse)
@@ -302,7 +301,7 @@ pub struct ListTasksQuery {
     page_size: Option<i32>,
     page_token: Option<String>,
     history_length: Option<i32>,
-    last_updated_after: Option<i64>,
+    status_timestamp_after: Option<String>,
     include_artifacts: Option<bool>,
 }
 
@@ -312,19 +311,6 @@ pub struct ListPushConfigQuery {
     tenant: Option<String>,
     page_size: Option<i32>,
     page_token: Option<String>,
-}
-
-fn parse_push_name(name: &str) -> Option<(&str, &str)> {
-    let mut parts = name.split('/');
-    if parts.next()? != "tasks" {
-        return None;
-    }
-    let task_id = parts.next()?;
-    if parts.next()? != "pushNotificationConfigs" {
-        return None;
-    }
-    let config_id = parts.next()?;
-    Some((task_id, config_id))
 }
 
 /// Public agent card discovery endpoint (no authentication required)
@@ -389,7 +375,7 @@ pub async fn get_task_http<S: Storage>(
     let service = service_from_server(&server);
     let request = GetTaskRequest {
         tenant: query.tenant.clone(),
-        name: format!("tasks/{}", path.id),
+        id: path.id.clone(),
         history_length: query.history_length,
     };
     match service.get_task(request).await {
@@ -412,7 +398,7 @@ pub async fn list_tasks_http<S: Storage>(
         page_size: query.page_size,
         page_token: query.page_token.clone(),
         history_length: query.history_length,
-        last_updated_after: query.last_updated_after,
+        status_timestamp_after: query.status_timestamp_after.clone(),
         include_artifacts: query.include_artifacts,
     };
     match service.list_tasks(request).await {
@@ -430,7 +416,7 @@ pub async fn cancel_task_http<S: Storage>(
     let service = service_from_server(&server);
     let request = CancelTaskRequest {
         tenant: None,
-        name: format!("tasks/{}", path.id),
+        id: path.id.clone(),
     };
     match service.cancel_task(request).await {
         Ok(task) => Ok(HttpResponse::Ok().json(task)),
@@ -447,7 +433,7 @@ pub async fn subscribe_task_http<S: Storage>(
     let service = service_from_server(&server);
     let request = SubscribeToTaskRequest {
         tenant: None,
-        name: format!("tasks/{}", path.id),
+        id: path.id.clone(),
     };
     match service.subscribe_to_task(request).await {
         Ok(stream) => {
@@ -464,7 +450,7 @@ pub async fn subscribe_task_http<S: Storage>(
     }
 }
 
-pub async fn set_task_push_config_http<S: Storage>(
+pub async fn create_task_push_config_http<S: Storage>(
     server: web::Data<DaemonRpcServer<S>>,
     request: HttpRequest,
     path: web::Path<TaskPath>,
@@ -474,34 +460,28 @@ pub async fn set_task_push_config_http<S: Storage>(
     let service = service_from_server(&server);
     let value: Value = serde_json::from_slice(&body).map_err(|e| ErrorBadRequest(e.to_string()))?;
     let request = if value.get("config").is_some() {
-        serde_json::from_value::<SetTaskPushNotificationConfigRequest>(value)
+        serde_json::from_value::<CreateTaskPushNotificationConfigRequest>(value)
             .map_err(|e| ErrorBadRequest(e.to_string()))?
     } else {
         let mut config: TaskPushNotificationConfig =
             serde_json::from_value(value).map_err(|e| ErrorBadRequest(e.to_string()))?;
-        let (task_id, config_id) = if let Some((task_id, config_id)) = parse_push_name(&config.name)
-        {
-            (task_id.to_string(), config_id.to_string())
+        let config_id = if !config.id.is_empty() {
+            config.id.clone()
         } else if let Some(config_id) = config.push_notification_config.id.clone() {
-            (path.id.clone(), config_id)
+            config_id
         } else {
             return Err(ErrorBadRequest("missing push config id"));
         };
-        if task_id != path.id {
-            return Err(ErrorBadRequest("push config task id mismatch"));
-        }
-        if config.name.is_empty() {
-            config.name = format!("tasks/{}/pushNotificationConfigs/{}", task_id, config_id);
-        }
-        SetTaskPushNotificationConfigRequest {
+        config.id = config_id;
+        config.task_id = path.id.clone();
+        CreateTaskPushNotificationConfigRequest {
             tenant: None,
-            parent: format!("tasks/{}", task_id),
-            config_id,
+            task_id: path.id.clone(),
             config,
         }
     };
 
-    match service.set_task_push_notification_config(request).await {
+    match service.create_task_push_notification_config(request).await {
         Ok(config) => Ok(HttpResponse::Ok().json(config)),
         Err(err) => Ok(http_error(err)),
     }
@@ -516,10 +496,8 @@ pub async fn get_task_push_config_http<S: Storage>(
     let service = service_from_server(&server);
     let request = GetTaskPushNotificationConfigRequest {
         tenant: None,
-        name: format!(
-            "tasks/{}/pushNotificationConfigs/{}",
-            path.id, path.config_id
-        ),
+        task_id: path.id.clone(),
+        id: path.config_id.clone(),
     };
     match service.get_task_push_notification_config(request).await {
         Ok(config) => Ok(HttpResponse::Ok().json(config)),
@@ -537,7 +515,7 @@ pub async fn list_task_push_config_http<S: Storage>(
     let service = service_from_server(&server);
     let request = ListTaskPushNotificationConfigRequest {
         tenant: query.tenant.clone(),
-        parent: format!("tasks/{}", path.id),
+        task_id: path.id.clone(),
         page_size: query.page_size,
         page_token: query.page_token.clone(),
     };
@@ -556,10 +534,8 @@ pub async fn delete_task_push_config_http<S: Storage>(
     let service = service_from_server(&server);
     let request = tos_common::a2a::DeleteTaskPushNotificationConfigRequest {
         tenant: None,
-        name: format!(
-            "tasks/{}/pushNotificationConfigs/{}",
-            path.id, path.config_id
-        ),
+        task_id: path.id.clone(),
+        id: path.config_id.clone(),
     };
     match service.delete_task_push_notification_config(request).await {
         Ok(()) => Ok(HttpResponse::Ok().json(json!({}))),

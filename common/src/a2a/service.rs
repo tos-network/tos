@@ -2,9 +2,9 @@ use async_trait::async_trait;
 use futures::Stream;
 
 use super::{
-    A2AResult, AgentCard, CancelTaskRequest, GetExtendedAgentCardRequest, GetTaskRequest,
-    ListTasksRequest, ListTasksResponse, SendMessageRequest, SendMessageResponse,
-    SetTaskPushNotificationConfigRequest, StreamResponse, SubscribeToTaskRequest, Task,
+    A2AResult, AgentCard, CancelTaskRequest, CreateTaskPushNotificationConfigRequest,
+    GetExtendedAgentCardRequest, GetTaskRequest, ListTasksRequest, ListTasksResponse,
+    SendMessageRequest, SendMessageResponse, StreamResponse, SubscribeToTaskRequest, Task,
     TaskPushNotificationConfig,
 };
 
@@ -31,9 +31,9 @@ pub trait A2AService: Send + Sync {
         request: SubscribeToTaskRequest,
     ) -> A2AResult<Self::TaskStream>;
 
-    async fn set_task_push_notification_config(
+    async fn create_task_push_notification_config(
         &self,
-        request: SetTaskPushNotificationConfigRequest,
+        request: CreateTaskPushNotificationConfigRequest,
     ) -> A2AResult<TaskPushNotificationConfig>;
 
     async fn get_task_push_notification_config(
