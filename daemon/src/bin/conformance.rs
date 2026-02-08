@@ -16,7 +16,7 @@ use tos_common::arbitration::{
     ArbiterAccount, ArbiterStatus, ArbitrationRequestKey, ArbitrationRoundKey, ExpertiseDomain,
 };
 use tos_common::asset::{AssetData, VersionedAssetData};
-use tos_common::block::Block;
+use tos_common::block::{Block, BlockHeader, EXTRA_NONCE_SIZE};
 use tos_common::config::{
     COIN_DECIMALS, COIN_VALUE, MAXIMUM_SUPPLY, MAX_GAS_USAGE_PER_TX, TOS_ASSET, UNO_ASSET,
 };
@@ -39,6 +39,7 @@ use tos_common::transaction::{
 
 use tos_common::crypto::elgamal::KeyPair;
 use tos_crypto::curve25519_dalek::ristretto::CompressedRistretto;
+use tos_daemon::core::blockdag;
 use tos_daemon::core::blockchain::Blockchain;
 use tos_daemon::core::blockchain::BroadcastOption;
 use tos_daemon::core::config::Config;
@@ -51,7 +52,8 @@ use tos_daemon::core::storage::rocksdb::RocksStorage;
 use tos_daemon::core::storage::{
     AccountProvider, AgentAccountProvider, ArbiterProvider, ArbitrationCommitProvider,
     AssetProvider, BalanceProvider, CommitteeProvider, ContractProvider, EnergyProvider,
-    EscrowProvider, KycProvider, NonceProvider, ReferralProvider, TnsProvider, VersionedContract,
+    DagOrderProvider, DifficultyProvider, EscrowProvider, KycProvider, NonceProvider,
+    ReferralProvider, TipsProvider, TnsProvider, VersionedContract,
 };
 use tos_daemon::vrf::WrappedMinerSecret;
 
@@ -468,6 +470,27 @@ struct BlockExecuteTx {
     wire_hex: String,
     #[serde(default)]
     tx: Option<serde_json::Value>,
+}
+
+#[derive(Deserialize)]
+struct ChainExecuteRequest {
+    blocks: Vec<ChainExecuteBlock>,
+}
+
+#[derive(Deserialize)]
+struct ChainExecuteBlock {
+    #[serde(default)]
+    id: String,
+    // If unset: use current storage tips. If set (even to empty): use exactly these parents.
+    #[serde(default)]
+    parents: Option<Vec<String>>,
+    #[serde(default)]
+    txs: Vec<BlockExecuteTx>,
+    // Overrides for negative vectors / boundary checks.
+    #[serde(default)]
+    height: Option<u64>,
+    #[serde(default)]
+    timestamp_ms: Option<u64>,
 }
 
 #[derive(Serialize)]
@@ -1132,6 +1155,21 @@ fn map_error_code(err: &BlockchainError) -> u16 {
         | BlockchainError::NoStableReferenceFound => 0x0107,
         BlockchainError::InvalidPublicKey => 0x0106,
         BlockchainError::InvalidNetwork => 0x0102,
+        // Block / DAG / consensus errors (L2+). Codes live in tos-spec ErrorCode (0x06xx).
+        BlockchainError::ExpectedTips => 0x0606,
+        BlockchainError::InvalidTipsCount(_, _) => 0x0607,
+        BlockchainError::InvalidTipsNotFound(_, _) => 0x0608,
+        BlockchainError::InvalidTipsDifficulty(_, _) => 0x0609,
+        BlockchainError::InvalidReachability => 0x060A,
+        BlockchainError::MissingVrfData(_) => 0x060B,
+        BlockchainError::InvalidVrfData(_, _) => 0x060C,
+        BlockchainError::InvalidBlockVersion => 0x060D,
+        BlockchainError::InvalidBlockHeight(_, _)
+        | BlockchainError::BlockHeightZeroNotAllowed
+        | BlockchainError::InvalidBlockHeightStableHeight => 0x060E,
+        BlockchainError::TimestampIsLessThanParent(_) => 0x0604,
+        BlockchainError::TimestampIsInFuture(_, _) => 0x0605,
+        BlockchainError::InvalidDifficulty => 0x0602,
         BlockchainError::NotImplemented | BlockchainError::UnsupportedOperation => 0xFF01,
         BlockchainError::Any(err) => {
             let msg = err.to_string();
@@ -3447,6 +3485,246 @@ async fn handle_block_execute(
     })
 }
 
+#[derive(Serialize)]
+struct ChainBlockResult {
+    #[serde(skip_serializing_if = "String::is_empty")]
+    id: String,
+    success: bool,
+    error_code: u16,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+}
+
+#[derive(Serialize)]
+struct ChainExecResult {
+    success: bool,
+    error_code: u16,
+    #[serde(default)]
+    state_digest: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    results: Vec<ChainBlockResult>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+}
+
+async fn handle_chain_execute(
+    state: web::Data<AppState>,
+    body: web::Json<ChainExecuteRequest>,
+) -> HttpResponse {
+    let mut engine = state.engine.lock().await;
+    let mut results: Vec<ChainBlockResult> = Vec::new();
+    let mut id_to_hash: HashMap<String, Hash> = HashMap::new();
+
+    for blk in &body.blocks {
+        // Build tx list from wire or JSON.
+        let mut txs: Vec<Arc<Transaction>> = Vec::with_capacity(blk.txs.len());
+        let mut tx_hashes = indexmap::IndexSet::with_capacity(blk.txs.len());
+        let mut burned_delta: u64 = 0;
+        for item in &blk.txs {
+            let tx_val = if !item.wire_hex.is_empty() {
+                match Transaction::from_hex(&item.wire_hex) {
+                    Ok(tx) => tx,
+                    Err(err) => {
+                        let code = 0x0100; // INVALID_FORMAT
+                        results.push(ChainBlockResult {
+                            id: blk.id.clone(),
+                            success: false,
+                            error_code: code,
+                            error: Some(err.to_string()),
+                        });
+                        let digest = current_state_digest(&engine).await;
+                        return HttpResponse::Ok().json(ChainExecResult {
+                            success: false,
+                            error_code: code,
+                            state_digest: digest,
+                            results,
+                            error: Some("invalid tx wire".to_string()),
+                        });
+                    }
+                }
+            } else if let Some(obj) = &item.tx {
+                match tx_from_json(obj) {
+                    Ok(tx) => tx,
+                    Err(err) => {
+                        let code = 0x0100; // INVALID_FORMAT
+                        results.push(ChainBlockResult {
+                            id: blk.id.clone(),
+                            success: false,
+                            error_code: code,
+                            error: Some(err.clone()),
+                        });
+                        let digest = current_state_digest(&engine).await;
+                        return HttpResponse::Ok().json(ChainExecResult {
+                            success: false,
+                            error_code: code,
+                            state_digest: digest,
+                            results,
+                            error: Some("invalid tx json".to_string()),
+                        });
+                    }
+                }
+            } else {
+                continue;
+            };
+
+            if let TransactionType::Burn(payload) = tx_val.get_data() {
+                burned_delta = burned_delta.saturating_add(payload.amount);
+            }
+            let h = tx_val.hash();
+            tx_hashes.insert(h);
+            txs.push(Arc::new(tx_val));
+        }
+
+        // Resolve parents -> tips (by alias or raw hex hash).
+        let (tips, height, timestamp_ms) = {
+            let storage = engine.blockchain.get_storage().read().await;
+            let genesis_hash = storage
+                .get_hash_at_topo_height(0)
+                .await
+                .unwrap_or(Hash::zero());
+
+            let mut parent_hashes: Vec<Hash> = Vec::new();
+            if let Some(parents) = &blk.parents {
+                for p in parents {
+                    if p == "genesis" {
+                        parent_hashes.push(genesis_hash.clone());
+                        continue;
+                    }
+                    if let Some(h) = id_to_hash.get(p) {
+                        parent_hashes.push(h.clone());
+                        continue;
+                    }
+                    if let Ok(h) = Hash::from_str(p) {
+                        parent_hashes.push(h);
+                        continue;
+                    }
+                    // Sentinel: will cause InvalidTipsNotFound on import.
+                    parent_hashes.push(Hash::zero());
+                }
+            } else if let Ok(t) = storage.get_tips().await {
+                parent_hashes.extend(t.into_iter());
+            }
+
+            let mut tips_set: indexmap::IndexSet<Hash> = indexmap::IndexSet::new();
+            for h in parent_hashes {
+                tips_set.insert(h);
+            }
+
+            // Sort tips to match daemon template behavior.
+            if tips_set.len() > 1 {
+                // Avoid borrowing `tips_set` across `.await`.
+                let tips_vec: Vec<Hash> = tips_set.iter().cloned().collect();
+                if let Ok(iter) = blockdag::sort_tips(&*storage, tips_vec.into_iter()).await {
+                    tips_set = iter.collect();
+                }
+            }
+
+            let height = if let Some(h) = blk.height {
+                h
+            } else {
+                blockdag::calculate_height_at_tips(&*storage, tips_set.iter())
+                    .await
+                    .unwrap_or(0)
+            };
+
+            let ts = if let Some(ts) = blk.timestamp_ms {
+                ts
+            } else if tips_set.is_empty() {
+                tos_common::time::get_current_time_in_millis()
+            } else {
+                let mut max_parent = 0u64;
+                for tip in tips_set.iter() {
+                    if let Ok(ts) = storage.get_timestamp_for_block_hash(tip).await {
+                        max_parent = max_parent.max(ts);
+                    }
+                }
+                let now = tos_common::time::get_current_time_in_millis();
+                now.max(max_parent)
+            };
+
+            (tips_set, height, ts)
+        };
+
+        let miner_key = miner_public_key();
+        let mut header = BlockHeader::new(
+            tos_daemon::core::hard_fork::get_version_at_height(engine.blockchain.get_network(), height),
+            height,
+            timestamp_ms,
+            tips,
+            [0u8; EXTRA_NONCE_SIZE],
+            miner_key,
+            tx_hashes,
+        );
+        // Keep VRF unset; add_new_block(mining=true) will fill it.
+        header.set_vrf_data(None);
+
+        let block = Block::new(tos_common::immutable::Immutable::Owned(header), txs);
+        let block_hash = block.hash();
+
+        let import_res = engine
+            .blockchain
+            .add_new_block(block, None, BroadcastOption::None, true)
+            .await;
+        match import_res {
+            Ok(()) => {
+                if !blk.id.is_empty() {
+                    id_to_hash.insert(blk.id.clone(), block_hash);
+                }
+                // Conformance meta surface: track burned + a topoheight-like counter.
+                engine.meta.global_state.total_burned = engine
+                    .meta
+                    .global_state
+                    .total_burned
+                    .saturating_add(burned_delta);
+                engine.meta.global_state.block_height = engine
+                    .meta
+                    .global_state
+                    .block_height
+                    .saturating_add(1);
+                results.push(ChainBlockResult {
+                    id: blk.id.clone(),
+                    success: true,
+                    error_code: 0,
+                    error: None,
+                });
+            }
+            Err(err) => {
+                let code = map_error_code(&err);
+                results.push(ChainBlockResult {
+                    id: blk.id.clone(),
+                    success: false,
+                    error_code: code,
+                    error: Some(err.to_string()),
+                });
+                let digest = current_state_digest(&engine).await;
+                return HttpResponse::Ok().json(ChainExecResult {
+                    success: false,
+                    error_code: code,
+                    state_digest: digest,
+                    results,
+                    error: Some(err.to_string()),
+                });
+            }
+        }
+    }
+
+    // Clear mempool to keep vector runs isolated.
+    {
+        let mut mempool = engine.blockchain.get_mempool().write().await;
+        mempool.clear();
+    }
+
+    let export = build_export(&engine).await;
+    let digest = compute_state_digest(&export);
+    HttpResponse::Ok().json(ChainExecResult {
+        success: true,
+        error_code: 0,
+        state_digest: digest,
+        results,
+        error: None,
+    })
+}
+
 async fn build_export(engine: &Engine) -> PreState {
     let mut accounts = Vec::new();
     let storage = engine.blockchain.get_storage().read().await;
@@ -3611,6 +3889,7 @@ async fn main() -> std::io::Result<()> {
             .route("/state/digest", web::get().to(handle_state_digest))
             .route("/tx/execute", web::post().to(handle_tx_execute))
             .route("/block/execute", web::post().to(handle_block_execute))
+            .route("/chain/execute", web::post().to(handle_chain_execute))
     })
     .bind(("0.0.0.0", 8080))?
     .run()
