@@ -409,6 +409,101 @@ impl Serializer for DelegatedFreezeRecord {
     }
 }
 
+/// Maximum number of delegation records per account (matches Avatar AT_MAX_DELEGATION_RECORDS)
+const MAX_DELEGATION_RECORDS: usize = 32;
+
+/// Delegator state tracking active delegation record indices
+///
+/// Fixed-size structure (136 bytes) matching Avatar's `at_delegator_state_t`:
+/// - `record_count`: u64 (8 bytes) - number of active delegation records (0-32)
+/// - `record_indices`: [u32; 32] (128 bytes) - active record indices
+///
+/// Stored in the `DelegatorState` column family keyed by `{pubkey[32]}`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DelegatorState {
+    /// Number of active delegation records (0-32)
+    pub record_count: u64,
+    /// Active record indices (only first `record_count` entries are meaningful)
+    pub record_indices: [u32; MAX_DELEGATION_RECORDS],
+}
+
+impl Default for DelegatorState {
+    fn default() -> Self {
+        Self {
+            record_count: 0,
+            record_indices: [0u32; MAX_DELEGATION_RECORDS],
+        }
+    }
+}
+
+impl DelegatorState {
+    /// Create a new empty delegator state
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Check if the state is full (32 records)
+    pub fn is_full(&self) -> bool {
+        self.record_count as usize >= MAX_DELEGATION_RECORDS
+    }
+
+    /// Add a record index to the state
+    pub fn add_record(&mut self, record_index: u32) -> Result<(), &'static str> {
+        if self.is_full() {
+            return Err("Delegator state is full");
+        }
+        self.record_indices[self.record_count as usize] = record_index;
+        self.record_count = self.record_count.saturating_add(1);
+        Ok(())
+    }
+
+    /// Remove a record index from the state
+    pub fn remove_record(&mut self, record_index: u32) -> Result<(), &'static str> {
+        let pos = self.record_indices[..self.record_count as usize]
+            .iter()
+            .position(|&idx| idx == record_index);
+        match pos {
+            Some(i) => {
+                let last = self.record_count as usize - 1;
+                self.record_indices[i] = self.record_indices[last];
+                self.record_indices[last] = 0;
+                self.record_count = self.record_count.saturating_sub(1);
+                Ok(())
+            }
+            None => Err("Record index not found"),
+        }
+    }
+}
+
+impl Serializer for DelegatorState {
+    fn write(&self, writer: &mut Writer) {
+        writer.write_u64(&self.record_count);
+        for idx in &self.record_indices {
+            writer.write_u32(idx);
+        }
+    }
+
+    fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
+        let record_count = reader.read_u64()?;
+        if record_count as usize > MAX_DELEGATION_RECORDS {
+            return Err(ReaderError::InvalidValue);
+        }
+        let mut record_indices = [0u32; MAX_DELEGATION_RECORDS];
+        for item in &mut record_indices {
+            *item = reader.read_u32()?;
+        }
+        Ok(Self {
+            record_count,
+            record_indices,
+        })
+    }
+
+    fn size(&self) -> usize {
+        // Fixed 136 bytes: 8 (u64) + 32 * 4 (u32 array)
+        8 + MAX_DELEGATION_RECORDS * 4
+    }
+}
+
 /// Pending unfreeze record for two-phase unfreeze
 ///
 /// # Two-Phase Unfreeze Process

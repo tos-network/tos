@@ -10,6 +10,7 @@ mod cache;
 mod client_protocol;
 mod contract;
 mod dag_order;
+mod delegation;
 mod difficulty;
 mod energy;
 mod merkle;

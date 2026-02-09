@@ -15,8 +15,8 @@ use std::{
 pub use agent_account::{AgentAccountMeta, SessionKey};
 pub use balance::{AccountSummary, Balance, BalanceType, VersionedBalance};
 pub use energy::{
-    DelegateRecordEntry, DelegatedFreezeRecord, EnergyLease, EnergyResource, FreezeDuration,
-    FreezeRecord, PendingUnfreeze,
+    DelegateRecordEntry, DelegatedFreezeRecord, DelegatorState, EnergyLease, EnergyResource,
+    FreezeDuration, FreezeRecord, PendingUnfreeze,
 };
 pub use nonce::{Nonce, VersionedNonce};
 pub use uno_balance::{UnoAccountSummary, UnoBalance, VersionedUnoBalance};
