@@ -206,9 +206,6 @@ pub trait BlockchainVerificationState<'a, E> {
         &self,
         account: &'a CompressedPublicKey,
     ) -> Result<Option<Hash>, E>;
-
-    /// Check if a message ID has been used (for replay protection)
-    async fn is_message_id_used(&self, message_id: &Hash) -> Result<bool, E>;
 }
 
 pub struct ContractEnvironment<'a, P: ContractProvider> {

@@ -415,16 +415,8 @@ pub enum BlockchainError {
     TnsAccountAlreadyHasName,
     #[error("TNS name not found")]
     TnsNameNotFound,
-    #[error("Message ID already used (replay attack)")]
-    TnsMessageIdAlreadyUsed,
     #[error("Sender does not own the name")]
     TnsSenderNotNameOwner,
-    #[error("Recipient name not registered")]
-    TnsRecipientNotRegistered,
-    #[error("Invalid TTL value")]
-    TnsInvalidTtl,
-    #[error("Message content too large")]
-    TnsMessageTooLarge,
     #[error("Invalid name format")]
     TnsInvalidNameFormat,
     #[error("Name is reserved")]

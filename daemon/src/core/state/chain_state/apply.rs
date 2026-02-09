@@ -302,10 +302,6 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError>
     ) -> Result<Option<Hash>, BlockchainError> {
         self.inner.get_account_name_hash(account).await
     }
-
-    async fn is_message_id_used(&self, message_id: &Hash) -> Result<bool, BlockchainError> {
-        self.inner.is_message_id_used(message_id).await
-    }
 }
 
 #[async_trait]

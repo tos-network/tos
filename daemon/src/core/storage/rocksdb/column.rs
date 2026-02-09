@@ -146,143 +146,6 @@ pub enum Column {
     // - contract_id: contract ID (8 bytes, deterministic tiebreaker)
     DelayedExecutionPriority,
 
-    // ===== Referral System =====
-
-    // Referral records: user -> referral data
-    // {user_public_key} => {ReferralRecord}
-    Referrals,
-    // Direct referrals index: referrer -> list of direct referrals
-    // {referrer_public_key}{page_number} => {Vec<PublicKey>}
-    ReferralDirects,
-    // Team volume records: per-user per-asset volume tracking
-    // {user_public_key (32 bytes)}{asset_hash (32 bytes)} => {TeamVolumeRecord}
-    TeamVolumes,
-
-    // ===== KYC System =====
-
-    // KYC data: user -> KycData (43 bytes)
-    // {user_public_key} => {KycData}
-    KycData,
-    // KYC metadata: user -> (committee_id, topoheight, tx_hash)
-    // {user_public_key} => {KycMetadata}
-    KycMetadata,
-    // Emergency suspension data
-    // {user_public_key} => {(reason_hash, expires_at)}
-    KycEmergencySuspension,
-    // KYC appeal records
-    // {user_public_key} => {KycAppealRecord}
-    KycAppeal,
-    // Previous KYC status before emergency suspension (for proper restoration)
-    // {user_public_key} => {KycStatus}
-    KycEmergencyPreviousStatus,
-
-    // ===== Security Committee System =====
-
-    // Committee data: committee_id -> SecurityCommittee
-    // {committee_id (32 bytes)} => {SecurityCommittee}
-    Committees,
-    // Global committee ID pointer
-    // GLOBAL_COMMITTEE_KEY => {committee_id}
-    GlobalCommittee,
-    // Committee by region index
-    // {region (u8)}{committee_id (32 bytes)} => {}
-    CommitteesByRegion,
-    // Member to committees index: member -> list of committee IDs
-    // {member_public_key (32 bytes)} => {Vec<Hash>}
-    MemberCommittees,
-    // Child committees index: parent_id -> list of child IDs
-    // {parent_committee_id (32 bytes)} => {Vec<Hash>}
-    ChildCommittees,
-
-    // ===== Contract Asset System =====
-
-    // Contract asset data: asset_hash -> ContractAssetData
-    // {prefix}{asset_hash (32 bytes)} => {ContractAssetData}
-    ContractAssets,
-
-    // ===== Native NFT System =====
-
-    // {nft:col:<collection_id>} => {topoheight}
-    NftCollections,
-    // {topoheight}{nft:col:<collection_id>} => {Versioned<Option<NftCollection>>}
-    VersionedNftCollections,
-
-    // {nft:tok:<collection_id><token_id>} => {topoheight}
-    NftTokens,
-    // {topoheight}{nft:tok:<collection_id><token_id>} => {Versioned<Option<Nft>>}
-    VersionedNftTokens,
-
-    // {nft:own:<collection_id><owner>} => {topoheight}
-    NftOwnerBalances,
-    // {topoheight}{nft:own:<collection_id><owner>} => {Versioned<u64>}
-    VersionedNftOwnerBalances,
-
-    // {nft:opr:<owner><collection_id><operator>} => {topoheight}
-    NftOperatorApprovals,
-    // {topoheight}{nft:opr:<owner><collection_id><operator>} => {Versioned<bool>}
-    VersionedNftOperatorApprovals,
-
-    // {nft:mnt:<collection_id><user>} => {topoheight}
-    NftMintCounts,
-    // {topoheight}{nft:mnt:<collection_id><user>} => {Versioned<u64>}
-    VersionedNftMintCounts,
-
-    // {nft:nonce} => {topoheight}
-    NftCollectionNonce,
-    // {topoheight}{nft:nonce} => {Versioned<u64>}
-    VersionedNftCollectionNonce,
-
-    // {nft:tba:<collection_id><token_id>} => {topoheight}
-    NftTba,
-    // {topoheight}{nft:tba:<collection_id><token_id>} => {Versioned<Option<TokenBoundAccount>>}
-    VersionedNftTba,
-
-    // {nft:lst:<listing_id>} => {topoheight}
-    NftRentalListings,
-    // {topoheight}{nft:lst:<listing_id>} => {Versioned<Option<RentalListing>>}
-    VersionedNftRentalListings,
-
-    // {nft:rnt:<collection_id><token_id>} => {topoheight}
-    NftActiveRentals,
-    // {topoheight}{nft:rnt:<collection_id><token_id>} => {Versioned<Option<NftRental>>}
-    VersionedNftActiveRentals,
-
-    // ===== Escrow (A2A) =====
-
-    // Escrow accounts storage
-    // {escrow_id (32 bytes)} => {EscrowAccount}
-    EscrowAccounts,
-    // Escrow history index
-    // {escrow_id (32 bytes)}{topoheight (8 bytes)}{tx_hash (32 bytes)} => {tx_hash}
-    EscrowHistory,
-    // Pending releases index (by release_at)
-    // {release_at (8 bytes)}{escrow_id (32 bytes)} => {escrow_id}
-    EscrowPendingRelease,
-    // A2A signature nonces (for replay protection across nodes)
-    // {pubkey_hex}:{nonce} => {timestamp_secs}
-    A2ANonces,
-
-    // ===== Arbitration =====
-
-    // Arbiter accounts storage
-    // {arbiter_public_key (32 bytes)} => {ArbiterAccount}
-    ArbiterAccounts,
-    // ArbitrationOpen commit indexed by escrow/dispute/round
-    // {escrow_id (32 bytes)}{dispute_id (32 bytes)}{round (4 bytes)} => {CommitArbitrationOpenPayload}
-    ArbitrationCommitOpenByRound,
-    // ArbitrationOpen commit indexed by request_id
-    // {request_id (32 bytes)} => {CommitArbitrationOpenPayload}
-    ArbitrationCommitOpenByRequest,
-    // VoteRequest commit indexed by request_id
-    // {request_id (32 bytes)} => {CommitVoteRequestPayload}
-    ArbitrationCommitVoteRequest,
-    // Selection commitment indexed by request_id
-    // {request_id (32 bytes)} => {CommitSelectionCommitmentPayload}
-    ArbitrationCommitSelectionCommitment,
-    // Juror votes indexed by request_id + juror pubkey
-    // {request_id (32 bytes)}{juror_public_key (32 bytes)} => {CommitJurorVotePayload}
-    ArbitrationCommitJurorVote,
-
     // ===== TNS (TOS Name Service) =====
 
     // Name to owner mapping: name_hash -> owner_public_key
@@ -292,12 +155,6 @@ pub enum Column {
     // Used to check if account already has a registered name
     // {owner_public_key (32 bytes)} => {Hash (32 bytes)}
     TnsAccountToName,
-    // Ephemeral messages storage with TTL
-    // {recipient_name_hash (32 bytes)}{message_id (32 bytes)} => {EphemeralMessage}
-    TnsEphemeralMessages,
-    // Message ID index for replay protection
-    // {message_id (32 bytes)} => {expiry_topoheight (8 bytes)}
-    TnsMessageIdIndex,
 }
 
 impl Column {
@@ -316,16 +173,7 @@ impl Column {
             | VersionedContractsAssetExt
             | VersionedContractsData
             | PrefixedRegistrations
-            | VersionedEnergyResources
-            | VersionedNftCollections
-            | VersionedNftTokens
-            | VersionedNftOwnerBalances
-            | VersionedNftOperatorApprovals
-            | VersionedNftMintCounts
-            | VersionedNftCollectionNonce
-            | VersionedNftTba
-            | VersionedNftRentalListings
-            | VersionedNftActiveRentals => Some(PREFIX_TOPOHEIGHT_LEN),
+            | VersionedEnergyResources => Some(PREFIX_TOPOHEIGHT_LEN),
 
             UnoBalances => Some(PREFIX_ID_LEN),
 
@@ -345,27 +193,8 @@ impl Column {
             // Priority index: prefix by exec_topoheight (8 bytes)
             DelayedExecutionPriority => Some(PREFIX_TOPOHEIGHT_LEN),
 
-            // Referral directs: prefix by referrer public key (32 bytes)
-            ReferralDirects => Some(32),
-            // Team volumes: prefix by user public key (32 bytes)
-            TeamVolumes => Some(32),
-
-            // Committee by region: prefix by region (1 byte)
-            CommitteesByRegion => Some(1),
-            // Child committees: prefix by parent committee ID (32 bytes)
-            ChildCommittees => Some(32),
-
             // Agent session keys: prefix by account public key (32 bytes)
             AgentSessionKeys => Some(32),
-            // TNS ephemeral messages: prefix by recipient name hash (32 bytes)
-            TnsEphemeralMessages => Some(32),
-
-            // Escrow pending release: prefix by release_at (8 bytes)
-            EscrowPendingRelease => Some(PREFIX_TOPOHEIGHT_LEN),
-            // Escrow history: prefix by escrow_id (32 bytes)
-            EscrowHistory => Some(32),
-            // Arbitration juror votes: prefix by request_id (32 bytes)
-            ArbitrationCommitJurorVote => Some(32),
 
             _ => None,
         }

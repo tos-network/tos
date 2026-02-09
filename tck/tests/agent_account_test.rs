@@ -319,10 +319,6 @@ impl<'a> BlockchainVerificationState<'a, MockStateError> for MockVerificationSta
     ) -> Result<Option<Hash>, MockStateError> {
         Ok(None)
     }
-
-    async fn is_message_id_used(&self, _message_id: &Hash) -> Result<bool, MockStateError> {
-        Ok(false)
-    }
 }
 
 // ============================================================================

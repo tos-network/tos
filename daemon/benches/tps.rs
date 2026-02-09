@@ -458,10 +458,6 @@ impl<'a> tos_common::transaction::verify::BlockchainVerificationState<'a, ()>
     ) -> Result<Option<Hash>, ()> {
         Ok(None)
     }
-
-    async fn is_message_id_used(&self, _message_id: &Hash) -> Result<bool, ()> {
-        Ok(false)
-    }
 }
 
 // -------------------------------------------------------------------------------------------------

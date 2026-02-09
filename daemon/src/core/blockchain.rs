@@ -4768,36 +4768,6 @@ impl<S: Storage> Blockchain<S> {
                     }
                 }
             }
-
-            // TNS expired message cleanup - run every 1000 blocks (~5 hours)
-            const TNS_CLEANUP_INTERVAL: u64 = 1000;
-            if current_topoheight % TNS_CLEANUP_INTERVAL == 0 {
-                if log::log_enabled!(log::Level::Debug) {
-                    debug!(
-                        "Running TNS expired message cleanup at topoheight {}",
-                        current_topoheight
-                    );
-                }
-                let cleanup_start = Instant::now();
-                match storage.cleanup_expired_messages(current_topoheight).await {
-                    Ok(deleted_count) => {
-                        if deleted_count > 0 {
-                            if log::log_enabled!(log::Level::Info) {
-                                info!(
-                                    "TNS cleanup: deleted {} expired messages in {}ms",
-                                    deleted_count,
-                                    cleanup_start.elapsed().as_millis()
-                                );
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        if log::log_enabled!(log::Level::Warn) {
-                            warn!("Error during TNS expired message cleanup: {}", e);
-                        }
-                    }
-                }
-            }
         }
 
         debug!("Storing new tips in storage");

@@ -2544,11 +2544,6 @@ impl<'a> BlockchainVerificationState<'a, TestError> for ChainState {
         // For test purposes, return None (account has no name)
         Ok(None)
     }
-
-    async fn is_message_id_used(&self, _message_id: &Hash) -> Result<bool, TestError> {
-        // For test purposes, return false (message ID not used)
-        Ok(false)
-    }
 }
 
 impl FeeHelper for AccountStateImpl {
