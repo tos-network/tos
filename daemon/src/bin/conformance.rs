@@ -190,6 +190,12 @@ struct TxExecuteRequest {
 }
 
 #[derive(Deserialize)]
+struct TxRoundtripRequest {
+    #[serde(default)]
+    wire_hex: String,
+}
+
+#[derive(Deserialize)]
 struct BlockExecuteRequest {
     #[serde(default)]
     wire_hex: String,
@@ -1247,6 +1253,64 @@ fn decode_tx_strict(hex_str: &str) -> Result<Transaction, ReaderError> {
         return Err(ReaderError::InvalidSize);
     }
     Ok(tx)
+}
+
+async fn handle_tx_roundtrip(body: web::Json<TxRoundtripRequest>) -> HttpResponse {
+    let wire_hex = body.wire_hex.trim();
+    if wire_hex.is_empty() {
+        return HttpResponse::BadRequest()
+            .json(json!({ "success": false, "error": "missing wire_hex", "error_code": 0xFF00 }));
+    }
+
+    let orig = match hex::decode(wire_hex) {
+        Ok(b) => b,
+        Err(_) => {
+            return HttpResponse::Ok().json(ExecResult {
+                success: false,
+                error_code: 0x0100, // INVALID_FORMAT
+                state_digest: String::new(),
+                error: Some("invalid tx wire_hex".to_string()),
+            });
+        }
+    };
+
+    let mut reader = Reader::new(&orig);
+    let tx = match Transaction::read(&mut reader) {
+        Ok(tx) => tx,
+        Err(_) => {
+            return HttpResponse::Ok().json(ExecResult {
+                success: false,
+                error_code: 0x0100, // INVALID_FORMAT
+                state_digest: String::new(),
+                error: Some("invalid tx wire_hex".to_string()),
+            });
+        }
+    };
+    if reader.size() != 0 {
+        return HttpResponse::Ok().json(ExecResult {
+            success: false,
+            error_code: 0x0100, // INVALID_FORMAT
+            state_digest: String::new(),
+            error: Some("invalid tx wire_hex (trailing bytes)".to_string()),
+        });
+    }
+
+    let re = tx.to_bytes();
+    if re != orig {
+        return HttpResponse::Ok().json(ExecResult {
+            success: false,
+            error_code: 0xFF01, // conformance-only: roundtrip mismatch
+            state_digest: String::new(),
+            error: Some("tx roundtrip mismatch".to_string()),
+        });
+    }
+
+    HttpResponse::Ok().json(ExecResult {
+        success: true,
+        error_code: 0x0000,
+        state_digest: String::new(),
+        error: None,
+    })
 }
 
 async fn current_state_digest(engine: &Engine) -> String {
@@ -2992,6 +3056,7 @@ async fn main() -> std::io::Result<()> {
             .route("/state/export", web::get().to(handle_state_export))
             .route("/state/digest", web::get().to(handle_state_digest))
             .route("/tx/execute", web::post().to(handle_tx_execute))
+            .route("/tx/roundtrip", web::post().to(handle_tx_roundtrip))
             .route("/block/execute", web::post().to(handle_block_execute))
             .route("/chain/execute", web::post().to(handle_chain_execute))
     })
