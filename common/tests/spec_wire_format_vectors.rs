@@ -103,42 +103,11 @@ fn tx_type_name(data: &TransactionType) -> &'static str {
         TransactionType::InvokeContract(_) => "invoke_contract",
         TransactionType::DeployContract(_) => "deploy_contract",
         TransactionType::Energy(_) => "energy",
-        TransactionType::BindReferrer(_) => "bind_referrer",
-        TransactionType::BatchReferralReward(_) => "batch_referral_reward",
-        TransactionType::SetKyc(_) => "set_kyc",
-        TransactionType::RevokeKyc(_) => "revoke_kyc",
-        TransactionType::RenewKyc(_) => "renew_kyc",
-        TransactionType::TransferKyc(_) => "transfer_kyc",
-        TransactionType::AppealKyc(_) => "appeal_kyc",
-        TransactionType::BootstrapCommittee(_) => "bootstrap_committee",
-        TransactionType::RegisterCommittee(_) => "register_committee",
-        TransactionType::UpdateCommittee(_) => "update_committee",
-        TransactionType::EmergencySuspend(_) => "emergency_suspend",
         TransactionType::AgentAccount(_) => "agent_account",
         TransactionType::UnoTransfers(_) => "uno_transfers",
         TransactionType::ShieldTransfers(_) => "shield_transfers",
         TransactionType::UnshieldTransfers(_) => "unshield_transfers",
         TransactionType::RegisterName(_) => "register_name",
-        TransactionType::EphemeralMessage(_) => "ephemeral_message",
-        TransactionType::CreateEscrow(_) => "create_escrow",
-        TransactionType::DepositEscrow(_) => "deposit_escrow",
-        TransactionType::ReleaseEscrow(_) => "release_escrow",
-        TransactionType::RefundEscrow(_) => "refund_escrow",
-        TransactionType::ChallengeEscrow(_) => "challenge_escrow",
-        TransactionType::DisputeEscrow(_) => "dispute_escrow",
-        TransactionType::AppealEscrow(_) => "appeal_escrow",
-        TransactionType::SubmitVerdict(_) => "submit_verdict",
-        TransactionType::SubmitVerdictByJuror(_) => "submit_verdict_by_juror",
-        TransactionType::CommitArbitrationOpen(_) => "commit_arbitration_open",
-        TransactionType::CommitVoteRequest(_) => "commit_vote_request",
-        TransactionType::CommitSelectionCommitment(_) => "commit_selection_commitment",
-        TransactionType::CommitJurorVote(_) => "commit_juror_vote",
-        TransactionType::RegisterArbiter(_) => "register_arbiter",
-        TransactionType::UpdateArbiter(_) => "update_arbiter",
-        TransactionType::SlashArbiter(_) => "slash_arbiter",
-        TransactionType::RequestArbiterExit(_) => "request_arbiter_exit",
-        TransactionType::WithdrawArbiterStake(_) => "withdraw_arbiter_stake",
-        TransactionType::CancelArbiterExit(_) => "cancel_arbiter_exit",
     }
 }
 
@@ -150,9 +119,52 @@ fn spec_wire_format_vectors_roundtrip_and_headers() {
     let raw = fs::read_to_string(&path).expect("read wire_format.json");
     let fixture: WireFormatFixture = serde_json::from_str(&raw).expect("parse wire_format.json");
 
+    // TX types removed during codebase slimdown now return InvalidValue.
+    // Skip vectors whose tx_type is no longer supported.
+    let removed_types: &[&str] = &[
+        "ephemeral_message",
+        "bind_referrer",
+        "batch_referral_reward",
+        "create_escrow",
+        "deposit_escrow",
+        "release_escrow",
+        "refund_escrow",
+        "challenge_escrow",
+        "dispute_escrow",
+        "appeal_escrow",
+        "submit_verdict",
+        "submit_verdict_by_juror",
+        "register_arbiter",
+        "update_arbiter",
+        "slash_arbiter",
+        "request_arbiter_exit",
+        "withdraw_arbiter_stake",
+        "cancel_arbiter_exit",
+        "commit_arbitration_open",
+        "commit_vote_request",
+        "commit_selection_commitment",
+        "commit_juror_vote",
+        "set_kyc",
+        "revoke_kyc",
+        "renew_kyc",
+        "transfer_kyc",
+        "appeal_kyc",
+        "bootstrap_committee",
+        "register_committee",
+        "update_committee",
+        "emergency_suspend",
+    ];
+
     let mut decode_failures: Vec<(String, String)> = Vec::new();
 
     for v in fixture.vectors {
+        // Skip vectors for removed TX types
+        if removed_types
+            .iter()
+            .any(|prefix| v.name.starts_with(prefix))
+        {
+            continue;
+        }
         let expected_hex = v.expected_hex.trim().to_ascii_lowercase();
         let bytes = hex::decode(&expected_hex)
             .unwrap_or_else(|e| panic!("{}: invalid hex in expected_hex: {e}", v.name));

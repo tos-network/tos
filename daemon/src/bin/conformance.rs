@@ -12,29 +12,17 @@ use tos_common::account::{
     AgentAccountMeta, EnergyResource, FreezeDuration, FreezeRecord, PendingUnfreeze,
     VersionedBalance, VersionedNonce,
 };
-use tos_common::arbitration::{
-    ArbiterAccount, ArbiterStatus, ArbitrationRequestKey, ArbitrationRoundKey, ExpertiseDomain,
-};
 use tos_common::asset::{AssetData, VersionedAssetData};
 use tos_common::block::{Block, BlockHeader, EXTRA_NONCE_SIZE};
 use tos_common::config::{
     COIN_DECIMALS, COIN_VALUE, MAXIMUM_SUPPLY, MAX_GAS_USAGE_PER_TX, TOS_ASSET, UNO_ASSET,
 };
 use tos_common::crypto::{hash as blake3_hash, Hash, Hashable, PublicKey, Signature};
-use tos_common::escrow::{
-    AppealInfo, ArbitrationConfig, ArbitrationMode, DisputeInfo, EscrowAccount, EscrowState,
-};
-use tos_common::kyc::{
-    CommitteeMember, CommitteeStatus, KycData, KycRegion, KycStatus, MemberRole, MemberStatus,
-    SecurityCommittee,
-};
 use tos_common::network::Network;
-use tos_common::referral::ReferralRecord;
 use tos_common::serializer::{Reader, ReaderError, Serializer};
 use tos_common::transaction::{
-    extra_data::UnknownExtraDataFormat, CommitArbitrationOpenPayload,
-    CommitSelectionCommitmentPayload, CommitVoteRequestPayload, FeeType, Reference, Transaction,
-    TransactionType, TxVersion, MAX_TRANSFER_COUNT,
+    extra_data::UnknownExtraDataFormat, FeeType, Reference, Transaction, TransactionType,
+    TxVersion, MAX_TRANSFER_COUNT,
 };
 
 use tos_common::crypto::elgamal::KeyPair;
@@ -50,10 +38,9 @@ use tos_daemon::core::genesis::{
 use tos_daemon::core::state::ApplicableChainState;
 use tos_daemon::core::storage::rocksdb::RocksStorage;
 use tos_daemon::core::storage::{
-    AccountProvider, AgentAccountProvider, ArbiterProvider, ArbitrationCommitProvider,
-    AssetProvider, BalanceProvider, CommitteeProvider, ContractProvider, DagOrderProvider,
-    DifficultyProvider, EnergyProvider, EscrowProvider, KycProvider, NonceProvider,
-    ReferralProvider, TipsProvider, TnsProvider, VersionedContract,
+    AccountProvider, AgentAccountProvider, AssetProvider, BalanceProvider, ContractProvider,
+    DagOrderProvider, DifficultyProvider, EnergyProvider, NonceProvider, TipsProvider, TnsProvider,
+    VersionedContract,
 };
 use tos_daemon::vrf::WrappedMinerSecret;
 
@@ -91,200 +78,6 @@ struct AccountState {
 // --- Domain data JSON wrapper structs ---
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
-struct EscrowEntry {
-    id: String,
-    task_id: String,
-    payer: String,
-    payee: String,
-    #[serde(default)]
-    amount: u64,
-    #[serde(default)]
-    total_amount: u64,
-    #[serde(default)]
-    released_amount: u64,
-    #[serde(default)]
-    refunded_amount: u64,
-    #[serde(default)]
-    challenge_deposit: u64,
-    #[serde(default)]
-    asset: String,
-    #[serde(default = "default_escrow_state")]
-    state: String,
-    #[serde(default)]
-    timeout_blocks: u64,
-    #[serde(default)]
-    challenge_window: u64,
-    #[serde(default)]
-    challenge_deposit_bps: u16,
-    #[serde(default)]
-    optimistic_release: bool,
-    #[serde(default)]
-    created_at: u64,
-    #[serde(default)]
-    updated_at: u64,
-    #[serde(default)]
-    timeout_at: u64,
-    #[serde(default)]
-    arbitration_config: Option<ArbitrationConfigEntry>,
-    #[serde(default)]
-    release_requested_at: Option<u64>,
-    #[serde(default)]
-    pending_release_amount: Option<u64>,
-    #[serde(default)]
-    dispute: Option<DisputeInfoEntry>,
-    #[serde(default)]
-    dispute_id: Option<String>,
-    #[serde(default)]
-    dispute_round: Option<u32>,
-    #[serde(default)]
-    appeal: Option<AppealInfoEntry>,
-}
-
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
-struct ArbitrationConfigEntry {
-    #[serde(default = "default_single")]
-    mode: String,
-    #[serde(default)]
-    arbiters: Vec<String>,
-    #[serde(default)]
-    threshold: Option<u8>,
-    #[serde(default)]
-    fee_amount: u64,
-    #[serde(default)]
-    allow_appeal: bool,
-}
-
-fn default_single() -> String {
-    "single".to_string()
-}
-
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
-struct DisputeInfoEntry {
-    #[serde(default)]
-    initiator: String,
-    #[serde(default)]
-    reason: String,
-    #[serde(default)]
-    evidence_hash: Option<String>,
-    #[serde(default)]
-    disputed_at: u64,
-    #[serde(default)]
-    deadline: u64,
-}
-
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
-struct AppealInfoEntry {
-    #[serde(default)]
-    appellant: String,
-    #[serde(default)]
-    reason: String,
-    #[serde(default)]
-    new_evidence_hash: Option<String>,
-    #[serde(default)]
-    deposit: u64,
-    #[serde(default)]
-    appealed_at: u64,
-    #[serde(default)]
-    deadline: u64,
-    #[serde(default)]
-    threshold: u8,
-}
-
-fn default_escrow_state() -> String {
-    "created".to_string()
-}
-
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
-struct ArbiterEntry {
-    public_key: String,
-    #[serde(default)]
-    name: String,
-    #[serde(default = "default_active")]
-    status: String,
-    #[serde(default)]
-    expertise: Vec<u8>,
-    #[serde(default)]
-    stake_amount: u64,
-    #[serde(default)]
-    fee_basis_points: u16,
-    #[serde(default)]
-    min_escrow_value: u64,
-    #[serde(default)]
-    max_escrow_value: u64,
-    #[serde(default)]
-    reputation_score: u16,
-    #[serde(default)]
-    total_cases: u64,
-    #[serde(default)]
-    active_cases: u64,
-    #[serde(default)]
-    registered_at: u64,
-    #[serde(default)]
-    total_slashed: u64,
-}
-
-fn default_active() -> String {
-    "active".to_string()
-}
-
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
-struct KycEntry {
-    address: String,
-    #[serde(default)]
-    level: u16,
-    #[serde(default = "default_active")]
-    status: String,
-    #[serde(default)]
-    verified_at: u64,
-    #[serde(default)]
-    data_hash: String,
-    #[serde(default)]
-    committee_id: String,
-}
-
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
-struct CommitteeEntry {
-    id: String,
-    #[serde(default)]
-    region: u8,
-    #[serde(default)]
-    name: String,
-    #[serde(default)]
-    members: Vec<CommitteeMemberEntry>,
-    #[serde(default = "default_one")]
-    threshold: u8,
-    #[serde(default)]
-    kyc_threshold: u8,
-    #[serde(default)]
-    max_kyc_level: u16,
-    #[serde(default = "default_active")]
-    status: String,
-    #[serde(default)]
-    parent_id: Option<String>,
-    #[serde(default)]
-    created_at: u64,
-    #[serde(default)]
-    updated_at: u64,
-}
-
-fn default_one() -> u8 {
-    1
-}
-
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
-struct CommitteeMemberEntry {
-    public_key: String,
-    #[serde(default)]
-    name: String,
-    #[serde(default)]
-    role: u8,
-    #[serde(default)]
-    status: u8,
-    #[serde(default)]
-    joined_at: u64,
-}
-
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 struct AgentAccountEntry {
     address: String,
     owner: String,
@@ -299,16 +92,6 @@ struct AgentAccountEntry {
 struct TnsNameEntry {
     name: String,
     owner: String,
-}
-
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
-struct ReferralEntry {
-    user: String,
-    referrer: String,
-    #[serde(default)]
-    bound_at_topoheight: u64,
-    #[serde(default)]
-    bound_timestamp: u64,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -348,40 +131,6 @@ struct PendingUnfreezeEntry {
     expire_height: u64,
 }
 
-// --- Arbitration commit entries ---
-
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
-struct ArbitrationCommitOpenEntry {
-    escrow_id: String,
-    dispute_id: String,
-    #[serde(default)]
-    round: u32,
-    request_id: String,
-    arbitration_open_hash: String,
-    #[serde(default)]
-    opener_signature: String,
-    #[serde(default)]
-    arbitration_open_payload: Vec<u8>,
-}
-
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
-struct ArbitrationCommitVoteRequestEntry {
-    request_id: String,
-    vote_request_hash: String,
-    #[serde(default)]
-    coordinator_signature: String,
-    #[serde(default)]
-    vote_request_payload: Vec<u8>,
-}
-
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
-struct ArbitrationCommitSelectionEntry {
-    request_id: String,
-    selection_commitment_id: String,
-    #[serde(default)]
-    selection_commitment_payload: Vec<u8>,
-}
-
 // Contract entry for pre-loading deployed contracts
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 struct ContractEntry {
@@ -402,27 +151,11 @@ struct PreState {
     #[serde(default)]
     accounts: Vec<AccountState>,
     #[serde(default)]
-    escrows: Vec<EscrowEntry>,
-    #[serde(default)]
-    arbiters: Vec<ArbiterEntry>,
-    #[serde(default)]
-    kyc_data: Vec<KycEntry>,
-    #[serde(default)]
-    committees: Vec<CommitteeEntry>,
-    #[serde(default)]
     agent_accounts: Vec<AgentAccountEntry>,
     #[serde(default)]
     tns_names: Vec<TnsNameEntry>,
     #[serde(default)]
-    referrals: Vec<ReferralEntry>,
-    #[serde(default)]
     energy_resources: Vec<EnergyResourceEntry>,
-    #[serde(default)]
-    arbitration_commit_opens: Vec<ArbitrationCommitOpenEntry>,
-    #[serde(default)]
-    arbitration_commit_vote_requests: Vec<ArbitrationCommitVoteRequestEntry>,
-    #[serde(default)]
-    arbitration_commit_selections: Vec<ArbitrationCommitSelectionEntry>,
     #[serde(default)]
     contracts: Vec<ContractEntry>,
 }
@@ -662,291 +395,6 @@ fn to_hash_or_zero(hex_str: &str) -> Result<Hash, String> {
     Hash::from_str(hex_str).map_err(|_| format!("invalid hash hex: {}", hex_str))
 }
 
-fn parse_escrow_state(s: &str) -> Result<EscrowState, String> {
-    match s {
-        "created" => Ok(EscrowState::Created),
-        "funded" => Ok(EscrowState::Funded),
-        "pending_release" | "pending-release" => Ok(EscrowState::PendingRelease),
-        "challenged" => Ok(EscrowState::Challenged),
-        "released" => Ok(EscrowState::Released),
-        "refunded" => Ok(EscrowState::Refunded),
-        "resolved" => Ok(EscrowState::Resolved),
-        "expired" => Ok(EscrowState::Expired),
-        _ => Err(format!("invalid escrow state: {}", s)),
-    }
-}
-
-fn parse_arbitration_mode(s: &str) -> Result<ArbitrationMode, String> {
-    match s {
-        "none" => Ok(ArbitrationMode::None),
-        "single" => Ok(ArbitrationMode::Single),
-        "committee" => Ok(ArbitrationMode::Committee),
-        "dao-governance" => Ok(ArbitrationMode::DaoGovernance),
-        _ => Err(format!("invalid arbitration mode: {}", s)),
-    }
-}
-
-fn parse_arbitration_config_entry(
-    entry: &ArbitrationConfigEntry,
-) -> Result<ArbitrationConfig, String> {
-    let mode = parse_arbitration_mode(&entry.mode)?;
-    let arbiters: Result<Vec<PublicKey>, String> =
-        entry.arbiters.iter().map(|s| to_public_key(s)).collect();
-    Ok(ArbitrationConfig {
-        mode,
-        arbiters: arbiters?,
-        threshold: entry.threshold,
-        fee_amount: entry.fee_amount,
-        allow_appeal: entry.allow_appeal,
-    })
-}
-
-fn parse_dispute_info_entry(entry: &DisputeInfoEntry) -> Result<DisputeInfo, String> {
-    let initiator = to_public_key(&entry.initiator)?;
-    let evidence_hash = match &entry.evidence_hash {
-        Some(h) if !h.is_empty() => Some(to_hash_or_zero(h)?),
-        _ => None,
-    };
-    Ok(DisputeInfo {
-        initiator,
-        reason: entry.reason.clone(),
-        evidence_hash,
-        disputed_at: entry.disputed_at,
-        deadline: entry.deadline,
-    })
-}
-
-fn parse_appeal_info_entry(entry: &AppealInfoEntry) -> Result<AppealInfo, String> {
-    let appellant = to_public_key(&entry.appellant)?;
-    let new_evidence_hash = match &entry.new_evidence_hash {
-        Some(h) if !h.is_empty() => Some(to_hash_or_zero(h)?),
-        _ => None,
-    };
-    Ok(AppealInfo {
-        appellant,
-        reason: entry.reason.clone(),
-        new_evidence_hash,
-        deposit: entry.deposit,
-        appealed_at: entry.appealed_at,
-        deadline: entry.deadline,
-        votes: Vec::new(),
-        committee: Vec::new(),
-        threshold: entry.threshold,
-    })
-}
-
-fn parse_escrow_entry(entry: &EscrowEntry) -> Result<EscrowAccount, String> {
-    let id = to_hash_or_zero(&entry.id)?;
-    let payer = to_public_key(&entry.payer)?;
-    let payee = to_public_key(&entry.payee)?;
-    let asset = if entry.asset.is_empty() {
-        TOS_ASSET
-    } else {
-        to_hash_or_zero(&entry.asset)?
-    };
-    let state = parse_escrow_state(&entry.state)?;
-    let arbitration_config = match &entry.arbitration_config {
-        Some(ac) => Some(parse_arbitration_config_entry(ac)?),
-        None => None,
-    };
-    let dispute = match &entry.dispute {
-        Some(d) => Some(parse_dispute_info_entry(d)?),
-        None => None,
-    };
-    let appeal = match &entry.appeal {
-        Some(a) => Some(parse_appeal_info_entry(a)?),
-        None => None,
-    };
-    let dispute_id = match &entry.dispute_id {
-        Some(h) if !h.is_empty() => Some(to_hash_or_zero(h)?),
-        _ => None,
-    };
-    Ok(EscrowAccount {
-        id,
-        task_id: entry.task_id.clone(),
-        payer,
-        payee,
-        amount: entry.amount,
-        total_amount: entry.total_amount,
-        released_amount: entry.released_amount,
-        refunded_amount: entry.refunded_amount,
-        pending_release_amount: entry.pending_release_amount,
-        challenge_deposit: entry.challenge_deposit,
-        asset,
-        state,
-        dispute_id,
-        dispute_round: entry.dispute_round,
-        challenge_window: entry.challenge_window,
-        challenge_deposit_bps: entry.challenge_deposit_bps,
-        optimistic_release: entry.optimistic_release,
-        release_requested_at: entry.release_requested_at,
-        created_at: entry.created_at,
-        updated_at: entry.updated_at,
-        timeout_at: entry.timeout_at,
-        timeout_blocks: entry.timeout_blocks,
-        arbitration_config,
-        dispute,
-        appeal,
-        resolutions: Vec::new(),
-    })
-}
-
-fn parse_arbiter_status(s: &str) -> Result<ArbiterStatus, String> {
-    match s {
-        "active" => Ok(ArbiterStatus::Active),
-        "suspended" => Ok(ArbiterStatus::Suspended),
-        "exiting" => Ok(ArbiterStatus::Exiting),
-        "removed" => Ok(ArbiterStatus::Removed),
-        _ => Err(format!("invalid arbiter status: {}", s)),
-    }
-}
-
-fn parse_expertise_domain(v: u8) -> Result<ExpertiseDomain, String> {
-    match v {
-        0 => Ok(ExpertiseDomain::General),
-        1 => Ok(ExpertiseDomain::AIAgent),
-        2 => Ok(ExpertiseDomain::SmartContract),
-        3 => Ok(ExpertiseDomain::Payment),
-        4 => Ok(ExpertiseDomain::DeFi),
-        5 => Ok(ExpertiseDomain::Governance),
-        6 => Ok(ExpertiseDomain::Identity),
-        7 => Ok(ExpertiseDomain::Data),
-        8 => Ok(ExpertiseDomain::Security),
-        9 => Ok(ExpertiseDomain::Gaming),
-        10 => Ok(ExpertiseDomain::DataService),
-        11 => Ok(ExpertiseDomain::DigitalAsset),
-        12 => Ok(ExpertiseDomain::CrossChain),
-        13 => Ok(ExpertiseDomain::Nft),
-        _ => Err(format!("invalid expertise domain: {}", v)),
-    }
-}
-
-fn parse_arbiter_entry(entry: &ArbiterEntry) -> Result<ArbiterAccount, String> {
-    let public_key = to_public_key(&entry.public_key)?;
-    let status = parse_arbiter_status(&entry.status)?;
-    let expertise: Result<Vec<ExpertiseDomain>, String> = entry
-        .expertise
-        .iter()
-        .map(|&v| parse_expertise_domain(v))
-        .collect();
-    Ok(ArbiterAccount {
-        public_key,
-        name: entry.name.clone(),
-        status,
-        expertise: expertise?,
-        stake_amount: entry.stake_amount,
-        fee_basis_points: entry.fee_basis_points,
-        min_escrow_value: entry.min_escrow_value,
-        max_escrow_value: entry.max_escrow_value,
-        reputation_score: entry.reputation_score,
-        total_cases: entry.total_cases,
-        cases_overturned: 0,
-        registered_at: entry.registered_at,
-        last_active_at: 0,
-        pending_withdrawal: 0,
-        deactivated_at: None,
-        active_cases: entry.active_cases,
-        total_slashed: entry.total_slashed,
-        slash_count: 0,
-    })
-}
-
-fn parse_kyc_status(s: &str) -> Result<KycStatus, String> {
-    match s {
-        "active" => Ok(KycStatus::Active),
-        "revoked" => Ok(KycStatus::Revoked),
-        "suspended" => Ok(KycStatus::Suspended),
-        "expired" => Ok(KycStatus::Expired),
-        _ => Err(format!("invalid kyc status: {}", s)),
-    }
-}
-
-fn parse_kyc_entry(entry: &KycEntry) -> Result<(PublicKey, KycData, Hash), String> {
-    let pubkey = to_public_key(&entry.address)?;
-    let status = parse_kyc_status(&entry.status)?;
-    let data_hash = to_hash_or_zero(&entry.data_hash)?;
-    let committee_id = to_hash_or_zero(&entry.committee_id)?;
-    let mut kyc = KycData::new(entry.level, entry.verified_at, data_hash);
-    kyc.status = status;
-    Ok((pubkey, kyc, committee_id))
-}
-
-fn parse_kyc_region(v: u8) -> KycRegion {
-    match v {
-        1 => KycRegion::AsiaPacific,
-        2 => KycRegion::Europe,
-        3 => KycRegion::NorthAmerica,
-        4 => KycRegion::LatinAmerica,
-        5 => KycRegion::MiddleEast,
-        255 => KycRegion::Global,
-        _ => KycRegion::Unspecified,
-    }
-}
-
-fn parse_member_role(v: u8) -> MemberRole {
-    MemberRole::from_u8(v).unwrap_or(MemberRole::Member)
-}
-
-fn parse_member_status(v: u8) -> MemberStatus {
-    MemberStatus::from_u8(v).unwrap_or(MemberStatus::Active)
-}
-
-fn parse_committee_status(s: &str) -> CommitteeStatus {
-    match s {
-        "active" => CommitteeStatus::Active,
-        "suspended" => CommitteeStatus::Suspended,
-        "dissolved" | "archived" => CommitteeStatus::Dissolved,
-        _ => CommitteeStatus::Active,
-    }
-}
-
-fn parse_committee_entry(entry: &CommitteeEntry) -> Result<(Hash, SecurityCommittee), String> {
-    let id = to_hash_or_zero(&entry.id)?;
-    let region = parse_kyc_region(entry.region);
-    let members: Vec<CommitteeMember> = entry
-        .members
-        .iter()
-        .map(|m| -> Result<CommitteeMember, String> {
-            let pk = to_public_key(&m.public_key)?;
-            Ok(CommitteeMember {
-                public_key: pk,
-                name: if m.name.is_empty() {
-                    None
-                } else {
-                    Some(m.name.clone())
-                },
-                role: parse_member_role(m.role),
-                status: parse_member_status(m.status),
-                joined_at: m.joined_at,
-                last_active_at: 0,
-            })
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-
-    let parent_id = match &entry.parent_id {
-        Some(p) if !p.is_empty() => Some(to_hash_or_zero(p)?),
-        _ => None,
-    };
-
-    let status = parse_committee_status(&entry.status);
-
-    let mut committee = SecurityCommittee::new(
-        id.clone(),
-        region,
-        entry.name.clone(),
-        members,
-        entry.threshold,
-        entry.max_kyc_level,
-        parent_id,
-        entry.created_at,
-    );
-    committee.kyc_threshold = entry.kyc_threshold;
-    committee.status = status;
-    committee.updated_at = entry.updated_at;
-
-    Ok((id, committee))
-}
-
 fn parse_agent_account_entry(
     entry: &AgentAccountEntry,
 ) -> Result<(PublicKey, AgentAccountMeta), String> {
@@ -971,19 +419,6 @@ fn parse_tns_entry(entry: &TnsNameEntry) -> Result<(Hash, PublicKey), String> {
     let name_hash = blake3_hash(entry.name.as_bytes());
     let owner = to_public_key(&entry.owner)?;
     Ok((name_hash, owner))
-}
-
-fn parse_referral_entry(entry: &ReferralEntry) -> Result<(PublicKey, ReferralRecord), String> {
-    let user = to_public_key(&entry.user)?;
-    let referrer = to_public_key(&entry.referrer)?;
-    let record = ReferralRecord::new(
-        user.clone(),
-        Some(referrer),
-        entry.bound_at_topoheight,
-        Hash::zero(),
-        entry.bound_timestamp,
-    );
-    Ok((user, record))
 }
 
 fn parse_energy_resource_entry(
@@ -1017,59 +452,6 @@ fn parse_energy_resource_entry(
         });
     }
     Ok((pubkey, resource))
-}
-
-fn parse_commit_open_entry(
-    entry: &ArbitrationCommitOpenEntry,
-) -> Result<CommitArbitrationOpenPayload, String> {
-    let escrow_id = to_hash_or_zero(&entry.escrow_id)?;
-    let dispute_id = to_hash_or_zero(&entry.dispute_id)?;
-    let request_id = to_hash_or_zero(&entry.request_id)?;
-    let arbitration_open_hash = to_hash_or_zero(&entry.arbitration_open_hash)?;
-    let opener_signature = if entry.opener_signature.is_empty() {
-        Signature::from_hex(&"00".repeat(64)).map_err(|e| e.to_string())?
-    } else {
-        Signature::from_hex(&entry.opener_signature).map_err(|e| e.to_string())?
-    };
-    Ok(CommitArbitrationOpenPayload {
-        escrow_id,
-        dispute_id,
-        round: entry.round,
-        request_id,
-        arbitration_open_hash,
-        opener_signature,
-        arbitration_open_payload: entry.arbitration_open_payload.clone(),
-    })
-}
-
-fn parse_commit_vote_request_entry(
-    entry: &ArbitrationCommitVoteRequestEntry,
-) -> Result<CommitVoteRequestPayload, String> {
-    let request_id = to_hash_or_zero(&entry.request_id)?;
-    let vote_request_hash = to_hash_or_zero(&entry.vote_request_hash)?;
-    let coordinator_signature = if entry.coordinator_signature.is_empty() {
-        Signature::from_hex(&"00".repeat(64)).map_err(|e| e.to_string())?
-    } else {
-        Signature::from_hex(&entry.coordinator_signature).map_err(|e| e.to_string())?
-    };
-    Ok(CommitVoteRequestPayload {
-        request_id,
-        vote_request_hash,
-        coordinator_signature,
-        vote_request_payload: entry.vote_request_payload.clone(),
-    })
-}
-
-fn parse_commit_selection_entry(
-    entry: &ArbitrationCommitSelectionEntry,
-) -> Result<CommitSelectionCommitmentPayload, String> {
-    let request_id = to_hash_or_zero(&entry.request_id)?;
-    let selection_commitment_id = to_hash_or_zero(&entry.selection_commitment_id)?;
-    Ok(CommitSelectionCommitmentPayload {
-        request_id,
-        selection_commitment_id,
-        selection_commitment_payload: entry.selection_commitment_payload.clone(),
-    })
 }
 
 fn compute_state_digest(state: &PreState) -> String {
@@ -1145,10 +527,7 @@ fn map_error_code(err: &BlockchainError) -> u16 {
         | BlockchainError::DepositNotFound => 0x0107,
         BlockchainError::InvalidTxFee(_, _) | BlockchainError::FeesToLowToOverride(_, _) => 0x0301,
         BlockchainError::InvalidTxVersion => 0x0101,
-        BlockchainError::InvalidTransactionToSender(_)
-        | BlockchainError::ReferralSelfReferral
-        | BlockchainError::NoSenderOutput => 0x0409,
-        BlockchainError::ReferralAlreadyBound => 0x0408,
+        BlockchainError::InvalidTransactionToSender(_) | BlockchainError::NoSenderOutput => 0x0409,
         BlockchainError::TxTooBig(_, _) => 0x0100,
         BlockchainError::InvalidReferenceHash
         | BlockchainError::InvalidReferenceTopoheight(_, _)
@@ -1713,60 +1092,6 @@ async fn handle_state_load(state: web::Data<AppState>, body: web::Json<PreState>
                 }
             }
 
-            // Load domain data: escrows
-            for entry in &pre_state.escrows {
-                match parse_escrow_entry(entry) {
-                    Ok(escrow) => {
-                        let _ = storage.set_escrow(&escrow).await;
-                    }
-                    Err(err) => {
-                        return HttpResponse::BadRequest()
-                            .json(json!({ "success": false, "error": err }));
-                    }
-                }
-            }
-
-            // Load domain data: arbiters
-            for entry in &pre_state.arbiters {
-                match parse_arbiter_entry(entry) {
-                    Ok(arbiter) => {
-                        let _ = storage.set_arbiter(&arbiter).await;
-                    }
-                    Err(err) => {
-                        return HttpResponse::BadRequest()
-                            .json(json!({ "success": false, "error": err }));
-                    }
-                }
-            }
-
-            // Load domain data: KYC (use set_kyc to write both KycData and KycMetadata)
-            for entry in &pre_state.kyc_data {
-                match parse_kyc_entry(entry) {
-                    Ok((pubkey, kyc, committee_id)) => {
-                        let _ = storage
-                            .set_kyc(&pubkey, kyc, &committee_id, 0, &Hash::zero())
-                            .await;
-                    }
-                    Err(err) => {
-                        return HttpResponse::BadRequest()
-                            .json(json!({ "success": false, "error": err }));
-                    }
-                }
-            }
-
-            // Load domain data: committees
-            for entry in &pre_state.committees {
-                match parse_committee_entry(entry) {
-                    Ok((id, committee)) => {
-                        let _ = storage.import_committee(&id, &committee).await;
-                    }
-                    Err(err) => {
-                        return HttpResponse::BadRequest()
-                            .json(json!({ "success": false, "error": err }));
-                    }
-                }
-            }
-
             // Load domain data: agent accounts
             for entry in &pre_state.agent_accounts {
                 match parse_agent_account_entry(entry) {
@@ -1793,82 +1118,12 @@ async fn handle_state_load(state: web::Data<AppState>, body: web::Json<PreState>
                 }
             }
 
-            // Load domain data: referrals
-            for entry in &pre_state.referrals {
-                match parse_referral_entry(entry) {
-                    Ok((user, record)) => {
-                        let _ = storage.import_referral_record(&user, &record).await;
-                    }
-                    Err(err) => {
-                        return HttpResponse::BadRequest()
-                            .json(json!({ "success": false, "error": err }));
-                    }
-                }
-            }
-
             // Load domain data: energy resources (explicit entries)
             for entry in &pre_state.energy_resources {
                 match parse_energy_resource_entry(entry) {
                     Ok((pubkey, resource)) => {
                         let _ = storage
                             .set_energy_resource(&pubkey, topoheight, &resource)
-                            .await;
-                    }
-                    Err(err) => {
-                        return HttpResponse::BadRequest()
-                            .json(json!({ "success": false, "error": err }));
-                    }
-                }
-            }
-
-            // Load domain data: arbitration commit opens
-            for entry in &pre_state.arbitration_commit_opens {
-                match parse_commit_open_entry(entry) {
-                    Ok(payload) => {
-                        let round_key = ArbitrationRoundKey {
-                            escrow_id: payload.escrow_id.clone(),
-                            dispute_id: payload.dispute_id.clone(),
-                            round: payload.round,
-                        };
-                        let request_key = ArbitrationRequestKey {
-                            request_id: payload.request_id.clone(),
-                        };
-                        let _ = storage
-                            .set_commit_arbitration_open(&round_key, &request_key, &payload)
-                            .await;
-                    }
-                    Err(err) => {
-                        return HttpResponse::BadRequest()
-                            .json(json!({ "success": false, "error": err }));
-                    }
-                }
-            }
-
-            // Load domain data: arbitration commit vote requests
-            for entry in &pre_state.arbitration_commit_vote_requests {
-                match parse_commit_vote_request_entry(entry) {
-                    Ok(payload) => {
-                        let key = ArbitrationRequestKey {
-                            request_id: payload.request_id.clone(),
-                        };
-                        let _ = storage.set_commit_vote_request(&key, &payload).await;
-                    }
-                    Err(err) => {
-                        return HttpResponse::BadRequest()
-                            .json(json!({ "success": false, "error": err }));
-                    }
-                }
-            }
-
-            // Load domain data: arbitration commit selection commitments
-            for entry in &pre_state.arbitration_commit_selections {
-                match parse_commit_selection_entry(entry) {
-                    Ok(payload) => {
-                        let key = ArbitrationRequestKey {
-                            request_id: payload.request_id.clone(),
-                        };
-                        let _ = storage
-                            .set_commit_selection_commitment(&key, &payload)
                             .await;
                     }
                     Err(err) => {
@@ -2385,149 +1640,6 @@ async fn handle_tx_execute(
                 }
             };
             if let Some((code, msg)) = invoke_err {
-                return HttpResponse::Ok().json(ExecResult {
-                    success: false,
-                    error_code: code,
-                    state_digest: current_state_digest(&engine).await,
-                    error: Some(msg),
-                });
-            }
-
-            let export = build_export(&engine).await;
-            let digest = compute_state_digest(&export);
-            return HttpResponse::Ok().json(ExecResult {
-                success: true,
-                error_code: 0,
-                state_digest: digest,
-                error: None,
-            });
-        }
-        TransactionType::BatchReferralReward(payload) => {
-            // Spec: sender must equal from_user.
-            let from_user = payload.get_from_user().as_bytes();
-            if from_user != tx_for_apply.get_source().as_bytes() {
-                return HttpResponse::Ok().json(ExecResult {
-                    success: false,
-                    error_code: 0x0200, // UNAUTHORIZED
-                    state_digest: current_state_digest(&engine).await,
-                    error: Some("sender must be from_user".to_string()),
-                });
-            }
-            let total_amount = payload.get_total_amount();
-            if total_amount == 0 {
-                return HttpResponse::Ok().json(ExecResult {
-                    success: false,
-                    error_code: 0x0105, // INVALID_AMOUNT
-                    state_digest: current_state_digest(&engine).await,
-                    error: Some("total_amount must be > 0".to_string()),
-                });
-            }
-            if payload.get_ratios().len() != payload.get_levels() as usize {
-                return HttpResponse::Ok().json(ExecResult {
-                    success: false,
-                    error_code: 0x0107, // INVALID_PAYLOAD
-                    state_digest: current_state_digest(&engine).await,
-                    error: Some("ratios length must match levels".to_string()),
-                });
-            }
-            let ratio_sum: u32 = payload.get_ratios().iter().map(|&r| r as u32).sum();
-            if ratio_sum > 10_000 {
-                return HttpResponse::Ok().json(ExecResult {
-                    success: false,
-                    error_code: 0x0107, // INVALID_PAYLOAD
-                    state_digest: current_state_digest(&engine).await,
-                    error: Some("ratios sum exceeds 10000".to_string()),
-                });
-            }
-
-            // Require strict nonce (spec).
-            let sender_nonce = {
-                let storage = engine.blockchain.get_storage().read().await;
-                storage
-                    .get_last_nonce(tx_for_apply.get_source())
-                    .await
-                    .map(|(_, v)| v.get_nonce())
-                    .unwrap_or(0)
-            };
-            let tx_nonce = tx_for_apply.get_nonce();
-            if tx_nonce != sender_nonce {
-                return HttpResponse::Ok().json(ExecResult {
-                    success: false,
-                    error_code: if tx_nonce > sender_nonce {
-                        0x0111
-                    } else {
-                        0x0110
-                    },
-                    state_digest: current_state_digest(&engine).await,
-                    error: Some("nonce mismatch".to_string()),
-                });
-            }
-
-            // Apply: debit sender by total_amount; distribute to uplines; then deduct fee + bump nonce.
-            let referral_err: Option<(u16, String)> = {
-                let mut storage = engine.blockchain.get_storage().write().await;
-                let mut sender_balance = storage
-                    .get_last_balance(tx_for_apply.get_source(), &TOS_ASSET)
-                    .await
-                    .map(|(_, v)| v.get_balance())
-                    .unwrap_or(0);
-                // fee already pre-checked; now check reward amount coverage
-                if sender_balance < total_amount {
-                    Some((0x0300, "insufficient balance for reward".to_string()))
-                } else {
-                    sender_balance = sender_balance.saturating_sub(total_amount);
-
-                    // Traverse referral chain from from_user.
-                    let mut current = payload.get_from_user().clone();
-                    for &ratio in payload.get_ratios() {
-                        let rec = match storage.get_referral_record(&current).await {
-                            Ok(Some(r)) => r,
-                            _ => break,
-                        };
-                        let Some(referrer) = rec.referrer else { break };
-                        let reward =
-                            (total_amount as u128).saturating_mul(ratio as u128) / 10_000u128;
-                        if reward > 0 {
-                            // Only credit if referrer account exists in state.
-                            if let Ok((_, v)) =
-                                storage.get_last_balance(&referrer, &TOS_ASSET).await
-                            {
-                                let bal = v.get_balance();
-                                let vb =
-                                    VersionedBalance::new(bal.saturating_add(reward as u64), None);
-                                let _ = storage
-                                    .set_last_balance_to(
-                                        &referrer,
-                                        &TOS_ASSET,
-                                        next_topoheight,
-                                        &vb,
-                                    )
-                                    .await;
-                            }
-                        }
-                        current = referrer;
-                    }
-
-                    // Deduct fee and bump nonce on success (spec apply_tx semantics).
-                    sender_balance = sender_balance.saturating_sub(tx_for_apply.get_fee());
-                    let vb = VersionedBalance::new(sender_balance, None);
-                    let vn = VersionedNonce::new(sender_nonce.saturating_add(1), None);
-                    let _ = storage
-                        .set_last_balance_to(
-                            tx_for_apply.get_source(),
-                            &TOS_ASSET,
-                            next_topoheight,
-                            &vb,
-                        )
-                        .await;
-                    let _ = storage
-                        .set_last_nonce_to(tx_for_apply.get_source(), next_topoheight, &vn)
-                        .await;
-
-                    None
-                }
-            };
-            if let Some((code, msg)) = referral_err {
                 return HttpResponse::Ok().json(ExecResult {
                     success: false,
                     error_code: code,
@@ -3837,17 +2949,9 @@ async fn build_export(engine: &Engine) -> PreState {
         network_chain_id: engine.meta.network_chain_id,
         global_state: gs,
         accounts,
-        escrows: Vec::new(),
-        arbiters: Vec::new(),
-        kyc_data: Vec::new(),
-        committees: Vec::new(),
         agent_accounts: Vec::new(),
         tns_names: Vec::new(),
-        referrals: Vec::new(),
         energy_resources: Vec::new(),
-        arbitration_commit_opens: Vec::new(),
-        arbitration_commit_vote_requests: Vec::new(),
-        arbitration_commit_selections: Vec::new(),
         contracts,
     }
 }

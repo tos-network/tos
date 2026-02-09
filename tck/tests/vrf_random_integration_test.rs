@@ -78,7 +78,6 @@ async fn execute_vrf_contract(
         &tx_sender,
         &[],
         None,
-        None,
         Some(vrf_data),
         Some(miner_public_key),
     )

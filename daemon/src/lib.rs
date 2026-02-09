@@ -12,8 +12,6 @@
 
 extern crate log;
 
-#[cfg(feature = "a2a")]
-pub mod a2a;
 pub mod config;
 
 // VRF (Verifiable Random Function) module for block producers
@@ -24,7 +22,6 @@ pub mod vrf;
 pub mod discovery;
 
 pub mod core;
-pub mod escrow;
 pub mod p2p;
 #[cfg(feature = "rpc")]
 pub mod rpc;

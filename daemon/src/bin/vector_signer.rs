@@ -199,7 +199,7 @@ fn main() {
         .expect("transfer_success signature")
         .signature
         .clone();
-    if let Some(last) = invalid_sig.as_bytes().last().copied() {
+    if let Some(_last) = invalid_sig.as_bytes().last().copied() {
         let mut bytes = hex::decode(invalid_sig).unwrap();
         let last_idx = bytes.len() - 1;
         bytes[last_idx] ^= 0x01;

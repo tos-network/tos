@@ -57,12 +57,6 @@ bincode = "1.3"
 # Common dependencies
 actix-web = { workspace = true }
 actix-ws = "0.3.0"
-tonic = "0.12"
-tonic-reflection = "0.12"
-prost = "0.13"
-prost-types = "0.13"
-tokio-stream = "0.1"
-base64 = "0.22"
 strum = { workspace = true }
 clap = { workspace = true }
 lru = { workspace = true }
@@ -107,15 +101,13 @@ rustls = { workspace = true }
 rcgen = "0.13"
 
 [build-dependencies]
-tonic-build = "0.12"
 
 [features]
-default = ["rocksdb", "rpc", "a2a"]
+default = ["rocksdb", "rpc"]
 rocksdb = []
 # Test utilities feature - exposes test-only functions for external test crates
 testutils = []
 sled = []
-a2a = []
 rpc = []
 
 [[bin]]

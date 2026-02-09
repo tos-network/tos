@@ -1,6 +1,5 @@
 use crate::{
-    asset::AssetData, context::NoOpBuildHasher, contract_asset::TokenKey,
-    contract_asset::TokenValue, crypto::Hash, versioned_type::VersionedState,
+    asset::AssetData, context::NoOpBuildHasher, crypto::Hash, versioned_type::VersionedState,
 };
 use std::collections::HashMap;
 use tos_kernel::ValueCell;
@@ -23,8 +22,6 @@ pub struct ContractCache {
     // Those already present are loaded due to the deposits to be added
     // If its none, it means we don't have any balance yet
     pub balances: HashMap<Hash, Option<(VersionedState, u64)>>,
-    // Contract-scoped token state (allowance/locks/roles/etc.)
-    pub tokens: HashMap<TokenKey, (VersionedState, TokenValue)>,
     // Memory Storage
     // This is shared between all executions of the same contract
     pub memory: HashMap<ValueCell, ValueCell>,
@@ -43,7 +40,6 @@ impl ContractCache {
         Self {
             storage: HashMap::new(),
             balances: HashMap::new(),
-            tokens: HashMap::new(),
             memory: HashMap::new(),
             events: HashMap::default(),
         }
@@ -64,9 +60,8 @@ impl ContractCache {
     /// # Safety
     ///
     /// Callers MUST only call this when execution succeeded (exit_code == Some(0)).
-    pub fn merge_overlay_storage_and_tokens(&mut self, other: Self) {
+    pub fn merge_overlay_storage(&mut self, other: Self) {
         self.storage.extend(other.storage);
-        self.tokens.extend(other.tokens);
         // NOTE: Do NOT merge balances/events/memory here.
         // - balances: already in chain_state.cache from deposits
         // - events: saved via add_contract_events() separately

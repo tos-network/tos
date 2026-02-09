@@ -116,7 +116,7 @@ async fn test_agent_account_rpc_getters() {
     }
 
     let mut handler = RPCHandler::new(blockchain);
-    tos_daemon::rpc::rpc::register_methods(&mut handler, false, false, false);
+    tos_daemon::rpc::rpc::register_methods(&mut handler, false, false);
 
     let address = owner_pub.clone().to_address(false).to_string();
     let request = json!({

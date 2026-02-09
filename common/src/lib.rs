@@ -6,29 +6,14 @@
 #![allow(clippy::ptr_arg)] // API compatibility
 #![allow(clippy::owned_cow)] // Cow usage pattern
 
-pub mod a2a;
 pub mod account;
 pub mod api;
-pub mod arbitration;
 pub mod block;
 pub mod contract;
 pub mod crypto;
 pub mod error;
-pub mod escrow;
 pub mod serializer;
 pub mod transaction;
-
-// Native Referral System module
-pub mod referral;
-
-// Native KYC Level System module
-pub mod kyc;
-
-// Native NFT System module
-pub mod nft;
-
-// Contract Asset System module (ERC20-like tokens)
-pub mod contract_asset;
 
 // TNS (TOS Name Service) module
 pub mod tns;

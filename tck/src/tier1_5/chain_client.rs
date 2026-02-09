@@ -1499,9 +1499,6 @@ impl ChainClient {
             &input_data,
             Some(max_gas),
             &SVMFeatureSet::production(),
-            None, // No referral provider
-            None, // No NFT provider
-            true, // Contract asset syscalls enabled
             vrf_data.as_ref(),
             Some(&miner_pk_bytes),
             Some(&mut scheduling_provider), // Scheduling provider enabled
@@ -2277,7 +2274,6 @@ impl ChainClient {
                         &exec.scheduler_contract,
                         &full_input,
                         Some(exec.max_gas),
-                        None,
                         vrf_data.as_ref(),
                         Some(&miner_pk),
                     );
@@ -2401,9 +2397,6 @@ impl ChainClient {
                         &full_input,
                         Some(exec.max_gas),
                         &SVMFeatureSet::production(),
-                        None, // No referral provider
-                        None, // No NFT provider
-                        true, // Contract asset syscalls enabled
                         vrf_data.as_ref(),
                         Some(&miner_pk),
                         Some(&mut scheduling_provider), // Enable cascade scheduling

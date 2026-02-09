@@ -1,25 +1,11 @@
-#[cfg(feature = "a2a")]
-pub mod a2a;
-#[cfg(feature = "a2a")]
-pub mod agent_registry;
-pub mod arbitration;
 pub mod callback;
-pub mod escrow;
 pub mod getwork;
 pub mod rpc;
 pub mod ws_security;
 
-#[cfg(feature = "a2a")]
-use crate::a2a::nonce_store::{A2ANonceStore, StorageNonceStore};
-#[cfg(feature = "a2a")]
-use crate::a2a::registry::router::{RouterConfig, RoutingStrategy};
-#[cfg(feature = "a2a")]
-use crate::a2a::router_executor::AgentRouterExecutor;
 use crate::core::{
     blockchain::Blockchain, config::RPCConfig, error::BlockchainError, storage::Storage,
 };
-#[cfg(feature = "a2a")]
-use crate::rpc::agent_registry::RegistrationRateLimitConfig;
 use actix_web::{
     dev::ServerHandle,
     error::Error,
@@ -32,10 +18,7 @@ use getwork::GetWorkServer;
 use log::{error, info, warn};
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use serde_json::{json, Value};
-use std::{collections::HashSet, net::SocketAddr, sync::Arc, time::Duration};
-use tokio::sync::oneshot;
-use tonic::transport::Server;
-use tonic_reflection::server::Builder as ReflectionBuilder;
+use std::{collections::HashSet, sync::Arc, time::Duration};
 use tos_common::{
     api::daemon::NotifyEvent,
     config,
@@ -59,7 +42,6 @@ pub struct DaemonRpcServer<S: Storage> {
     websocket: WebSocketServerShared<EventWebSocketHandler<Arc<Blockchain<S>>, NotifyEvent>>,
     getwork: Option<WebSocketServerShared<GetWorkServer<S>>>,
     websocket_security: Arc<WebSocketSecurity>,
-    a2a_grpc_shutdown: Mutex<Option<oneshot::Sender<()>>>,
     rpc_stop_timeout_secs: u64,
 }
 
@@ -115,62 +97,6 @@ impl<S: Storage> DaemonRpcServer<S> {
                 ws_security_config.max_messages_per_connection_per_second
             );
         }
-        if log::log_enabled!(log::Level::Info) {
-            info!("A2A service enabled: {}", config.enable_a2a);
-        }
-        #[cfg(not(feature = "a2a"))]
-        if config.enable_a2a && log::log_enabled!(log::Level::Warn) {
-            warn!("A2A requested by config, but this binary was built without feature `a2a`");
-        }
-        #[cfg(feature = "a2a")]
-        if config.enable_a2a {
-            let _ = crate::a2a::registry::spawn_health_checks();
-            let nonce_store: Option<Arc<dyn A2ANonceStore>> =
-                Some(Arc::new(StorageNonceStore::new(Arc::clone(&blockchain))));
-            crate::a2a::auth::set_auth_config(
-                crate::a2a::auth::A2AAuthConfig::from_rpc_config(&config),
-                nonce_store,
-            );
-            crate::a2a::set_settlement_validation_config(crate::a2a::SettlementValidationConfig {
-                validate_states: config.a2a_escrow_validate_states,
-                allowed_states: config.a2a_escrow_allowed_states.clone(),
-                validate_timeout: config.a2a_escrow_validate_timeout,
-                validate_amounts: config.a2a_escrow_validate_amounts,
-            });
-            crate::rpc::agent_registry::set_registration_rate_limit_config(
-                RegistrationRateLimitConfig {
-                    window_secs: config.a2a_registry_rate_limit_window_secs,
-                    max_requests: config.a2a_registry_rate_limit_max,
-                },
-            );
-            let local_executor =
-                crate::a2a::executor::default_executor(config.a2a_executor_concurrency);
-            let router_config = RouterConfig {
-                strategy: match config.a2a_router_strategy {
-                    crate::core::config::A2ARoutingStrategy::FirstMatch => {
-                        RoutingStrategy::FirstMatch
-                    }
-                    crate::core::config::A2ARoutingStrategy::LowestLatency => {
-                        RoutingStrategy::LowestLatency
-                    }
-                    crate::core::config::A2ARoutingStrategy::HighestReputation => {
-                        RoutingStrategy::HighestReputation
-                    }
-                    crate::core::config::A2ARoutingStrategy::RoundRobin => {
-                        RoutingStrategy::RoundRobin
-                    }
-                    crate::core::config::A2ARoutingStrategy::WeightedRandom => {
-                        RoutingStrategy::WeightedRandom
-                    }
-                },
-                timeout_ms: config.a2a_router_timeout_ms,
-                retry_count: config.a2a_router_retry_count,
-                fallback_to_local: config.a2a_router_fallback_to_local,
-            };
-            let router_executor = AgentRouterExecutor::new(local_executor, router_config);
-            crate::a2a::executor::set_executor(Arc::new(router_executor));
-        }
-
         let websocket_security = Arc::new(WebSocketSecurity::new(ws_security_config));
 
         let getwork = if !config.getwork.disable {
@@ -207,7 +133,6 @@ impl<S: Storage> DaemonRpcServer<S> {
             &mut rpc_handler,
             !config.getwork.disable,
             config.enable_admin_rpc,
-            config.enable_a2a && cfg!(feature = "a2a"),
         );
 
         // create the default websocket server (support event & rpc methods)
@@ -221,7 +146,6 @@ impl<S: Storage> DaemonRpcServer<S> {
             websocket: ws,
             getwork,
             websocket_security: Arc::clone(&websocket_security),
-            a2a_grpc_shutdown: Mutex::new(None),
             rpc_stop_timeout_secs: config.stop_timeout_secs,
         });
 
@@ -258,7 +182,6 @@ impl<S: Storage> DaemonRpcServer<S> {
 
         {
             let clone = Arc::clone(&server);
-            let enable_a2a = config.enable_a2a;
             let builder = HttpServer::new(move || {
                 let server = Arc::clone(&clone);
                 let mut app = App::new()
@@ -279,198 +202,6 @@ impl<S: Storage> DaemonRpcServer<S> {
                     )
                     .service(index);
 
-                #[cfg(not(feature = "a2a"))]
-                let _ = enable_a2a;
-
-                #[cfg(feature = "a2a")]
-                if enable_a2a {
-                    // Unversioned A2A endpoints
-                    app = app
-                        .route(
-                            "/.well-known/agent-card.json",
-                            web::get().to(a2a::agent_card::<S>),
-                        )
-                        .route(
-                            "/agents:register",
-                            web::post().to(agent_registry::register_agent_http::<S>),
-                        )
-                        .route(
-                            "/agents:discover",
-                            web::post().to(agent_registry::discover_agents_http::<S>),
-                        )
-                        .route(
-                            "/agents:discover",
-                            web::get().to(agent_registry::discover_agents_http_get::<S>),
-                        )
-                        .route(
-                            "/agents:by-account",
-                            web::get().to(agent_registry::get_agent_by_account_http::<S>),
-                        )
-                        .route(
-                            "/committees:members",
-                            web::post().to(agent_registry::discover_committee_members_http::<S>),
-                        )
-                        .route(
-                            "/committees/{id}:members",
-                            web::get().to(agent_registry::discover_committee_members_http_get::<S>),
-                        )
-                        .route(
-                            "/escrows:pending",
-                            web::post().to(escrow::get_pending_releases_http::<S>),
-                        )
-                        .route(
-                            "/escrows:pending",
-                            web::get().to(escrow::get_pending_releases_http_get::<S>),
-                        )
-                        .route(
-                            "/agents",
-                            web::get().to(agent_registry::list_agents_http::<S>),
-                        )
-                        .route(
-                            "/agents/{id}",
-                            web::get().to(agent_registry::get_agent_http::<S>),
-                        )
-                        .route(
-                            "/agents/{id}",
-                            web::patch().to(agent_registry::update_agent_http::<S>),
-                        )
-                        .route(
-                            "/agents/{id}",
-                            web::delete().to(agent_registry::unregister_agent_http::<S>),
-                        )
-                        .route(
-                            "/agents/{id}:heartbeat",
-                            web::post().to(agent_registry::heartbeat_http::<S>),
-                        )
-                        .route("/message:send", web::post().to(a2a::send_message_http::<S>))
-                        .route(
-                            "/message:stream",
-                            web::post().to(a2a::send_streaming_message_http::<S>),
-                        )
-                        .route("/tasks", web::get().to(a2a::list_tasks_http::<S>))
-                        .route("/tasks/{id}", web::get().to(a2a::get_task_http::<S>))
-                        .route(
-                            "/tasks/{id}:cancel",
-                            web::post().to(a2a::cancel_task_http::<S>),
-                        )
-                        .route(
-                            "/tasks/{id}:subscribe",
-                            web::post().to(a2a::subscribe_task_http::<S>),
-                        )
-                        .route(
-                            "/tasks/{id}/pushNotificationConfigs",
-                            web::post().to(a2a::create_task_push_config_http::<S>),
-                        )
-                        .route(
-                            "/tasks/{id}/pushNotificationConfigs",
-                            web::get().to(a2a::list_task_push_config_http::<S>),
-                        )
-                        .route(
-                            "/tasks/{id}/pushNotificationConfigs/{configId}",
-                            web::get().to(a2a::get_task_push_config_http::<S>),
-                        )
-                        .route(
-                            "/tasks/{id}/pushNotificationConfigs/{configId}",
-                            web::delete().to(a2a::delete_task_push_config_http::<S>),
-                        )
-                        .route(
-                            "/extendedAgentCard",
-                            web::get().to(a2a::get_extended_agent_card_http::<S>),
-                        );
-                    // Versioned A2A endpoints (/v1/...)
-                    app = app
-                        .route(
-                            "/v1/agents:register",
-                            web::post().to(agent_registry::register_agent_http::<S>),
-                        )
-                        .route(
-                            "/v1/agents:discover",
-                            web::post().to(agent_registry::discover_agents_http::<S>),
-                        )
-                        .route(
-                            "/v1/agents:discover",
-                            web::get().to(agent_registry::discover_agents_http_get::<S>),
-                        )
-                        .route(
-                            "/v1/agents:by-account",
-                            web::get().to(agent_registry::get_agent_by_account_http::<S>),
-                        )
-                        .route(
-                            "/v1/committees:members",
-                            web::post().to(agent_registry::discover_committee_members_http::<S>),
-                        )
-                        .route(
-                            "/v1/committees/{id}:members",
-                            web::get().to(agent_registry::discover_committee_members_http_get::<S>),
-                        )
-                        .route(
-                            "/v1/escrows:pending",
-                            web::post().to(escrow::get_pending_releases_http::<S>),
-                        )
-                        .route(
-                            "/v1/escrows:pending",
-                            web::get().to(escrow::get_pending_releases_http_get::<S>),
-                        )
-                        .route(
-                            "/v1/agents",
-                            web::get().to(agent_registry::list_agents_http::<S>),
-                        )
-                        .route(
-                            "/v1/agents/{id}",
-                            web::get().to(agent_registry::get_agent_http::<S>),
-                        )
-                        .route(
-                            "/v1/agents/{id}",
-                            web::patch().to(agent_registry::update_agent_http::<S>),
-                        )
-                        .route(
-                            "/v1/agents/{id}",
-                            web::delete().to(agent_registry::unregister_agent_http::<S>),
-                        )
-                        .route(
-                            "/v1/agents/{id}:heartbeat",
-                            web::post().to(agent_registry::heartbeat_http::<S>),
-                        )
-                        .route(
-                            "/v1/message:send",
-                            web::post().to(a2a::send_message_http::<S>),
-                        )
-                        .route(
-                            "/v1/message:stream",
-                            web::post().to(a2a::send_streaming_message_http::<S>),
-                        )
-                        .route("/v1/tasks", web::get().to(a2a::list_tasks_http::<S>))
-                        .route("/v1/tasks/{id}", web::get().to(a2a::get_task_http::<S>))
-                        .route(
-                            "/v1/tasks/{id}:cancel",
-                            web::post().to(a2a::cancel_task_http::<S>),
-                        )
-                        .route(
-                            "/v1/tasks/{id}:subscribe",
-                            web::post().to(a2a::subscribe_task_http::<S>),
-                        )
-                        .route(
-                            "/v1/tasks/{id}/pushNotificationConfigs",
-                            web::post().to(a2a::create_task_push_config_http::<S>),
-                        )
-                        .route(
-                            "/v1/tasks/{id}/pushNotificationConfigs",
-                            web::get().to(a2a::list_task_push_config_http::<S>),
-                        )
-                        .route(
-                            "/v1/tasks/{id}/pushNotificationConfigs/{configId}",
-                            web::get().to(a2a::get_task_push_config_http::<S>),
-                        )
-                        .route(
-                            "/v1/tasks/{id}/pushNotificationConfigs/{configId}",
-                            web::delete().to(a2a::delete_task_push_config_http::<S>),
-                        )
-                        .route(
-                            "/v1/extendedAgentCard",
-                            web::get().to(a2a::get_extended_agent_card_http::<S>),
-                        );
-                    app = app.route("/a2a/ws", web::get().to(a2a::a2a_websocket::<S>));
-                }
                 if let Some((route, _)) = &prometheus {
                     app = app.route(route, web::get().to(prometheus_metrics));
                 }
@@ -488,48 +219,6 @@ impl<S: Storage> DaemonRpcServer<S> {
                 *lock = Some(handle);
             }
             spawn_task("rpc-server", http_server);
-        }
-        #[cfg(feature = "a2a")]
-        if config.enable_a2a {
-            let addr: SocketAddr = config
-                .a2a_grpc_bind_address
-                .parse::<SocketAddr>()
-                .map_err(|e: std::net::AddrParseError| BlockchainError::Any(e.into()))?;
-            let (tx, rx) = oneshot::channel::<()>();
-            {
-                let mut lock = server.a2a_grpc_shutdown.lock().await;
-                *lock = Some(tx);
-            }
-            let blockchain = Arc::clone(&blockchain);
-            spawn_task("a2a-grpc", async move {
-                let service = crate::a2a::grpc::service::A2AGrpcService::new(blockchain);
-                let svc =
-                    crate::a2a::grpc::proto::a2a_service_server::A2aServiceServer::new(service);
-                let reflection = match ReflectionBuilder::configure()
-                    .register_encoded_file_descriptor_set(
-                        crate::a2a::grpc::proto::FILE_DESCRIPTOR_SET,
-                    )
-                    .build_v1()
-                {
-                    Ok(r) => r,
-                    Err(err) => {
-                        log::error!("Failed to build a2a grpc reflection: {err}");
-                        return;
-                    }
-                };
-                if let Err(err) = Server::builder()
-                    .add_service(svc)
-                    .add_service(reflection)
-                    .serve_with_shutdown(addr, async move {
-                        let _ = rx.await;
-                    })
-                    .await
-                {
-                    if log::log_enabled!(log::Level::Error) {
-                        error!("A2A gRPC server error: {}", err);
-                    }
-                }
-            });
         }
         Ok(server)
     }
@@ -571,16 +260,6 @@ impl<S: Storage> DaemonRpcServer<S> {
     pub async fn stop(&self) {
         if log::log_enabled!(log::Level::Info) {
             info!("Stopping RPC Server...");
-        }
-
-        // Stop A2A gRPC server if running
-        // Take the sender first to release lock quickly
-        let grpc_shutdown = {
-            let mut grpc = self.a2a_grpc_shutdown.lock().await;
-            grpc.take()
-        };
-        if let Some(shutdown) = grpc_shutdown {
-            let _ = shutdown.send(());
         }
 
         // Stop HTTP server

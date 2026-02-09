@@ -13,8 +13,8 @@ use crate::core::{
             NEXT_CONTRACT_ID, PRUNED_TOPOHEIGHT, TIPS, TOP_HEIGHT, TOP_TOPO_HEIGHT, TXS_COUNT,
         },
         snapshot::{BytesView, Direction, EntryState, IteratorMode, Snapshot as InternalSnapshot},
-        BlocksAtHeightProvider, ClientProtocolProvider, ContractOutputsProvider, EscrowProvider,
-        StorageCache, Tips,
+        BlocksAtHeightProvider, ClientProtocolProvider, ContractOutputsProvider, StorageCache,
+        Tips,
     },
 };
 use anyhow::Context;
@@ -35,7 +35,7 @@ use tos_common::{
     network::Network,
     serializer::{Count, Serializer},
     tokio,
-    transaction::{Transaction, TransactionType},
+    transaction::Transaction,
 };
 
 use crate::config::DEFAULT_CACHE_SIZE;
@@ -322,6 +322,7 @@ impl RocksStorage {
     /// * `operations` - Iterator of (column_name, key, optional_value) tuples
     ///   - If value is Some, it's a put operation
     ///   - If value is None, it's a delete operation
+    #[allow(dead_code)]
     pub(super) fn write_batch<'a, I>(&mut self, operations: I) -> Result<(), BlockchainError>
     where
         I: IntoIterator<Item = (&'a str, &'a [u8], Option<&'a [u8]>)>,
@@ -757,24 +758,6 @@ impl Storage for RocksStorage {
                 let tx: Immutable<Transaction> =
                     self.load_from_disk(Column::Transactions, tx_hash)?;
                 loaded_tx = Some(tx.clone());
-                let escrow_id = match tx.get_data() {
-                    TransactionType::CreateEscrow(_) => Some(tx_hash.clone()),
-                    TransactionType::DepositEscrow(payload) => Some(payload.escrow_id.clone()),
-                    TransactionType::ReleaseEscrow(payload) => Some(payload.escrow_id.clone()),
-                    TransactionType::RefundEscrow(payload) => Some(payload.escrow_id.clone()),
-                    TransactionType::ChallengeEscrow(payload) => Some(payload.escrow_id.clone()),
-                    TransactionType::DisputeEscrow(payload) => Some(payload.escrow_id.clone()),
-                    TransactionType::AppealEscrow(payload) => Some(payload.escrow_id.clone()),
-                    TransactionType::SubmitVerdict(payload) => Some(payload.escrow_id.clone()),
-                    TransactionType::SubmitVerdictByJuror(payload) => {
-                        Some(payload.escrow_id.clone())
-                    }
-                    _ => None,
-                };
-                if let Some(escrow_id) = escrow_id {
-                    self.remove_escrow_history(&escrow_id, topoheight, tx_hash)
-                        .await?;
-                }
                 self.unmark_tx_from_executed(&tx_hash)?;
                 self.delete_contract_outputs_for_tx(&tx_hash).await?;
             }

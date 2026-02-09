@@ -2,7 +2,6 @@ use std::{borrow::Cow, collections::HashMap};
 
 use crate::{
     account::{AgentAccountMeta, Nonce, SessionKey},
-    arbitration::ArbiterAccount,
     block::{Block, BlockVersion},
     contract::{
         AssetChanges, ChainState, ContractCache, ContractEventTracker, ContractOutput,
@@ -10,13 +9,9 @@ use crate::{
     },
     crypto::{
         elgamal::{Ciphertext, CompressedPublicKey},
-        Hash, PublicKey,
+        Hash,
     },
-    nft::NftCache,
-    transaction::{
-        CommitArbitrationOpenPayload, CommitJurorVotePayload, CommitSelectionCommitmentPayload,
-        CommitVoteRequestPayload, ContractDeposit, MultiSigPayload, Reference, Transaction,
-    },
+    transaction::{ContractDeposit, MultiSigPayload, Reference, Transaction},
 };
 use async_trait::async_trait;
 use indexmap::IndexMap;
@@ -28,11 +23,6 @@ use tos_kernel::Module;
 /// state, where the transactions can get applied in order.
 #[async_trait]
 pub trait BlockchainVerificationState<'a, E> {
-    // This is giving a "implementation is not general enough"
-    // We replace it by a generic type in the trait definition
-    // See: https://play.rust-lang.org/?version=stable&mode=debug&edition=2021&gist=aaa6065daaab514e638b2333703765c7
-    // type Error;
-
     /// Pre-verify the TX
     async fn pre_verify_tx<'b>(&'b mut self, tx: &Transaction) -> Result<(), E>;
 
@@ -98,8 +88,6 @@ pub trait BlockchainVerificationState<'a, E> {
     ) -> Result<(), E>;
 
     /// Atomically compare and swap nonce to prevent race conditions
-    /// Returns true if the nonce matched expected value and was updated
-    /// Returns false if the current nonce didn't match expected value
     async fn compare_and_swap_nonce(
         &mut self,
         account: &'a CompressedPublicKey,
@@ -162,132 +150,16 @@ pub trait BlockchainVerificationState<'a, E> {
         Ok(Vec::new())
     }
 
-    // ===== Escrow Verification Methods =====
-
-    /// Get an escrow account by ID
-    async fn get_escrow(
-        &mut self,
-        _escrow_id: &Hash,
-    ) -> Result<Option<crate::escrow::EscrowAccount>, E> {
-        Ok(None)
-    }
-
-    /// Get an arbiter account by public key
-    async fn get_arbiter(
-        &mut self,
-        _arbiter: &'a CompressedPublicKey,
-    ) -> Result<Option<ArbiterAccount>, E> {
-        Ok(None)
-    }
-
-    // ===== Arbitration Commit Methods =====
-
-    async fn get_commit_arbitration_open(
-        &mut self,
-        _escrow_id: &Hash,
-        _dispute_id: &Hash,
-        _round: u32,
-    ) -> Result<Option<CommitArbitrationOpenPayload>, E> {
-        Ok(None)
-    }
-
-    async fn get_commit_arbitration_open_by_request(
-        &mut self,
-        _request_id: &Hash,
-    ) -> Result<Option<CommitArbitrationOpenPayload>, E> {
-        Ok(None)
-    }
-
-    async fn set_commit_arbitration_open(
-        &mut self,
-        _escrow_id: &Hash,
-        _dispute_id: &Hash,
-        _round: u32,
-        _payload: &CommitArbitrationOpenPayload,
-    ) -> Result<(), E> {
-        Ok(())
-    }
-
-    async fn get_commit_vote_request(
-        &mut self,
-        _request_id: &Hash,
-    ) -> Result<Option<CommitVoteRequestPayload>, E> {
-        Ok(None)
-    }
-
-    async fn set_commit_vote_request(
-        &mut self,
-        _request_id: &Hash,
-        _payload: &CommitVoteRequestPayload,
-    ) -> Result<(), E> {
-        Ok(())
-    }
-
-    async fn get_commit_selection_commitment(
-        &mut self,
-        _request_id: &Hash,
-    ) -> Result<Option<CommitSelectionCommitmentPayload>, E> {
-        Ok(None)
-    }
-
-    async fn set_commit_selection_commitment(
-        &mut self,
-        _request_id: &Hash,
-        _payload: &CommitSelectionCommitmentPayload,
-    ) -> Result<(), E> {
-        Ok(())
-    }
-
-    async fn get_commit_juror_vote(
-        &mut self,
-        _request_id: &Hash,
-        _juror_pubkey: &PublicKey,
-    ) -> Result<Option<CommitJurorVotePayload>, E> {
-        Ok(None)
-    }
-
-    async fn set_commit_juror_vote(
-        &mut self,
-        _request_id: &Hash,
-        _juror_pubkey: &PublicKey,
-        _payload: &CommitJurorVotePayload,
-    ) -> Result<(), E> {
-        Ok(())
-    }
-
-    async fn list_commit_juror_votes(
-        &mut self,
-        _request_id: &Hash,
-    ) -> Result<Vec<CommitJurorVotePayload>, E> {
-        Ok(Vec::new())
-    }
-
     /// Get the block version in which TX is executed
     fn get_block_version(&self) -> BlockVersion;
 
     /// Get the timestamp to use for verification
-    ///
-    /// For block validation (consensus): returns the block timestamp
-    /// For mempool verification: returns current system time
-    ///
-    /// This ensures deterministic consensus validation while allowing
-    /// flexibility for mempool operations.
     fn get_verification_timestamp(&self) -> u64;
 
     /// Get the topoheight to use for verification
-    ///
-    /// For block validation: returns the block's topoheight
-    /// For mempool verification: returns current chain height
-    ///
-    /// Used for checking expired freeze records during balance verification.
     fn get_verification_topoheight(&self) -> u64;
 
     /// Get the recyclable TOS amount from expired freeze records
-    ///
-    /// Used during balance verification to determine how much TOS can be
-    /// recycled from expired freeze records instead of requiring fresh balance.
-    ///
-    /// Returns 0 if the account has no energy resource or no expired records.
     async fn get_recyclable_tos(&mut self, account: &'a CompressedPublicKey) -> Result<u64, E>;
 
     /// Set the multisig state for an account
@@ -297,7 +169,7 @@ pub trait BlockchainVerificationState<'a, E> {
         config: &MultiSigPayload,
     ) -> Result<(), E>;
 
-    /// Set the multisig state for an account
+    /// Get the multisig state for an account
     async fn get_multisig_state(
         &mut self,
         account: &'a CompressedPublicKey,
@@ -313,12 +185,9 @@ pub trait BlockchainVerificationState<'a, E> {
     async fn set_contract_module(&mut self, hash: &Hash, module: &'a Module) -> Result<(), E>;
 
     /// Load in the cache the contract module
-    /// This is called before `get_contract_module_with_environment`
-    /// Returns true if the module is available
     async fn load_contract_module(&mut self, hash: &Hash) -> Result<bool, E>;
 
     /// Get the contract module with the environment
-    /// This is used to verify that all parameters are correct
     async fn get_contract_module_with_environment(
         &self,
         hash: &Hash,
@@ -327,42 +196,18 @@ pub trait BlockchainVerificationState<'a, E> {
     // ===== TNS (TOS Name Service) Verification Methods =====
 
     /// Check if a TNS name hash is registered
-    ///
-    /// # Arguments
-    /// * `name_hash` - The blake3 hash of the normalized name
-    ///
-    /// # Returns
-    /// true if the name is already registered
     async fn is_name_registered(&self, name_hash: &Hash) -> Result<bool, E>;
 
     /// Check if an account already has a registered TNS name
-    ///
-    /// # Arguments
-    /// * `account` - The account's public key
-    ///
-    /// # Returns
-    /// true if the account already has a name
     async fn account_has_name(&self, account: &'a CompressedPublicKey) -> Result<bool, E>;
 
     /// Get the TNS name hash for an account
-    ///
-    /// # Arguments
-    /// * `account` - The account's public key
-    ///
-    /// # Returns
-    /// The name hash if the account has a registered name, None otherwise
     async fn get_account_name_hash(
         &self,
         account: &'a CompressedPublicKey,
     ) -> Result<Option<Hash>, E>;
 
     /// Check if a message ID has been used (for replay protection)
-    ///
-    /// # Arguments
-    /// * `message_id` - The unique message identifier (blake3 hash)
-    ///
-    /// # Returns
-    /// true if the message ID has already been used
     async fn is_message_id_used(&self, message_id: &Hash) -> Result<bool, E>;
 }
 
@@ -402,8 +247,6 @@ pub trait BlockchainApplyState<'a, P: ContractProvider, E>:
     ) -> Result<(), E>;
 
     /// Get the contract environment
-    /// Implementation should take care of deposits by applying them
-    /// to the chain state
     async fn get_contract_environment_for<'b>(
         &'b mut self,
         contract: &'b Hash,
@@ -416,14 +259,11 @@ pub trait BlockchainApplyState<'a, P: ContractProvider, E>:
         &mut self,
         hash: &Hash,
         cache: ContractCache,
-        nft_cache: NftCache,
         tracker: ContractEventTracker,
         assets: HashMap<Hash, Option<AssetChanges>>,
     ) -> Result<(), E>;
 
     /// Remove the contract module
-    /// This will mark the contract
-    /// as a None version
     async fn remove_contract_module(&mut self, hash: &Hash) -> Result<(), E>;
 
     /// Get the energy resource for an account
@@ -440,13 +280,9 @@ pub trait BlockchainApplyState<'a, P: ContractProvider, E>:
     ) -> Result<(), E>;
 
     /// Get the contract executor for executing contracts
-    /// This returns an Arc to the executor implementation (TOS Kernel(TAKO), legacy VM, etc.)
-    /// that will be used to execute contract bytecode.
-    /// Using Arc avoids borrow conflicts when executor is used alongside mutable state access.
     fn get_contract_executor(&self) -> std::sync::Arc<dyn crate::contract::ContractExecutor>;
 
     /// Add contract events emitted during execution (LOG0-LOG4 syscalls)
-    /// These events will be indexed and stored for later querying
     async fn add_contract_events(
         &mut self,
         events: Vec<crate::contract::ContractEvent>,
@@ -454,328 +290,12 @@ pub trait BlockchainApplyState<'a, P: ContractProvider, E>:
         tx_hash: &'a Hash,
     ) -> Result<(), E>;
 
-    // ===== Escrow Apply Methods =====
-
-    /// Store/update an escrow account
-    async fn set_escrow(&mut self, escrow: &crate::escrow::EscrowAccount) -> Result<(), E>;
-
-    /// Add a pending release index entry
-    async fn add_pending_release(&mut self, release_at: u64, escrow_id: &Hash) -> Result<(), E>;
-
-    /// Remove a pending release index entry
-    async fn remove_pending_release(&mut self, release_at: u64, escrow_id: &Hash) -> Result<(), E>;
-
-    /// Add an escrow history entry
-    async fn add_escrow_history(
-        &mut self,
-        escrow_id: &Hash,
-        topoheight: u64,
-        tx_hash: &Hash,
-    ) -> Result<(), E>;
-
-    // ===== Arbiter Apply Methods =====
-
-    /// Store/update an arbiter account
-    async fn set_arbiter(&mut self, arbiter: &ArbiterAccount) -> Result<(), E>;
-
-    /// Remove an arbiter account
-    async fn remove_arbiter(&mut self, arbiter: &CompressedPublicKey) -> Result<(), E>;
-
-    // ===== KYC System Operations =====
-
-    /// Get a committee by ID
-    ///
-    /// # Arguments
-    /// * `committee_id` - The committee ID to look up
-    ///
-    /// # Returns
-    /// The committee if found, None otherwise
-    async fn get_committee(
-        &self,
-        committee_id: &'a Hash,
-    ) -> Result<Option<crate::kyc::SecurityCommittee>, E>;
-
-    /// Get the committee ID that verified a user's KYC
-    ///
-    /// # Arguments
-    /// * `user` - The user's public key
-    ///
-    /// # Returns
-    /// The committee ID if the user has KYC, None otherwise
-    async fn get_verifying_committee(
-        &self,
-        user: &'a CompressedPublicKey,
-    ) -> Result<Option<Hash>, E>;
-
-    /// Get the KYC status for a user
-    ///
-    /// # Arguments
-    /// * `user` - The user's public key
-    ///
-    /// # Returns
-    /// The KYC status if the user has KYC, None otherwise
-    async fn get_kyc_status(
-        &self,
-        user: &'a CompressedPublicKey,
-    ) -> Result<Option<crate::kyc::KycStatus>, E>;
-
-    /// Get the KYC level for a user
-    ///
-    /// SECURITY FIX (Issue #45): Added to support binding TransferKyc approvals to current level
-    ///
-    /// # Arguments
-    /// * `user` - The user's public key
-    ///
-    /// # Returns
-    /// The KYC level if the user has KYC, None otherwise
-    async fn get_kyc_level(&self, user: &'a CompressedPublicKey) -> Result<Option<u16>, E>;
-
-    /// Check if the global committee has been bootstrapped
-    async fn is_global_committee_bootstrapped(&self) -> Result<bool, E>;
-
-    /// Set KYC data for a user
-    ///
-    /// # Arguments
-    /// * `user` - The user's public key
-    /// * `level` - The KYC level bitmask
-    /// * `verified_at` - The verification timestamp
-    /// * `data_hash` - SHA256 hash of full off-chain KycOffChainData
-    /// * `committee_id` - The committee that verified this KYC
-    /// * `tx_hash` - The transaction hash
-    async fn set_kyc(
-        &mut self,
-        user: &'a CompressedPublicKey,
-        level: u16,
-        verified_at: u64,
-        data_hash: &'a Hash,
-        committee_id: &'a Hash,
-        tx_hash: &'a Hash,
-    ) -> Result<(), E>;
-
-    /// Revoke KYC for a user
-    ///
-    /// # Arguments
-    /// * `user` - The user's public key
-    /// * `reason_hash` - Hash of revocation reason (stored off-chain)
-    /// * `tx_hash` - The transaction hash
-    async fn revoke_kyc(
-        &mut self,
-        user: &'a CompressedPublicKey,
-        reason_hash: &'a Hash,
-        tx_hash: &'a Hash,
-    ) -> Result<(), E>;
-
-    /// Renew KYC for a user
-    ///
-    /// # Arguments
-    /// * `user` - The user's public key
-    /// * `verified_at` - The new verification timestamp
-    /// * `data_hash` - The new off-chain data hash
-    /// * `tx_hash` - The transaction hash
-    async fn renew_kyc(
-        &mut self,
-        user: &'a CompressedPublicKey,
-        verified_at: u64,
-        data_hash: &'a Hash,
-        tx_hash: &'a Hash,
-    ) -> Result<(), E>;
-
-    /// Transfer KYC across regions (dual committee approval)
-    ///
-    /// # Arguments
-    /// * `user` - The user's public key
-    /// * `source_committee_id` - The source committee ID (releasing)
-    /// * `dest_committee_id` - The destination committee ID (accepting)
-    /// * `new_data_hash` - New off-chain data hash from destination committee
-    /// * `transferred_at` - Transfer timestamp (used as new verified_at)
-    /// * `tx_hash` - The transaction hash
-    /// * `dest_max_kyc_level` - Destination committee's max KYC level (for validation)
-    /// * `verification_timestamp` - Block/verification time for checking suspension expiry
-    async fn transfer_kyc(
-        &mut self,
-        user: &'a CompressedPublicKey,
-        source_committee_id: &'a Hash,
-        dest_committee_id: &'a Hash,
-        new_data_hash: &'a Hash,
-        transferred_at: u64,
-        tx_hash: &'a Hash,
-        dest_max_kyc_level: u16,
-        verification_timestamp: u64,
-    ) -> Result<(), E>;
-
-    /// Submit a KYC appeal to parent committee
-    ///
-    /// # Arguments
-    /// * `user` - The user's public key (appellant)
-    /// * `original_committee_id` - The committee that rejected/revoked KYC
-    /// * `parent_committee_id` - The parent committee (arbiter)
-    /// * `reason_hash` - Hash of appeal reason (full reason stored off-chain)
-    /// * `documents_hash` - Hash of supporting documents
-    /// * `submitted_at` - Appeal submission timestamp
-    /// * `tx_hash` - The transaction hash
-    async fn submit_kyc_appeal(
-        &mut self,
-        user: &'a CompressedPublicKey,
-        original_committee_id: &'a Hash,
-        parent_committee_id: &'a Hash,
-        reason_hash: &'a Hash,
-        documents_hash: &'a Hash,
-        submitted_at: u64,
-        tx_hash: &'a Hash,
-    ) -> Result<(), E>;
-
-    /// Emergency suspend a user's KYC
-    ///
-    /// # Arguments
-    /// * `user` - The user's public key
-    /// * `reason_hash` - Hash of suspension reason
-    /// * `expires_at` - When the emergency suspension expires
-    /// * `tx_hash` - The transaction hash
-    async fn emergency_suspend_kyc(
-        &mut self,
-        user: &'a CompressedPublicKey,
-        reason_hash: &'a Hash,
-        expires_at: u64,
-        tx_hash: &'a Hash,
-    ) -> Result<(), E>;
-
-    /// Bootstrap the Global Committee (one-time operation)
-    ///
-    /// # Arguments
-    /// * `name` - Committee name
-    /// * `members` - Initial members
-    /// * `threshold` - Governance threshold
-    /// * `kyc_threshold` - KYC approval threshold
-    /// * `max_kyc_level` - Maximum KYC level this committee can approve
-    /// * `tx_hash` - The transaction hash
-    ///
-    /// # Returns
-    /// The committee ID
-    async fn bootstrap_global_committee(
-        &mut self,
-        name: String,
-        members: Vec<crate::kyc::CommitteeMemberInfo>,
-        threshold: u8,
-        kyc_threshold: u8,
-        max_kyc_level: u16,
-        tx_hash: &'a Hash,
-    ) -> Result<Hash, E>;
-
-    /// Register a new regional committee
-    ///
-    /// # Arguments
-    /// * `name` - Committee name
-    /// * `region` - The region this committee covers
-    /// * `members` - Initial members
-    /// * `threshold` - Governance threshold
-    /// * `kyc_threshold` - KYC approval threshold
-    /// * `max_kyc_level` - Maximum KYC level
-    /// * `parent_id` - Parent committee ID
-    /// * `tx_hash` - The transaction hash
-    ///
-    /// # Returns
-    /// The committee ID
-    #[allow(clippy::too_many_arguments)]
-    async fn register_committee(
-        &mut self,
-        name: String,
-        region: crate::kyc::KycRegion,
-        members: Vec<crate::kyc::CommitteeMemberInfo>,
-        threshold: u8,
-        kyc_threshold: u8,
-        max_kyc_level: u16,
-        parent_id: &'a Hash,
-        tx_hash: &'a Hash,
-    ) -> Result<Hash, E>;
-
-    /// Update committee configuration
-    ///
-    /// # Arguments
-    /// * `committee_id` - The committee ID
-    /// * `update` - The update to apply
-    async fn update_committee(
-        &mut self,
-        committee_id: &'a Hash,
-        update: &crate::transaction::CommitteeUpdateData,
-    ) -> Result<(), E>;
-
-    // ===== Referral System Operations =====
-
-    /// Bind a referrer to a user
-    /// This operation is one-time only - once bound, cannot be changed
-    ///
-    /// # Arguments
-    /// * `user` - The user binding the referrer
-    /// * `referrer` - The referrer's public key
-    /// * `tx_hash` - The transaction hash
-    ///
-    /// # Errors
-    /// * `AlreadyBound` - User already has a referrer
-    /// * `SelfReferral` - Cannot set self as referrer
-    /// * `CircularReference` - Would create a circular reference chain
-    async fn bind_referrer(
-        &mut self,
-        user: &'a CompressedPublicKey,
-        referrer: &'a CompressedPublicKey,
-        tx_hash: &'a Hash,
-    ) -> Result<(), E>;
-
-    /// Distribute referral rewards to uplines
-    ///
-    /// # Arguments
-    /// * `from_user` - The user whose uplines will receive rewards
-    /// * `asset` - The asset to distribute
-    /// * `total_amount` - Total amount to distribute
-    /// * `ratios` - Reward ratios for each level (basis points, 100 = 1%)
-    ///
-    /// # Returns
-    /// * Distribution result with details of each transfer made
-    async fn distribute_referral_rewards(
-        &mut self,
-        from_user: &'a CompressedPublicKey,
-        asset: &'a Hash,
-        total_amount: u64,
-        ratios: &[u16],
-    ) -> Result<crate::referral::DistributionResult, E>;
-
     // ===== TNS (TOS Name Service) Apply Methods =====
 
     /// Register a TNS name for an account
-    ///
-    /// # Arguments
-    /// * `name_hash` - The blake3 hash of the normalized name
-    /// * `owner` - The account's public key
-    ///
-    /// # Errors
-    /// * Name already registered
-    /// * Account already has a name
     async fn register_name(
         &mut self,
         name_hash: Hash,
         owner: &'a CompressedPublicKey,
-    ) -> Result<(), E>;
-
-    /// Store an ephemeral message
-    ///
-    /// # Arguments
-    /// * `message_id` - The unique message identifier (for replay protection)
-    /// * `sender_name_hash` - Blake3 hash of sender's name
-    /// * `recipient_name_hash` - Blake3 hash of recipient's name
-    /// * `message_nonce` - Message nonce (from transaction)
-    /// * `ttl_blocks` - Time-to-live in blocks
-    /// * `encrypted_content` - Encrypted message content
-    /// * `receiver_handle` - ECDH handle for decryption
-    /// * `current_topoheight` - Current block topoheight (for expiry calculation)
-    #[allow(clippy::too_many_arguments)]
-    async fn store_ephemeral_message(
-        &mut self,
-        message_id: Hash,
-        sender_name_hash: Hash,
-        recipient_name_hash: Hash,
-        message_nonce: u64,
-        ttl_blocks: u32,
-        encrypted_content: Vec<u8>,
-        receiver_handle: [u8; 32],
-        current_topoheight: u64,
     ) -> Result<(), E>;
 }

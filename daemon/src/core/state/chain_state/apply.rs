@@ -22,12 +22,10 @@ use tos_common::{
         AssetChanges, ChainState as ContractChainState, ContractCache, ContractEventTracker,
         ContractOutput, ScheduledExecution,
     },
-    contract_asset::TokenValue,
     crypto::{
         elgamal::{Ciphertext, CompressedPublicKey},
         Hash, PublicKey,
     },
-    nft::NftCache,
     transaction::{
         verify::{BlockchainApplyState, BlockchainVerificationState, ContractEnvironment},
         ContractDeposit, MultiSigPayload, Reference,
@@ -43,8 +41,6 @@ struct ContractManager {
     caches: HashMap<Hash, ContractCache>,
     // global assets cache
     assets: HashMap<Hash, Option<AssetChanges>>,
-    // global NFT cache
-    nft_cache: NftCache,
     tracker: ContractEventTracker,
     // Scheduled executions registered during this block
     // Key: (contract_hash, execution_topoheight)
@@ -310,20 +306,6 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError>
     async fn is_message_id_used(&self, message_id: &Hash) -> Result<bool, BlockchainError> {
         self.inner.is_message_id_used(message_id).await
     }
-
-    async fn get_escrow(
-        &mut self,
-        escrow_id: &Hash,
-    ) -> Result<Option<tos_common::escrow::EscrowAccount>, BlockchainError> {
-        self.inner.storage.get_escrow(escrow_id).await
-    }
-
-    async fn get_arbiter(
-        &mut self,
-        arbiter: &'a CompressedPublicKey,
-    ) -> Result<Option<tos_common::arbitration::ArbiterAccount>, BlockchainError> {
-        self.inner.storage.get_arbiter(arbiter).await
-    }
 }
 
 #[async_trait]
@@ -451,7 +433,6 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for Applicable
             random: None,
             tx_hash,
             cache,
-            nft_cache: self.contract_manager.nft_cache.clone(),
             outputs: Vec::new(),
             // Event trackers
             tracker: self.contract_manager.tracker.clone(),
@@ -474,13 +455,11 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for Applicable
         &mut self,
         hash: &Hash,
         cache: ContractCache,
-        nft_cache: NftCache,
         tracker: ContractEventTracker,
         assets: HashMap<Hash, Option<AssetChanges>>,
     ) -> Result<(), BlockchainError> {
         // Insert or update cache
         self.contract_manager.caches.insert(hash.clone(), cache);
-        self.contract_manager.nft_cache = nft_cache;
 
         self.contract_manager.tracker = tracker;
         self.contract_manager.assets = assets;
@@ -514,49 +493,6 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for Applicable
 
     fn get_contract_executor(&self) -> std::sync::Arc<dyn tos_common::contract::ContractExecutor> {
         self.executor.clone()
-    }
-
-    async fn bind_referrer(
-        &mut self,
-        user: &'a CompressedPublicKey,
-        referrer: &'a CompressedPublicKey,
-        tx_hash: &'a Hash,
-    ) -> Result<(), BlockchainError> {
-        // Note: PublicKey is an alias for CompressedPublicKey, so no conversion needed
-        // Get current timestamp from block
-        let timestamp = self.block.get_timestamp() / 1000; // Convert ms to seconds
-
-        // Call the ReferralProvider implementation
-        self.inner
-            .storage
-            .bind_referrer(
-                user,
-                referrer,
-                self.inner.topoheight,
-                tx_hash.clone(),
-                timestamp,
-            )
-            .await
-    }
-
-    async fn distribute_referral_rewards(
-        &mut self,
-        from_user: &'a CompressedPublicKey,
-        asset: &'a Hash,
-        total_amount: u64,
-        ratios: &[u16],
-    ) -> Result<tos_common::referral::DistributionResult, BlockchainError> {
-        // Note: PublicKey is an alias for CompressedPublicKey, so no conversion needed
-        // Build ReferralRewardRatios from the slice
-        let reward_ratios = tos_common::referral::ReferralRewardRatios {
-            ratios: ratios.to_vec(),
-        };
-
-        // Call the ReferralProvider implementation
-        self.inner
-            .storage
-            .distribute_to_uplines(from_user, asset.clone(), total_amount, &reward_ratios)
-            .await
     }
 
     async fn add_contract_events(
@@ -609,425 +545,6 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for Applicable
         Ok(())
     }
 
-    async fn set_escrow(
-        &mut self,
-        escrow: &tos_common::escrow::EscrowAccount,
-    ) -> Result<(), BlockchainError> {
-        self.inner.storage.set_escrow(escrow).await
-    }
-
-    async fn add_pending_release(
-        &mut self,
-        release_at: u64,
-        escrow_id: &Hash,
-    ) -> Result<(), BlockchainError> {
-        self.inner
-            .storage
-            .add_pending_release(release_at, escrow_id)
-            .await
-    }
-
-    async fn remove_pending_release(
-        &mut self,
-        release_at: u64,
-        escrow_id: &Hash,
-    ) -> Result<(), BlockchainError> {
-        self.inner
-            .storage
-            .remove_pending_release(release_at, escrow_id)
-            .await
-    }
-
-    async fn add_escrow_history(
-        &mut self,
-        escrow_id: &Hash,
-        topoheight: u64,
-        tx_hash: &Hash,
-    ) -> Result<(), BlockchainError> {
-        self.inner
-            .storage
-            .add_escrow_history(escrow_id, topoheight, tx_hash)
-            .await
-    }
-
-    async fn set_arbiter(
-        &mut self,
-        arbiter: &tos_common::arbitration::ArbiterAccount,
-    ) -> Result<(), BlockchainError> {
-        self.inner.storage.set_arbiter(arbiter).await
-    }
-
-    async fn remove_arbiter(
-        &mut self,
-        arbiter: &CompressedPublicKey,
-    ) -> Result<(), BlockchainError> {
-        self.inner.storage.remove_arbiter(arbiter).await
-    }
-
-    // ===== KYC System Operations =====
-
-    async fn set_kyc(
-        &mut self,
-        user: &'a CompressedPublicKey,
-        level: u16,
-        verified_at: u64,
-        data_hash: &'a Hash,
-        committee_id: &'a Hash,
-        tx_hash: &'a Hash,
-    ) -> Result<(), BlockchainError> {
-        use tos_common::kyc::KycData;
-
-        // Create KYC data (KycData::new takes level, verified_at, data_hash)
-        let kyc_data = KycData::new(level, verified_at, data_hash.clone());
-
-        // Call the KycProvider implementation
-        self.inner
-            .storage
-            .set_kyc(user, kyc_data, committee_id, self.inner.topoheight, tx_hash)
-            .await
-    }
-
-    async fn revoke_kyc(
-        &mut self,
-        user: &'a CompressedPublicKey,
-        reason_hash: &'a Hash,
-        tx_hash: &'a Hash,
-    ) -> Result<(), BlockchainError> {
-        // Call the KycProvider implementation
-        self.inner
-            .storage
-            .revoke_kyc(user, reason_hash, self.inner.topoheight, tx_hash)
-            .await
-    }
-
-    async fn renew_kyc(
-        &mut self,
-        user: &'a CompressedPublicKey,
-        verified_at: u64,
-        data_hash: &'a Hash,
-        tx_hash: &'a Hash,
-    ) -> Result<(), BlockchainError> {
-        // Call the KycProvider implementation
-        self.inner
-            .storage
-            .renew_kyc(
-                user,
-                verified_at,
-                data_hash.clone(),
-                self.inner.topoheight,
-                tx_hash,
-            )
-            .await
-    }
-
-    async fn transfer_kyc(
-        &mut self,
-        user: &'a CompressedPublicKey,
-        _source_committee_id: &'a Hash,
-        dest_committee_id: &'a Hash,
-        new_data_hash: &'a Hash,
-        transferred_at: u64,
-        tx_hash: &'a Hash,
-        dest_max_kyc_level: u16,
-        verification_timestamp: u64,
-    ) -> Result<(), BlockchainError> {
-        // Transfer KYC to a new committee
-        // This updates the committee_id while preserving the user's KYC level
-        // The source_committee validation is done at verification time
-        self.inner
-            .storage
-            .transfer_kyc(
-                user,
-                dest_committee_id,
-                new_data_hash.clone(),
-                transferred_at,
-                self.inner.topoheight,
-                tx_hash,
-                dest_max_kyc_level,
-                verification_timestamp,
-            )
-            .await
-    }
-
-    async fn emergency_suspend_kyc(
-        &mut self,
-        user: &'a CompressedPublicKey,
-        reason_hash: &'a Hash,
-        expires_at: u64,
-        tx_hash: &'a Hash,
-    ) -> Result<(), BlockchainError> {
-        // Call the KycProvider implementation
-        self.inner
-            .storage
-            .emergency_suspend(
-                user,
-                reason_hash,
-                expires_at,
-                self.inner.topoheight,
-                tx_hash,
-            )
-            .await
-    }
-
-    async fn submit_kyc_appeal(
-        &mut self,
-        user: &'a CompressedPublicKey,
-        original_committee_id: &'a Hash,
-        parent_committee_id: &'a Hash,
-        reason_hash: &'a Hash,
-        documents_hash: &'a Hash,
-        submitted_at: u64,
-        tx_hash: &'a Hash,
-    ) -> Result<(), BlockchainError> {
-        // Call the KycProvider implementation
-        self.inner
-            .storage
-            .submit_appeal(
-                user,
-                original_committee_id,
-                parent_committee_id,
-                reason_hash,
-                documents_hash,
-                submitted_at,
-                self.inner.topoheight,
-                tx_hash,
-            )
-            .await
-    }
-
-    async fn bootstrap_global_committee(
-        &mut self,
-        name: String,
-        members: Vec<tos_common::kyc::CommitteeMemberInfo>,
-        threshold: u8,
-        kyc_threshold: u8,
-        max_kyc_level: u16,
-        tx_hash: &'a Hash,
-    ) -> Result<Hash, BlockchainError> {
-        use tos_common::kyc::SecurityCommittee;
-
-        // Get current timestamp from block
-        let timestamp = self.block.get_timestamp() / 1000;
-
-        // Convert member info to full committee members
-        let committee_members: Vec<_> = members
-            .into_iter()
-            .map(|m| m.into_member(timestamp))
-            .collect();
-
-        // Create the Global Committee
-        let committee = SecurityCommittee::new_global(
-            name,
-            committee_members,
-            threshold,
-            kyc_threshold,
-            max_kyc_level,
-            timestamp,
-        );
-
-        // Call the CommitteeProvider implementation
-        self.inner
-            .storage
-            .bootstrap_global_committee(committee, self.inner.topoheight, tx_hash)
-            .await
-    }
-
-    async fn register_committee(
-        &mut self,
-        name: String,
-        region: tos_common::kyc::KycRegion,
-        members: Vec<tos_common::kyc::CommitteeMemberInfo>,
-        threshold: u8,
-        kyc_threshold: u8,
-        max_kyc_level: u16,
-        parent_id: &'a Hash,
-        tx_hash: &'a Hash,
-    ) -> Result<Hash, BlockchainError> {
-        use tos_common::kyc::SecurityCommittee;
-
-        // Get current timestamp from block
-        let timestamp = self.block.get_timestamp() / 1000;
-
-        // Convert member info to full committee members
-        let committee_members: Vec<_> = members
-            .into_iter()
-            .map(|m| m.into_member(timestamp))
-            .collect();
-
-        // Create the regional committee
-        let committee = SecurityCommittee::new_regional(
-            name,
-            region,
-            committee_members,
-            threshold,
-            kyc_threshold,
-            max_kyc_level,
-            parent_id.clone(),
-            timestamp,
-        );
-
-        // Call the CommitteeProvider implementation
-        self.inner
-            .storage
-            .register_committee(committee, parent_id, self.inner.topoheight, tx_hash)
-            .await
-    }
-
-    async fn update_committee(
-        &mut self,
-        committee_id: &'a Hash,
-        update: &tos_common::transaction::CommitteeUpdateData,
-    ) -> Result<(), BlockchainError> {
-        use tos_common::kyc::CommitteeStatus;
-        use tos_common::transaction::CommitteeUpdateData;
-
-        match update {
-            CommitteeUpdateData::AddMember {
-                public_key,
-                name,
-                role,
-            } => {
-                self.inner
-                    .storage
-                    .add_committee_member(
-                        committee_id,
-                        public_key,
-                        name.clone(),
-                        *role,
-                        self.inner.topoheight,
-                    )
-                    .await
-            }
-            CommitteeUpdateData::RemoveMember { public_key } => {
-                self.inner
-                    .storage
-                    .remove_committee_member(committee_id, public_key, self.inner.topoheight)
-                    .await
-            }
-            CommitteeUpdateData::UpdateMemberRole {
-                public_key,
-                new_role,
-            } => {
-                self.inner
-                    .storage
-                    .update_member_role(committee_id, public_key, *new_role, self.inner.topoheight)
-                    .await
-            }
-            CommitteeUpdateData::UpdateMemberStatus {
-                public_key,
-                new_status,
-            } => {
-                self.inner
-                    .storage
-                    .update_member_status(
-                        committee_id,
-                        public_key,
-                        *new_status,
-                        self.inner.topoheight,
-                    )
-                    .await
-            }
-            CommitteeUpdateData::UpdateThreshold { new_threshold } => {
-                self.inner
-                    .storage
-                    .update_committee_threshold(committee_id, *new_threshold, self.inner.topoheight)
-                    .await
-            }
-            CommitteeUpdateData::UpdateKycThreshold { new_kyc_threshold } => {
-                self.inner
-                    .storage
-                    .update_committee_kyc_threshold(
-                        committee_id,
-                        *new_kyc_threshold,
-                        self.inner.topoheight,
-                    )
-                    .await
-            }
-            CommitteeUpdateData::UpdateName { new_name } => {
-                self.inner
-                    .storage
-                    .update_committee_name(committee_id, new_name.clone(), self.inner.topoheight)
-                    .await
-            }
-            CommitteeUpdateData::SuspendCommittee => {
-                self.inner
-                    .storage
-                    .update_committee_status(
-                        committee_id,
-                        CommitteeStatus::Suspended,
-                        self.inner.topoheight,
-                    )
-                    .await
-            }
-            CommitteeUpdateData::ActivateCommittee => {
-                self.inner
-                    .storage
-                    .update_committee_status(
-                        committee_id,
-                        CommitteeStatus::Active,
-                        self.inner.topoheight,
-                    )
-                    .await
-            }
-        }
-    }
-
-    async fn get_committee(
-        &self,
-        committee_id: &'a Hash,
-    ) -> Result<Option<tos_common::kyc::SecurityCommittee>, BlockchainError> {
-        self.inner.storage.get_committee(committee_id).await
-    }
-
-    async fn get_verifying_committee(
-        &self,
-        user: &'a CompressedPublicKey,
-    ) -> Result<Option<Hash>, BlockchainError> {
-        self.inner.storage.get_verifying_committee(user).await
-    }
-
-    async fn get_kyc_status(
-        &self,
-        user: &'a CompressedPublicKey,
-    ) -> Result<Option<tos_common::kyc::KycStatus>, BlockchainError> {
-        let kyc_data = self.inner.storage.get_kyc(user).await?;
-        if let Some(data) = kyc_data {
-            if data.status == tos_common::kyc::KycStatus::Suspended {
-                if let Some((_reason_hash, expires_at)) =
-                    self.inner.storage.get_emergency_suspension(user).await?
-                {
-                    let current_time = self.get_verification_timestamp();
-                    if current_time >= expires_at {
-                        // Get previous status, but if missing, keep user as Suspended
-                        // to prevent unauthorized status elevation from missing data
-                        let previous_status = self
-                            .inner
-                            .storage
-                            .get_emergency_previous_status(user)
-                            .await?
-                            .unwrap_or(data.status); // Fall back to stored status (Suspended)
-                        return Ok(Some(previous_status));
-                    }
-                }
-            }
-            Ok(Some(data.status))
-        } else {
-            Ok(None)
-        }
-    }
-
-    async fn get_kyc_level(
-        &self,
-        user: &'a CompressedPublicKey,
-    ) -> Result<Option<u16>, BlockchainError> {
-        let kyc_data = self.inner.storage.get_kyc(user).await?;
-        Ok(kyc_data.map(|d| d.level))
-    }
-
-    async fn is_global_committee_bootstrapped(&self) -> Result<bool, BlockchainError> {
-        self.inner.storage.is_global_committee_bootstrapped().await
-    }
-
     // ===== TNS (TOS Name Service) Apply Methods =====
 
     async fn register_name(
@@ -1038,37 +555,6 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for Applicable
         self.inner
             .storage
             .register_name(name_hash, owner.clone())
-            .await
-    }
-
-    async fn store_ephemeral_message(
-        &mut self,
-        message_id: Hash,
-        sender_name_hash: Hash,
-        recipient_name_hash: Hash,
-        message_nonce: u64,
-        ttl_blocks: u32,
-        encrypted_content: Vec<u8>,
-        receiver_handle: [u8; 32],
-        current_topoheight: u64,
-    ) -> Result<(), BlockchainError> {
-        use crate::core::storage::StoredEphemeralMessage;
-
-        let expiry_topoheight = current_topoheight.saturating_add(ttl_blocks as u64);
-        let message = StoredEphemeralMessage {
-            sender_name_hash,
-            recipient_name_hash,
-            message_nonce,
-            ttl_blocks,
-            encrypted_content,
-            receiver_handle,
-            stored_topoheight: current_topoheight,
-            expiry_topoheight,
-        };
-
-        self.inner
-            .storage
-            .store_ephemeral_message(message_id, message)
             .await
     }
 }
@@ -1127,7 +613,6 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
                 outputs: HashMap::new(),
                 caches: HashMap::new(),
                 assets: HashMap::new(),
-                nft_cache: NftCache::default(),
                 tracker: ContractEventTracker::default(),
                 scheduled_executions: Vec::new(),
                 scheduled_execution_results: BlockScheduledExecutionResults::default(),
@@ -1624,194 +1109,6 @@ impl<'a, S: Storage> ApplicableChainState<'a, S> {
                                 self.inner.topoheight,
                                 VersionedContractBalance::new(balance, state.get_topoheight()),
                             )
-                            .await?;
-                    }
-                }
-            }
-
-            for (key, (state, value)) in cache.tokens {
-                if state.should_be_stored() {
-                    match value {
-                        TokenValue::Deleted => {
-                            self.inner
-                                .storage
-                                .delete_contract_asset_ext(&contract, &key, self.inner.topoheight)
-                                .await?;
-                        }
-                        value => {
-                            self.inner
-                                .storage
-                                .set_last_contract_asset_ext_to(
-                                    &contract,
-                                    &key,
-                                    self.inner.topoheight,
-                                    &value,
-                                )
-                                .await?;
-                        }
-                    }
-                }
-            }
-        }
-
-        if log::log_enabled!(log::Level::Debug) {
-            debug!("Storing NFT cache changes");
-        }
-        let nft_cache = std::mem::take(&mut self.contract_manager.nft_cache);
-        for (collection, (state, value)) in nft_cache.collections {
-            if state.should_be_stored() {
-                match value {
-                    Some(collection_data) => {
-                        self.inner
-                            .storage
-                            .set_last_nft_collection_to(
-                                &collection,
-                                self.inner.topoheight,
-                                &collection_data,
-                            )
-                            .await?;
-                    }
-                    None => {
-                        self.inner
-                            .storage
-                            .delete_nft_collection(&collection, self.inner.topoheight)
-                            .await?;
-                    }
-                }
-            }
-        }
-
-        for ((collection, token_id), (state, value)) in nft_cache.tokens {
-            if state.should_be_stored() {
-                match value {
-                    Some(token) => {
-                        self.inner
-                            .storage
-                            .set_last_nft_token_to(
-                                &collection,
-                                token_id,
-                                self.inner.topoheight,
-                                &token,
-                            )
-                            .await?;
-                    }
-                    None => {
-                        self.inner
-                            .storage
-                            .delete_nft_token(&collection, token_id, self.inner.topoheight)
-                            .await?;
-                    }
-                }
-            }
-        }
-
-        for ((collection, owner), (state, balance)) in nft_cache.owner_balances {
-            if state.should_be_stored() {
-                self.inner
-                    .storage
-                    .set_last_nft_owner_balance_to(
-                        &collection,
-                        &owner,
-                        self.inner.topoheight,
-                        balance,
-                    )
-                    .await?;
-            }
-        }
-
-        for ((owner, collection, operator), (state, approved)) in nft_cache.operator_approvals {
-            if state.should_be_stored() {
-                self.inner
-                    .storage
-                    .set_last_nft_operator_approval_to(
-                        &owner,
-                        &collection,
-                        &operator,
-                        self.inner.topoheight,
-                        approved,
-                    )
-                    .await?;
-            }
-        }
-
-        for ((collection, user), (state, count)) in nft_cache.mint_counts {
-            if state.should_be_stored() {
-                self.inner
-                    .storage
-                    .set_last_nft_mint_count_to(&collection, &user, self.inner.topoheight, count)
-                    .await?;
-            }
-        }
-
-        if let Some((state, nonce)) = nft_cache.collection_nonce {
-            if state.should_be_stored() {
-                self.inner
-                    .storage
-                    .set_last_nft_collection_nonce_to(self.inner.topoheight, nonce)
-                    .await?;
-            }
-        }
-
-        for ((collection, token_id), (state, value)) in nft_cache.tbas {
-            if state.should_be_stored() {
-                match value {
-                    Some(tba) => {
-                        self.inner
-                            .storage
-                            .set_last_nft_tba_to(&collection, token_id, self.inner.topoheight, &tba)
-                            .await?;
-                    }
-                    None => {
-                        self.inner
-                            .storage
-                            .delete_nft_tba(&collection, token_id, self.inner.topoheight)
-                            .await?;
-                    }
-                }
-            }
-        }
-
-        for (listing_id, (state, value)) in nft_cache.rental_listings {
-            if state.should_be_stored() {
-                match value {
-                    Some(listing) => {
-                        self.inner
-                            .storage
-                            .set_last_nft_rental_listing_to(
-                                &listing_id,
-                                self.inner.topoheight,
-                                &listing,
-                            )
-                            .await?;
-                    }
-                    None => {
-                        self.inner
-                            .storage
-                            .delete_nft_rental_listing(&listing_id, self.inner.topoheight)
-                            .await?;
-                    }
-                }
-            }
-        }
-
-        for ((collection, token_id), (state, value)) in nft_cache.active_rentals {
-            if state.should_be_stored() {
-                match value {
-                    Some(rental) => {
-                        self.inner
-                            .storage
-                            .set_last_nft_active_rental_to(
-                                &collection,
-                                token_id,
-                                self.inner.topoheight,
-                                &rental,
-                            )
-                            .await?;
-                    }
-                    None => {
-                        self.inner
-                            .storage
-                            .delete_nft_active_rental(&collection, token_id, self.inner.topoheight)
                             .await?;
                     }
                 }
