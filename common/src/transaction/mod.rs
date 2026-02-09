@@ -54,18 +54,6 @@ pub enum TransactionType {
     InvokeContract(InvokeContractPayload),
     DeployContract(DeployContractPayload),
     Energy(EnergyPayload),
-    BindReferrer(BindReferrerPayload),
-    BatchReferralReward(BatchReferralRewardPayload),
-    // KYC transaction types (native KYC infrastructure)
-    SetKyc(SetKycPayload),
-    RevokeKyc(RevokeKycPayload),
-    RenewKyc(RenewKycPayload),
-    TransferKyc(TransferKycPayload),
-    AppealKyc(AppealKycPayload),
-    BootstrapCommittee(BootstrapCommitteePayload),
-    RegisterCommittee(RegisterCommitteePayload),
-    UpdateCommittee(UpdateCommitteePayload),
-    EmergencySuspend(EmergencySuspendPayload),
     AgentAccount(AgentAccountPayload),
     /// UNO privacy transfers (encrypted amounts)
     UnoTransfers(Vec<UnoTransferPayload>),
@@ -75,46 +63,6 @@ pub enum TransactionType {
     UnshieldTransfers(Vec<UnshieldTransferPayload>),
     /// TNS: Register a human-readable name (e.g., alice@tos.network)
     RegisterName(RegisterNamePayload),
-    /// TNS: Send an ephemeral message to a registered name
-    EphemeralMessage(EphemeralMessagePayload),
-    /// A2A escrow: create escrow
-    CreateEscrow(CreateEscrowPayload),
-    /// A2A escrow: deposit funds
-    DepositEscrow(DepositEscrowPayload),
-    /// A2A escrow: request release
-    ReleaseEscrow(ReleaseEscrowPayload),
-    /// A2A escrow: refund payer
-    RefundEscrow(RefundEscrowPayload),
-    /// A2A escrow: challenge optimistic release
-    ChallengeEscrow(ChallengeEscrowPayload),
-    /// A2A escrow: dispute escrow
-    DisputeEscrow(DisputeEscrowPayload),
-    /// A2A escrow: appeal resolved dispute
-    AppealEscrow(AppealEscrowPayload),
-    /// A2A escrow: submit arbitration verdict
-    SubmitVerdict(SubmitVerdictPayload),
-    /// A2A escrow: submit arbitration verdict by juror (fallback)
-    SubmitVerdictByJuror(SubmitVerdictPayload),
-    /// Arbitration: commit ArbitrationOpen payload
-    CommitArbitrationOpen(CommitArbitrationOpenPayload),
-    /// Arbitration: commit VoteRequest payload
-    CommitVoteRequest(CommitVoteRequestPayload),
-    /// Arbitration: commit SelectionCommitment payload
-    CommitSelectionCommitment(CommitSelectionCommitmentPayload),
-    /// Arbitration: commit JurorVote payload
-    CommitJurorVote(CommitJurorVotePayload),
-    /// Arbitration: register arbiter
-    RegisterArbiter(RegisterArbiterPayload),
-    /// Arbitration: update arbiter
-    UpdateArbiter(UpdateArbiterPayload),
-    /// Arbitration: slash arbiter stake
-    SlashArbiter(SlashArbiterPayload),
-    /// Arbitration: request arbiter exit
-    RequestArbiterExit(RequestArbiterExitPayload),
-    /// Arbitration: withdraw arbiter stake
-    WithdrawArbiterStake(WithdrawArbiterStakePayload),
-    /// Arbitration: cancel arbiter exit
-    CancelArbiterExit(CancelArbiterExitPayload),
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -522,7 +470,6 @@ impl Serializer for TransactionType {
             }
             TransactionType::Transfers(txs) => {
                 writer.write_u8(1);
-                // max 500 txs per transaction
                 let len: u16 = txs.len() as u16;
                 writer.write_u16(len);
                 for tx in txs {
@@ -545,129 +492,8 @@ impl Serializer for TransactionType {
                 writer.write_u8(5);
                 payload.write(writer);
             }
-            TransactionType::BindReferrer(payload) => {
-                writer.write_u8(7);
-                payload.write(writer);
-            }
-            TransactionType::BatchReferralReward(payload) => {
-                writer.write_u8(8);
-                payload.write(writer);
-            }
-            // KYC transaction types (9-15)
-            TransactionType::SetKyc(payload) => {
-                writer.write_u8(9);
-                payload.write(writer);
-            }
-            TransactionType::RevokeKyc(payload) => {
-                writer.write_u8(10);
-                payload.write(writer);
-            }
-            TransactionType::RenewKyc(payload) => {
-                writer.write_u8(11);
-                payload.write(writer);
-            }
-            TransactionType::TransferKyc(payload) => {
-                writer.write_u8(16);
-                payload.write(writer);
-            }
-            TransactionType::AppealKyc(payload) => {
-                writer.write_u8(17);
-                payload.write(writer);
-            }
-            TransactionType::BootstrapCommittee(payload) => {
-                writer.write_u8(12);
-                payload.write(writer);
-            }
-            TransactionType::RegisterCommittee(payload) => {
-                writer.write_u8(13);
-                payload.write(writer);
-            }
-            TransactionType::UpdateCommittee(payload) => {
-                writer.write_u8(14);
-                payload.write(writer);
-            }
-            TransactionType::EmergencySuspend(payload) => {
-                writer.write_u8(15);
-                payload.write(writer);
-            }
             TransactionType::AgentAccount(payload) => {
                 writer.write_u8(23);
-                payload.write(writer);
-            }
-            TransactionType::CreateEscrow(payload) => {
-                writer.write_u8(24);
-                payload.write(writer);
-            }
-            TransactionType::DepositEscrow(payload) => {
-                writer.write_u8(25);
-                payload.write(writer);
-            }
-            TransactionType::ReleaseEscrow(payload) => {
-                writer.write_u8(26);
-                payload.write(writer);
-            }
-            TransactionType::RefundEscrow(payload) => {
-                writer.write_u8(27);
-                payload.write(writer);
-            }
-            TransactionType::ChallengeEscrow(payload) => {
-                writer.write_u8(28);
-                payload.write(writer);
-            }
-            TransactionType::SubmitVerdict(payload) => {
-                writer.write_u8(29);
-                payload.write(writer);
-            }
-            TransactionType::SubmitVerdictByJuror(payload) => {
-                writer.write_u8(32);
-                payload.write(writer);
-            }
-            TransactionType::CommitArbitrationOpen(payload) => {
-                writer.write_u8(35);
-                payload.write(writer);
-            }
-            TransactionType::CommitVoteRequest(payload) => {
-                writer.write_u8(36);
-                payload.write(writer);
-            }
-            TransactionType::CommitSelectionCommitment(payload) => {
-                writer.write_u8(37);
-                payload.write(writer);
-            }
-            TransactionType::CommitJurorVote(payload) => {
-                writer.write_u8(38);
-                payload.write(writer);
-            }
-            TransactionType::DisputeEscrow(payload) => {
-                writer.write_u8(30);
-                payload.write(writer);
-            }
-            TransactionType::AppealEscrow(payload) => {
-                writer.write_u8(31);
-                payload.write(writer);
-            }
-            TransactionType::RegisterArbiter(payload) => {
-                writer.write_u8(33);
-                payload.write(writer);
-            }
-            TransactionType::UpdateArbiter(payload) => {
-                writer.write_u8(34);
-                payload.write(writer);
-            }
-            TransactionType::SlashArbiter(payload) => {
-                writer.write_u8(44);
-                payload.write(writer);
-            }
-            TransactionType::RequestArbiterExit(payload) => {
-                writer.write_u8(45);
-                payload.write(writer);
-            }
-            TransactionType::WithdrawArbiterStake(payload) => {
-                writer.write_u8(46);
-                payload.write(writer);
-            }
-            TransactionType::CancelArbiterExit(payload) => {
-                writer.write_u8(47);
                 payload.write(writer);
             }
             TransactionType::UnoTransfers(transfers) => {
@@ -698,10 +524,6 @@ impl Serializer for TransactionType {
                 writer.write_u8(21);
                 payload.write(writer);
             }
-            TransactionType::EphemeralMessage(payload) => {
-                writer.write_u8(22);
-                payload.write(writer);
-            }
         };
     }
 
@@ -727,42 +549,6 @@ impl Serializer for TransactionType {
             3 => TransactionType::InvokeContract(InvokeContractPayload::read(reader)?),
             4 => TransactionType::DeployContract(DeployContractPayload::read(reader)?),
             5 => TransactionType::Energy(EnergyPayload::read(reader)?),
-            7 => TransactionType::BindReferrer(BindReferrerPayload::read(reader)?),
-            8 => TransactionType::BatchReferralReward(BatchReferralRewardPayload::read(reader)?),
-            // KYC transaction types (9-16)
-            9 => TransactionType::SetKyc(SetKycPayload::read(reader)?),
-            10 => TransactionType::RevokeKyc(RevokeKycPayload::read(reader)?),
-            11 => TransactionType::RenewKyc(RenewKycPayload::read(reader)?),
-            12 => TransactionType::BootstrapCommittee(BootstrapCommitteePayload::read(reader)?),
-            13 => TransactionType::RegisterCommittee(RegisterCommitteePayload::read(reader)?),
-            14 => TransactionType::UpdateCommittee(UpdateCommitteePayload::read(reader)?),
-            15 => TransactionType::EmergencySuspend(EmergencySuspendPayload::read(reader)?),
-            16 => TransactionType::TransferKyc(TransferKycPayload::read(reader)?),
-            17 => TransactionType::AppealKyc(AppealKycPayload::read(reader)?),
-            23 => TransactionType::AgentAccount(AgentAccountPayload::read(reader)?),
-            24 => TransactionType::CreateEscrow(CreateEscrowPayload::read(reader)?),
-            25 => TransactionType::DepositEscrow(DepositEscrowPayload::read(reader)?),
-            26 => TransactionType::ReleaseEscrow(ReleaseEscrowPayload::read(reader)?),
-            27 => TransactionType::RefundEscrow(RefundEscrowPayload::read(reader)?),
-            28 => TransactionType::ChallengeEscrow(ChallengeEscrowPayload::read(reader)?),
-            29 => TransactionType::SubmitVerdict(SubmitVerdictPayload::read(reader)?),
-            32 => TransactionType::SubmitVerdictByJuror(SubmitVerdictPayload::read(reader)?),
-            35 => {
-                TransactionType::CommitArbitrationOpen(CommitArbitrationOpenPayload::read(reader)?)
-            }
-            36 => TransactionType::CommitVoteRequest(CommitVoteRequestPayload::read(reader)?),
-            37 => TransactionType::CommitSelectionCommitment(
-                CommitSelectionCommitmentPayload::read(reader)?,
-            ),
-            38 => TransactionType::CommitJurorVote(CommitJurorVotePayload::read(reader)?),
-            30 => TransactionType::DisputeEscrow(DisputeEscrowPayload::read(reader)?),
-            31 => TransactionType::AppealEscrow(AppealEscrowPayload::read(reader)?),
-            33 => TransactionType::RegisterArbiter(RegisterArbiterPayload::read(reader)?),
-            34 => TransactionType::UpdateArbiter(UpdateArbiterPayload::read(reader)?),
-            44 => TransactionType::SlashArbiter(SlashArbiterPayload::read(reader)?),
-            45 => TransactionType::RequestArbiterExit(RequestArbiterExitPayload::read(reader)?),
-            46 => TransactionType::WithdrawArbiterStake(WithdrawArbiterStakePayload::read(reader)?),
-            47 => TransactionType::CancelArbiterExit(CancelArbiterExitPayload::read(reader)?),
             18 => {
                 let txs_count = reader.read_u16()?;
                 if txs_count == 0 || txs_count as usize > MAX_TRANSFER_COUNT {
@@ -797,7 +583,7 @@ impl Serializer for TransactionType {
                 TransactionType::UnshieldTransfers(txs)
             }
             21 => TransactionType::RegisterName(RegisterNamePayload::read(reader)?),
-            22 => TransactionType::EphemeralMessage(EphemeralMessagePayload::read(reader)?),
+            23 => TransactionType::AgentAccount(AgentAccountPayload::read(reader)?),
             _ => return Err(ReaderError::InvalidValue),
         })
     }
@@ -820,40 +606,8 @@ impl Serializer for TransactionType {
             TransactionType::InvokeContract(payload) => payload.size(),
             TransactionType::DeployContract(module) => module.size(),
             TransactionType::Energy(payload) => payload.size(),
-            TransactionType::BindReferrer(payload) => payload.size(),
-            TransactionType::BatchReferralReward(payload) => payload.size(),
-            // KYC transaction types
-            TransactionType::SetKyc(payload) => payload.size(),
-            TransactionType::RevokeKyc(payload) => payload.size(),
-            TransactionType::RenewKyc(payload) => payload.size(),
-            TransactionType::TransferKyc(payload) => payload.size(),
-            TransactionType::AppealKyc(payload) => payload.size(),
-            TransactionType::BootstrapCommittee(payload) => payload.size(),
-            TransactionType::RegisterCommittee(payload) => payload.size(),
-            TransactionType::UpdateCommittee(payload) => payload.size(),
-            TransactionType::EmergencySuspend(payload) => payload.size(),
             TransactionType::AgentAccount(payload) => payload.size(),
-            TransactionType::CreateEscrow(payload) => payload.size(),
-            TransactionType::DepositEscrow(payload) => payload.size(),
-            TransactionType::ReleaseEscrow(payload) => payload.size(),
-            TransactionType::RefundEscrow(payload) => payload.size(),
-            TransactionType::ChallengeEscrow(payload) => payload.size(),
-            TransactionType::SubmitVerdict(payload) => payload.size(),
-            TransactionType::SubmitVerdictByJuror(payload) => payload.size(),
-            TransactionType::CommitArbitrationOpen(payload) => payload.size(),
-            TransactionType::CommitVoteRequest(payload) => payload.size(),
-            TransactionType::CommitSelectionCommitment(payload) => payload.size(),
-            TransactionType::CommitJurorVote(payload) => payload.size(),
-            TransactionType::DisputeEscrow(payload) => payload.size(),
-            TransactionType::AppealEscrow(payload) => payload.size(),
-            TransactionType::RegisterArbiter(payload) => payload.size(),
-            TransactionType::UpdateArbiter(payload) => payload.size(),
-            TransactionType::SlashArbiter(payload) => payload.size(),
-            TransactionType::RequestArbiterExit(payload) => payload.size(),
-            TransactionType::WithdrawArbiterStake(payload) => payload.size(),
-            TransactionType::CancelArbiterExit(payload) => payload.size(),
             TransactionType::UnoTransfers(txs) => {
-                // 2 bytes for count of transfers (u16)
                 let mut size = 2;
                 for tx in txs {
                     size += tx.size();
@@ -861,7 +615,6 @@ impl Serializer for TransactionType {
                 size
             }
             TransactionType::ShieldTransfers(txs) => {
-                // 2 bytes for count of transfers (u16)
                 let mut size = 2;
                 for tx in txs {
                     size += tx.size();
@@ -869,7 +622,6 @@ impl Serializer for TransactionType {
                 size
             }
             TransactionType::UnshieldTransfers(txs) => {
-                // 2 bytes for count of transfers (u16)
                 let mut size = 2;
                 for tx in txs {
                     size += tx.size();
@@ -877,7 +629,6 @@ impl Serializer for TransactionType {
                 size
             }
             TransactionType::RegisterName(payload) => payload.size(),
-            TransactionType::EphemeralMessage(payload) => payload.size(),
         }
     }
 }

@@ -3,7 +3,6 @@ use tos_kernel::tid;
 use crate::{
     asset::AssetData,
     block::TopoHeight,
-    contract_asset::{TokenKey, TokenValue},
     crypto::{Hash, PublicKey},
 };
 
@@ -58,16 +57,6 @@ pub trait ContractProvider: ContractStorage + Send + Sync + 'static {
         contract: &Hash,
         topoheight: TopoHeight,
     ) -> Result<Option<Vec<u8>>, anyhow::Error>;
-
-    // Load contract-scoped token extension data
-    fn get_contract_token_ext(
-        &self,
-        _contract: &Hash,
-        _key: &TokenKey,
-        _topoheight: TopoHeight,
-    ) -> Result<Option<(TopoHeight, TokenValue)>, anyhow::Error> {
-        Ok(None)
-    }
 }
 
 // This is a wrapper around the storage to allow for the storage to be passed in the Context

@@ -17,11 +17,10 @@ pub use unsigned::UnsignedTransaction;
 use super::{
     extra_data::{ExtraDataType, PlaintextData, UnknownExtraDataFormat},
     payload::{ShieldTransferPayload, UnoTransferPayload, UnshieldTransferPayload},
-    AgentAccountPayload, BatchReferralRewardPayload, BindReferrerPayload, BurnPayload,
-    ContractDeposit, DeployContractPayload, Deposits, EnergyPayload, EphemeralMessagePayload,
-    FeeType, InvokeConstructorPayload, InvokeContractPayload, MultiSigPayload, RegisterNamePayload,
-    Role, SourceCommitment, Transaction, TransactionType, TransferPayload, TxVersion,
-    EXTRA_DATA_LIMIT_SIZE, EXTRA_DATA_LIMIT_SUM_SIZE, MAX_MULTISIG_PARTICIPANTS,
+    AgentAccountPayload, BurnPayload, ContractDeposit, DeployContractPayload, Deposits,
+    EnergyPayload, FeeType, InvokeConstructorPayload, InvokeContractPayload, MultiSigPayload,
+    RegisterNamePayload, Role, SourceCommitment, Transaction, TransactionType, TransferPayload,
+    TxVersion, EXTRA_DATA_LIMIT_SIZE, EXTRA_DATA_LIMIT_SUM_SIZE, MAX_MULTISIG_PARTICIPANTS,
     MAX_TRANSFER_COUNT,
 };
 use crate::account::FreezeDuration;
@@ -128,13 +127,9 @@ pub enum TransactionTypeBuilder {
     InvokeContract(InvokeContractBuilder),
     DeployContract(DeployContractBuilder),
     Energy(EnergyBuilder),
-    BindReferrer(BindReferrerPayload),
-    BatchReferralReward(BatchReferralRewardPayload),
     AgentAccount(AgentAccountPayload),
     /// TNS: Register a human-readable name (e.g., alice@tos.network)
     RegisterName(RegisterNamePayload),
-    /// TNS: Send an ephemeral message to a registered name
-    EphemeralMessage(EphemeralMessagePayload),
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -365,14 +360,6 @@ impl TransactionBuilder {
                 // Payload size
                 size += energy_payload.size();
             }
-            TransactionTypeBuilder::BindReferrer(payload) => {
-                // BindReferrer payload size
-                size += payload.size();
-            }
-            TransactionTypeBuilder::BatchReferralReward(payload) => {
-                // BatchReferralReward payload size
-                size += payload.size();
-            }
             TransactionTypeBuilder::AgentAccount(payload) => {
                 size += payload.size();
             }
@@ -445,10 +432,6 @@ impl TransactionBuilder {
             }
             TransactionTypeBuilder::RegisterName(payload) => {
                 // RegisterName payload size
-                size += payload.size();
-            }
-            TransactionTypeBuilder::EphemeralMessage(payload) => {
-                // EphemeralMessage payload size
                 size += payload.size();
             }
         };
@@ -682,10 +665,6 @@ impl TransactionBuilder {
                     cost = cost.checked_add(payload.amount)?;
                 }
             }
-            // BindReferrer has no asset cost, only gas fee
-            TransactionTypeBuilder::BindReferrer(_) => {}
-            // BatchReferralReward - asset costs are handled during distribution
-            TransactionTypeBuilder::BatchReferralReward(_) => {}
             TransactionTypeBuilder::AgentAccount(_) => {}
             // Shield transfers consume TOS (plaintext) amount
             TransactionTypeBuilder::ShieldTransfers(transfers) => {
@@ -705,8 +684,6 @@ impl TransactionBuilder {
             }
             // RegisterName has no asset cost, only gas fee (registration fee is in the fee field)
             TransactionTypeBuilder::RegisterName(_) => {}
-            // EphemeralMessage has no asset cost, only gas fee (message fee is in the fee field)
-            TransactionTypeBuilder::EphemeralMessage(_) => {}
         }
 
         if *asset == UNO_ASSET && fee_type.map(|ft| ft.is_uno()).unwrap_or(false) {
@@ -1002,12 +979,6 @@ impl TransactionBuilder {
                 };
                 TransactionType::Energy(energy_payload)
             }
-            TransactionTypeBuilder::BindReferrer(ref payload) => {
-                TransactionType::BindReferrer(payload.clone())
-            }
-            TransactionTypeBuilder::BatchReferralReward(ref payload) => {
-                TransactionType::BatchReferralReward(payload.clone())
-            }
             TransactionTypeBuilder::AgentAccount(ref payload) => {
                 TransactionType::AgentAccount(payload.clone())
             }
@@ -1036,9 +1007,6 @@ impl TransactionBuilder {
             }
             TransactionTypeBuilder::RegisterName(ref payload) => {
                 TransactionType::RegisterName(payload.clone())
-            }
-            TransactionTypeBuilder::EphemeralMessage(ref payload) => {
-                TransactionType::EphemeralMessage(payload.clone())
             }
         };
 

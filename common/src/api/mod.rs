@@ -17,19 +17,10 @@ use crate::{
     crypto::{Address, Hash, Signature},
     serializer::Serializer,
     transaction::{
-        extra_data::UnknownExtraDataFormat, multisig::MultiSig, AgentAccountPayload,
-        AppealEscrowPayload, AppealKycPayload, BatchReferralRewardPayload, BindReferrerPayload,
-        BootstrapCommitteePayload, BurnPayload, CancelArbiterExitPayload, ChallengeEscrowPayload,
-        CommitArbitrationOpenPayload, CommitJurorVotePayload, CommitSelectionCommitmentPayload,
-        CommitVoteRequestPayload, CreateEscrowPayload, DeployContractPayload, DepositEscrowPayload,
-        DisputeEscrowPayload, EmergencySuspendPayload, EnergyPayload, EphemeralMessagePayload,
-        FeeType, InvokeContractPayload, MultiSigPayload, Reference, RefundEscrowPayload,
-        RegisterArbiterPayload, RegisterCommitteePayload, RegisterNamePayload,
-        ReleaseEscrowPayload, RenewKycPayload, RequestArbiterExitPayload, RevokeKycPayload,
-        SetKycPayload, ShieldTransferPayload, SlashArbiterPayload, SubmitVerdictPayload,
-        Transaction, TransactionType, TransferKycPayload, TransferPayload, TxVersion,
-        UnoTransferPayload, UnshieldTransferPayload, UpdateArbiterPayload, UpdateCommitteePayload,
-        WithdrawArbiterStakePayload,
+        extra_data::UnknownExtraDataFormat, multisig::MultiSig, AgentAccountPayload, BurnPayload,
+        DeployContractPayload, EnergyPayload, FeeType, InvokeContractPayload, MultiSigPayload,
+        Reference, RegisterNamePayload, ShieldTransferPayload, Transaction, TransactionType,
+        TransferPayload, TxVersion, UnoTransferPayload, UnshieldTransferPayload,
     },
 };
 pub use data::*;
@@ -81,18 +72,6 @@ pub enum RPCTransactionType<'a> {
     InvokeContract(Cow<'a, InvokeContractPayload>),
     DeployContract(Cow<'a, DeployContractPayload>),
     Energy(Cow<'a, EnergyPayload>),
-    BindReferrer(Cow<'a, BindReferrerPayload>),
-    BatchReferralReward(Cow<'a, BatchReferralRewardPayload>),
-    // KYC transaction types
-    SetKyc(Cow<'a, SetKycPayload>),
-    RevokeKyc(Cow<'a, RevokeKycPayload>),
-    RenewKyc(Cow<'a, RenewKycPayload>),
-    TransferKyc(Cow<'a, TransferKycPayload>),
-    AppealKyc(Cow<'a, AppealKycPayload>),
-    BootstrapCommittee(Cow<'a, BootstrapCommitteePayload>),
-    RegisterCommittee(Cow<'a, RegisterCommitteePayload>),
-    UpdateCommittee(Cow<'a, UpdateCommitteePayload>),
-    EmergencySuspend(Cow<'a, EmergencySuspendPayload>),
     AgentAccount(Cow<'a, AgentAccountPayload>),
     // UNO (Privacy Balance) transaction types
     UnoTransfers(Cow<'a, Vec<UnoTransferPayload>>),
@@ -100,28 +79,6 @@ pub enum RPCTransactionType<'a> {
     UnshieldTransfers(Cow<'a, Vec<UnshieldTransferPayload>>),
     // TNS (TOS Name Service) transaction types
     RegisterName(Cow<'a, RegisterNamePayload>),
-    EphemeralMessage(Cow<'a, EphemeralMessagePayload>),
-    // Escrow (A2A) transaction types
-    CreateEscrow(Cow<'a, CreateEscrowPayload>),
-    DepositEscrow(Cow<'a, DepositEscrowPayload>),
-    ReleaseEscrow(Cow<'a, ReleaseEscrowPayload>),
-    RefundEscrow(Cow<'a, RefundEscrowPayload>),
-    ChallengeEscrow(Cow<'a, ChallengeEscrowPayload>),
-    DisputeEscrow(Cow<'a, DisputeEscrowPayload>),
-    AppealEscrow(Cow<'a, AppealEscrowPayload>),
-    SubmitVerdict(Cow<'a, SubmitVerdictPayload>),
-    SubmitVerdictByJuror(Cow<'a, SubmitVerdictPayload>),
-    CommitArbitrationOpen(Cow<'a, CommitArbitrationOpenPayload>),
-    CommitVoteRequest(Cow<'a, CommitVoteRequestPayload>),
-    CommitSelectionCommitment(Cow<'a, CommitSelectionCommitmentPayload>),
-    CommitJurorVote(Cow<'a, CommitJurorVotePayload>),
-    // Arbitration transaction types
-    RegisterArbiter(Cow<'a, RegisterArbiterPayload>),
-    UpdateArbiter(Cow<'a, UpdateArbiterPayload>),
-    SlashArbiter(Cow<'a, SlashArbiterPayload>),
-    RequestArbiterExit(Cow<'a, RequestArbiterExitPayload>),
-    WithdrawArbiterStake(Cow<'a, WithdrawArbiterStakePayload>),
-    CancelArbiterExit(Cow<'a, CancelArbiterExitPayload>),
 }
 
 impl<'a> RPCTransactionType<'a> {
@@ -148,28 +105,6 @@ impl<'a> RPCTransactionType<'a> {
                 Self::DeployContract(Cow::Borrowed(payload))
             }
             TransactionType::Energy(payload) => Self::Energy(Cow::Borrowed(payload)),
-            TransactionType::BindReferrer(payload) => Self::BindReferrer(Cow::Borrowed(payload)),
-            TransactionType::BatchReferralReward(payload) => {
-                Self::BatchReferralReward(Cow::Borrowed(payload))
-            }
-            // KYC transaction types
-            TransactionType::SetKyc(payload) => Self::SetKyc(Cow::Borrowed(payload)),
-            TransactionType::RevokeKyc(payload) => Self::RevokeKyc(Cow::Borrowed(payload)),
-            TransactionType::RenewKyc(payload) => Self::RenewKyc(Cow::Borrowed(payload)),
-            TransactionType::TransferKyc(payload) => Self::TransferKyc(Cow::Borrowed(payload)),
-            TransactionType::AppealKyc(payload) => Self::AppealKyc(Cow::Borrowed(payload)),
-            TransactionType::BootstrapCommittee(payload) => {
-                Self::BootstrapCommittee(Cow::Borrowed(payload))
-            }
-            TransactionType::RegisterCommittee(payload) => {
-                Self::RegisterCommittee(Cow::Borrowed(payload))
-            }
-            TransactionType::UpdateCommittee(payload) => {
-                Self::UpdateCommittee(Cow::Borrowed(payload))
-            }
-            TransactionType::EmergencySuspend(payload) => {
-                Self::EmergencySuspend(Cow::Borrowed(payload))
-            }
             TransactionType::AgentAccount(payload) => Self::AgentAccount(Cow::Borrowed(payload)),
             TransactionType::UnoTransfers(transfers) => {
                 Self::UnoTransfers(Cow::Borrowed(transfers))
@@ -181,48 +116,6 @@ impl<'a> RPCTransactionType<'a> {
                 Self::UnshieldTransfers(Cow::Borrowed(transfers))
             }
             TransactionType::RegisterName(payload) => Self::RegisterName(Cow::Borrowed(payload)),
-            TransactionType::EphemeralMessage(payload) => {
-                Self::EphemeralMessage(Cow::Borrowed(payload))
-            }
-            TransactionType::CreateEscrow(payload) => Self::CreateEscrow(Cow::Borrowed(payload)),
-            TransactionType::DepositEscrow(payload) => Self::DepositEscrow(Cow::Borrowed(payload)),
-            TransactionType::ReleaseEscrow(payload) => Self::ReleaseEscrow(Cow::Borrowed(payload)),
-            TransactionType::RefundEscrow(payload) => Self::RefundEscrow(Cow::Borrowed(payload)),
-            TransactionType::ChallengeEscrow(payload) => {
-                Self::ChallengeEscrow(Cow::Borrowed(payload))
-            }
-            TransactionType::DisputeEscrow(payload) => Self::DisputeEscrow(Cow::Borrowed(payload)),
-            TransactionType::AppealEscrow(payload) => Self::AppealEscrow(Cow::Borrowed(payload)),
-            TransactionType::SubmitVerdict(payload) => Self::SubmitVerdict(Cow::Borrowed(payload)),
-            TransactionType::SubmitVerdictByJuror(payload) => {
-                Self::SubmitVerdictByJuror(Cow::Borrowed(payload))
-            }
-            TransactionType::CommitArbitrationOpen(payload) => {
-                Self::CommitArbitrationOpen(Cow::Borrowed(payload))
-            }
-            TransactionType::CommitVoteRequest(payload) => {
-                Self::CommitVoteRequest(Cow::Borrowed(payload))
-            }
-            TransactionType::CommitSelectionCommitment(payload) => {
-                Self::CommitSelectionCommitment(Cow::Borrowed(payload))
-            }
-            TransactionType::CommitJurorVote(payload) => {
-                Self::CommitJurorVote(Cow::Borrowed(payload))
-            }
-            TransactionType::RegisterArbiter(payload) => {
-                Self::RegisterArbiter(Cow::Borrowed(payload))
-            }
-            TransactionType::UpdateArbiter(payload) => Self::UpdateArbiter(Cow::Borrowed(payload)),
-            TransactionType::SlashArbiter(payload) => Self::SlashArbiter(Cow::Borrowed(payload)),
-            TransactionType::RequestArbiterExit(payload) => {
-                Self::RequestArbiterExit(Cow::Borrowed(payload))
-            }
-            TransactionType::WithdrawArbiterStake(payload) => {
-                Self::WithdrawArbiterStake(Cow::Borrowed(payload))
-            }
-            TransactionType::CancelArbiterExit(payload) => {
-                Self::CancelArbiterExit(Cow::Borrowed(payload))
-            }
         }
     }
 }
@@ -247,38 +140,6 @@ impl From<RPCTransactionType<'_>> for TransactionType {
                 TransactionType::DeployContract(payload.into_owned())
             }
             RPCTransactionType::Energy(payload) => TransactionType::Energy(payload.into_owned()),
-            RPCTransactionType::BindReferrer(payload) => {
-                TransactionType::BindReferrer(payload.into_owned())
-            }
-            RPCTransactionType::BatchReferralReward(payload) => {
-                TransactionType::BatchReferralReward(payload.into_owned())
-            }
-            // KYC transaction types
-            RPCTransactionType::SetKyc(payload) => TransactionType::SetKyc(payload.into_owned()),
-            RPCTransactionType::RevokeKyc(payload) => {
-                TransactionType::RevokeKyc(payload.into_owned())
-            }
-            RPCTransactionType::RenewKyc(payload) => {
-                TransactionType::RenewKyc(payload.into_owned())
-            }
-            RPCTransactionType::TransferKyc(payload) => {
-                TransactionType::TransferKyc(payload.into_owned())
-            }
-            RPCTransactionType::AppealKyc(payload) => {
-                TransactionType::AppealKyc(payload.into_owned())
-            }
-            RPCTransactionType::BootstrapCommittee(payload) => {
-                TransactionType::BootstrapCommittee(payload.into_owned())
-            }
-            RPCTransactionType::RegisterCommittee(payload) => {
-                TransactionType::RegisterCommittee(payload.into_owned())
-            }
-            RPCTransactionType::UpdateCommittee(payload) => {
-                TransactionType::UpdateCommittee(payload.into_owned())
-            }
-            RPCTransactionType::EmergencySuspend(payload) => {
-                TransactionType::EmergencySuspend(payload.into_owned())
-            }
             RPCTransactionType::AgentAccount(payload) => {
                 TransactionType::AgentAccount(payload.into_owned())
             }
@@ -293,66 +154,6 @@ impl From<RPCTransactionType<'_>> for TransactionType {
             }
             RPCTransactionType::RegisterName(payload) => {
                 TransactionType::RegisterName(payload.into_owned())
-            }
-            RPCTransactionType::EphemeralMessage(payload) => {
-                TransactionType::EphemeralMessage(payload.into_owned())
-            }
-            RPCTransactionType::RegisterArbiter(payload) => {
-                TransactionType::RegisterArbiter(payload.into_owned())
-            }
-            RPCTransactionType::UpdateArbiter(payload) => {
-                TransactionType::UpdateArbiter(payload.into_owned())
-            }
-            RPCTransactionType::SlashArbiter(payload) => {
-                TransactionType::SlashArbiter(payload.into_owned())
-            }
-            RPCTransactionType::RequestArbiterExit(payload) => {
-                TransactionType::RequestArbiterExit(payload.into_owned())
-            }
-            RPCTransactionType::WithdrawArbiterStake(payload) => {
-                TransactionType::WithdrawArbiterStake(payload.into_owned())
-            }
-            RPCTransactionType::CancelArbiterExit(payload) => {
-                TransactionType::CancelArbiterExit(payload.into_owned())
-            }
-            RPCTransactionType::CreateEscrow(payload) => {
-                TransactionType::CreateEscrow(payload.into_owned())
-            }
-            RPCTransactionType::DepositEscrow(payload) => {
-                TransactionType::DepositEscrow(payload.into_owned())
-            }
-            RPCTransactionType::ReleaseEscrow(payload) => {
-                TransactionType::ReleaseEscrow(payload.into_owned())
-            }
-            RPCTransactionType::RefundEscrow(payload) => {
-                TransactionType::RefundEscrow(payload.into_owned())
-            }
-            RPCTransactionType::ChallengeEscrow(payload) => {
-                TransactionType::ChallengeEscrow(payload.into_owned())
-            }
-            RPCTransactionType::DisputeEscrow(payload) => {
-                TransactionType::DisputeEscrow(payload.into_owned())
-            }
-            RPCTransactionType::AppealEscrow(payload) => {
-                TransactionType::AppealEscrow(payload.into_owned())
-            }
-            RPCTransactionType::SubmitVerdict(payload) => {
-                TransactionType::SubmitVerdict(payload.into_owned())
-            }
-            RPCTransactionType::SubmitVerdictByJuror(payload) => {
-                TransactionType::SubmitVerdictByJuror(payload.into_owned())
-            }
-            RPCTransactionType::CommitArbitrationOpen(payload) => {
-                TransactionType::CommitArbitrationOpen(payload.into_owned())
-            }
-            RPCTransactionType::CommitVoteRequest(payload) => {
-                TransactionType::CommitVoteRequest(payload.into_owned())
-            }
-            RPCTransactionType::CommitSelectionCommitment(payload) => {
-                TransactionType::CommitSelectionCommitment(payload.into_owned())
-            }
-            RPCTransactionType::CommitJurorVote(payload) => {
-                TransactionType::CommitJurorVote(payload.into_owned())
             }
         }
     }

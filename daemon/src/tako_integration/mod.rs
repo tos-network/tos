@@ -1,15 +1,11 @@
 mod accounts;
-mod contract_asset;
 mod error;
 mod executor;
 mod executor_adapter;
 mod feature_set;
-mod kyc;
 mod loader;
-mod nft;
 pub mod precompile_cost;
 mod precompile_verifier;
-mod referral;
 mod scheduled_execution;
 /// TOS Kernel(TAKO) integration module for TOS blockchain.
 ///
@@ -40,20 +36,15 @@ mod scheduled_execution;
 /// - `executor_adapter`: ContractExecutor trait implementation for TOS Kernel(TAKO)
 /// - `error`: Error types for TOS Kernel(TAKO) execution
 /// - `precompile_verifier`: Transaction-level precompile verification (Ed25519, secp256k1, secp256r1)
-/// - `contract_asset`: Adapts TOS contract asset storage to TAKO's asset syscalls
 mod storage;
-mod token_provider;
 pub mod transaction_cost;
 
 pub use accounts::TosAccountAdapter;
-pub use contract_asset::TosContractAssetAdapter;
 pub use error::TakoExecutionError;
 pub use executor::{ExecutionResult, TakoExecutor};
 pub use executor_adapter::TakoContractExecutor;
 pub use feature_set::SVMFeatureSet;
-pub use kyc::TosKycAdapter;
 pub use loader::TosContractLoaderAdapter;
-pub use nft::{NoOpNftStorage, TosNftAdapter};
 pub use precompile_cost::{
     costs, estimate_single_precompile_cost, estimate_transaction_precompile_cost,
     TransactionCostEstimator,
@@ -61,7 +52,6 @@ pub use precompile_cost::{
 pub use precompile_verifier::{
     estimate_precompile_cost, verify_all_precompiles, verify_precompile_instruction,
 };
-pub use referral::TosReferralAdapter;
 pub use scheduled_execution::{
     calculate_offer_burn, calculate_offer_miner_reward, TosScheduledExecutionAdapter,
 };

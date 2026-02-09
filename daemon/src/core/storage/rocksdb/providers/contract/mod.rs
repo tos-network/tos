@@ -1,4 +1,3 @@
-mod asset_ext;
 mod balance;
 mod data;
 mod event;
@@ -14,7 +13,6 @@ use tos_common::{
     asset::AssetData,
     block::TopoHeight,
     contract::{ContractProvider as ContractAccess, ContractStorage},
-    contract_asset::{TokenKey, TokenValue},
     crypto::{Hash, PublicKey},
     tokio::try_block_on,
 };
@@ -120,16 +118,6 @@ impl ContractAccess for RocksStorage {
         }
         let res = try_block_on(self.get_balance_at_maximum_topoheight(key, asset, topoheight))??;
         Ok(res.map(|(topoheight, balance)| (topoheight, balance.take_balance())))
-    }
-
-    fn get_contract_token_ext(
-        &self,
-        contract: &Hash,
-        key: &TokenKey,
-        topoheight: TopoHeight,
-    ) -> Result<Option<(TopoHeight, TokenValue)>, anyhow::Error> {
-        let res = try_block_on(self.get_contract_asset_ext(contract, key, topoheight))??;
-        Ok(res)
     }
 
     fn load_contract_module(

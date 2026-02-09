@@ -167,7 +167,7 @@ fn test_contract_failure_nonzero_exit_code() {
     if is_success {
         // This branch should NOT be taken
         if let Some(vc) = vm_cache {
-            chain_cache.merge_overlay_storage_and_tokens(vc);
+            chain_cache.merge_overlay_storage(vc);
         }
         panic!("Should not merge on failure");
     } else {
@@ -233,7 +233,7 @@ fn test_storage_rollback_on_failure() {
     // Apply the success/failure logic
     if is_success {
         if let Some(vc) = execution_result.cache {
-            chain_cache.merge_overlay_storage_and_tokens(vc);
+            chain_cache.merge_overlay_storage(vc);
         }
     }
     // On failure: do nothing with vm_cache (it's dropped)

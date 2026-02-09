@@ -23,10 +23,7 @@ use tos_common::{
     contract::{ContractCache, ContractProvider, TransferOutput},
     crypto::Hash,
 };
-use tos_program_runtime::{
-    invoke_context::InvokeContext, storage::ContractAssetProvider as TakoContractAssetProvider,
-    storage::ScheduledExecutionProvider,
-};
+use tos_program_runtime::{invoke_context::InvokeContext, storage::ScheduledExecutionProvider};
 use tos_tbpf::{
     aligned_memory::AlignedMemory,
     ebpf,
@@ -38,13 +35,10 @@ use tos_tbpf::{
 };
 
 use super::{
-    token_provider::ContractTokenProvider, SVMFeatureSet, TakoExecutionError, TosAccountAdapter,
-    TosContractAssetAdapter, TosContractLoaderAdapter, TosNftAdapter, TosReferralAdapter,
+    SVMFeatureSet, TakoExecutionError, TosAccountAdapter, TosContractLoaderAdapter,
     TosStorageAdapter,
 };
-use crate::core::storage::ReferralProvider;
 use crate::vrf::VrfData;
-use tos_common::nft::operations::NftStorage;
 
 /// Default compute budget for contract execution (200,000 compute units)
 ///
@@ -235,11 +229,10 @@ impl TakoExecutor {
         tx_sender: &Hash,
         input_data: &[u8],
         compute_budget: Option<u64>,
-        nft_provider: Option<&mut (dyn NftStorage + Send)>,
         vrf_data: Option<&VrfData>,
         miner_public_key: Option<&[u8; 32]>,
     ) -> Result<ExecutionResult, TakoExecutionError> {
-        Self::execute_with_features_and_referral(
+        Self::execute_with_all_providers(
             bytecode,
             provider,
             topoheight,
@@ -252,60 +245,9 @@ impl TakoExecutor {
             input_data,
             compute_budget,
             &SVMFeatureSet::production(),
-            None, // No referral provider
-            nft_provider,
             vrf_data,
             miner_public_key,
-        )
-    }
-
-    /// Execute a TOS Kernel(TAKO) contract with referral system access
-    ///
-    /// This method is similar to `execute()` but provides access to the native
-    /// referral system via syscalls. Use this when executing contracts that need
-    /// to query referral relationships, team sizes, or upline information.
-    ///
-    /// # Referral Syscalls Enabled
-    ///
-    /// - `tos_has_referrer` - Check if user has referrer (500 CU)
-    /// - `get_referrer` - Get user's referrer address (500 CU)
-    /// - `get_uplines` - Get N levels of uplines (500 + 200*N CU)
-    /// - `get_direct_referrals_count` - Count of direct referrals (500 CU)
-    /// - `get_team_size` - Team size from cache (500 CU)
-    /// - `get_level` - User's level in referral tree (500 CU)
-    /// - `tos_is_downline` - Check downline relationship (500 + 100*depth CU)
-    #[allow(clippy::too_many_arguments)]
-    pub fn execute_with_referral(
-        bytecode: &[u8],
-        provider: &(dyn tos_common::contract::ContractProvider + Send),
-        topoheight: TopoHeight,
-        contract_hash: &Hash,
-        block_hash: &Hash,
-        block_height: u64,
-        block_timestamp: u64,
-        tx_hash: &Hash,
-        tx_sender: &Hash,
-        input_data: &[u8],
-        compute_budget: Option<u64>,
-        referral_provider: &mut (dyn ReferralProvider + Send + Sync),
-    ) -> Result<ExecutionResult, TakoExecutionError> {
-        Self::execute_with_features_and_referral(
-            bytecode,
-            provider,
-            topoheight,
-            contract_hash,
-            block_hash,
-            block_height,
-            block_timestamp,
-            tx_hash,
-            tx_sender,
-            input_data,
-            compute_budget,
-            &SVMFeatureSet::production(),
-            Some(referral_provider),
-            None, // No NFT provider
-            None, // VRF data not available in this method
-            None, // Miner public key not available
+            None, // No scheduled execution provider
         )
     }
 
@@ -382,62 +324,7 @@ impl TakoExecutor {
         compute_budget: Option<u64>,
         feature_set: &SVMFeatureSet,
     ) -> Result<ExecutionResult, TakoExecutionError> {
-        // Execute without referral provider, VRF, or miner identity (backward compatibility)
-        Self::execute_with_features_and_referral(
-            bytecode,
-            provider,
-            topoheight,
-            contract_hash,
-            block_hash,
-            block_height,
-            block_timestamp,
-            tx_hash,
-            tx_sender,
-            input_data,
-            compute_budget,
-            feature_set,
-            None, // No referral provider
-            None, // No NFT provider
-            None, // No VRF data
-            None, // No miner public key
-        )
-    }
-
-    /// Execute a TOS Kernel(TAKO) contract with custom feature set and referral provider
-    ///
-    /// This method allows specifying which TBPF versions are enabled and provides
-    /// access to the native referral system via syscalls.
-    ///
-    /// # Referral System Access
-    ///
-    /// When `referral_provider` is provided, contracts can access the native referral
-    /// system via these syscalls:
-    /// - `tos_has_referrer` - Check if user has referrer
-    /// - `get_referrer` - Get user's referrer address
-    /// - `get_uplines` - Get N levels of uplines
-    /// - `get_direct_referrals_count` - Count of direct referrals
-    /// - `get_team_size` - Team size (cached)
-    /// - `get_level` - User's level in referral tree
-    /// - `tos_is_downline` - Check if user is in another's downline
-    #[allow(clippy::too_many_arguments)]
-    pub fn execute_with_features_and_referral(
-        bytecode: &[u8],
-        provider: &(dyn tos_common::contract::ContractProvider + Send),
-        topoheight: TopoHeight,
-        contract_hash: &Hash,
-        block_hash: &Hash,
-        block_height: u64,
-        block_timestamp: u64,
-        tx_hash: &Hash,
-        tx_sender: &Hash,  // Using Hash type for sender (32 bytes)
-        input_data: &[u8], // Contract input parameters (entry point, user data)
-        compute_budget: Option<u64>,
-        feature_set: &SVMFeatureSet,
-        referral_provider: Option<&mut (dyn ReferralProvider + Send + Sync)>,
-        nft_provider: Option<&mut (dyn NftStorage + Send)>,
-        vrf_data: Option<&VrfData>, // VRF data for verifiable randomness
-        miner_public_key: Option<&[u8; 32]>, // Block producer's key for VRF identity binding
-    ) -> Result<ExecutionResult, TakoExecutionError> {
+        // Execute without VRF or miner identity (backward compatibility)
         Self::execute_with_all_providers(
             bytecode,
             provider,
@@ -451,44 +338,17 @@ impl TakoExecutor {
             input_data,
             compute_budget,
             feature_set,
-            referral_provider,
-            nft_provider,
-            true, // Contract asset syscalls enabled
-            vrf_data,
-            miner_public_key,
-            None, // No scheduled execution provider (use execute_with_all_providers directly)
+            None, // No VRF data
+            None, // No miner public key
+            None, // No scheduled execution provider
         )
     }
 
     /// Execute a TOS Kernel(TAKO) contract with all available providers
     ///
     /// This is the most comprehensive execution method, supporting all provider types:
-    /// - Referral provider for accessing the native referral system
-    /// - NFT provider for accessing the native NFT system
-    /// - Contract asset provider for accessing the contract asset system
     /// - VRF data for verifiable randomness
     /// - Scheduled execution provider for offer_call syscall (scheduling future executions)
-    ///
-    /// # NFT System Access
-    ///
-    /// When `nft_provider` is provided, contracts can access the native NFT system
-    /// via syscalls for:
-    /// - Collection management (create, pause)
-    /// - Token operations (mint, burn, transfer)
-    /// - Ownership queries (owner_of, balance_of)
-    /// - Approval management (approve, set_approval_for_all)
-    ///
-    /// # Contract Asset System Access
-    ///
-    /// When contract asset syscalls are enabled, contracts can access the contract asset
-    /// system via syscalls for:
-    /// - Asset creation and management (create_asset, asset_exists)
-    /// - Token operations (transfer, mint, burn)
-    /// - Balance queries (balance_of, total_supply)
-    /// - Approval management (approve, allowance, transfer_from)
-    /// - Governance features (delegate, lock, timelock)
-    /// - Role management (grant_role, revoke_role, has_role)
-    /// - Advanced features (escrow, permit, agent operations)
     ///
     /// # Scheduled Execution Access (OFFERCALL)
     ///
@@ -511,10 +371,7 @@ impl TakoExecutor {
         input_data: &[u8], // Contract input parameters (entry point, user data)
         compute_budget: Option<u64>,
         feature_set: &SVMFeatureSet,
-        referral_provider: Option<&mut (dyn ReferralProvider + Send + Sync)>,
-        nft_provider: Option<&mut (dyn NftStorage + Send)>, // NFT storage provider
-        contract_assets_enabled: bool,                      // Contract asset syscalls enabled
-        vrf_data: Option<&VrfData>,                         // VRF data for verifiable randomness
+        vrf_data: Option<&VrfData>, // VRF data for verifiable randomness
         miner_public_key: Option<&[u8; 32]>, // Block producer's key for VRF identity binding
         scheduled_provider: Option<&mut dyn ScheduledExecutionProvider>, // Scheduled execution provider
     ) -> Result<ExecutionResult, TakoExecutionError> {
@@ -558,33 +415,6 @@ impl TakoExecutor {
             TosStorageAdapter::new(provider, contract_hash, &mut cache.storage, topoheight);
         let mut accounts = TosAccountAdapter::new(provider, topoheight);
         let loader_adapter = TosContractLoaderAdapter::new(provider, topoheight);
-
-        // 3a. Create referral adapter (if provider is available)
-        // Created before InvokeContext to ensure proper lifetime (adapter must outlive InvokeContext)
-        let mut referral_adapter =
-            referral_provider.map(|p| TosReferralAdapter::new(p, topoheight));
-
-        // 3b. Create NFT adapter (if provider is available)
-        // NFT adapter bridges TAKO's NftProvider trait with TOS's NftStorage operations
-        let mut nft_adapter = nft_provider.map(TosNftAdapter::new);
-
-        // 3c. Create contract asset adapter
-        // Use the contract-scoped token cache to preserve atomicity on failure,
-        // but only when the caller enables contract asset syscalls.
-        let mut contract_token_provider = if contract_assets_enabled {
-            Some(ContractTokenProvider::new(
-                provider,
-                contract_hash,
-                topoheight,
-                &mut cache.tokens,
-            ))
-        } else {
-            None
-        };
-        let mut contract_asset_adapter = contract_token_provider.as_mut().map(|provider| {
-            Box::new(TosContractAssetAdapter::new(provider, block_height))
-                as Box<dyn TakoContractAssetProvider>
-        });
 
         // 4. Create TBPF loader with syscalls (needed for InvokeContext creation)
         // Note: JIT compilation is enabled via the "jit" feature in Cargo.toml
@@ -689,34 +519,7 @@ impl TakoExecutor {
             }
         }
 
-        // 7c. Wire referral provider (if available)
-        // Enables contracts to access native referral system via get_uplines, etc.
-        if let Some(ref mut adapter) = referral_adapter {
-            invoke_context.set_referral_provider(adapter);
-            if log::log_enabled!(log::Level::Debug) {
-                debug!("Referral provider wired to InvokeContext");
-            }
-        }
-
-        // 7d. Wire NFT provider (if available)
-        // Enables contracts to access native NFT system via nft_mint, nft_transfer, etc.
-        if let Some(ref mut adapter) = nft_adapter {
-            invoke_context.set_nft_provider(adapter);
-            if log::log_enabled!(log::Level::Debug) {
-                debug!("NFT provider wired to InvokeContext");
-            }
-        }
-
-        // 7e. Wire contract asset provider (if available)
-        // Enables contracts to access contract asset system via asset syscalls
-        if let Some(ref mut adapter) = contract_asset_adapter {
-            invoke_context.set_asset_provider(adapter.as_mut());
-            if log::log_enabled!(log::Level::Debug) {
-                debug!("Contract asset provider wired to InvokeContext");
-            }
-        }
-
-        // 7f. Wire scheduled execution provider (if available)
+        // 7c. Wire scheduled execution provider (if available)
         // Enables contracts to schedule future executions via offer_call syscall
         if let Some(scheduled) = scheduled_provider {
             invoke_context.set_scheduled_execution_provider(scheduled);
@@ -824,9 +627,6 @@ impl TakoExecutor {
 
             // Get transfers (precompiles don't typically do transfers)
             let transfers = accounts.take_pending_transfers();
-
-            drop(contract_asset_adapter);
-            drop(contract_token_provider);
 
             return Ok(ExecutionResult {
                 return_value: 0,          // Success
@@ -951,9 +751,6 @@ impl TakoExecutor {
                         HEAP_SIZE / 1024
                     );
                 }
-                drop(contract_asset_adapter);
-                drop(contract_token_provider);
-
                 Ok(ExecutionResult {
                     return_value,
                     instructions_executed: instruction_count,

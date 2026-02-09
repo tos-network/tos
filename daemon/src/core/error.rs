@@ -401,69 +401,8 @@ pub enum BlockchainError {
     UnknownAccount,
     #[error(transparent)]
     SemaphoreError(#[from] AcquireError),
-    // Referral system errors
-    #[error("User has already bound a referrer")]
-    ReferralAlreadyBound,
-    #[error("Cannot set self as referrer")]
-    ReferralSelfReferral,
-    #[error("Circular reference detected in referral chain")]
-    ReferralCircularReference,
-    #[error("Total reward ratio exceeds 100%")]
-    ReferralRatiosTooHigh,
-    #[error("Referrer not found")]
-    ReferralReferrerNotFound,
-    #[error("Referral record not found")]
-    ReferralRecordNotFound,
     #[error("Feature not implemented")]
     NotImplemented,
-
-    // KYC system errors
-    #[error("KYC record not found")]
-    KycNotFound,
-    #[error("KYC already set for this user")]
-    KycAlreadySet,
-    #[error("KYC level is invalid")]
-    InvalidKycLevel,
-    #[error("KYC has expired")]
-    KycExpired,
-    #[error("KYC is revoked")]
-    KycRevoked,
-    #[error("KYC is suspended")]
-    KycSuspended,
-    #[error("Insufficient KYC level: required {0}, got {1}")]
-    InsufficientKycLevel(u16, u16),
-    #[error("KYC level downgrade not allowed: current level {0}, attempted level {1}")]
-    KycDowngradeNotAllowed(u16, u16),
-    #[error("KYC level exceeds destination committee's max level")]
-    KycLevelExceedsCommitteeMax,
-
-    // Committee system errors
-    #[error("Committee not found")]
-    CommitteeNotFound,
-    #[error("Committee already exists")]
-    CommitteeAlreadyExists,
-    #[error("Global Committee already exists")]
-    GlobalCommitteeAlreadyExists,
-    #[error("Global Committee not bootstrapped")]
-    GlobalCommitteeNotBootstrapped,
-    #[error("Parent committee not found")]
-    ParentCommitteeNotFound,
-    #[error("Invalid max KYC level for committee")]
-    InvalidMaxKycLevel,
-    #[error("Member not found in committee")]
-    MemberNotFound,
-    #[error("Member already exists in committee")]
-    MemberAlreadyExists,
-    #[error("Cannot remove last member from committee")]
-    CannotRemoveLastMember,
-    #[error("Insufficient approvals for operation")]
-    InsufficientApprovals,
-    #[error("Committee is not active")]
-    CommitteeNotActive,
-    #[error("Invalid committee threshold")]
-    InvalidCommitteeThreshold,
-    #[error("Cannot delete committee with active children")]
-    CommitteeHasChildren,
 
     // UNO (Privacy Balance) errors
     #[error("UNO (privacy balance) not implemented yet")]
