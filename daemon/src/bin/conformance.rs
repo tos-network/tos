@@ -196,6 +196,18 @@ struct TxRoundtripRequest {
 }
 
 #[derive(Deserialize)]
+struct JsonRpcRequest {
+    #[serde(default)]
+    jsonrpc: String,
+    #[serde(default)]
+    id: serde_json::Value,
+    #[serde(default)]
+    method: String,
+    #[serde(default)]
+    params: serde_json::Value,
+}
+
+#[derive(Deserialize)]
 struct BlockExecuteRequest {
     #[serde(default)]
     wire_hex: String,
@@ -1242,6 +1254,238 @@ async fn handle_state_digest(state: web::Data<AppState>) -> HttpResponse {
     let export = build_export(&engine).await;
     let digest = compute_state_digest(&export);
     HttpResponse::Ok().json(json!({ "state_digest": digest }))
+}
+
+fn jsonrpc_ok(id: &serde_json::Value, result: serde_json::Value) -> serde_json::Value {
+    json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "result": result,
+    })
+}
+
+fn jsonrpc_err(id: &serde_json::Value, code: i32, message: &str) -> serde_json::Value {
+    json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "error": { "code": code, "message": message },
+    })
+}
+
+async fn handle_json_rpc(
+    state: web::Data<AppState>,
+    body: web::Json<JsonRpcRequest>,
+) -> HttpResponse {
+    let req = body.into_inner();
+    // Note: accept only single-request JSON-RPC 2.0 (no batch).
+    if req.jsonrpc != "2.0" || req.method.is_empty() {
+        return HttpResponse::Ok().json(jsonrpc_err(&req.id, -32600, "Invalid Request"));
+    }
+
+    let engine = state.engine.lock().await;
+    let storage = engine.blockchain.get_storage().read().await;
+
+    match req.method.as_str() {
+        "tos_stateDigest" => {
+            let export = build_export(&engine).await;
+            let digest = compute_state_digest(&export);
+            HttpResponse::Ok().json(jsonrpc_ok(&req.id, json!(digest)))
+        }
+        "tos_stateExport" => {
+            let export = build_export(&engine).await;
+            HttpResponse::Ok().json(jsonrpc_ok(
+                &req.id,
+                serde_json::to_value(export).unwrap_or_else(|_| json!({})),
+            ))
+        }
+        "tos_accountGet" => {
+            let addr = req
+                .params
+                .get("address")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let key = match to_public_key(addr) {
+                Ok(k) => k,
+                Err(_) => {
+                    return HttpResponse::Ok().json(jsonrpc_err(
+                        &req.id,
+                        -32602,
+                        "Invalid params: address",
+                    ));
+                }
+            };
+            let balance = storage
+                .get_last_balance(&key, &TOS_ASSET)
+                .await
+                .map(|(_, v)| v.get_balance())
+                .unwrap_or(0);
+            let nonce = storage
+                .get_last_nonce(&key)
+                .await
+                .map(|(_, v)| v.get_nonce())
+                .unwrap_or(0);
+            let meta = engine
+                .meta
+                .account_meta
+                .get(addr)
+                .cloned()
+                .unwrap_or_default();
+            let (frozen, energy) = match storage.get_energy_resource(&key).await {
+                Ok(Some(resource)) => (
+                    resource.frozen_tos.saturating_mul(COIN_VALUE),
+                    resource.energy,
+                ),
+                _ => (meta.frozen, meta.energy),
+            };
+            if balance == 0
+                && nonce == 0
+                && frozen == 0
+                && energy == 0
+                && !engine.meta.account_meta.contains_key(addr)
+            {
+                return HttpResponse::Ok().json(jsonrpc_ok(&req.id, serde_json::Value::Null));
+            }
+            HttpResponse::Ok().json(jsonrpc_ok(
+                &req.id,
+                json!({
+                    "address": addr,
+                    "balance": balance,
+                    "nonce": nonce,
+                    "frozen": frozen,
+                    "energy": energy,
+                    "flags": meta.flags,
+                    "data": meta.data,
+                }),
+            ))
+        }
+        "tos_energyGet" => {
+            let addr = req
+                .params
+                .get("address")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let key = match to_public_key(addr) {
+                Ok(k) => k,
+                Err(_) => {
+                    return HttpResponse::Ok().json(jsonrpc_err(
+                        &req.id,
+                        -32602,
+                        "Invalid params: address",
+                    ));
+                }
+            };
+            let resource = match storage.get_energy_resource(&key).await {
+                Ok(Some(r)) => r,
+                _ => {
+                    return HttpResponse::Ok().json(jsonrpc_ok(&req.id, serde_json::Value::Null));
+                }
+            };
+            let freeze_records: Vec<serde_json::Value> = resource
+                .freeze_records
+                .iter()
+                .map(|fr| {
+                    json!({
+                        "amount": fr.amount.saturating_mul(COIN_VALUE),
+                        "energy_gained": fr.energy_gained,
+                        "freeze_height": fr.freeze_topoheight,
+                        "unlock_height": fr.unlock_topoheight,
+                        "duration_days": fr.duration.get_days(),
+                    })
+                })
+                .collect();
+            let pending_unfreezes: Vec<serde_json::Value> = resource
+                .pending_unfreezes
+                .iter()
+                .map(|pu| {
+                    json!({
+                        "amount": pu.amount.saturating_mul(COIN_VALUE),
+                        "expire_height": pu.expire_topoheight,
+                    })
+                })
+                .collect();
+            HttpResponse::Ok().json(jsonrpc_ok(
+                &req.id,
+                json!({
+                    "address": addr,
+                    "energy": resource.energy,
+                    "frozen_tos": resource.frozen_tos.saturating_mul(COIN_VALUE),
+                    "last_update": resource.last_update,
+                    "freeze_records": freeze_records,
+                    "pending_unfreezes": pending_unfreezes,
+                }),
+            ))
+        }
+        "tos_tnsResolve" => {
+            let name = req
+                .params
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            if name.is_empty() {
+                return HttpResponse::Ok().json(jsonrpc_err(
+                    &req.id,
+                    -32602,
+                    "Invalid params: name",
+                ));
+            }
+            let name_hash = blake3_hash(name.as_bytes());
+            match storage.get_name_owner(&name_hash).await {
+                Ok(Some(owner)) => {
+                    HttpResponse::Ok().json(jsonrpc_ok(&req.id, json!(owner.to_hex())))
+                }
+                Ok(None) => HttpResponse::Ok().json(jsonrpc_ok(&req.id, serde_json::Value::Null)),
+                Err(_) => HttpResponse::Ok().json(jsonrpc_err(&req.id, -32603, "Internal error")),
+            }
+        }
+        "tos_contractGet" => {
+            let hash = req
+                .params
+                .get("hash")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let h = match Hash::from_str(hash) {
+                Ok(h) => h,
+                Err(_) => {
+                    return HttpResponse::Ok().json(jsonrpc_err(
+                        &req.id,
+                        -32602,
+                        "Invalid params: hash",
+                    ));
+                }
+            };
+            match storage
+                .get_contract_at_maximum_topoheight_for(&h, u64::MAX)
+                .await
+            {
+                Ok(Some((_, versioned))) => {
+                    if let Some(cow_module) = versioned.get() {
+                        if let Some(bytecode) = cow_module.get_bytecode() {
+                            return HttpResponse::Ok().json(jsonrpc_ok(
+                                &req.id,
+                                json!({ "hash": h.to_hex(), "module": hex::encode(bytecode) }),
+                            ));
+                        }
+                    }
+                    HttpResponse::Ok().json(jsonrpc_ok(&req.id, serde_json::Value::Null))
+                }
+                Ok(None) => HttpResponse::Ok().json(jsonrpc_ok(&req.id, serde_json::Value::Null)),
+                Err(_) => HttpResponse::Ok().json(jsonrpc_err(&req.id, -32603, "Internal error")),
+            }
+        }
+        "tos_methods" => HttpResponse::Ok().json(jsonrpc_ok(
+            &req.id,
+            json!([
+                "tos_stateDigest",
+                "tos_stateExport",
+                "tos_accountGet",
+                "tos_energyGet",
+                "tos_tnsResolve",
+                "tos_contractGet",
+                "tos_methods"
+            ]),
+        )),
+        _ => HttpResponse::Ok().json(jsonrpc_err(&req.id, -32601, "Method not found")),
+    }
 }
 
 fn decode_tx_strict(hex_str: &str) -> Result<Transaction, ReaderError> {
@@ -3055,6 +3299,7 @@ async fn main() -> std::io::Result<()> {
             .route("/state/load", web::post().to(handle_state_load))
             .route("/state/export", web::get().to(handle_state_export))
             .route("/state/digest", web::get().to(handle_state_digest))
+            .route("/json_rpc", web::post().to(handle_json_rpc))
             .route("/tx/execute", web::post().to(handle_tx_execute))
             .route("/tx/roundtrip", web::post().to(handle_tx_roundtrip))
             .route("/block/execute", web::post().to(handle_block_execute))
