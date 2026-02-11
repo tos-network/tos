@@ -3291,6 +3291,11 @@ async fn main() -> std::io::Result<()> {
         engine: Arc::new(Mutex::new(engine)),
     });
 
+    let port: u16 = std::env::var("CONFORMANCE_PORT")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(8086);
+
     HttpServer::new(move || {
         App::new()
             .app_data(app_state.clone())
@@ -3305,7 +3310,7 @@ async fn main() -> std::io::Result<()> {
             .route("/block/execute", web::post().to(handle_block_execute))
             .route("/chain/execute", web::post().to(handle_chain_execute))
     })
-    .bind(("0.0.0.0", 8080))?
+    .bind(("0.0.0.0", port))?
     .run()
     .await
 }

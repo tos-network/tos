@@ -36,7 +36,13 @@ echo ""
 
 # Build all binaries
 echo "🚀 Starting build..."
-cargo build --release
+# Use all available CPUs (Linux) while keeping a safe fallback
+if command -v nproc >/dev/null 2>&1; then
+    jobs="$(nproc)"
+else
+    jobs="4"
+fi
+cargo build --release -j "${jobs}"
 
 echo ""
 echo "📁 Creating local build directory..."
