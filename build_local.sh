@@ -37,12 +37,15 @@ echo ""
 # Build all binaries
 echo "🚀 Starting build..."
 # Use generic CPU target to avoid native-instruction crashes on older CPUs.
-export RUSTFLAGS="-C target-cpu=generic"
-# Use all available CPUs (Linux) while keeping a safe fallback
+export RUSTFLAGS="-C target-cpu=native"
+# Use half of available CPUs (Linux) with a minimum of 8
 if command -v nproc >/dev/null 2>&1; then
-    jobs="$(nproc)"
+    jobs="$(( $(nproc) / 2 ))"
 else
     jobs="4"
+fi
+if [[ "${jobs}" -lt 8 ]]; then
+    jobs="8"
 fi
 cargo build --release -j "${jobs}"
 
