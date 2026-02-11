@@ -1,0 +1,16 @@
+[package]
+name = "tos_tck_hash"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+
+[[bin]]
+name = "gen_tos_hash_v3_vectors"
+path = "gen_tos_hash_v3_vectors.rs"
+
+[dependencies]
+tos-hash = { git = "https://github.com/tos-network/tos-hash", rev = "b661e5a" }
+hex = "0.4"
+serde = { version = "1.0", features = ["derive"] }
+serde_yaml = "0.9"
