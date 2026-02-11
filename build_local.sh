@@ -36,6 +36,8 @@ echo ""
 
 # Build all binaries
 echo "🚀 Starting build..."
+# Use generic CPU target to avoid native-instruction crashes on older CPUs.
+export RUSTFLAGS="-C target-cpu=generic"
 # Use all available CPUs (Linux) while keeping a safe fallback
 if command -v nproc >/dev/null 2>&1; then
     jobs="$(nproc)"
