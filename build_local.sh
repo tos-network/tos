@@ -38,15 +38,8 @@ echo ""
 echo "🚀 Starting build..."
 # Use generic CPU target to avoid native-instruction crashes on older CPUs.
 export RUSTFLAGS="-C target-cpu=native"
-# Use half of available CPUs (Linux) with a minimum of 8
-if command -v nproc >/dev/null 2>&1; then
-    jobs="$(( $(nproc) / 2 ))"
-else
-    jobs="4"
-fi
-if [[ "${jobs}" -lt 8 ]]; then
-    jobs="8"
-fi
+# Use 48 CPUs for maximum parallel compilation
+jobs="48"
 cargo build --release -j "${jobs}"
 
 echo ""

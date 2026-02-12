@@ -77,7 +77,7 @@ print_step "Step 2: Clippy Linting (Critical)"
 echo "Running clippy (critical lints as errors, others as warnings)..."
 echo "  - await_holding_lock: error (prevents deadlocks)"
 echo "  - other lints: warnings only"
-if cargo clippy --workspace --lib --bins --tests -- \
+if cargo clippy -j 48 --workspace --lib --bins --tests -- \
     -D clippy::await_holding_lock \
     -W clippy::all 2>&1; then
     print_success "Clippy critical linting"
@@ -92,7 +92,7 @@ fi
 print_step "Step 3: Security Clippy (Production Code)"
 
 echo "Checking daemon, common, wallet for unwrap/expect/panic..."
-if cargo clippy \
+if cargo clippy -j 48 \
     --package tos_daemon \
     --package tos_common \
     --package tos_wallet \
@@ -108,7 +108,7 @@ else
 fi
 
 echo "Checking miner binary..."
-if cargo clippy \
+if cargo clippy -j 48 \
     --package tos_miner -- \
     -D clippy::unwrap_used \
     -D clippy::expect_used \
@@ -136,14 +136,14 @@ fi
 print_step "Step 4: Build Verification"
 
 echo "Building workspace..."
-if cargo build --workspace --lib 2>&1; then
+if cargo build -j 48 --workspace --lib 2>&1; then
     print_success "Build (libs)"
 else
     print_error "Build (libs)"
     exit 1
 fi
 
-if cargo build --workspace --bins 2>&1; then
+if cargo build -j 48 --workspace --bins 2>&1; then
     print_success "Build (bins)"
 else
     print_error "Build (bins)"
@@ -156,7 +156,7 @@ fi
 print_step "Step 5: Build with Strict Warnings (-D warnings)"
 
 echo "Building production crates with -D warnings..."
-if RUSTFLAGS="-D warnings" cargo build \
+if RUSTFLAGS="-D warnings" cargo build -j 48 \
     --package tos_daemon \
     --package tos_common \
     --package tos_wallet \
@@ -184,7 +184,7 @@ fi
 print_step "Step 6: Running Tests"
 
 echo "Running unit tests..."
-if cargo test --workspace --lib 2>&1; then
+if cargo test -j 48 --workspace --lib 2>&1; then
     print_success "Unit tests"
 else
     print_error "Unit tests"
@@ -192,7 +192,7 @@ else
 fi
 
 echo "Running doc tests..."
-if cargo test --workspace --doc 2>&1; then
+if cargo test -j 48 --workspace --doc 2>&1; then
     print_success "Doc tests"
 else
     print_error "Doc tests"
