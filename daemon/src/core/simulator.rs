@@ -72,7 +72,7 @@ impl Simulator {
     pub async fn start<S: Storage>(&self, blockchain: Arc<Blockchain<S>>) {
         let millis_interval = match self {
             Self::Stress => 300,
-            _ => 5000,
+            _ => 1000,
         };
 
         let mut interval = interval(Duration::from_millis(millis_interval));
