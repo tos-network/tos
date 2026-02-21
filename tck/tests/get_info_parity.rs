@@ -13,14 +13,13 @@
 ///      TOS Rust (blockchain.rs get_block_reward):
 ///        base_reward = (MAXIMUM_SUPPLY - supply) >> EMISSION_SPEED_FACTOR
 ///        reward = base_reward * block_time_target / MILLIS_PER_SECOND / 180
-
 use tos_daemon::core::blockchain::get_block_reward;
 
 // ---------------------------------------------------------------------------
 // Constants matching Avatar C (at_dag_config.h) and TOS Rust (config.rs)
 // ---------------------------------------------------------------------------
-const MAXIMUM_SUPPLY: u64 = 184_000_000 * 100_000_000;  // AT_MAXIMUM_SUPPLY
-const BLOCK_TIME_MS: u64  = 1_000;                        // AT_BLOCK_TIME_TARGET_MS
+const MAXIMUM_SUPPLY: u64 = 184_000_000 * 100_000_000; // AT_MAXIMUM_SUPPLY
+const BLOCK_TIME_MS: u64 = 1_000; // AT_BLOCK_TIME_TARGET_MS
 
 // ---------------------------------------------------------------------------
 // Mirrors Avatar's rpc_compute_emitted_supply() and TOS Rust's iterative
@@ -29,7 +28,9 @@ const BLOCK_TIME_MS: u64  = 1_000;                        // AT_BLOCK_TIME_TARGE
 fn compute_emitted_supply(topoheight: u64) -> u64 {
     let mut supply: u64 = 0;
     for _ in 0..topoheight {
-        if supply >= MAXIMUM_SUPPLY { break; }
+        if supply >= MAXIMUM_SUPPLY {
+            break;
+        }
         // TOS Rust: get_block_reward(supply, BLOCK_TIME_TARGET_MS)
         let reward = get_block_reward(supply, BLOCK_TIME_MS);
         supply += reward;
@@ -47,7 +48,11 @@ fn compute_emitted_supply(topoheight: u64) -> u64 {
 // Both produce the same value for equivalent state.
 // ---------------------------------------------------------------------------
 fn avatar_current_topoheight(next_topoheight: u64) -> Option<u64> {
-    if next_topoheight == 0 { None } else { Some(next_topoheight - 1) }
+    if next_topoheight == 0 {
+        None
+    } else {
+        Some(next_topoheight - 1)
+    }
 }
 
 // ===========================================================================
@@ -95,9 +100,12 @@ fn test_genesis_topoheight() {
 #[test]
 fn test_sequential_topoheights() {
     // Simulate ordering 3 blocks: next starts at 0, increments to 3
-    let next: u64 = 3;  // after ordering blocks at topo 0, 1, 2
+    let next: u64 = 3; // after ordering blocks at topo 0, 1, 2
     let current = avatar_current_topoheight(next).unwrap();
-    assert_eq!(current, 2, "after 3 ordered blocks, top topoheight must be 2");
+    assert_eq!(
+        current, 2,
+        "after 3 ordered blocks, top topoheight must be 2"
+    );
 
     // Verify the sequence: block N was assigned topoheight N-1 (0-indexed)
     // next_topo=1 → current=0 (block 1 = genesis)
@@ -105,8 +113,12 @@ fn test_sequential_topoheights() {
     // next_topo=3 → current=2 (block 3 = top)
     for n in 1u64..=10 {
         let c = avatar_current_topoheight(n).unwrap();
-        assert_eq!(c, n - 1,
-            "avatar_current_topoheight(next={n}) must be {}", n - 1);
+        assert_eq!(
+            c,
+            n - 1,
+            "avatar_current_topoheight(next={n}) must be {}",
+            n - 1
+        );
     }
 }
 
@@ -122,8 +134,10 @@ fn test_sequential_topoheights() {
 #[test]
 fn test_emitted_supply_1_block() {
     let supply = compute_emitted_supply(1);
-    assert_eq!(supply, 97_486_707,
-        "emitted_supply(1) must be 97_486_707 (genesis block reward)");
+    assert_eq!(
+        supply, 97_486_707,
+        "emitted_supply(1) must be 97_486_707 (genesis block reward)"
+    );
 }
 
 // ===========================================================================
@@ -135,17 +149,23 @@ fn test_emitted_supply_10_blocks() {
     let mut prev: u64 = 0;
     for i in 1u64..=10 {
         let supply = compute_emitted_supply(i);
-        assert!(supply > prev,
-            "emitted_supply({i}) must be strictly greater than supply({prev})");
+        assert!(
+            supply > prev,
+            "emitted_supply({i}) must be strictly greater than supply({prev})"
+        );
         prev = supply;
     }
 
     let supply_10 = compute_emitted_supply(10);
-    let supply_1  = compute_emitted_supply(1);
-    assert!(supply_10 > supply_1 * 9,
-        "supply(10) must exceed 9 * supply(1)");
-    assert!(supply_10 < supply_1 * 11,
-        "supply(10) must be less than 11 * supply(1) (decay is small over 10 blocks)");
+    let supply_1 = compute_emitted_supply(1);
+    assert!(
+        supply_10 > supply_1 * 9,
+        "supply(10) must exceed 9 * supply(1)"
+    );
+    assert!(
+        supply_10 < supply_1 * 11,
+        "supply(10) must be less than 11 * supply(1) (decay is small over 10 blocks)"
+    );
 }
 
 // ===========================================================================
@@ -155,10 +175,11 @@ fn test_emitted_supply_10_blocks() {
 #[test]
 fn test_emitted_supply_never_exceeds_max() {
     let supply = compute_emitted_supply(1_000_000);
-    assert!(supply <= MAXIMUM_SUPPLY,
-        "emitted_supply must never exceed MAXIMUM_SUPPLY={MAXIMUM_SUPPLY}");
-    assert!(supply > 0,
-        "emitted_supply for 1M blocks must be > 0");
+    assert!(
+        supply <= MAXIMUM_SUPPLY,
+        "emitted_supply must never exceed MAXIMUM_SUPPLY={MAXIMUM_SUPPLY}"
+    );
+    assert!(supply > 0, "emitted_supply for 1M blocks must be > 0");
 }
 
 // ===========================================================================
@@ -168,8 +189,10 @@ fn test_emitted_supply_never_exceeds_max() {
 #[test]
 fn test_emitted_supply_zero_topo() {
     let supply = compute_emitted_supply(0);
-    assert_eq!(supply, 0,
-        "emitted_supply(topoheight=0) must be 0: no blocks ordered yet");
+    assert_eq!(
+        supply, 0,
+        "emitted_supply(topoheight=0) must be 0: no blocks ordered yet"
+    );
 }
 
 // ===========================================================================
@@ -181,11 +204,16 @@ fn test_emitted_supply_zero_topo() {
 fn test_get_block_reward_matches_c_formula() {
     // TOS Rust: get_block_reward(0, 1000) == Avatar: base_reward * 1000 / 1000 / 180
     let reward = get_block_reward(0, BLOCK_TIME_MS);
-    assert_eq!(reward, 97_486_707,
-        "get_block_reward(supply=0, time=1000ms) must equal C formula result 97_486_707");
+    assert_eq!(
+        reward, 97_486_707,
+        "get_block_reward(supply=0, time=1000ms) must equal C formula result 97_486_707"
+    );
 
     // After genesis: supply = 97_486_707
     let reward2 = get_block_reward(97_486_707, BLOCK_TIME_MS);
-    assert_eq!(reward2, compute_emitted_supply(2) - compute_emitted_supply(1),
-        "get_block_reward at supply(1) must equal marginal supply gain from topo=1 to topo=2");
+    assert_eq!(
+        reward2,
+        compute_emitted_supply(2) - compute_emitted_supply(1),
+        "get_block_reward at supply(1) must equal marginal supply gain from topo=1 to topo=2"
+    );
 }
