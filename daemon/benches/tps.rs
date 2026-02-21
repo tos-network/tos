@@ -441,23 +441,6 @@ impl<'a> tos_common::transaction::verify::BlockchainVerificationState<'a, ()>
     ) -> Result<(), ()> {
         Err(())
     }
-
-    // ===== TNS (TOS Name Service) Verification Methods =====
-
-    async fn is_name_registered(&self, _name_hash: &Hash) -> Result<bool, ()> {
-        Ok(false)
-    }
-
-    async fn account_has_name(&self, _account: &'a CompressedPublicKey) -> Result<bool, ()> {
-        Ok(false)
-    }
-
-    async fn get_account_name_hash(
-        &self,
-        _account: &'a CompressedPublicKey,
-    ) -> Result<Option<Hash>, ()> {
-        Ok(None)
-    }
 }
 
 // -------------------------------------------------------------------------------------------------

@@ -47,7 +47,6 @@ pub enum StepKind {
     Accounts,
     MultiSigs,
     Contracts,
-    Tns,
     UnoBalance,
     BlocksMetadata,
 }
@@ -61,8 +60,7 @@ impl StepKind {
             Self::KeyBalances => Self::Accounts,
             Self::Accounts => Self::MultiSigs,
             Self::MultiSigs => Self::Contracts,
-            Self::Contracts => Self::Tns,
-            Self::Tns => Self::UnoBalance,
+            Self::Contracts => Self::UnoBalance,
             Self::UnoBalance => Self::BlocksMetadata,
             Self::BlocksMetadata => return None,
         })
@@ -106,8 +104,6 @@ pub enum StepRequest<'a> {
 
     // === TOS Extension Steps ===
 
-    // TNS name records, pagination
-    TnsNames(Option<u64>),
     // UNO balances per key/asset, key, asset, topoheight, pagination
     UnoBalances(Cow<'a, PublicKey>, Cow<'a, Hash>, TopoHeight, Option<u64>),
     // UNO balance keys discovery (list all key+asset pairs), pagination
@@ -132,7 +128,6 @@ impl<'a> StepRequest<'a> {
             Self::ContractBalances(_, _, _) => StepKind::Contracts,
             Self::ContractStores(_, _, _) => StepKind::Contracts,
             Self::ContractsExecutions(_, _, _) => StepKind::Contracts,
-            Self::TnsNames(_) => StepKind::Tns,
             Self::UnoBalances(_, _, _, _) => StepKind::UnoBalance,
             Self::UnoBalanceKeys(_) => StepKind::UnoBalance,
             Self::BlocksMetadata(_) => StepKind::BlocksMetadata,
@@ -351,7 +346,6 @@ impl Serializer for StepRequest<'_> {
                 }
                 Self::ContractsExecutions(min, max, page)
             }
-            22 => Self::TnsNames(Option::read(reader)?),
             25 => {
                 let key = PublicKey::read(reader)?;
                 let asset = Hash::read(reader)?;
@@ -445,10 +439,6 @@ impl Serializer for StepRequest<'_> {
                 max.write(writer);
                 page.write(writer);
             }
-            Self::TnsNames(page) => {
-                writer.write_u8(22);
-                page.write(writer);
-            }
             Self::UnoBalances(key, asset, topo, page) => {
                 writer.write_u8(25);
                 key.write(writer);
@@ -489,7 +479,6 @@ impl Serializer for StepRequest<'_> {
                 hash.size() + topoheight.size() + page.size()
             }
             Self::ContractsExecutions(min, max, page) => min.size() + max.size() + page.size(),
-            Self::TnsNames(page) => page.size(),
             Self::UnoBalances(key, asset, topo, page) => {
                 key.size() + asset.size() + topo.size() + page.size()
             }
@@ -536,8 +525,6 @@ pub enum StepResponse {
 
     // === TOS Extension Responses ===
 
-    // TNS name -> owner entries, pagination
-    TnsNames(IndexMap<Hash, PublicKey>, Option<u64>),
     // UNO balance entries, pagination
     UnoBalances(Vec<UnoBalance>, Option<u64>),
     // UNO balance keys discovery (key, asset pairs), pagination
@@ -562,7 +549,6 @@ impl StepResponse {
             Self::ContractBalances(_, _) => StepKind::Contracts,
             Self::ContractStores(_, _) => StepKind::Contracts,
             Self::ContractsExecutions(_, _) => StepKind::Contracts,
-            Self::TnsNames(_, _) => StepKind::Tns,
             Self::UnoBalances(_, _) => StepKind::UnoBalance,
             Self::UnoBalanceKeys(_, _) => StepKind::UnoBalance,
             Self::BlocksMetadata(_) => StepKind::BlocksMetadata,
@@ -840,38 +826,6 @@ impl Serializer for StepResponse {
 
                 Self::ContractsExecutions(executions, page)
             }
-            22 => {
-                let len = reader.read_u16()?;
-                if len > MAX_ITEMS_PER_PAGE as u16 {
-                    if log::log_enabled!(log::Level::Debug) {
-                        debug!("Invalid tns names response length: {}", len);
-                    }
-                    return Err(ReaderError::InvalidValue);
-                }
-
-                let mut entries = IndexMap::with_capacity(len as usize);
-                for _ in 0..len {
-                    let key = Hash::read(reader)?;
-                    let value = PublicKey::read(reader)?;
-                    if entries.insert(key, value).is_some() {
-                        if log::log_enabled!(log::Level::Debug) {
-                            debug!("Duplicated hash in TnsNames Step Response");
-                        }
-                        return Err(ReaderError::InvalidValue);
-                    }
-                }
-
-                let page = Option::read(reader)?;
-                if let Some(page_number) = &page {
-                    if *page_number == 0 {
-                        if log::log_enabled!(log::Level::Debug) {
-                            debug!("Invalid page number (0) in Step Response");
-                        }
-                        return Err(ReaderError::InvalidValue);
-                    }
-                }
-                Self::TnsNames(entries, page)
-            }
             25 => {
                 let entries = Vec::<UnoBalance>::read(reader)?;
                 let page = Option::read(reader)?;
@@ -1002,11 +956,6 @@ impl Serializer for StepResponse {
                 executions.write(writer);
                 page.write(writer);
             }
-            Self::TnsNames(entries, page) => {
-                writer.write_u8(22);
-                entries.write(writer);
-                page.write(writer);
-            }
             Self::UnoBalances(entries, page) => {
                 writer.write_u8(25);
                 entries.write(writer);
@@ -1044,7 +993,6 @@ impl Serializer for StepResponse {
             Self::ContractBalances(assets, page) => assets.size() + page.size(),
             Self::ContractStores(entries, page) => entries.size() + page.size(),
             Self::ContractsExecutions(executions, page) => executions.size() + page.size(),
-            Self::TnsNames(entries, page) => entries.size() + page.size(),
             Self::UnoBalances(entries, page) => entries.size() + page.size(),
             Self::UnoBalanceKeys(entries, page) => {
                 2 + entries
@@ -1810,17 +1758,6 @@ mod tests {
     // ========================================================================
 
     #[test]
-    fn test_request_tns_names_round_trip() {
-        let request = StepRequest::TnsNames(Some(10));
-        let decoded = round_trip_request(&request);
-        match decoded {
-            StepRequest::TnsNames(page) => assert_eq!(page, Some(10)),
-            _ => panic!("Expected TnsNames variant"),
-        }
-        verify_size_request(&request);
-    }
-
-    #[test]
     fn test_request_uno_balances_round_trip() {
         let key = PublicKey::from_bytes(&[5u8; 32]).unwrap();
         let request =
@@ -1841,48 +1778,6 @@ mod tests {
     // ========================================================================
     // TOS Extension StepResponse tests
     // ========================================================================
-
-    #[test]
-    fn test_response_tns_names_empty() {
-        let response = StepResponse::TnsNames(IndexMap::new(), None);
-        let decoded = round_trip_response(&response);
-        match decoded {
-            StepResponse::TnsNames(entries, page) => {
-                assert!(entries.is_empty());
-                assert_eq!(page, None);
-            }
-            _ => panic!("Expected TnsNames variant"),
-        }
-        verify_size_response(&response);
-    }
-
-    #[test]
-    fn test_response_tns_names_with_entries() {
-        let mut entries = IndexMap::new();
-        let owner = PublicKey::from_bytes(&[10u8; 32]).unwrap();
-        entries.insert(test_hash(1), owner);
-
-        let response = StepResponse::TnsNames(entries, Some(3));
-        let decoded = round_trip_response(&response);
-        match decoded {
-            StepResponse::TnsNames(decoded_entries, page) => {
-                assert_eq!(decoded_entries.len(), 1);
-                assert_eq!(
-                    *decoded_entries.get(&test_hash(1)).unwrap(),
-                    PublicKey::from_bytes(&[10u8; 32]).unwrap()
-                );
-                assert_eq!(page, Some(3));
-            }
-            _ => panic!("Expected TnsNames variant"),
-        }
-        verify_size_response(&response);
-    }
-
-    #[test]
-    fn test_response_tns_names_kind() {
-        let response = StepResponse::TnsNames(IndexMap::new(), None);
-        assert_eq!(response.kind(), StepKind::Tns);
-    }
 
     #[test]
     fn test_response_uno_balances_empty() {
@@ -1948,7 +1843,7 @@ mod tests {
     #[test]
     fn test_response_tos_page_zero_rejected() {
         // Test that page=0 is rejected for TOS extension variants
-        let test_cases: Vec<(&str, u8)> = vec![("TnsNames", 22), ("UnoBalances", 25)];
+        let test_cases: Vec<(&str, u8)> = vec![("UnoBalances", 25)];
 
         for (name, id) in test_cases {
             let mut bytes = Vec::new();
@@ -1974,7 +1869,7 @@ mod tests {
     #[test]
     fn test_response_tos_too_many_items_rejected() {
         // Test that more than MAX_ITEMS_PER_PAGE is rejected
-        let test_cases: Vec<(&str, u8)> = vec![("TnsNames", 22), ("UnoBalances", 25)];
+        let test_cases: Vec<(&str, u8)> = vec![("UnoBalances", 25)];
 
         for (name, id) in test_cases {
             let mut bytes = Vec::new();
@@ -2001,18 +1896,15 @@ mod tests {
     #[test]
     fn test_request_tos_extension_wire_ids() {
         // Verify that each TOS extension request serializes with the correct wire ID
-        let test_cases: Vec<(StepRequest, u8)> = vec![
-            (StepRequest::TnsNames(None), 22),
-            (
-                StepRequest::UnoBalances(
-                    Cow::Owned(PublicKey::from_bytes(&[0u8; 32]).unwrap()),
-                    Cow::Owned(test_hash(1)),
-                    0,
-                    None,
-                ),
-                25,
+        let test_cases: Vec<(StepRequest, u8)> = vec![(
+            StepRequest::UnoBalances(
+                Cow::Owned(PublicKey::from_bytes(&[0u8; 32]).unwrap()),
+                Cow::Owned(test_hash(1)),
+                0,
+                None,
             ),
-        ];
+            25,
+        )];
 
         for (request, expected_id) in test_cases {
             let mut bytes = Vec::new();
@@ -2032,10 +1924,8 @@ mod tests {
     #[test]
     fn test_response_tos_extension_wire_ids() {
         // Verify that each TOS extension response serializes with the correct wire ID
-        let test_cases: Vec<(StepResponse, u8)> = vec![
-            (StepResponse::TnsNames(IndexMap::new(), None), 22),
-            (StepResponse::UnoBalances(Vec::new(), None), 25),
-        ];
+        let test_cases: Vec<(StepResponse, u8)> =
+            vec![(StepResponse::UnoBalances(Vec::new(), None), 25)];
 
         for (response, expected_id) in test_cases {
             let mut bytes = Vec::new();
@@ -2058,14 +1948,12 @@ mod tests {
 
     #[test]
     fn test_step_kind_tos_transitions() {
-        assert_eq!(StepKind::Tns.next(), Some(StepKind::UnoBalance));
         assert_eq!(StepKind::UnoBalance.next(), Some(StepKind::BlocksMetadata));
         assert_eq!(StepKind::BlocksMetadata.next(), None);
     }
 
     #[test]
     fn test_step_kind_tos_request_kind_mapping() {
-        assert_eq!(StepRequest::TnsNames(None).kind(), StepKind::Tns);
         assert_eq!(
             StepRequest::UnoBalances(
                 Cow::Owned(PublicKey::from_bytes(&[0u8; 32]).unwrap()),

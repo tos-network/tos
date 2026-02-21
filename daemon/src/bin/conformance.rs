@@ -36,7 +36,7 @@ use tos_daemon::core::state::ApplicableChainState;
 use tos_daemon::core::storage::rocksdb::RocksStorage;
 use tos_daemon::core::storage::{
     AccountProvider, AssetProvider, BalanceProvider, ContractProvider, DagOrderProvider,
-    DifficultyProvider, NonceProvider, TipsProvider, TnsProvider, VersionedContract,
+    DifficultyProvider, NonceProvider, TipsProvider, VersionedContract,
 };
 use tos_daemon::vrf::WrappedMinerSecret;
 
@@ -67,12 +67,6 @@ struct AccountState {
 
 // --- Domain data JSON wrapper structs ---
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
-struct TnsNameEntry {
-    name: String,
-    owner: String,
-}
-
 // Contract entry for pre-loading deployed contracts
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 struct ContractEntry {
@@ -92,8 +86,6 @@ struct PreState {
     global_state: GlobalState,
     #[serde(default)]
     accounts: Vec<AccountState>,
-    #[serde(default)]
-    tns_names: Vec<TnsNameEntry>,
     #[serde(default)]
     contracts: Vec<ContractEntry>,
 }
@@ -333,14 +325,6 @@ fn public_key_to_hex(key: &PublicKey) -> String {
     hex::encode(key.as_bytes())
 }
 
-// --- Domain data parse helpers ---
-
-fn parse_tns_entry(entry: &TnsNameEntry) -> Result<(Hash, PublicKey), String> {
-    let name_hash = blake3_hash(entry.name.as_bytes());
-    let owner = to_public_key(&entry.owner)?;
-    Ok((name_hash, owner))
-}
-
 fn compute_state_digest(state: &PreState) -> String {
     let mut buf = Vec::new();
     let gs = &state.global_state;
@@ -444,7 +428,7 @@ fn map_error_code(err: &BlockchainError) -> u16 {
                 0x0300
             }
             // === Insufficient fee (0x0301) ===
-            else if msg.contains("Insufficient TNS fee") || msg.contains("registration fee") {
+            else if msg.contains("Insufficient fee") {
                 0x0301
             }
             // === Overflow (0x0304) ===
@@ -466,7 +450,6 @@ fn map_error_code(err: &BlockchainError) -> u16 {
             else if msg.contains("self-referral")
                 || msg.contains("SelfReferral")
                 || msg.contains("Sender is receiver")
-                || msg.contains("Cannot send message to yourself")
             {
                 0x0409
             }
@@ -504,7 +487,6 @@ fn map_error_code(err: &BlockchainError) -> u16 {
             // === Account / record not found (0x0400) ===
             else if msg.contains("does not exist")
                 || msg.contains("Arbiter not found")
-                || msg.contains("Recipient name not registered")
                 || msg.contains("no KYC record")
                 || msg.contains("Committee not found")
                 || msg.contains("committee not found")
@@ -512,10 +494,7 @@ fn map_error_code(err: &BlockchainError) -> u16 {
                 0x0400
             }
             // === Already exists (0x0405) ===
-            else if msg.contains("already registered")
-                || msg.contains("already has a registered name")
-                || msg.contains("already exists")
-            {
+            else if msg.contains("already registered") || msg.contains("already exists") {
                 0x0405
             }
             // === Already bound (0x0408) ===
@@ -533,16 +512,9 @@ fn map_error_code(err: &BlockchainError) -> u16 {
                 0x0403
             }
             // === Invalid format / payload (0x0107) — catch-all for validation ===
-            // TNS name validation errors
-            else if msg.contains("Invalid name length")
-                || msg.contains("must start with")
-                || msg.contains("cannot end with")
-                || msg.contains("Invalid character")
-                || msg.contains("Consecutive separators")
-                || msg.contains("Reserved name")
-                || msg.contains("Confusing name")
+            else if
             // KYC errors
-                || msg.contains("requires at least")
+            msg.contains("requires at least")
                 || msg.contains("Duplicate approver")
                 || msg.contains("Duplicate member")
                 || msg.contains("Too many approvals")
@@ -625,15 +597,6 @@ fn map_error_code(err: &BlockchainError) -> u16 {
                 || msg.contains("Invalid batch referral")
                 || msg.contains("multisig")
                 || msg.contains("Invalid invoke contract")
-            // Ephemeral message errors
-                || msg.contains("Invalid message TTL")
-                || msg.contains("Message too large")
-                || msg.contains("Message cannot be empty")
-                || msg.contains("Sender must have a registered")
-                || msg.contains("Sender name hash mismatch")
-                || msg.contains("Message with this nonce already")
-                || msg.contains("Message nonce must equal")
-                || msg.contains("Invalid receiver handle")
             // Privacy/Shield errors
                 || msg.contains("Shield transfers only")
             {
@@ -664,29 +627,9 @@ fn map_verify_error_code(
         VE::InvalidFee(_, _) => 0x0301,
         VE::InsufficientFunds { .. } => 0x0300,
         VE::TransferExtraDataSize | VE::TransactionExtraDataSize | VE::InvalidFormat => 0x0100,
-        VE::SenderIsReceiver | VE::SelfMessage => 0x0409,
+        VE::SenderIsReceiver => 0x0409,
         VE::ContractNotFound => 0x0500,
         VE::ContractAlreadyExists(_) => 0x0405,
-        // TNS name registration errors
-        VE::InvalidNameLength(_)
-        | VE::InvalidNameStart
-        | VE::InvalidNameEnd
-        | VE::InvalidNameCharacter(_)
-        | VE::ConsecutiveSeparators
-        | VE::ReservedName(_)
-        | VE::ConfusingName(_) => 0x0107,
-        VE::NameAlreadyRegistered | VE::AccountAlreadyHasName => 0x0405,
-        VE::InsufficientTnsFee { .. } => 0x0301,
-        // Ephemeral message errors
-        VE::InvalidMessageTTL(_)
-        | VE::MessageTooLarge(_)
-        | VE::EmptyMessage
-        | VE::RecipientNotFound
-        | VE::SenderNotRegistered
-        | VE::InvalidSender
-        | VE::MessageAlreadyExists
-        | VE::InvalidMessageNonce
-        | VE::InvalidReceiverHandle => 0x0107,
         // Arbiter not found (0x0400)
         VE::ArbiterNotFound => 0x0400,
         // Arbiter validation errors (0x0107)
@@ -901,19 +844,6 @@ async fn handle_state_load(state: web::Data<AppState>, body: web::Json<PreState>
                     .json(json!({ "success": false, "error": err.to_string() }));
             }
 
-            // Load domain data: TNS names
-            for entry in &pre_state.tns_names {
-                match parse_tns_entry(entry) {
-                    Ok((name_hash, owner)) => {
-                        let _ = storage.register_name(name_hash, owner).await;
-                    }
-                    Err(err) => {
-                        return HttpResponse::BadRequest()
-                            .json(json!({ "success": false, "error": err }));
-                    }
-                }
-            }
-
             // Load domain data: deployed contracts
             for entry in &pre_state.contracts {
                 let contract_hash = match Hash::from_hex(&entry.hash) {
@@ -1102,28 +1032,6 @@ async fn handle_json_rpc(
                 }),
             ))
         }
-        "tos_tnsResolve" => {
-            let name = req
-                .params
-                .get("name")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            if name.is_empty() {
-                return HttpResponse::Ok().json(jsonrpc_err(
-                    &req.id,
-                    -32602,
-                    "Invalid params: name",
-                ));
-            }
-            let name_hash = blake3_hash(name.as_bytes());
-            match storage.get_name_owner(&name_hash).await {
-                Ok(Some(owner)) => {
-                    HttpResponse::Ok().json(jsonrpc_ok(&req.id, json!(owner.to_hex())))
-                }
-                Ok(None) => HttpResponse::Ok().json(jsonrpc_ok(&req.id, serde_json::Value::Null)),
-                Err(_) => HttpResponse::Ok().json(jsonrpc_err(&req.id, -32603, "Internal error")),
-            }
-        }
         "tos_contractGet" => {
             let hash = req
                 .params
@@ -1165,7 +1073,6 @@ async fn handle_json_rpc(
                 "tos_stateDigest",
                 "tos_stateExport",
                 "tos_accountGet",
-                "tos_tnsResolve",
                 "tos_contractGet",
                 "tos_methods"
             ]),
@@ -2805,7 +2712,6 @@ async fn build_export(engine: &Engine) -> PreState {
         network_chain_id: engine.meta.network_chain_id,
         global_state: gs,
         accounts,
-        tns_names: Vec::new(),
         contracts,
     }
 }

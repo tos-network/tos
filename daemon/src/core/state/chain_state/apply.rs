@@ -236,26 +236,6 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError>
             .get_network()
             .unwrap_or(tos_common::network::Network::Mainnet)
     }
-
-    // ===== TNS (TOS Name Service) Verification Methods =====
-
-    async fn is_name_registered(&self, name_hash: &Hash) -> Result<bool, BlockchainError> {
-        self.inner.is_name_registered(name_hash).await
-    }
-
-    async fn account_has_name(
-        &self,
-        account: &'a CompressedPublicKey,
-    ) -> Result<bool, BlockchainError> {
-        self.inner.account_has_name(account).await
-    }
-
-    async fn get_account_name_hash(
-        &self,
-        account: &'a CompressedPublicKey,
-    ) -> Result<Option<Hash>, BlockchainError> {
-        self.inner.get_account_name_hash(account).await
-    }
 }
 
 #[async_trait]
@@ -473,19 +453,6 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for Applicable
         }
 
         Ok(())
-    }
-
-    // ===== TNS (TOS Name Service) Apply Methods =====
-
-    async fn register_name(
-        &mut self,
-        name_hash: Hash,
-        owner: &'a CompressedPublicKey,
-    ) -> Result<(), BlockchainError> {
-        self.inner
-            .storage
-            .register_name(name_hash, owner.clone())
-            .await
     }
 }
 

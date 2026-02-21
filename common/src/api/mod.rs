@@ -18,9 +18,9 @@ use crate::{
     serializer::Serializer,
     transaction::{
         extra_data::UnknownExtraDataFormat, multisig::MultiSig, BurnPayload, DeployContractPayload,
-        FeeType, InvokeContractPayload, MultiSigPayload, Reference, RegisterNamePayload,
-        ShieldTransferPayload, Transaction, TransactionType, TransferPayload, TxVersion,
-        UnoTransferPayload, UnshieldTransferPayload,
+        FeeType, InvokeContractPayload, MultiSigPayload, Reference, ShieldTransferPayload,
+        Transaction, TransactionType, TransferPayload, TxVersion, UnoTransferPayload,
+        UnshieldTransferPayload,
     },
 };
 pub use data::*;
@@ -75,8 +75,6 @@ pub enum RPCTransactionType<'a> {
     UnoTransfers(Cow<'a, Vec<UnoTransferPayload>>),
     ShieldTransfers(Cow<'a, Vec<ShieldTransferPayload>>),
     UnshieldTransfers(Cow<'a, Vec<UnshieldTransferPayload>>),
-    // TNS (TOS Name Service) transaction types
-    RegisterName(Cow<'a, RegisterNamePayload>),
 }
 
 impl<'a> RPCTransactionType<'a> {
@@ -111,7 +109,6 @@ impl<'a> RPCTransactionType<'a> {
             TransactionType::UnshieldTransfers(transfers) => {
                 Self::UnshieldTransfers(Cow::Borrowed(transfers))
             }
-            TransactionType::RegisterName(payload) => Self::RegisterName(Cow::Borrowed(payload)),
         }
     }
 }
@@ -143,9 +140,6 @@ impl From<RPCTransactionType<'_>> for TransactionType {
             }
             RPCTransactionType::UnshieldTransfers(transfers) => {
                 TransactionType::UnshieldTransfers(transfers.into_owned())
-            }
-            RPCTransactionType::RegisterName(payload) => {
-                TransactionType::RegisterName(payload.into_owned())
             }
         }
     }

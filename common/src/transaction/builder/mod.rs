@@ -18,10 +18,9 @@ use super::{
     extra_data::{ExtraDataType, PlaintextData, UnknownExtraDataFormat},
     payload::{ShieldTransferPayload, UnoTransferPayload, UnshieldTransferPayload},
     BurnPayload, ContractDeposit, DeployContractPayload, Deposits, FeeType,
-    InvokeConstructorPayload, InvokeContractPayload, MultiSigPayload, RegisterNamePayload, Role,
-    SourceCommitment, Transaction, TransactionType, TransferPayload, TxVersion,
-    EXTRA_DATA_LIMIT_SIZE, EXTRA_DATA_LIMIT_SUM_SIZE, MAX_MULTISIG_PARTICIPANTS,
-    MAX_TRANSFER_COUNT,
+    InvokeConstructorPayload, InvokeContractPayload, MultiSigPayload, Role, SourceCommitment,
+    Transaction, TransactionType, TransferPayload, TxVersion, EXTRA_DATA_LIMIT_SIZE,
+    EXTRA_DATA_LIMIT_SUM_SIZE, MAX_MULTISIG_PARTICIPANTS, MAX_TRANSFER_COUNT,
 };
 use crate::{
     config::{
@@ -123,8 +122,6 @@ pub enum TransactionTypeBuilder {
     MultiSig(MultiSigBuilder),
     InvokeContract(InvokeContractBuilder),
     DeployContract(DeployContractBuilder),
-    /// TNS: Register a human-readable name (e.g., alice@tos.network)
-    RegisterName(RegisterNamePayload),
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -380,10 +377,6 @@ impl TransactionBuilder {
                 // G_vec len
                 size += 2 * RISTRETTO_COMPRESSED_SIZE * lg_n;
             }
-            TransactionTypeBuilder::RegisterName(payload) => {
-                // RegisterName payload size
-                size += payload.size();
-            }
         };
 
         size
@@ -604,8 +597,6 @@ impl TransactionBuilder {
                     }
                 }
             }
-            // RegisterName has no asset cost, only gas fee (registration fee is in the fee field)
-            TransactionTypeBuilder::RegisterName(_) => {}
         }
 
         if *asset == UNO_ASSET && fee_type.map(|ft| ft.is_uno()).unwrap_or(false) {
@@ -874,9 +865,6 @@ impl TransactionBuilder {
                     "Unshield transfers require UnoAccountState. Use build_unshield_unsigned instead."
                         .into(),
                 ));
-            }
-            TransactionTypeBuilder::RegisterName(ref payload) => {
-                TransactionType::RegisterName(payload.clone())
             }
         };
 

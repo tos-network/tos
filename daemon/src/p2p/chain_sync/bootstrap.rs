@@ -441,18 +441,6 @@ impl<S: Storage> P2pServer<S> {
                 StepResponse::ContractsExecutions(executions, page)
             }
             // === TOS Extension Handlers ===
-            StepRequest::TnsNames(page) => {
-                let page = page.unwrap_or(0);
-                let skip = checked_page_offset(page)?;
-                let entries = storage.list_all_tns_names(skip, MAX_ITEMS_PER_PAGE).await?;
-                let next_page = if entries.len() == MAX_ITEMS_PER_PAGE {
-                    Some(page + 1)
-                } else {
-                    None
-                };
-                let map: IndexMap<Hash, PublicKey> = entries.into_iter().collect();
-                StepResponse::TnsNames(map, next_page)
-            }
             StepRequest::UnoBalances(key, asset, topoheight, page) => {
                 // Use the topoheight as max boundary for first request, then page as cursor
                 let max = page.unwrap_or(topoheight);
@@ -1748,54 +1736,13 @@ impl<S: Storage> P2pServer<S> {
             info!("Syncing TOS extension data from peer");
         }
 
-        // 1. Sync TNS names
-        self.sync_tns_names(peer).await?;
-
-        // 2. Sync UNO balances
+        // Sync UNO balances
         self.sync_uno_balances(peer, stable_topoheight).await?;
 
         if log::log_enabled!(log::Level::Info) {
             info!("TOS extension data sync complete");
         }
 
-        Ok(())
-    }
-
-    async fn sync_tns_names(&self, peer: &Arc<Peer>) -> Result<(), BlockchainError> {
-        let mut next_page = None;
-        let mut pages_received: u64 = 0;
-        loop {
-            let StepResponse::TnsNames(entries, page) = peer
-                .request_boostrap_chain(StepRequest::TnsNames(next_page))
-                .await?
-            else {
-                if log::log_enabled!(log::Level::Error) {
-                    error!("Received an invalid StepResponse while fetching TNS names");
-                }
-                return Err(P2pError::InvalidPacket.into());
-            };
-
-            if !entries.is_empty() {
-                let _permit = self.blockchain.storage_semaphore().acquire().await?;
-                let mut storage = self.blockchain.get_storage().write().await;
-                for (name_hash, owner) in entries {
-                    storage.register_name(name_hash, owner).await?;
-                }
-            }
-
-            pages_received = pages_received.saturating_add(1);
-            if pages_received >= MAX_BOOTSTRAP_PAGES {
-                if log::log_enabled!(log::Level::Error) {
-                    error!("Bootstrap sync exceeded maximum page limit");
-                }
-                return Err(P2pError::InvalidPacket.into());
-            }
-
-            next_page = page;
-            if next_page.is_none() {
-                break;
-            }
-        }
         Ok(())
     }
 

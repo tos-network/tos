@@ -1,7 +1,6 @@
 mod contract;
 mod error;
 mod state;
-mod tns;
 mod zkp_cache;
 
 use std::{borrow::Cow, iter, sync::Arc};
@@ -41,7 +40,6 @@ use contract::InvokeContract;
 
 pub use error::*;
 pub use state::*;
-pub use tns::*;
 pub use zkp_cache::*;
 
 /// Prepared UNO transaction data for batch range proof verification
@@ -121,8 +119,7 @@ impl Transaction {
                     | TransactionType::DeployContract(_)
                     | TransactionType::UnoTransfers(_)
                     | TransactionType::ShieldTransfers(_)
-                    | TransactionType::UnshieldTransfers(_)
-                    | TransactionType::RegisterName(_) => true,
+                    | TransactionType::UnshieldTransfers(_) => true,
                 }
             }
         }
@@ -624,33 +621,6 @@ impl Transaction {
                     return Err(VerificationError::TransactionExtraDataSize);
                 }
             }
-            TransactionType::RegisterName(payload) => {
-                // TNS RegisterName: stateless format validation + stateful checks
-                verify_register_name_format::<E>(payload)?;
-
-                // Fee verification: minimum registration fee required
-                verify_register_name_fee::<E>(self.fee)?;
-
-                // Stateful checks: name not taken, account doesn't have name
-                let name_hash = get_register_name_hash(payload)
-                    .ok_or_else(|| VerificationError::InvalidFormat)?;
-
-                if state
-                    .is_name_registered(&name_hash)
-                    .await
-                    .map_err(VerificationError::State)?
-                {
-                    return Err(VerificationError::NameAlreadyRegistered);
-                }
-
-                if state
-                    .account_has_name(&self.source)
-                    .await
-                    .map_err(VerificationError::State)?
-                {
-                    return Err(VerificationError::AccountAlreadyHasName);
-                }
-            }
         };
 
         // SECURITY FIX: Verify sender has sufficient balance for all spending
@@ -727,11 +697,6 @@ impl Transaction {
                 // Spending verification is done through ZKP proofs (CommitmentEqProof)
                 // No plaintext spending to verify here
                 // Shield/Unshield: actual balance checks happen in apply()
-            }
-            TransactionType::RegisterName(_) => {
-                // TNS transactions: fees are paid from TOS balance
-                // Registration fee and message fee are added to TOS spending via the fee field
-                // Actual name/message verification happens in verify_register_name/verify_ephemeral_message
             }
         };
 
@@ -1715,33 +1680,6 @@ impl Transaction {
                     return Err(VerificationError::TransactionExtraDataSize);
                 }
             }
-            TransactionType::RegisterName(payload) => {
-                // TNS RegisterName: stateless format validation + stateful checks
-                verify_register_name_format::<E>(payload)?;
-
-                // Fee verification: minimum registration fee required
-                verify_register_name_fee::<E>(self.fee)?;
-
-                // Stateful checks: name not taken, account doesn't have name
-                let name_hash = get_register_name_hash(payload)
-                    .ok_or_else(|| VerificationError::InvalidFormat)?;
-
-                if state
-                    .is_name_registered(&name_hash)
-                    .await
-                    .map_err(VerificationError::State)?
-                {
-                    return Err(VerificationError::NameAlreadyRegistered);
-                }
-
-                if state
-                    .account_has_name(&self.source)
-                    .await
-                    .map_err(VerificationError::State)?
-                {
-                    return Err(VerificationError::AccountAlreadyHasName);
-                }
-            }
         };
 
         // 0.a Verify chain_id for T1+ transactions (cross-network replay protection)
@@ -1857,9 +1795,6 @@ impl Transaction {
                 // UNO/Shield/Unshield transfers are verified through ZKP proofs
                 // Logging handled during apply phase
             }
-            TransactionType::RegisterName(_) => {
-                // TNS transactions: verification handled in dedicated functions
-            }
         }
 
         // With plaintext balances, we don't need Bulletproofs range proofs
@@ -1953,10 +1888,6 @@ impl Transaction {
                 // Unshield transfers spend from encrypted UNO balances
                 // Spending verification is done through ZKP proofs
                 // No plaintext spending to verify here (adds to plaintext balance)
-            }
-            TransactionType::RegisterName(_) => {
-                // TNS transactions: registration/message fees are paid via the fee field
-                // No additional spending verification needed here
             }
         };
 
@@ -2302,10 +2233,6 @@ impl Transaction {
                 // Spending verification is done through ZKP proofs
                 // No plaintext spending to verify here (adds to plaintext balance)
             }
-            TransactionType::RegisterName(_) => {
-                // TNS transactions: registration/message fees are paid via the fee field
-                // No additional spending verification needed here
-            }
         };
 
         // Add fee to TOS spending
@@ -2623,23 +2550,6 @@ impl Transaction {
                     }
                 }
             }
-            TransactionType::RegisterName(payload) => {
-                // TNS RegisterName: store name->account mapping
-                let name_hash = get_register_name_hash(payload)
-                    .ok_or_else(|| VerificationError::InvalidFormat)?;
-
-                if log::log_enabled!(log::Level::Debug) {
-                    debug!(
-                        "RegisterName applying - owner: {:?}, name_hash: {}",
-                        self.source, name_hash
-                    );
-                }
-
-                state
-                    .register_name(name_hash, &self.source)
-                    .await
-                    .map_err(VerificationError::State)?;
-            }
         }
 
         Ok(())
@@ -2760,10 +2670,6 @@ impl Transaction {
                 // Unshield transfers spend from encrypted UNO balances
                 // Spending verification is done through ZKP proofs
                 // No plaintext spending to verify here (adds to plaintext balance)
-            }
-            TransactionType::RegisterName(_) => {
-                // TNS transactions: registration/message fees are paid via the fee field
-                // No additional spending verification needed here
             }
         };
 

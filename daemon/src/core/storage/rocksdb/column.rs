@@ -134,16 +134,6 @@ pub enum Column {
     // - reg_topo: registration topoheight (8 bytes, FIFO for equal offers)
     // - contract_id: contract ID (8 bytes, deterministic tiebreaker)
     DelayedExecutionPriority,
-
-    // ===== TNS (TOS Name Service) =====
-
-    // Name to owner mapping: name_hash -> owner_public_key
-    // {name_hash (32 bytes)} => {PublicKey (32 bytes)}
-    TnsNameToOwner,
-    // Account to name mapping: owner_public_key -> name_hash
-    // Used to check if account already has a registered name
-    // {owner_public_key (32 bytes)} => {Hash (32 bytes)}
-    TnsAccountToName,
 }
 
 impl Column {
@@ -194,10 +184,10 @@ mod tests {
     #[test]
     fn test_column_family_alignment() {
         // Verify total CF count
-        assert_eq!(Column::iter().count(), 43);
+        assert_eq!(Column::iter().count(), 41);
 
         // Verify the first and last known CFs for sanity
         assert_eq!(Column::Transactions as usize, 0);
-        assert_eq!(Column::TnsAccountToName as usize, 42);
+        assert_eq!(Column::DelayedExecutionPriority as usize, 40);
     }
 }

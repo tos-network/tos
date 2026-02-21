@@ -4,15 +4,25 @@ set -euo pipefail
 echo "[pre-commit checks] Running format check..."
 cargo fmt --all -- --check
 
+CPU_COUNT="$(nproc)"
+CPU_CAP="${CPU_CAP:-48}"
+if [ "$CPU_COUNT" -gt "$CPU_CAP" ]; then
+  EFFECTIVE_CPU="$CPU_CAP"
+else
+  EFFECTIVE_CPU="$CPU_COUNT"
+fi
+
 echo "[pre-commit checks] Running lint check..."
-CLIPPY_JOBS="${CLIPPY_JOBS:-$(nproc)}"
+CLIPPY_JOBS="${CLIPPY_JOBS:-$EFFECTIVE_CPU}"
 cargo clippy -j "$CLIPPY_JOBS" --workspace --lib --bins --tests -- \
   -D clippy::await_holding_lock \
   -W clippy::all
 
 echo "[pre-commit checks] Running Unit Tests (Debug Mode)..."
-CPU_COUNT="$(nproc)"
 DEFAULT_TEST_JOBS=$((CPU_COUNT / 2))
+if [ "$DEFAULT_TEST_JOBS" -gt "$CPU_CAP" ]; then
+  DEFAULT_TEST_JOBS="$CPU_CAP"
+fi
 if [ "$DEFAULT_TEST_JOBS" -lt 1 ]; then
   DEFAULT_TEST_JOBS=1
 fi

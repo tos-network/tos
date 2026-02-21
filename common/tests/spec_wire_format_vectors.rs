@@ -104,7 +104,6 @@ fn tx_type_name(data: &TransactionType) -> &'static str {
         TransactionType::UnoTransfers(_) => "uno_transfers",
         TransactionType::ShieldTransfers(_) => "shield_transfers",
         TransactionType::UnshieldTransfers(_) => "unshield_transfers",
-        TransactionType::RegisterName(_) => "register_name",
     }
 }
 

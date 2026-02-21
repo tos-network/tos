@@ -15,9 +15,6 @@ pub mod error;
 pub mod serializer;
 pub mod transaction;
 
-// TNS (TOS Name Service) module
-pub mod tns;
-
 pub mod asset;
 pub mod config;
 pub mod context;
