@@ -1306,12 +1306,6 @@ pub enum NotifyEvent {
     PeerPeerDisconnected,
     // A new block template has been created
     NewBlockTemplate,
-    // When a payment is received to a watched address
-    // It contains AddressPaymentEvent struct as value
-    // This is used for QR code payment monitoring (TIP-QR-PAYMENT)
-    WatchAddressPayments {
-        address: Address,
-    },
     // When a scheduled execution has been processed in a block
     // It contains ScheduledExecutionExecutedEvent struct as value
     ScheduledExecutionExecuted {
@@ -1435,32 +1429,6 @@ pub struct NewContractEvent<'a> {
     pub topoheight: TopoHeight,
 }
 
-// Value of NotifyEvent::WatchAddressPayments
-// Used for real-time payment monitoring (TIP-QR-PAYMENT)
-#[derive(Serialize, Deserialize)]
-pub struct AddressPaymentEvent<'a> {
-    /// Recipient address that received the payment
-    pub address: Address,
-    /// Transaction hash containing the payment
-    pub tx_hash: Cow<'a, Hash>,
-    /// Amount received in atomic units
-    pub amount: u64,
-    /// Asset hash (native TOS if matches TOS_ASSET)
-    pub asset: Cow<'a, Hash>,
-    /// Block hash containing the transaction
-    pub block_hash: Cow<'a, Hash>,
-    /// Block topoheight
-    pub topoheight: TopoHeight,
-    /// Payment ID if present in extra_data (TIP-QR-PAYMENT format)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub payment_id: Option<Cow<'a, str>>,
-    /// Memo if present in extra_data
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub memo: Option<Cow<'a, str>>,
-    /// Number of confirmations (1 = just included in block)
-    pub confirmations: u64,
-}
-
 // Value of NotifyEvent::ScheduledExecutionExecuted
 #[derive(Serialize, Deserialize)]
 pub struct ScheduledExecutionExecutedEvent<'a> {
@@ -1483,22 +1451,6 @@ pub struct ScheduledExecutionExecutedEvent<'a> {
     pub miner_reward: u64,
 }
 
-// ============================================================================
-// QR Code Payment Types
-// ============================================================================
-
-/// Request to get payments received by an address
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GetAddressPaymentsParams {
-    /// Address to check for incoming payments
-    pub address: Address,
-    /// Minimum topoheight to start search from
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub min_topoheight: Option<TopoHeight>,
-    /// Maximum number of payments to return
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub limit: Option<usize>,
-}
 /// Parameters for get_contract_scheduled_executions_at_topoheight RPC method
 #[derive(Serialize, Deserialize)]
 pub struct GetContractScheduledExecutionsAtTopoHeightParams {
