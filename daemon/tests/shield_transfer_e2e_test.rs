@@ -3,7 +3,7 @@
 //! These tests verify the Shield transfer infrastructure:
 //! 1. ShieldTransferPayload creation with valid commitment proofs
 //! 2. Transaction serialization with Shield transfers
-//! 3. TransactionType::ShieldTransfers (opcode 19) serialization
+//! 3. TransactionType::ShieldTransfers (opcode constants) serialization
 //!
 //! Shield transfers convert plaintext TOS balance to encrypted UNO balance.
 
@@ -20,7 +20,7 @@ use tos_common::{
     serializer::{Reader, Serializer},
     transaction::{
         FeeType, Reference, ShieldTransferPayload, Transaction, TransactionType, TransferPayload,
-        TxVersion,
+        TxVersion, TX_TYPE_OPCODE_SHIELD_TRANSFERS,
     },
 };
 
@@ -83,7 +83,7 @@ fn test_shield_transfer_payload_serialization() {
     );
 }
 
-/// Test TransactionType::ShieldTransfers serialization (opcode 19)
+/// Test TransactionType::ShieldTransfers serialization
 #[test]
 fn test_shield_transfers_transaction_type() {
     let receiver = KeyPair::new();
@@ -94,8 +94,11 @@ fn test_shield_transfers_transaction_type() {
     // Serialize
     let bytes = tx_type.to_bytes();
 
-    // First byte should be opcode 19 for ShieldTransfers
-    assert_eq!(bytes[0], 19, "ShieldTransfers should use opcode 19");
+    // First byte should be ShieldTransfers opcode
+    assert_eq!(
+        bytes[0], TX_TYPE_OPCODE_SHIELD_TRANSFERS,
+        "ShieldTransfers should use configured opcode"
+    );
 
     // Deserialize with context
     let mut context = Context::new();

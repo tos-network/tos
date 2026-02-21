@@ -7,9 +7,17 @@ use tos_common::{
         Hash, Signature,
     },
     serializer::{Reader, Serializer},
-    transaction::{FeeType, Reference, Transaction, TransactionType, TxVersion},
+    transaction::{
+        FeeType, Reference, Transaction, TransactionType, TxVersion,
+        TX_TYPE_OPCODE_SHIELD_TRANSFERS, TX_TYPE_OPCODE_UNO_TRANSFERS,
+        TX_TYPE_OPCODE_UNSHIELD_TRANSFERS,
+    },
 };
 use tos_crypto::{curve25519_dalek::Scalar, merlin::Transcript};
+
+const LEGACY_TX_TYPE_OPCODE_UNO_TRANSFERS: u8 = 18;
+const LEGACY_TX_TYPE_OPCODE_SHIELD_TRANSFERS: u8 = 19;
+const LEGACY_TX_TYPE_OPCODE_UNSHIELD_TRANSFERS: u8 = 20;
 
 #[derive(Debug, Deserialize, Serialize)]
 struct WireFormatFixture {
@@ -59,7 +67,25 @@ fn parse_prefix(
 > {
     let bytes =
         hex::decode(expected_hex).map_err(|_| tos_common::serializer::ReaderError::InvalidHex)?;
-    let mut reader = Reader::new(&bytes);
+    let mut normalized = bytes.clone();
+
+    // Backward-compat for fixture regeneration only:
+    // old vectors may still use UNO/Shield/Unshield legacy opcodes 18/19/20.
+    let mut probe = Reader::new(&normalized);
+    let version = TxVersion::read(&mut probe)?;
+    probe.context_mut().store(version);
+    probe.read_u8()?; // chain_id
+    let _ = tos_common::crypto::elgamal::CompressedPublicKey::read(&mut probe)?;
+    let tx_opcode_offset = probe.total_read();
+    let tx_opcode = probe.read_u8()?;
+    normalized[tx_opcode_offset] = match tx_opcode {
+        LEGACY_TX_TYPE_OPCODE_UNO_TRANSFERS => TX_TYPE_OPCODE_UNO_TRANSFERS,
+        LEGACY_TX_TYPE_OPCODE_SHIELD_TRANSFERS => TX_TYPE_OPCODE_SHIELD_TRANSFERS,
+        LEGACY_TX_TYPE_OPCODE_UNSHIELD_TRANSFERS => TX_TYPE_OPCODE_UNSHIELD_TRANSFERS,
+        other => other,
+    };
+
+    let mut reader = Reader::new(&normalized);
     let version = TxVersion::read(&mut reader)?;
     // CiphertextValidityProof decoding depends on tx version.
     reader.context_mut().store(version);

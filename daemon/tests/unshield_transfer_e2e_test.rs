@@ -3,7 +3,7 @@
 //! These tests verify the Unshield transfer infrastructure:
 //! 1. UnshieldTransferPayload creation with valid CiphertextValidityProof
 //! 2. Transaction serialization with Unshield transfers
-//! 3. TransactionType::UnshieldTransfers (opcode 20) serialization
+//! 3. TransactionType::UnshieldTransfers (opcode constants) serialization
 //!
 //! Unshield transfers convert encrypted UNO balance back to plaintext TOS balance.
 
@@ -20,7 +20,8 @@ use tos_common::{
     serializer::{Reader, Serializer},
     transaction::{
         FeeType, Reference, Transaction, TransactionType, TransferPayload, TxVersion,
-        UnshieldTransferPayload,
+        UnshieldTransferPayload, TX_TYPE_OPCODE_SHIELD_TRANSFERS,
+        TX_TYPE_OPCODE_UNSHIELD_TRANSFERS,
     },
 };
 
@@ -91,7 +92,7 @@ fn test_unshield_transfer_payload_serialization() {
     assert_eq!(payload.get_sender_handle(), restored.get_sender_handle());
 }
 
-/// Test TransactionType::UnshieldTransfers serialization (opcode 20)
+/// Test TransactionType::UnshieldTransfers serialization
 #[test]
 fn test_unshield_transfers_transaction_type() {
     let sender = KeyPair::new();
@@ -103,8 +104,11 @@ fn test_unshield_transfers_transaction_type() {
     // Serialize
     let bytes = tx_type.to_bytes();
 
-    // First byte should be opcode 20 for UnshieldTransfers
-    assert_eq!(bytes[0], 20, "UnshieldTransfers should use opcode 20");
+    // First byte should be UnshieldTransfers opcode
+    assert_eq!(
+        bytes[0], TX_TYPE_OPCODE_UNSHIELD_TRANSFERS,
+        "UnshieldTransfers should use configured opcode"
+    );
 
     // Deserialize with context
     let mut context = Context::new();
@@ -432,7 +436,7 @@ fn test_unshield_sender_ciphertext() {
     assert_eq!(sender_ct.handle().compress(), *payload.get_sender_handle());
 }
 
-/// Test opcode distinction between Shield (19) and Unshield (20)
+/// Test opcode distinction between Shield and Unshield
 #[test]
 fn test_shield_unshield_opcode_distinction() {
     use tos_common::crypto::proofs::ShieldCommitmentProof;
@@ -474,7 +478,13 @@ fn test_shield_unshield_opcode_distinction() {
     let unshield_bytes = unshield_tx.to_bytes();
 
     // Verify different opcodes
-    assert_eq!(shield_bytes[0], 19, "Shield should use opcode 19");
-    assert_eq!(unshield_bytes[0], 20, "Unshield should use opcode 20");
+    assert_eq!(
+        shield_bytes[0], TX_TYPE_OPCODE_SHIELD_TRANSFERS,
+        "Shield should use configured opcode"
+    );
+    assert_eq!(
+        unshield_bytes[0], TX_TYPE_OPCODE_UNSHIELD_TRANSFERS,
+        "Unshield should use configured opcode"
+    );
     assert_ne!(shield_bytes[0], unshield_bytes[0]);
 }

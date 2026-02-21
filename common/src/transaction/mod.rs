@@ -44,6 +44,17 @@ pub const MAX_DEPOSIT_PER_INVOKE_CALL: usize = 255;
 // Maximum number of participants in a multi signature account
 pub const MAX_MULTISIG_PARTICIPANTS: usize = 255;
 
+// TransactionType serialization opcodes.
+// Keep these values stable across protocol participants.
+pub const TX_TYPE_OPCODE_BURN: u8 = 0;
+pub const TX_TYPE_OPCODE_TRANSFERS: u8 = 1;
+pub const TX_TYPE_OPCODE_MULTISIG: u8 = 2;
+pub const TX_TYPE_OPCODE_INVOKE_CONTRACT: u8 = 3;
+pub const TX_TYPE_OPCODE_DEPLOY_CONTRACT: u8 = 4;
+pub const TX_TYPE_OPCODE_UNO_TRANSFERS: u8 = 5;
+pub const TX_TYPE_OPCODE_SHIELD_TRANSFERS: u8 = 6;
+pub const TX_TYPE_OPCODE_UNSHIELD_TRANSFERS: u8 = 7;
+
 // this enum represent all types of transaction available on Tos Network
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "snake_case")]
@@ -429,11 +440,11 @@ impl Serializer for TransactionType {
     fn write(&self, writer: &mut Writer) {
         match self {
             TransactionType::Burn(payload) => {
-                writer.write_u8(0);
+                writer.write_u8(TX_TYPE_OPCODE_BURN);
                 payload.write(writer);
             }
             TransactionType::Transfers(txs) => {
-                writer.write_u8(1);
+                writer.write_u8(TX_TYPE_OPCODE_TRANSFERS);
                 let len: u16 = txs.len() as u16;
                 writer.write_u16(len);
                 for tx in txs {
@@ -441,19 +452,19 @@ impl Serializer for TransactionType {
                 }
             }
             TransactionType::MultiSig(payload) => {
-                writer.write_u8(2);
+                writer.write_u8(TX_TYPE_OPCODE_MULTISIG);
                 payload.write(writer);
             }
             TransactionType::InvokeContract(payload) => {
-                writer.write_u8(3);
+                writer.write_u8(TX_TYPE_OPCODE_INVOKE_CONTRACT);
                 payload.write(writer);
             }
             TransactionType::DeployContract(module) => {
-                writer.write_u8(4);
+                writer.write_u8(TX_TYPE_OPCODE_DEPLOY_CONTRACT);
                 module.write(writer);
             }
             TransactionType::UnoTransfers(transfers) => {
-                writer.write_u8(18);
+                writer.write_u8(TX_TYPE_OPCODE_UNO_TRANSFERS);
                 let len: u16 = transfers.len() as u16;
                 writer.write_u16(len);
                 for tx in transfers {
@@ -461,7 +472,7 @@ impl Serializer for TransactionType {
                 }
             }
             TransactionType::ShieldTransfers(transfers) => {
-                writer.write_u8(19);
+                writer.write_u8(TX_TYPE_OPCODE_SHIELD_TRANSFERS);
                 let len: u16 = transfers.len() as u16;
                 writer.write_u16(len);
                 for tx in transfers {
@@ -469,7 +480,7 @@ impl Serializer for TransactionType {
                 }
             }
             TransactionType::UnshieldTransfers(transfers) => {
-                writer.write_u8(20);
+                writer.write_u8(TX_TYPE_OPCODE_UNSHIELD_TRANSFERS);
                 let len: u16 = transfers.len() as u16;
                 writer.write_u16(len);
                 for tx in transfers {
@@ -481,11 +492,11 @@ impl Serializer for TransactionType {
 
     fn read(reader: &mut Reader) -> Result<TransactionType, ReaderError> {
         Ok(match reader.read_u8()? {
-            0 => {
+            TX_TYPE_OPCODE_BURN => {
                 let payload = BurnPayload::read(reader)?;
                 TransactionType::Burn(payload)
             }
-            1 => {
+            TX_TYPE_OPCODE_TRANSFERS => {
                 let txs_count = reader.read_u16()?;
                 if txs_count == 0 || txs_count as usize > MAX_TRANSFER_COUNT {
                     return Err(ReaderError::InvalidSize);
@@ -497,10 +508,14 @@ impl Serializer for TransactionType {
                 }
                 TransactionType::Transfers(txs)
             }
-            2 => TransactionType::MultiSig(MultiSigPayload::read(reader)?),
-            3 => TransactionType::InvokeContract(InvokeContractPayload::read(reader)?),
-            4 => TransactionType::DeployContract(DeployContractPayload::read(reader)?),
-            18 => {
+            TX_TYPE_OPCODE_MULTISIG => TransactionType::MultiSig(MultiSigPayload::read(reader)?),
+            TX_TYPE_OPCODE_INVOKE_CONTRACT => {
+                TransactionType::InvokeContract(InvokeContractPayload::read(reader)?)
+            }
+            TX_TYPE_OPCODE_DEPLOY_CONTRACT => {
+                TransactionType::DeployContract(DeployContractPayload::read(reader)?)
+            }
+            TX_TYPE_OPCODE_UNO_TRANSFERS => {
                 let txs_count = reader.read_u16()?;
                 if txs_count == 0 || txs_count as usize > MAX_TRANSFER_COUNT {
                     return Err(ReaderError::InvalidSize);
@@ -511,7 +526,7 @@ impl Serializer for TransactionType {
                 }
                 TransactionType::UnoTransfers(txs)
             }
-            19 => {
+            TX_TYPE_OPCODE_SHIELD_TRANSFERS => {
                 let txs_count = reader.read_u16()?;
                 if txs_count == 0 || txs_count as usize > MAX_TRANSFER_COUNT {
                     return Err(ReaderError::InvalidSize);
@@ -522,7 +537,7 @@ impl Serializer for TransactionType {
                 }
                 TransactionType::ShieldTransfers(txs)
             }
-            20 => {
+            TX_TYPE_OPCODE_UNSHIELD_TRANSFERS => {
                 let txs_count = reader.read_u16()?;
                 if txs_count == 0 || txs_count as usize > MAX_TRANSFER_COUNT {
                     return Err(ReaderError::InvalidSize);
