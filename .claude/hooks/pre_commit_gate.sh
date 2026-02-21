@@ -29,30 +29,10 @@ fi
 
 cd "$PROJECT_DIR"
 
-echo "[pre-commit gate] Running format + lint checks before git commit..." >&2
+echo "[pre-commit gate] Running pre-commit checks before git commit..." >&2
 
-if ! cargo fmt --all -- --check; then
-  echo "[pre-commit gate] Blocked: format check failed. Run: cargo fmt --all" >&2
-  exit 2
-fi
-
-CLIPPY_JOBS="${CLIPPY_JOBS:-$(nproc)}"
-if ! cargo clippy -j "$CLIPPY_JOBS" --workspace --lib --bins --tests -- \
-  -D clippy::await_holding_lock \
-  -W clippy::all; then
-  echo "[pre-commit gate] Blocked: lint check failed. Fix clippy issues before commit." >&2
-  exit 2
-fi
-
-TEST_JOBS="${TEST_JOBS:-$(nproc)}"
-RUST_TEST_THREADS="${RUST_TEST_THREADS:-16}"
-UNIT_TEST_PACKAGES="${UNIT_TEST_PACKAGES:-tos_common}"
-TEST_ARGS=()
-for pkg in $UNIT_TEST_PACKAGES; do
-  TEST_ARGS+=("-p" "$pkg")
-done
-if ! cargo test -j "$TEST_JOBS" "${TEST_ARGS[@]}" --lib -- --test-threads "$RUST_TEST_THREADS"; then
-  echo "[pre-commit gate] Blocked: Unit Tests (Debug Mode) failed." >&2
+if ! "$PROJECT_DIR"/scripts/pre_commit_checks.sh; then
+  echo "[pre-commit gate] Blocked: pre-commit checks failed." >&2
   exit 2
 fi
 

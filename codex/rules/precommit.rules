@@ -1,3 +1,5 @@
 prefix_rule(pattern=["git", "commit"], decision="forbidden", justification="Run ./scripts/commit_with_checks.sh ... so format/lint checks pass before committing.")
 prefix_rule(pattern=["./scripts/commit_with_checks.sh"], decision="allow")
 prefix_rule(pattern=["scripts/commit_with_checks.sh"], decision="allow")
+prefix_rule(pattern=["./scripts/pre_commit_checks.sh"], decision="allow")
+prefix_rule(pattern=["scripts/pre_commit_checks.sh"], decision="allow")
