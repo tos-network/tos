@@ -295,9 +295,6 @@ All transactions share a common envelope structure:
 | 60 | ReferralRegister | Variable | Register referral code |
 | 61 | ReferralActivate | Variable | Activate with referral |
 | 62 | ReferralClaim | Variable | Claim referral rewards |
-| 70 | AgentCreate | Variable | Create agent account |
-| 71 | AgentUpdate | Variable | Update agent parameters |
-| 72 | AgentRevoke | Variable | Revoke agent permissions |
 | 80 | MultiSigCreate | Variable | Create multisig account |
 | 81 | MultiSigPropose | Variable | Propose transaction |
 | 82 | MultiSigApprove | Variable | Approve proposal |

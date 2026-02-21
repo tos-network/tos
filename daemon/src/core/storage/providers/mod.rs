@@ -1,5 +1,4 @@
 mod account;
-mod agent_account;
 mod asset;
 mod balance;
 mod block;
@@ -25,7 +24,6 @@ mod uno_balance;
 mod versioned;
 
 pub use account::*;
-pub use agent_account::*;
 pub use asset::*;
 pub use balance::*;
 pub use block::*;

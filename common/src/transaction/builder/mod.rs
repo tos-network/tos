@@ -17,7 +17,7 @@ pub use unsigned::UnsignedTransaction;
 use super::{
     extra_data::{ExtraDataType, PlaintextData, UnknownExtraDataFormat},
     payload::{ShieldTransferPayload, UnoTransferPayload, UnshieldTransferPayload},
-    AgentAccountPayload, BurnPayload, ContractDeposit, DeployContractPayload, Deposits, FeeType,
+    BurnPayload, ContractDeposit, DeployContractPayload, Deposits, FeeType,
     InvokeConstructorPayload, InvokeContractPayload, MultiSigPayload, RegisterNamePayload, Role,
     SourceCommitment, Transaction, TransactionType, TransferPayload, TxVersion,
     EXTRA_DATA_LIMIT_SIZE, EXTRA_DATA_LIMIT_SUM_SIZE, MAX_MULTISIG_PARTICIPANTS,
@@ -123,7 +123,6 @@ pub enum TransactionTypeBuilder {
     MultiSig(MultiSigBuilder),
     InvokeContract(InvokeContractBuilder),
     DeployContract(DeployContractBuilder),
-    AgentAccount(AgentAccountPayload),
     /// TNS: Register a human-readable name (e.g., alice@tos.network)
     RegisterName(RegisterNamePayload),
 }
@@ -313,9 +312,6 @@ impl TransactionBuilder {
                     let deposits_size = self.estimate_deposits_size(&invoke.deposits);
                     size += deposits_size + invoke.max_gas.size();
                 }
-            }
-            TransactionTypeBuilder::AgentAccount(payload) => {
-                size += payload.size();
             }
             TransactionTypeBuilder::ShieldTransfers(transfers) => {
                 // Shield transfers: TOS (plaintext) -> UNO (encrypted)
@@ -592,7 +588,6 @@ impl TransactionBuilder {
                     }
                 }
             }
-            TransactionTypeBuilder::AgentAccount(_) => {}
             // Shield transfers consume TOS (plaintext) amount
             TransactionTypeBuilder::ShieldTransfers(transfers) => {
                 for transfer in transfers {
@@ -856,9 +851,6 @@ impl TransactionBuilder {
                         None
                     },
                 })
-            }
-            TransactionTypeBuilder::AgentAccount(ref payload) => {
-                TransactionType::AgentAccount(payload.clone())
             }
             TransactionTypeBuilder::UnoTransfers(_) => {
                 // UNO transfers require UnoAccountState which provides ciphertext access

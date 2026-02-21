@@ -14,7 +14,6 @@ use tos_common::{
 };
 
 // TOS extension types for bootstrap sync handlers
-use tos_common::account::AgentAccountMeta;
 
 use crate::{
     config::PRUNE_SAFETY_LIMIT,
@@ -461,20 +460,6 @@ impl<S: Storage> P2pServer<S> {
                     .get_spendable_uno_balances_for(&key, &asset, 0, max, MAX_ITEMS_PER_PAGE)
                     .await?;
                 StepResponse::UnoBalances(balances, next_max)
-            }
-            StepRequest::AgentData(page) => {
-                let page = page.unwrap_or(0);
-                let skip = checked_page_offset(page)?;
-                let entries = storage
-                    .list_all_agent_accounts(skip, MAX_ITEMS_PER_PAGE)
-                    .await?;
-                let next_page = if entries.len() == MAX_ITEMS_PER_PAGE {
-                    Some(page + 1)
-                } else {
-                    None
-                };
-                let map: IndexMap<PublicKey, AgentAccountMeta> = entries.into_iter().collect();
-                StepResponse::AgentData(map, next_page)
             }
             StepRequest::UnoBalanceKeys(page) => {
                 let page = page.unwrap_or(0);
@@ -1766,10 +1751,7 @@ impl<S: Storage> P2pServer<S> {
         // 1. Sync TNS names
         self.sync_tns_names(peer).await?;
 
-        // 2. Sync agent data
-        self.sync_agent_data(peer).await?;
-
-        // 3. Sync UNO balances
+        // 2. Sync UNO balances
         self.sync_uno_balances(peer, stable_topoheight).await?;
 
         if log::log_enabled!(log::Level::Info) {
@@ -1798,44 +1780,6 @@ impl<S: Storage> P2pServer<S> {
                 let mut storage = self.blockchain.get_storage().write().await;
                 for (name_hash, owner) in entries {
                     storage.register_name(name_hash, owner).await?;
-                }
-            }
-
-            pages_received = pages_received.saturating_add(1);
-            if pages_received >= MAX_BOOTSTRAP_PAGES {
-                if log::log_enabled!(log::Level::Error) {
-                    error!("Bootstrap sync exceeded maximum page limit");
-                }
-                return Err(P2pError::InvalidPacket.into());
-            }
-
-            next_page = page;
-            if next_page.is_none() {
-                break;
-            }
-        }
-        Ok(())
-    }
-
-    async fn sync_agent_data(&self, peer: &Arc<Peer>) -> Result<(), BlockchainError> {
-        let mut next_page = None;
-        let mut pages_received: u64 = 0;
-        loop {
-            let StepResponse::AgentData(entries, page) = peer
-                .request_boostrap_chain(StepRequest::AgentData(next_page))
-                .await?
-            else {
-                if log::log_enabled!(log::Level::Error) {
-                    error!("Received an invalid StepResponse while fetching agent data");
-                }
-                return Err(P2pError::InvalidPacket.into());
-            };
-
-            if !entries.is_empty() {
-                let _permit = self.blockchain.storage_semaphore().acquire().await?;
-                let mut storage = self.blockchain.get_storage().write().await;
-                for (account, meta) in &entries {
-                    storage.set_agent_account_meta(account, meta).await?;
                 }
             }
 

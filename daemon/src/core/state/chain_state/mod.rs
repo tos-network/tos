@@ -9,9 +9,7 @@ use std::{
     collections::{hash_map::Entry, HashMap},
 };
 use tos_common::{
-    account::{
-        AgentAccountMeta, Nonce, SessionKey, VersionedBalance, VersionedNonce, VersionedUnoBalance,
-    },
+    account::{Nonce, VersionedBalance, VersionedNonce, VersionedUnoBalance},
     block::{BlockVersion, TopoHeight},
     config::TOS_ASSET,
     crypto::{
@@ -146,10 +144,6 @@ pub struct ChainState<'a, S: Storage> {
     // Sender accounts
     // This is used to verify ZK Proofs and store/update nonces
     accounts: HashMap<Cow<'a, PublicKey>, Account>,
-    // Agent account metadata updates (None = delete)
-    agent_account_meta: HashMap<Cow<'a, PublicKey>, Option<AgentAccountMeta>>,
-    // Agent session key updates (None = delete)
-    agent_session_keys: HashMap<(PublicKey, u64), Option<SessionKey>>,
     // Current stable topoheight of the snapshot
     stable_topoheight: TopoHeight,
     // Current topoheight of the snapshot
@@ -180,8 +174,6 @@ impl<'a, S: Storage> ChainState<'a, S> {
             receiver_balances: HashMap::new(),
             receiver_uno_balances: HashMap::new(),
             accounts: HashMap::new(),
-            agent_account_meta: HashMap::new(),
-            agent_session_keys: HashMap::new(),
             stable_topoheight,
             topoheight,
             contracts: HashMap::new(),
@@ -1042,96 +1034,6 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for ChainS
         } else {
             Ok(false)
         }
-    }
-
-    async fn get_agent_account_meta(
-        &mut self,
-        account: &'a CompressedPublicKey,
-    ) -> Result<Option<AgentAccountMeta>, BlockchainError> {
-        if let Some(meta) = self.agent_account_meta.get(account) {
-            return Ok(meta.clone());
-        }
-        self.storage.get_agent_account_meta(account).await
-    }
-
-    async fn set_agent_account_meta(
-        &mut self,
-        account: &'a CompressedPublicKey,
-        meta: &AgentAccountMeta,
-    ) -> Result<(), BlockchainError> {
-        self.agent_account_meta
-            .insert(Cow::Borrowed(account), Some(meta.clone()));
-        Ok(())
-    }
-
-    async fn delete_agent_account_meta(
-        &mut self,
-        account: &'a CompressedPublicKey,
-    ) -> Result<(), BlockchainError> {
-        self.agent_account_meta.insert(Cow::Borrowed(account), None);
-        Ok(())
-    }
-
-    async fn get_session_key(
-        &mut self,
-        account: &'a CompressedPublicKey,
-        key_id: u64,
-    ) -> Result<Option<SessionKey>, BlockchainError> {
-        let key = (account.clone(), key_id);
-        if let Some(session_key) = self.agent_session_keys.get(&key) {
-            return Ok(session_key.clone());
-        }
-        self.storage.get_session_key(account, key_id).await
-    }
-
-    async fn set_session_key(
-        &mut self,
-        account: &'a CompressedPublicKey,
-        session_key: &SessionKey,
-    ) -> Result<(), BlockchainError> {
-        let key = (account.clone(), session_key.key_id);
-        self.agent_session_keys
-            .insert(key, Some(session_key.clone()));
-        Ok(())
-    }
-
-    async fn delete_session_key(
-        &mut self,
-        account: &'a CompressedPublicKey,
-        key_id: u64,
-    ) -> Result<(), BlockchainError> {
-        let key = (account.clone(), key_id);
-        self.agent_session_keys.insert(key, None);
-        Ok(())
-    }
-
-    async fn get_session_keys_for_account(
-        &mut self,
-        account: &'a CompressedPublicKey,
-    ) -> Result<Vec<SessionKey>, BlockchainError> {
-        let mut keys: HashMap<u64, SessionKey> = self
-            .storage
-            .get_session_keys_for_account(account)
-            .await?
-            .into_iter()
-            .map(|key| (key.key_id, key))
-            .collect();
-
-        for ((cached_account, key_id), entry) in &self.agent_session_keys {
-            if cached_account != account {
-                continue;
-            }
-            match entry {
-                Some(key) => {
-                    keys.insert(*key_id, key.clone());
-                }
-                None => {
-                    keys.remove(key_id);
-                }
-            }
-        }
-
-        Ok(keys.into_values().collect())
     }
 
     /// Get the block version

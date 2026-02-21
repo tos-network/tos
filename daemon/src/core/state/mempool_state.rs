@@ -5,7 +5,7 @@ use std::{
     collections::{hash_map::Entry, HashMap},
 };
 use tos_common::{
-    account::{AgentAccountMeta, Nonce, SessionKey},
+    account::Nonce,
     block::{BlockVersion, TopoHeight},
     config::COIN_VALUE,
     crypto::{
@@ -47,10 +47,6 @@ pub struct MempoolState<'a, S: Storage> {
     // Sender accounts
     // This is used to verify ZK Proofs and store/update nonces
     accounts: HashMap<Cow<'a, PublicKey>, Account>,
-    // Agent account metadata updates (None = delete)
-    agent_account_meta: HashMap<Cow<'a, PublicKey>, Option<AgentAccountMeta>>,
-    // Agent session key updates (None = delete)
-    agent_session_keys: HashMap<(PublicKey, u64), Option<SessionKey>>,
     // Contract modules
     contracts: HashMap<Hash, Cow<'a, Module>>,
     // The current stable topoheight of the chain
@@ -83,8 +79,6 @@ impl<'a, S: Storage> MempoolState<'a, S> {
             receiver_balances: HashMap::new(),
             receiver_uno_balances: HashMap::new(),
             accounts: HashMap::new(),
-            agent_account_meta: HashMap::new(),
-            agent_session_keys: HashMap::new(),
             contracts: HashMap::new(),
             stable_topoheight,
             topoheight,
@@ -97,33 +91,10 @@ impl<'a, S: Storage> MempoolState<'a, S> {
     pub fn get_sender_cache(
         &mut self,
         key: &PublicKey,
-    ) -> Option<(
-        HashMap<Hash, u64>,
-        Option<MultiSigPayload>,
-        Option<AgentAccountMeta>,
-        HashMap<u64, Option<SessionKey>>,
-    )> {
+    ) -> Option<(HashMap<Hash, u64>, Option<MultiSigPayload>)> {
         let account = self.accounts.remove(key)?;
-        let agent_account_meta = self.agent_account_meta.remove(key).flatten();
 
-        let mut agent_session_keys = HashMap::new();
-        let mut keys_to_remove = Vec::new();
-        for ((account_key, key_id), entry) in self.agent_session_keys.iter() {
-            if account_key == key {
-                agent_session_keys.insert(*key_id, entry.clone());
-                keys_to_remove.push((account_key.clone(), *key_id));
-            }
-        }
-        for key in keys_to_remove {
-            self.agent_session_keys.remove(&key);
-        }
-
-        Some((
-            account.assets,
-            account.multisig,
-            agent_account_meta,
-            agent_session_keys,
-        ))
+        Some((account.assets, account.multisig))
     }
 
     // Retrieve the receiver balance
@@ -520,119 +491,6 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Mempoo
         } else {
             Ok(false)
         }
-    }
-
-    async fn get_agent_account_meta(
-        &mut self,
-        account: &'a CompressedPublicKey,
-    ) -> Result<Option<AgentAccountMeta>, BlockchainError> {
-        if let Some(meta) = self.agent_account_meta.get(account) {
-            return Ok(meta.clone());
-        }
-        if let Some(cache) = self.mempool.get_cache_for(account) {
-            if let Some(meta) = cache.get_agent_account_meta() {
-                return Ok(Some(meta.clone()));
-            }
-        }
-        self.storage.get_agent_account_meta(account).await
-    }
-
-    async fn set_agent_account_meta(
-        &mut self,
-        account: &'a CompressedPublicKey,
-        meta: &AgentAccountMeta,
-    ) -> Result<(), BlockchainError> {
-        self.agent_account_meta
-            .insert(Cow::Borrowed(account), Some(meta.clone()));
-        Ok(())
-    }
-
-    async fn delete_agent_account_meta(
-        &mut self,
-        account: &'a CompressedPublicKey,
-    ) -> Result<(), BlockchainError> {
-        self.agent_account_meta.insert(Cow::Borrowed(account), None);
-        Ok(())
-    }
-
-    async fn get_session_key(
-        &mut self,
-        account: &'a CompressedPublicKey,
-        key_id: u64,
-    ) -> Result<Option<SessionKey>, BlockchainError> {
-        let key = (account.clone(), key_id);
-        if let Some(session_key) = self.agent_session_keys.get(&key) {
-            return Ok(session_key.clone());
-        }
-        if let Some(cache) = self.mempool.get_cache_for(account) {
-            if let Some(session_key) = cache.get_agent_session_keys().get(&key_id) {
-                return Ok(session_key.clone());
-            }
-        }
-        self.storage.get_session_key(account, key_id).await
-    }
-
-    async fn set_session_key(
-        &mut self,
-        account: &'a CompressedPublicKey,
-        session_key: &SessionKey,
-    ) -> Result<(), BlockchainError> {
-        let key = (account.clone(), session_key.key_id);
-        self.agent_session_keys
-            .insert(key, Some(session_key.clone()));
-        Ok(())
-    }
-
-    async fn delete_session_key(
-        &mut self,
-        account: &'a CompressedPublicKey,
-        key_id: u64,
-    ) -> Result<(), BlockchainError> {
-        let key = (account.clone(), key_id);
-        self.agent_session_keys.insert(key, None);
-        Ok(())
-    }
-
-    async fn get_session_keys_for_account(
-        &mut self,
-        account: &'a CompressedPublicKey,
-    ) -> Result<Vec<SessionKey>, BlockchainError> {
-        let mut keys: HashMap<u64, SessionKey> = self
-            .storage
-            .get_session_keys_for_account(account)
-            .await?
-            .into_iter()
-            .map(|key| (key.key_id, key))
-            .collect();
-
-        if let Some(cache) = self.mempool.get_cache_for(account) {
-            for (key_id, entry) in cache.get_agent_session_keys() {
-                match entry {
-                    Some(key) => {
-                        keys.insert(*key_id, key.clone());
-                    }
-                    None => {
-                        keys.remove(key_id);
-                    }
-                }
-            }
-        }
-
-        for ((cached_account, key_id), entry) in &self.agent_session_keys {
-            if cached_account != account {
-                continue;
-            }
-            match entry {
-                Some(key) => {
-                    keys.insert(*key_id, key.clone());
-                }
-                None => {
-                    keys.remove(key_id);
-                }
-            }
-        }
-
-        Ok(keys.into_values().collect())
     }
 
     /// Get the block version

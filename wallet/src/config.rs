@@ -276,21 +276,6 @@ Multisig (2-of-N threshold signatures):
   multisig_create_tx <asset> <amount> <address> - Create unsigned TX for signing
   multisig_sign <tx_hash> [source] [signatures] - Sign or submit multisig TX
 
-Agent Account:
-  agent_show [address]                   - Show agent account metadata
-  agent_session_key <key_id> [address]   - Show a session key by key ID
-  agent_session_keys [address]           - List session keys
-  agent_register <controller> <policy_hash> [session_key_root]
-                                        - Register agent account
-  agent_update_policy <policy_hash>      - Update policy hash
-  agent_rotate_controller <controller>   - Rotate controller address
-  agent_set_status <status>              - Set status (0=active,1=frozen)
-  agent_set_session_key_root [root]      - Set session key root (use 'none' to clear)
-  agent_add_session_key <key_id> <public_key> <expiry_topoheight> <max_value_per_window>
-                                        [allowed_targets] [allowed_assets]
-                                        - Add session key
-  agent_revoke_session_key <key_id>      - Revoke session key
-
 ═══════════════════════════════════════════════════════════════════════════════
 NETWORK OPTIONS:
 ═══════════════════════════════════════════════════════════════════════════════
@@ -377,70 +362,6 @@ Create a JSON file (transfer.json):
 Execute:
 ./tos_wallet --network devnet --daemon-address http://127.0.0.1:8080 \
     --wallet-path my_wallet --password mypass123 --json-file transfer.json
-
-Create a JSON file (agent_register.json):
-{
-  "command": "agent_register",
-  "params": {
-    "controller": "tst1yp0hc5z0csf2jk2ze9tjjxkjg8gawt2upltksyegffmudm29z38qqrkvqzk",
-    "policy_hash": "0000000000000000000000000000000000000000000000000000000000000001",
-    "session_key_root": "none"
-  }
-}
-
-Execute:
-./tos_wallet --network devnet --daemon-address http://127.0.0.1:8080 \
-    --wallet-path my_wallet --password mypass123 --json-file agent_register.json
-
-CLI example (agent_add_session_key):
-./tos_wallet --network devnet --daemon-address http://127.0.0.1:8080 \
-    --wallet-path my_wallet --password mypass123 \
-    --exec "agent_add_session_key key_id=1 public_key=tst1... expiry_topoheight=100000 max_value_per_window=1000000 allowed_targets=tst1...,tst1... allowed_assets=0000000000000000000000000000000000000000000000000000000000000001"
-
-CLI example (agent_register):
-./tos_wallet --network devnet --daemon-address http://127.0.0.1:8080 \
-    --wallet-path my_wallet --password mypass123 \
-    --exec "agent_register controller=tst1... policy_hash=0000000000000000000000000000000000000000000000000000000000000001 session_key_root=none"
-
-CLI example (agent_update_policy):
-./tos_wallet --network devnet --daemon-address http://127.0.0.1:8080 \
-    --wallet-path my_wallet --password mypass123 \
-    --exec "agent_update_policy policy_hash=0000000000000000000000000000000000000000000000000000000000000002"
-
-CLI example (agent_rotate_controller):
-./tos_wallet --network devnet --daemon-address http://127.0.0.1:8080 \
-    --wallet-path my_wallet --password mypass123 \
-    --exec "agent_rotate_controller controller=tst1..."
-
-CLI example (agent_set_status):
-./tos_wallet --network devnet --daemon-address http://127.0.0.1:8080 \
-    --wallet-path my_wallet --password mypass123 \
-    --exec "agent_set_status status=0"
-
-CLI example (agent_set_session_key_root):
-./tos_wallet --network devnet --daemon-address http://127.0.0.1:8080 \
-    --wallet-path my_wallet --password mypass123 \
-    --exec "agent_set_session_key_root session_key_root=0000000000000000000000000000000000000000000000000000000000000003"
-
-CLI example (agent_revoke_session_key):
-./tos_wallet --network devnet --daemon-address http://127.0.0.1:8080 \
-    --wallet-path my_wallet --password mypass123 \
-    --exec "agent_revoke_session_key key_id=1"
-
-CLI example (agent_show):
-./tos_wallet --network devnet --daemon-address http://127.0.0.1:8080 \
-    --wallet-path my_wallet --password mypass123 \
-    --exec "agent_show"
-
-CLI example (agent_session_key):
-./tos_wallet --network devnet --daemon-address http://127.0.0.1:8080 \
-    --wallet-path my_wallet --password mypass123 \
-    --exec "agent_session_key key_id=1"
-
-CLI example (agent_session_keys):
-./tos_wallet --network devnet --daemon-address http://127.0.0.1:8080 \
-    --wallet-path my_wallet --password mypass123 \
-    --exec "agent_session_keys"
 
 ═══════════════════════════════════════════════════════════════════════════════
 

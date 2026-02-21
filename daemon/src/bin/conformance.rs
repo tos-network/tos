@@ -8,7 +8,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-use tos_common::account::{AgentAccountMeta, VersionedBalance, VersionedNonce};
+use tos_common::account::{VersionedBalance, VersionedNonce};
 use tos_common::asset::{AssetData, VersionedAssetData};
 use tos_common::block::{Block, BlockHeader, EXTRA_NONCE_SIZE};
 use tos_common::config::{
@@ -35,9 +35,8 @@ use tos_daemon::core::genesis::{
 use tos_daemon::core::state::ApplicableChainState;
 use tos_daemon::core::storage::rocksdb::RocksStorage;
 use tos_daemon::core::storage::{
-    AccountProvider, AgentAccountProvider, AssetProvider, BalanceProvider, ContractProvider,
-    DagOrderProvider, DifficultyProvider, NonceProvider, TipsProvider, TnsProvider,
-    VersionedContract,
+    AccountProvider, AssetProvider, BalanceProvider, ContractProvider, DagOrderProvider,
+    DifficultyProvider, NonceProvider, TipsProvider, TnsProvider, VersionedContract,
 };
 use tos_daemon::vrf::WrappedMinerSecret;
 
@@ -69,17 +68,6 @@ struct AccountState {
 // --- Domain data JSON wrapper structs ---
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
-struct AgentAccountEntry {
-    address: String,
-    owner: String,
-    controller: String,
-    #[serde(default)]
-    policy_hash: String,
-    #[serde(default)]
-    status: u8,
-}
-
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 struct TnsNameEntry {
     name: String,
     owner: String,
@@ -104,8 +92,6 @@ struct PreState {
     global_state: GlobalState,
     #[serde(default)]
     accounts: Vec<AccountState>,
-    #[serde(default)]
-    agent_accounts: Vec<AgentAccountEntry>,
     #[serde(default)]
     tns_names: Vec<TnsNameEntry>,
     #[serde(default)]
@@ -349,32 +335,6 @@ fn public_key_to_hex(key: &PublicKey) -> String {
 
 // --- Domain data parse helpers ---
 
-fn to_hash_or_zero(hex_str: &str) -> Result<Hash, String> {
-    if hex_str.is_empty() {
-        return Ok(Hash::zero());
-    }
-    Hash::from_str(hex_str).map_err(|_| format!("invalid hash hex: {}", hex_str))
-}
-
-fn parse_agent_account_entry(
-    entry: &AgentAccountEntry,
-) -> Result<(PublicKey, AgentAccountMeta), String> {
-    let address = to_public_key(&entry.address)?;
-    let owner = to_public_key(&entry.owner)?;
-    let controller = to_public_key(&entry.controller)?;
-    let policy_hash = to_hash_or_zero(&entry.policy_hash)?;
-    Ok((
-        address,
-        AgentAccountMeta {
-            owner,
-            controller,
-            policy_hash,
-            status: entry.status,
-            session_key_root: None,
-        },
-    ))
-}
-
 fn parse_tns_entry(entry: &TnsNameEntry) -> Result<(Hash, PublicKey), String> {
     let name_hash = blake3_hash(entry.name.as_bytes());
     let owner = to_public_key(&entry.owner)?;
@@ -542,25 +502,12 @@ fn map_error_code(err: &BlockchainError) -> u16 {
                 0x0100
             }
             // === Account / record not found (0x0400) ===
-            else if msg.contains("Agent account invalid parameter")
-                || msg.contains("does not exist")
+            else if msg.contains("does not exist")
                 || msg.contains("Arbiter not found")
                 || msg.contains("Recipient name not registered")
                 || msg.contains("no KYC record")
                 || msg.contains("Committee not found")
                 || msg.contains("committee not found")
-            {
-                0x0400
-            }
-            // === Account already exists (0x0401) ===
-            else if msg.contains("Agent account already registered") {
-                0x0401
-            }
-            // === Agent account errors (0x0400) ===
-            else if msg.contains("Agent account is frozen")
-                || msg.contains("Agent account unauthorized")
-                || msg.contains("Agent account policy violation")
-                || msg.contains("Agent session key")
             {
                 0x0400
             }
@@ -669,8 +616,6 @@ fn map_error_code(err: &BlockchainError) -> u16 {
                 || msg.contains("CommitSelectionCommitment missing")
                 || msg.contains("insufficient committed juror")
                 || msg.contains("missing committed juror")
-            // Agent account errors
-                || msg.contains("Invalid agent account controller")
             // Contract gas errors
                 || msg.contains("Configured max gas")
             // Other validation errors
@@ -719,15 +664,6 @@ fn map_verify_error_code(
         VE::InvalidFee(_, _) => 0x0301,
         VE::InsufficientFunds { .. } => 0x0300,
         VE::TransferExtraDataSize | VE::TransactionExtraDataSize | VE::InvalidFormat => 0x0100,
-        VE::AgentAccountInvalidParameter
-        | VE::AgentAccountUnauthorized
-        | VE::AgentAccountFrozen
-        | VE::AgentAccountPolicyViolation
-        | VE::AgentAccountSessionKeyExpired
-        | VE::AgentAccountSessionKeyNotFound
-        | VE::AgentAccountSessionKeyExists => 0x0400,
-        VE::AgentAccountInvalidController => 0x0107,
-        VE::AgentAccountAlreadyRegistered => 0x0405,
         VE::SenderIsReceiver | VE::SelfMessage => 0x0409,
         VE::ContractNotFound => 0x0500,
         VE::ContractAlreadyExists(_) => 0x0405,
@@ -963,19 +899,6 @@ async fn handle_state_load(state: web::Data<AppState>, body: web::Json<PreState>
             if let Err(err) = apply_genesis_state(&mut *storage, &alloc).await {
                 return HttpResponse::InternalServerError()
                     .json(json!({ "success": false, "error": err.to_string() }));
-            }
-
-            // Load domain data: agent accounts
-            for entry in &pre_state.agent_accounts {
-                match parse_agent_account_entry(entry) {
-                    Ok((pubkey, meta)) => {
-                        let _ = storage.set_agent_account_meta(&pubkey, &meta).await;
-                    }
-                    Err(err) => {
-                        return HttpResponse::BadRequest()
-                            .json(json!({ "success": false, "error": err }));
-                    }
-                }
             }
 
             // Load domain data: TNS names
@@ -2882,7 +2805,6 @@ async fn build_export(engine: &Engine) -> PreState {
         network_chain_id: engine.meta.network_chain_id,
         global_state: gs,
         accounts,
-        agent_accounts: Vec::new(),
         tns_names: Vec::new(),
         contracts,
     }

@@ -101,7 +101,6 @@ fn tx_type_name(data: &TransactionType) -> &'static str {
         TransactionType::MultiSig(_) => "multisig",
         TransactionType::InvokeContract(_) => "invoke_contract",
         TransactionType::DeployContract(_) => "deploy_contract",
-        TransactionType::AgentAccount(_) => "agent_account",
         TransactionType::UnoTransfers(_) => "uno_transfers",
         TransactionType::ShieldTransfers(_) => "shield_transfers",
         TransactionType::UnshieldTransfers(_) => "unshield_transfers",
