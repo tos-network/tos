@@ -820,42 +820,35 @@ impl HardFork {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum TosHardfork {
-    // === Future TIPs will be added here ===
-    // Example:
-    // /// TIP-100: Smart contract support
-    // SmartContracts,
+    /// TIP-100: Smart contract support
+    SmartContracts,
 }
 
 impl TosHardfork {
     /// Returns all known hard forks in activation order
     pub const fn all() -> &'static [Self] {
-        &[
-            // Future TIPs will be added here
-        ]
+        &[Self::SmartContracts]
     }
 
     /// Returns the TIP number for this hardfork
     pub const fn tip_number(&self) -> u16 {
         match *self {
-            // Future TIPs will be added here
-            // Example: Self::SmartContracts => 100,
+            Self::SmartContracts => 100,
         }
     }
 
     /// Returns a human-readable name for this hardfork
     pub const fn name(&self) -> &'static str {
         match *self {
-            // Future TIPs will be added here
-            // Example: Self::SmartContracts => "SmartContracts",
+            Self::SmartContracts => "SmartContracts",
         }
     }
 }
 
 impl std::fmt::Display for TosHardfork {
-    fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match *self {
-            // Future TIPs will be added here
-            // Example: _ => write!(f, "TIP-{}: {}", self.tip_number(), self.name()),
+            Self::SmartContracts => write!(f, "TIP-{}: {}", self.tip_number(), self.name()),
         }
     }
 }

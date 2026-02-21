@@ -6,10 +6,12 @@ pub use mempool_state::MempoolState;
 
 use log::{debug, trace};
 use tos_common::{
+    api::daemon::TosHardfork,
     account::VersionedBalance,
     block::{BlockVersion, TopoHeight},
     crypto::{Hash, PublicKey},
-    transaction::{Reference, Transaction},
+    network::Network,
+    transaction::{Reference, Transaction, TransactionType},
     utils::format_tos,
 };
 
@@ -28,6 +30,7 @@ pub(super) async fn pre_verify_tx<P: AccountProvider + BalanceProvider>(
     stable_topoheight: TopoHeight,
     topoheight: TopoHeight,
     block_version: BlockVersion,
+    network: Network,
 ) -> Result<(), BlockchainError> {
     if log::log_enabled!(log::Level::Debug) {
         debug!(
@@ -44,6 +47,23 @@ pub(super) async fn pre_verify_tx<P: AccountProvider + BalanceProvider>(
             );
         }
         return Err(BlockchainError::InvalidTxVersion);
+    }
+
+    if matches!(
+        tx.get_data(),
+        TransactionType::InvokeContract(_) | TransactionType::DeployContract(_)
+    ) && !hard_fork::is_tip_active_at_height(&network, TosHardfork::SmartContracts, topoheight)
+    {
+        // Consensus-level contract entry gate.
+        // This blocks contract TXs from all ingestion paths (RPC + P2P), not just RPC.
+        // Avatar clients should mirror this by disabling contract actions when TIP-100 is inactive.
+        if log::log_enabled!(log::Level::Debug) {
+            debug!(
+                "Smart contracts are disabled at topoheight {} on network {}",
+                topoheight, network
+            );
+        }
+        return Err(BlockchainError::SmartContractTodo);
     }
 
     let required_fees =

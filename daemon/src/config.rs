@@ -4,7 +4,7 @@ use std::sync::RwLock;
 
 use lazy_static::lazy_static;
 use tos_common::{
-    api::daemon::{ChainTips, DevFeeThreshold, ForkCondition, HardFork},
+    api::daemon::{ChainTips, DevFeeThreshold, ForkCondition, HardFork, TosHardfork},
     block::BlockVersion,
     config::BYTES_PER_KB,
     crypto::{Address, Hash, PublicKey},
@@ -308,20 +308,23 @@ const HARD_FORKS: [HardFork; 1] = [
 lazy_static! {
     /// Mainnet TIP activations
     static ref MAINNET_TIPS: ChainTips = ChainTips::new(vec![
-        // Future TIPs will be configured here
-        // Example: (TosHardfork::SmartContracts, ForkCondition::Block(100000)),
+        // TIP-100 (SmartContracts):
+        // Mainnet is intentionally disabled at this stage.
+        // Purpose: keep mainnet behavior stable while allowing testnet/devnet integration.
+        // Avatar clients should gate "deploy/invoke contract" entry by network/TIP activation.
+        (TosHardfork::SmartContracts, ForkCondition::Never),
     ]);
 
     /// Testnet TIP activations
     static ref TESTNET_TIPS: ChainTips = ChainTips::new(vec![
-        // Future TIPs will be configured here (typically activated earlier than mainnet)
-        // Example: (TosHardfork::SmartContracts, ForkCondition::Block(50000)),
+        // TIP-100 enabled from genesis for client and protocol validation.
+        (TosHardfork::SmartContracts, ForkCondition::Block(0)),
     ]);
 
     /// Devnet TIP activations
     static ref DEVNET_TIPS: ChainTips = ChainTips::new(vec![
-        // Future TIPs will be configured here (typically activated at genesis for testing)
-        // Example: (TosHardfork::SmartContracts, ForkCondition::Block(0)),
+        // TIP-100 enabled from genesis for local development and debugging.
+        (TosHardfork::SmartContracts, ForkCondition::Block(0)),
     ]);
 
 }
@@ -814,6 +817,26 @@ mod tests {
             Some(&TESTNET_GENESIS_BLOCK_HASH)
         );
         assert_eq!(get_genesis_block_hash(&Network::Devnet), None);
+    }
+
+    #[test]
+    fn test_smart_contract_tip_activation_by_network() {
+        let mainnet_tips = get_chain_tips(&Network::Mainnet);
+        let testnet_tips = get_chain_tips(&Network::Testnet);
+        let devnet_tips = get_chain_tips(&Network::Devnet);
+
+        assert!(!mainnet_tips.is_active_at_height(
+            tos_common::api::daemon::TosHardfork::SmartContracts,
+            0
+        ));
+        assert!(testnet_tips.is_active_at_height(
+            tos_common::api::daemon::TosHardfork::SmartContracts,
+            0
+        ));
+        assert!(devnet_tips.is_active_at_height(
+            tos_common::api::daemon::TosHardfork::SmartContracts,
+            0
+        ));
     }
 
     /// Test that mainnet and testnet genesis blocks have different hashes

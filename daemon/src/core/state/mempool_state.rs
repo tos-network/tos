@@ -632,6 +632,7 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Mempoo
             self.stable_topoheight,
             self.topoheight,
             self.get_block_version(),
+            self.get_network(),
         )
         .await
     }
