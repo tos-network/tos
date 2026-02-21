@@ -65,7 +65,7 @@ async fn test_simulator_e2e_block_production() {
     config.skip_pow_verification = true;
     config.simulator = Some(Simulator::Blockchain);
     config.dir_path = Some(format!("{}/", temp_dir.path().to_string_lossy()));
-    config.rocksdb = RocksDBConfig::default();
+    config.rocksdb = RocksDBConfig::for_tests();
     config.vrf.miner_private_key =
         Some(WrappedMinerSecret::from_str(&miner_secret_hex).expect("miner key"));
 
@@ -236,7 +236,7 @@ fn test_simulator_e2e_tx_inclusion_and_receipt() {
                 config.skip_pow_verification = true;
                 config.simulator = None;
                 config.dir_path = Some(format!("{}/", temp_dir.path().to_string_lossy()));
-                config.rocksdb = RocksDBConfig::default();
+                config.rocksdb = RocksDBConfig::for_tests();
                 config.vrf.miner_private_key =
                     Some(WrappedMinerSecret::from_str(&miner_secret_hex).expect("miner key"));
 

@@ -27,7 +27,7 @@ use tos_daemon::core::{
 pub async fn create_test_storage() -> Arc<tokio::sync::RwLock<RocksStorage>> {
     let temp_dir = TempDir::new("tos_parallel_test").unwrap();
     let dir_path = temp_dir.into_path();
-    let config = RocksDBConfig::default();
+    let config = RocksDBConfig::for_tests();
     let storage = RocksStorage::new(&dir_path.to_string_lossy(), Network::Devnet, &config);
 
     let storage_arc = Arc::new(tokio::sync::RwLock::new(storage));

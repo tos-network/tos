@@ -825,18 +825,12 @@ mod tests {
         let testnet_tips = get_chain_tips(&Network::Testnet);
         let devnet_tips = get_chain_tips(&Network::Devnet);
 
-        assert!(!mainnet_tips.is_active_at_height(
-            tos_common::api::daemon::TosHardfork::SmartContracts,
-            0
-        ));
-        assert!(testnet_tips.is_active_at_height(
-            tos_common::api::daemon::TosHardfork::SmartContracts,
-            0
-        ));
-        assert!(devnet_tips.is_active_at_height(
-            tos_common::api::daemon::TosHardfork::SmartContracts,
-            0
-        ));
+        assert!(!mainnet_tips
+            .is_active_at_height(tos_common::api::daemon::TosHardfork::SmartContracts, 0));
+        assert!(testnet_tips
+            .is_active_at_height(tos_common::api::daemon::TosHardfork::SmartContracts, 0));
+        assert!(devnet_tips
+            .is_active_at_height(tos_common::api::daemon::TosHardfork::SmartContracts, 0));
     }
 
     /// Test that mainnet and testnet genesis blocks have different hashes

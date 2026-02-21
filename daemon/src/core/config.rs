@@ -502,6 +502,19 @@ impl Default for RocksDBConfig {
     }
 }
 
+impl RocksDBConfig {
+    /// Conservative settings for tests to avoid creating massive background thread pools.
+    pub fn for_tests() -> Self {
+        Self {
+            parallelism: 1,
+            max_background_jobs: 1,
+            max_subcompaction_jobs: 1,
+            low_priority_background_threads: 1,
+            ..Self::default()
+        }
+    }
+}
+
 /// VRF (Verifiable Random Function) configuration for block producers
 ///
 /// VRF is mandatory for all nodes. Block producers sign each block hash

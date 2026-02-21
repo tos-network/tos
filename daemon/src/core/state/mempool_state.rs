@@ -1123,7 +1123,7 @@ mod tests {
 
     async fn create_storage() -> (TempDir, Arc<tokio::sync::RwLock<RocksStorage>>) {
         let temp_dir = TempDir::new("mempool_state_energy_tests").unwrap();
-        let config = RocksDBConfig::default();
+        let config = RocksDBConfig::for_tests();
         let storage =
             RocksStorage::new(&temp_dir.path().to_string_lossy(), Network::Devnet, &config);
         let storage_arc = Arc::new(tokio::sync::RwLock::new(storage));

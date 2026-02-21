@@ -269,7 +269,7 @@ mod tests {
 
     async fn create_storage() -> (TempDir, RocksStorage) {
         let temp_dir = TempDir::new("versioned_energy_tests").unwrap();
-        let config = RocksDBConfig::default();
+        let config = RocksDBConfig::for_tests();
         let storage =
             RocksStorage::new(&temp_dir.path().to_string_lossy(), Network::Devnet, &config);
         (temp_dir, storage)

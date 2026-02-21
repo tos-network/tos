@@ -11,8 +11,13 @@ cargo clippy -j "$CLIPPY_JOBS" --workspace --lib --bins --tests -- \
   -W clippy::all
 
 echo "[pre-commit checks] Running Unit Tests (Debug Mode)..."
-TEST_JOBS="${TEST_JOBS:-$(nproc)}"
-RUST_TEST_THREADS="${RUST_TEST_THREADS:-16}"
+CPU_COUNT="$(nproc)"
+DEFAULT_TEST_JOBS=$((CPU_COUNT / 2))
+if [ "$DEFAULT_TEST_JOBS" -lt 1 ]; then
+  DEFAULT_TEST_JOBS=1
+fi
+TEST_JOBS="${TEST_JOBS:-$DEFAULT_TEST_JOBS}"
+RUST_TEST_THREADS="${RUST_TEST_THREADS:-48}"
 UNIT_TEST_PACKAGES="${UNIT_TEST_PACKAGES:-tos_common}"
 TEST_ARGS=()
 for pkg in $UNIT_TEST_PACKAGES; do

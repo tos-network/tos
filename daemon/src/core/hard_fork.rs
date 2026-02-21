@@ -980,19 +980,21 @@ mod tests {
     // ========================================================================
 
     #[test]
-    fn test_tos_hardfork_all_empty() {
-        // Currently no TIPs defined - empty framework for future use
+    fn test_tos_hardfork_all_contains_smart_contracts() {
         let all = TosHardfork::all();
-        assert!(all.is_empty());
+        assert_eq!(all, &[TosHardfork::SmartContracts]);
     }
 
     #[test]
-    fn test_get_active_tips_empty() {
-        // No TIPs configured, so active list should be empty
-        for network in &[Network::Mainnet, Network::Testnet, Network::Devnet] {
-            let active = get_active_tips(network, 0, 0, 0);
-            assert!(active.is_empty());
-        }
+    fn test_get_active_tips_by_network() {
+        let mainnet_active = get_active_tips(&Network::Mainnet, 0, 0, 0);
+        assert!(mainnet_active.is_empty());
+
+        let testnet_active = get_active_tips(&Network::Testnet, 0, 0, 0);
+        assert_eq!(testnet_active, vec![TosHardfork::SmartContracts]);
+
+        let devnet_active = get_active_tips(&Network::Devnet, 0, 0, 0);
+        assert_eq!(devnet_active, vec![TosHardfork::SmartContracts]);
     }
 
     #[test]

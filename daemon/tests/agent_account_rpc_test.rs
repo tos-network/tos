@@ -31,7 +31,7 @@ async fn build_blockchain(temp_dir: &TempDir) -> Arc<Blockchain<RocksStorage>> {
     config.p2p.disable = true;
     config.skip_pow_verification = true;
     config.dir_path = Some(format!("{}/", temp_dir.path().to_string_lossy()));
-    config.rocksdb = RocksDBConfig::default();
+    config.rocksdb = RocksDBConfig::for_tests();
 
     let storage = RocksStorage::new(
         &temp_dir.path().to_string_lossy(),

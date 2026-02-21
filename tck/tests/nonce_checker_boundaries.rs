@@ -13,7 +13,7 @@ async fn test_nonce_checker_sequence_and_undo() {
     let mut storage = RocksStorage::new(
         &temp_dir.path().to_string_lossy(),
         Network::Devnet,
-        &RocksDBConfig::default(),
+        &RocksDBConfig::for_tests(),
     );
 
     let keypair = KeyPair::new();
@@ -57,7 +57,7 @@ async fn test_nonce_checker_rejects_lower_than_initial() {
     let mut storage = RocksStorage::new(
         &temp_dir.path().to_string_lossy(),
         Network::Devnet,
-        &RocksDBConfig::default(),
+        &RocksDBConfig::for_tests(),
     );
 
     let keypair = KeyPair::new();

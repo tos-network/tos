@@ -294,7 +294,7 @@ async fn run_hard_fork_e2e_parity() {
     config.skip_pow_verification = true;
     config.simulator = None;
     config.dir_path = Some(format!("{}/", temp_dir.path().to_string_lossy()));
-    config.rocksdb = RocksDBConfig::default();
+    config.rocksdb = RocksDBConfig::for_tests();
     config.vrf.miner_private_key =
         Some(WrappedMinerSecret::from_str(&miner_secret_hex).expect("miner key"));
 

@@ -6,8 +6,8 @@ pub use mempool_state::MempoolState;
 
 use log::{debug, trace};
 use tos_common::{
-    api::daemon::TosHardfork,
     account::VersionedBalance,
+    api::daemon::TosHardfork,
     block::{BlockVersion, TopoHeight},
     crypto::{Hash, PublicKey},
     network::Network,

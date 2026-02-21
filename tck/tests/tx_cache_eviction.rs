@@ -43,7 +43,7 @@ async fn test_tx_cache_storage_presence_and_eviction() {
     let mut storage = RocksStorage::new(
         &temp_dir.path().to_string_lossy(),
         Network::Devnet,
-        &RocksDBConfig::default(),
+        &RocksDBConfig::for_tests(),
     );
 
     let mempool = Mempool::new(Network::Devnet, false);
