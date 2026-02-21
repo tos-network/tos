@@ -12,19 +12,6 @@ pub const UNO_ASSET: Hash = Hash::new([
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
 ]);
 
-// ===== NEW ENERGY-BASED FEE MODEL =====
-
-// Energy-based fee model constants
-// Only transfer operations consume energy
-// Simplified model compared to TRON: 1 transfer = 1 energy (size-independent)
-//
-// Energy Model Overview:
-// - Each transfer consumes exactly 1 energy regardless of transaction size
-// - Energy is gained by freezing TOS with duration-based multipliers
-// - Energy formula: 1 TOS × (2 × freeze_days) = energy units
-// - Example: 1 TOS frozen for 7 days = 14 energy = 14 free transfers
-pub const ENERGY_PER_TRANSFER: u64 = 1; // Basic transfer (1 energy per transfer)
-
 // TOS-based fee model constants
 pub const FEE_PER_KB: u64 = 10000;
 pub const FEE_PER_ACCOUNT_CREATION: u64 = 0; // Free account creation (no fee)
@@ -81,17 +68,7 @@ pub const COIN_VALUE: u64 = 10u64.pow(COIN_DECIMALS as u32);
 // 184M full coin
 pub const MAXIMUM_SUPPLY: u64 = 184_000_000 * COIN_VALUE;
 
-// ===== FREEZE DURATION LIMITS =====
-// Minimum freeze duration in days
-pub const MIN_FREEZE_DURATION_DAYS: u32 = 3;
-// Maximum freeze duration in days (extended to 365 for long-term staking)
-pub const MAX_FREEZE_DURATION_DAYS: u32 = 365;
-
 // ===== TOS AMOUNT LIMITS =====
-// Minimum TOS amount for freeze operations (1 TOS)
-pub const MIN_FREEZE_TOS_AMOUNT: u64 = COIN_VALUE;
-// Minimum TOS amount for unfreeze operations (1 TOS)
-pub const MIN_UNFREEZE_TOS_AMOUNT: u64 = COIN_VALUE;
 // Minimum TOS amount for Shield operations (100 TOS) - anti-money-laundering measure
 pub const MIN_SHIELD_TOS_AMOUNT: u64 = COIN_VALUE * 100;
 /// Minimum arbiter stake (1000 TOS)
@@ -108,16 +85,6 @@ pub const MAX_SELECTION_COMMITMENT_BYTES: usize = 64 * 1024;
 pub const MAX_JUROR_VOTE_BYTES: usize = 8 * 1024;
 /// Max bytes for VerdictBundle payload
 pub const MAX_VERDICT_BUNDLE_BYTES: usize = 128 * 1024;
-
-// ===== ENERGY SYSTEM LIMITS =====
-// Maximum freeze records per account (self-freeze + delegation combined)
-pub const MAX_FREEZE_RECORDS: usize = 32;
-// Maximum pending unfreeze operations per account
-pub const MAX_PENDING_UNFREEZES: usize = 32;
-// Maximum delegatees in a single batch delegation
-pub const MAX_DELEGATEES: usize = 500;
-// Unfreeze cooldown period in days (converted to blocks per network)
-pub const UNFREEZE_COOLDOWN_DAYS: u64 = 14;
 
 // Addresses format
 // mainnet prefix address

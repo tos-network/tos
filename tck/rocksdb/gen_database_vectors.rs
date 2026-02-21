@@ -53,7 +53,6 @@ struct AccountDbOperation {
     registered_at: Option<u64>,
     nonce_pointer: Option<u64>,
     multisig_pointer: Option<u64>,
-    energy_pointer: Option<u64>,
 }
 
 fn serialize_account(
@@ -61,14 +60,12 @@ fn serialize_account(
     registered_at: Option<u64>,
     nonce_pointer: Option<u64>,
     multisig_pointer: Option<u64>,
-    energy_pointer: Option<u64>,
 ) -> Vec<u8> {
     let mut buf = Vec::new();
     buf.extend(write_u64_be(id));
     buf.extend(write_option_u64_be(registered_at));
     buf.extend(write_option_u64_be(nonce_pointer));
     buf.extend(write_option_u64_be(multisig_pointer));
-    buf.extend(write_option_u64_be(energy_pointer));
     buf
 }
 
@@ -77,7 +74,7 @@ fn generate_account_db_operations() -> Vec<AccountDbOperation> {
         {
             let id = 0u64;
             let key = write_u64_be(id);
-            let value = serialize_account(id, None, None, None, None);
+            let value = serialize_account(id, None, None, None);
             AccountDbOperation {
                 name: "put_account_genesis".to_string(),
                 description: "Insert genesis account (id=0)".to_string(),
@@ -89,13 +86,12 @@ fn generate_account_db_operations() -> Vec<AccountDbOperation> {
                 registered_at: None,
                 nonce_pointer: None,
                 multisig_pointer: None,
-                energy_pointer: None,
             }
         },
         {
             let id = 1u64;
             let key = write_u64_be(id);
-            let value = serialize_account(id, Some(0), Some(0), None, None);
+            let value = serialize_account(id, Some(0), Some(0), None);
             AccountDbOperation {
                 name: "put_account_1".to_string(),
                 description: "Insert account 1 with registration".to_string(),
@@ -107,13 +103,12 @@ fn generate_account_db_operations() -> Vec<AccountDbOperation> {
                 registered_at: Some(0),
                 nonce_pointer: Some(0),
                 multisig_pointer: None,
-                energy_pointer: None,
             }
         },
         {
             let id = 42u64;
             let key = write_u64_be(id);
-            let value = serialize_account(id, Some(100), Some(200), Some(300), Some(400));
+            let value = serialize_account(id, Some(100), Some(200), Some(300));
             AccountDbOperation {
                 name: "put_account_42".to_string(),
                 description: "Insert account 42 with all fields".to_string(),
@@ -125,7 +120,6 @@ fn generate_account_db_operations() -> Vec<AccountDbOperation> {
                 registered_at: Some(100),
                 nonce_pointer: Some(200),
                 multisig_pointer: Some(300),
-                energy_pointer: Some(400),
             }
         },
     ]

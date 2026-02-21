@@ -1,7 +1,6 @@
 mod agent_account;
 mod burn;
 mod contract;
-mod energy;
 mod multisig;
 mod shield_transfer;
 mod tns;
@@ -12,7 +11,6 @@ mod unshield_transfer;
 pub use agent_account::*;
 pub use burn::*;
 pub use contract::*;
-pub use energy::*;
 pub use multisig::*;
 pub use shield_transfer::*;
 pub use tns::*;

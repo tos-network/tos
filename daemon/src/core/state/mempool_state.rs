@@ -1,22 +1,18 @@
 use crate::core::{error::BlockchainError, mempool::Mempool, storage::Storage};
-use anyhow::anyhow;
 use async_trait::async_trait;
 use std::{
     borrow::Cow,
     collections::{hash_map::Entry, HashMap},
 };
 use tos_common::{
-    account::{AgentAccountMeta, DelegateRecordEntry, EnergyResource, Nonce, SessionKey},
+    account::{AgentAccountMeta, Nonce, SessionKey},
     block::{BlockVersion, TopoHeight},
-    config::{COIN_VALUE, TOS_ASSET},
+    config::COIN_VALUE,
     crypto::{
         elgamal::{Ciphertext, CompressedPublicKey},
         Hash, PublicKey,
     },
-    transaction::{
-        verify::BlockchainVerificationState, EnergyPayload, MultiSigPayload, Reference,
-        Transaction, TransactionType,
-    },
+    transaction::{verify::BlockchainVerificationState, MultiSigPayload, Reference, Transaction},
 };
 use tos_environment::Environment;
 use tos_kernel::Module;
@@ -35,10 +31,6 @@ struct Account {
 
 const _: () = assert!(COIN_VALUE > 0);
 
-fn to_whole_coins(amount: u64) -> u64 {
-    amount.saturating_div(COIN_VALUE)
-}
-
 pub struct MempoolState<'a, S: Storage> {
     // If the provider is mainnet or not
     mainnet: bool,
@@ -55,8 +47,6 @@ pub struct MempoolState<'a, S: Storage> {
     // Sender accounts
     // This is used to verify ZK Proofs and store/update nonces
     accounts: HashMap<Cow<'a, PublicKey>, Account>,
-    // Sender energy resources (used for energy fee validation)
-    energy_resources: HashMap<&'a PublicKey, EnergyResource>,
     // Agent account metadata updates (None = delete)
     agent_account_meta: HashMap<Cow<'a, PublicKey>, Option<AgentAccountMeta>>,
     // Agent session key updates (None = delete)
@@ -93,7 +83,6 @@ impl<'a, S: Storage> MempoolState<'a, S> {
             receiver_balances: HashMap::new(),
             receiver_uno_balances: HashMap::new(),
             accounts: HashMap::new(),
-            energy_resources: HashMap::new(),
             agent_account_meta: HashMap::new(),
             agent_session_keys: HashMap::new(),
             contracts: HashMap::new(),
@@ -111,12 +100,10 @@ impl<'a, S: Storage> MempoolState<'a, S> {
     ) -> Option<(
         HashMap<Hash, u64>,
         Option<MultiSigPayload>,
-        Option<EnergyResource>,
         Option<AgentAccountMeta>,
         HashMap<u64, Option<SessionKey>>,
     )> {
         let account = self.accounts.remove(key)?;
-        let energy_resource = self.energy_resources.remove(key);
         let agent_account_meta = self.agent_account_meta.remove(key).flatten();
 
         let mut agent_session_keys = HashMap::new();
@@ -134,7 +121,6 @@ impl<'a, S: Storage> MempoolState<'a, S> {
         Some((
             account.assets,
             account.multisig,
-            energy_resource,
             agent_account_meta,
             agent_session_keys,
         ))
@@ -336,288 +322,6 @@ impl<'a, S: Storage> MempoolState<'a, S> {
         })?;
         account.nonce = new_nonce;
 
-        Ok(())
-    }
-
-    async fn internal_get_sender_energy_resource<'b>(
-        &'b mut self,
-        key: &'a PublicKey,
-    ) -> Result<&'b mut EnergyResource, BlockchainError> {
-        match self.energy_resources.entry(key) {
-            Entry::Occupied(o) => Ok(o.into_mut()),
-            Entry::Vacant(v) => {
-                let energy_resource = if let Some(cache) = self.mempool.get_cache_for(key) {
-                    cache
-                        .get_energy_resource()
-                        .cloned()
-                        .unwrap_or_else(EnergyResource::new)
-                } else {
-                    self.storage
-                        .get_energy_resource(key)
-                        .await?
-                        .unwrap_or_else(EnergyResource::new)
-                };
-                Ok(v.insert(energy_resource))
-            }
-        }
-    }
-
-    pub async fn consume_energy_for_transaction(
-        &mut self,
-        tx: &'a Transaction,
-    ) -> Result<(), BlockchainError> {
-        if !tx.get_fee_type().is_energy() {
-            return Ok(());
-        }
-
-        // Handle energy consumption for all transfer-type transactions
-        if matches!(
-            tx.get_data(),
-            TransactionType::Transfers(_)
-                | TransactionType::UnoTransfers(_)
-                | TransactionType::ShieldTransfers(_)
-                | TransactionType::UnshieldTransfers(_)
-        ) {
-            let energy_cost = tx.calculate_energy_cost();
-            if energy_cost == 0 {
-                return Ok(());
-            }
-
-            let topoheight = self.topoheight;
-
-            let energy_resource = self
-                .internal_get_sender_energy_resource(tx.get_source())
-                .await?;
-
-            if !energy_resource.has_enough_energy(topoheight, energy_cost) {
-                return Err(BlockchainError::Any(anyhow::anyhow!("Insufficient energy")));
-            }
-
-            energy_resource
-                .consume_energy(energy_cost, topoheight)
-                .map_err(|_| BlockchainError::Any(anyhow::anyhow!("Insufficient energy")))?;
-        }
-
-        Ok(())
-    }
-
-    pub async fn apply_energy_payload(
-        &mut self,
-        tx: &'a Transaction,
-    ) -> Result<(), BlockchainError> {
-        let TransactionType::Energy(payload) = tx.get_data() else {
-            return Ok(());
-        };
-
-        let topoheight = self.topoheight;
-        let network = self.get_network();
-
-        match payload {
-            EnergyPayload::FreezeTos { amount, duration } => {
-                let energy_resource = self
-                    .internal_get_sender_energy_resource(tx.get_source())
-                    .await?;
-                energy_resource
-                    .freeze_tos_with_recycling(*amount, *duration, topoheight, &network)
-                    .map_err(|e| BlockchainError::Any(anyhow!(e)))?;
-            }
-            EnergyPayload::FreezeTosDelegate {
-                delegatees,
-                duration,
-            } => {
-                let energy_resource = self
-                    .internal_get_sender_energy_resource(tx.get_source())
-                    .await?;
-
-                let entries: Vec<DelegateRecordEntry> = delegatees
-                    .iter()
-                    .map(|d| {
-                        if d.amount % COIN_VALUE != 0 {
-                            return Err(BlockchainError::Any(anyhow!(
-                                "Delegated amount must be a whole TOS"
-                            )));
-                        }
-                        let amount_whole = to_whole_coins(d.amount);
-                        let energy = amount_whole
-                            .checked_mul(duration.reward_multiplier())
-                            .ok_or(BlockchainError::Overflow)?;
-                        Ok(DelegateRecordEntry {
-                            delegatee: d.delegatee.clone(),
-                            amount: amount_whole,
-                            energy,
-                        })
-                    })
-                    .collect::<Result<_, BlockchainError>>()?;
-
-                let total_amount: u64 = delegatees.iter().try_fold(0u64, |acc, entry| {
-                    if entry.amount % COIN_VALUE != 0 {
-                        return Err(BlockchainError::Any(anyhow!(
-                            "Delegated amount must be a whole TOS"
-                        )));
-                    }
-                    let amount_whole = to_whole_coins(entry.amount);
-                    acc.checked_add(amount_whole)
-                        .ok_or(BlockchainError::Overflow)
-                })?;
-
-                energy_resource
-                    .create_delegated_freeze(entries, *duration, total_amount, topoheight, &network)
-                    .map_err(|e| BlockchainError::Any(anyhow!(e)))?;
-
-                let mut staged_updates: Vec<(&PublicKey, EnergyResource)> =
-                    Vec::with_capacity(delegatees.len());
-                for entry in delegatees.iter() {
-                    let amount_whole = to_whole_coins(entry.amount);
-                    let energy = amount_whole
-                        .checked_mul(duration.reward_multiplier())
-                        .ok_or(BlockchainError::Overflow)?;
-                    let delegatee_resource = self
-                        .internal_get_sender_energy_resource(&entry.delegatee)
-                        .await?
-                        .clone();
-                    let mut updated_resource = delegatee_resource;
-                    updated_resource
-                        .add_delegated_energy(energy, topoheight)
-                        .map_err(|e| BlockchainError::Any(anyhow!(e)))?;
-                    staged_updates.push((&entry.delegatee, updated_resource));
-                }
-
-                for (delegatee, updated_resource) in staged_updates {
-                    let delegatee_resource =
-                        self.internal_get_sender_energy_resource(delegatee).await?;
-                    *delegatee_resource = updated_resource;
-                }
-            }
-            EnergyPayload::UnfreezeTos {
-                amount,
-                from_delegation,
-                record_index,
-                delegatee_address,
-            } => {
-                let energy_resource = self
-                    .internal_get_sender_energy_resource(tx.get_source())
-                    .await?;
-
-                if !*from_delegation && delegatee_address.is_some() {
-                    return Err(BlockchainError::Any(anyhow!(
-                        "Invalid delegatee_address usage"
-                    )));
-                }
-
-                if *from_delegation {
-                    let (_delegatee_key, _energy_removed, _pending_amount) =
-                        if let Some(delegatee_address) = delegatee_address.as_ref() {
-                            energy_resource
-                                .unfreeze_delegated_entry(
-                                    *amount,
-                                    topoheight,
-                                    *record_index,
-                                    delegatee_address,
-                                    &network,
-                                )
-                                .map_err(|e| BlockchainError::Any(anyhow!(e)))?
-                        } else {
-                            if energy_resource.delegated_records.is_empty() {
-                                return Err(BlockchainError::Any(anyhow!(
-                                    "No delegated records found"
-                                )));
-                            }
-
-                            let record_idx = match *record_index {
-                                Some(idx) => {
-                                    let idx = idx as usize;
-                                    if idx >= energy_resource.delegated_records.len() {
-                                        return Err(BlockchainError::Any(anyhow!(
-                                            "Record index out of bounds"
-                                        )));
-                                    }
-                                    idx
-                                }
-                                None => {
-                                    if energy_resource.delegated_records.len() > 1 {
-                                        return Err(BlockchainError::Any(anyhow!(
-                                        "Multiple delegation records exist, record_index required"
-                                    )));
-                                    }
-                                    0
-                                }
-                            };
-
-                            let record = &energy_resource.delegated_records[record_idx];
-                            if record.entries.len() > 1 {
-                                return Err(BlockchainError::Any(anyhow!(
-                                    "Delegatee address required for batch delegations"
-                                )));
-                            }
-
-                            let delegatee = record
-                                .entries
-                                .first()
-                                .ok_or_else(|| {
-                                    BlockchainError::Any(anyhow!("Delegatee not found in record"))
-                                })?
-                                .delegatee
-                                .clone();
-
-                            energy_resource
-                                .unfreeze_delegated_entry(
-                                    *amount,
-                                    topoheight,
-                                    Some(record_idx as u32),
-                                    &delegatee,
-                                    &network,
-                                )
-                                .map_err(|e| BlockchainError::Any(anyhow!(e)))?
-                        };
-
-                    let _ = (_delegatee_key, _energy_removed);
-                } else {
-                    energy_resource
-                        .unfreeze_tos(*amount, topoheight, *record_index, &network)
-                        .map_err(|e| BlockchainError::Any(anyhow!(e)))?;
-                }
-            }
-            EnergyPayload::WithdrawUnfrozen => {
-                let energy_resource = self
-                    .internal_get_sender_energy_resource(tx.get_source())
-                    .await?;
-
-                if energy_resource.pending_unfreezes.is_empty() {
-                    return Err(BlockchainError::Any(anyhow!("No pending unfreezes")));
-                }
-                let withdrawable = energy_resource
-                    .withdrawable_unfreeze(topoheight)
-                    .map_err(|_| BlockchainError::Overflow)?;
-                if withdrawable == 0 {
-                    return Err(BlockchainError::Any(anyhow!("No expired unfreezes")));
-                }
-
-                let withdrawn = energy_resource
-                    .withdraw_unfrozen(topoheight)
-                    .map_err(|_| BlockchainError::Overflow)?;
-
-                self.credit_receiver_balance(
-                    Cow::Borrowed(tx.get_source()),
-                    Cow::Borrowed(&TOS_ASSET),
-                    withdrawn,
-                )
-                .await?;
-            }
-        }
-
-        Ok(())
-    }
-
-    async fn credit_receiver_balance(
-        &mut self,
-        account: Cow<'a, PublicKey>,
-        asset: Cow<'a, Hash>,
-        amount: u64,
-    ) -> Result<(), BlockchainError> {
-        let balance = self.internal_get_receiver_balance(account, asset).await?;
-        *balance = balance
-            .checked_add(amount)
-            .ok_or(BlockchainError::Overflow)?;
         Ok(())
     }
 }
@@ -954,19 +658,8 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Mempoo
 
     /// Get the recyclable TOS amount from expired freeze records
     async fn get_recyclable_tos(&mut self, account: &'a PublicKey) -> Result<u64, BlockchainError> {
-        if let Some(resource) = self.energy_resources.get(account) {
-            return resource
-                .get_recyclable_tos(self.topoheight)
-                .map_err(|_| BlockchainError::Overflow);
-        }
-        let energy_resource = self.storage.get_energy_resource(account).await?;
-        let recyclable = match energy_resource {
-            Some(resource) => resource
-                .get_recyclable_tos(self.topoheight)
-                .map_err(|_| BlockchainError::Overflow)?,
-            None => 0,
-        };
-        Ok(recyclable)
+        let _ = account;
+        Ok(0)
     }
 
     /// Set the multisig state for an account
@@ -1088,409 +781,5 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for Mempoo
         account: &'a CompressedPublicKey,
     ) -> Result<Option<Hash>, BlockchainError> {
         self.storage.get_account_name(account).await
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::core::{
-        config::RocksDBConfig,
-        error::BlockchainError,
-        mempool::Mempool,
-        storage::{
-            AccountProvider, AssetProvider, BalanceProvider, EnergyProvider, NonceProvider,
-            RocksStorage,
-        },
-    };
-    use std::sync::Arc;
-    use tempdir::TempDir;
-    use tos_common::{
-        account::{FreezeDuration, PendingUnfreeze, VersionedBalance, VersionedNonce},
-        asset::{AssetData, VersionedAssetData},
-        block::BlockVersion,
-        config::{COIN_DECIMALS, COIN_VALUE, MAX_PENDING_UNFREEZES, TOS_ASSET},
-        crypto::{Hash, KeyPair, PublicKey},
-        network::Network,
-        transaction::verify::BlockchainVerificationState,
-        transaction::{
-            builder::UnsignedTransaction, DelegationEntry, EnergyPayload, FeeType, Reference,
-            Transaction, TransactionType, TxVersion,
-        },
-        versioned_type::Versioned,
-    };
-    use tos_environment::Environment;
-
-    async fn create_storage() -> (TempDir, Arc<tokio::sync::RwLock<RocksStorage>>) {
-        let temp_dir = TempDir::new("mempool_state_energy_tests").unwrap();
-        let config = RocksDBConfig::for_tests();
-        let storage =
-            RocksStorage::new(&temp_dir.path().to_string_lossy(), Network::Devnet, &config);
-        let storage_arc = Arc::new(tokio::sync::RwLock::new(storage));
-
-        {
-            let mut storage_write = storage_arc.write().await;
-            let asset_data = AssetData::new(
-                COIN_DECIMALS,
-                "TOS".to_string(),
-                "TOS".to_string(),
-                None,
-                None,
-            );
-            let versioned: VersionedAssetData = Versioned::new(asset_data, Some(0));
-            storage_write
-                .add_asset(&TOS_ASSET, 0, versioned)
-                .await
-                .unwrap();
-        }
-
-        (temp_dir, storage_arc)
-    }
-
-    async fn setup_account(
-        storage: &Arc<tokio::sync::RwLock<RocksStorage>>,
-        account: &PublicKey,
-        balance: u64,
-        nonce: u64,
-    ) -> Result<(), BlockchainError> {
-        let mut storage_write = storage.write().await;
-        storage_write
-            .set_last_nonce_to(account, 0, &VersionedNonce::new(nonce, Some(0)))
-            .await?;
-        storage_write
-            .set_last_balance_to(
-                account,
-                &TOS_ASSET,
-                0,
-                &VersionedBalance::new(balance, Some(0)),
-            )
-            .await?;
-        storage_write
-            .set_account_registration_topoheight(account, 0)
-            .await?;
-        Ok(())
-    }
-
-    fn build_energy_tx(sender: &KeyPair, payload: EnergyPayload, nonce: u64) -> Transaction {
-        let unsigned = UnsignedTransaction::new_with_fee_type(
-            TxVersion::T1,
-            0,
-            sender.get_public_key().compress(),
-            TransactionType::Energy(payload),
-            0,
-            FeeType::TOS,
-            nonce,
-            Reference {
-                topoheight: 0,
-                hash: Hash::zero(),
-            },
-        );
-        unsigned.finalize(sender)
-    }
-
-    #[tokio::test]
-    async fn test_mempool_unfreeze_pending_limit_enforced() {
-        let (_temp_dir, storage) = create_storage().await;
-        let sender = KeyPair::new();
-        let sender_pub = sender.get_public_key().compress();
-        setup_account(&storage, &sender_pub, 1000 * COIN_VALUE, 0)
-            .await
-            .unwrap();
-
-        let network = Network::Devnet;
-        let mut energy_resource = EnergyResource::new();
-        energy_resource.pending_unfreezes = (0..MAX_PENDING_UNFREEZES)
-            .map(|_| PendingUnfreeze::new(1, 0, &network))
-            .collect();
-
-        {
-            let mut storage_write = storage.write().await;
-            storage_write
-                .set_energy_resource(&sender_pub, 0, &energy_resource)
-                .await
-                .unwrap();
-        }
-
-        let payload = EnergyPayload::UnfreezeTos {
-            amount: COIN_VALUE,
-            from_delegation: false,
-            record_index: None,
-            delegatee_address: None,
-        };
-        let tx = build_energy_tx(&sender, payload, 0);
-
-        let environment = Environment::new();
-        let mempool = Mempool::new(network, true);
-        let storage_read = storage.read().await;
-        let mut state = MempoolState::new(
-            &mempool,
-            &*storage_read,
-            &environment,
-            0,
-            0,
-            BlockVersion::Nobunaga,
-            network.is_mainnet(),
-            None,
-        );
-
-        let result = state.apply_energy_payload(&tx).await;
-        assert!(result.is_err());
-    }
-
-    #[tokio::test]
-    async fn test_mempool_unfreeze_locked_rejected_after_freeze() {
-        let (_temp_dir, storage) = create_storage().await;
-        let sender = KeyPair::new();
-        let sender_pub = sender.get_public_key().compress();
-        setup_account(&storage, &sender_pub, 1000 * COIN_VALUE, 0)
-            .await
-            .unwrap();
-
-        let network = Network::Devnet;
-        let duration = FreezeDuration::new(3).unwrap();
-        let mut energy_resource = EnergyResource::new();
-        energy_resource
-            .freeze_tos_for_energy_with_network(COIN_VALUE, duration, 0, &network)
-            .unwrap();
-
-        {
-            let mut storage_write = storage.write().await;
-            storage_write
-                .set_energy_resource(&sender_pub, 0, &energy_resource)
-                .await
-                .unwrap();
-        }
-
-        let payload = EnergyPayload::UnfreezeTos {
-            amount: COIN_VALUE,
-            from_delegation: false,
-            record_index: None,
-            delegatee_address: None,
-        };
-        let tx = build_energy_tx(&sender, payload, 0);
-
-        let environment = Environment::new();
-        let mempool = Mempool::new(network, true);
-        let storage_read = storage.read().await;
-        let mut state = MempoolState::new(
-            &mempool,
-            &*storage_read,
-            &environment,
-            0,
-            0,
-            BlockVersion::Nobunaga,
-            network.is_mainnet(),
-            None,
-        );
-
-        let result = state.apply_energy_payload(&tx).await;
-        assert!(result.is_err());
-    }
-
-    #[tokio::test]
-    async fn test_mempool_delegatee_energy_updated_in_state() {
-        let (_temp_dir, storage) = create_storage().await;
-        let alice = KeyPair::new();
-        let bob = KeyPair::new();
-        let alice_pub = alice.get_public_key().compress();
-        let bob_pub = bob.get_public_key().compress();
-
-        setup_account(&storage, &alice_pub, 1000 * COIN_VALUE, 0)
-            .await
-            .unwrap();
-        setup_account(&storage, &bob_pub, 0, 0).await.unwrap();
-
-        let network = Network::Devnet;
-        let mut bob_energy = EnergyResource::new();
-        bob_energy.energy = 0;
-
-        {
-            let mut storage_write = storage.write().await;
-            storage_write
-                .set_energy_resource(&bob_pub, 0, &bob_energy)
-                .await
-                .unwrap();
-        }
-
-        let duration = FreezeDuration::new(7).unwrap();
-        let payload = EnergyPayload::FreezeTosDelegate {
-            delegatees: vec![DelegationEntry {
-                delegatee: bob_pub.clone(),
-                amount: COIN_VALUE,
-            }],
-            duration,
-        };
-        let tx = build_energy_tx(&alice, payload, 0);
-
-        let environment = Environment::new();
-        let mempool = Mempool::new(network, true);
-        let storage_read = storage.read().await;
-        let initial_bob = storage_read
-            .get_energy_resource(&bob_pub)
-            .await
-            .unwrap()
-            .unwrap_or_else(EnergyResource::new);
-
-        let mut state = MempoolState::new(
-            &mempool,
-            &*storage_read,
-            &environment,
-            0,
-            0,
-            BlockVersion::Nobunaga,
-            network.is_mainnet(),
-            None,
-        );
-
-        state.apply_energy_payload(&tx).await.unwrap();
-        assert!(state.energy_resources.contains_key(&alice_pub));
-        assert!(state.energy_resources.contains_key(&bob_pub));
-
-        let bob_after = storage_read
-            .get_energy_resource(&bob_pub)
-            .await
-            .unwrap()
-            .unwrap_or_else(EnergyResource::new);
-        assert_eq!(bob_after.energy, initial_bob.energy);
-
-        let bob_in_state = state.energy_resources.get(&bob_pub).unwrap();
-        assert_eq!(bob_in_state.energy, duration.reward_multiplier());
-    }
-
-    #[tokio::test]
-    async fn test_same_block_recycling_uses_cached_state() {
-        let (_temp_dir, storage) = create_storage().await;
-        let sender = KeyPair::new();
-        let sender_pub = sender.get_public_key().compress();
-        setup_account(&storage, &sender_pub, 1000 * COIN_VALUE, 0)
-            .await
-            .unwrap();
-
-        let network = Network::Devnet;
-        let duration = FreezeDuration::new(3).unwrap();
-        let freeze_topoheight = 0;
-        let unlock_topoheight =
-            freeze_topoheight + duration.duration_in_blocks_for_network(&network);
-
-        let mut energy_resource = EnergyResource::new();
-        energy_resource
-            .freeze_tos_for_energy_with_network(
-                3 * COIN_VALUE,
-                duration,
-                freeze_topoheight,
-                &network,
-            )
-            .unwrap();
-
-        {
-            let mut storage_write = storage.write().await;
-            storage_write
-                .set_energy_resource(&sender_pub, 0, &energy_resource)
-                .await
-                .unwrap();
-        }
-
-        let environment = Environment::new();
-        let mempool = Mempool::new(network, true);
-        let storage_read = storage.read().await;
-        let mut state = MempoolState::new(
-            &mempool,
-            &*storage_read,
-            &environment,
-            unlock_topoheight,
-            unlock_topoheight,
-            BlockVersion::Nobunaga,
-            network.is_mainnet(),
-            None,
-        );
-
-        let tx1 = build_energy_tx(
-            &sender,
-            EnergyPayload::UnfreezeTos {
-                amount: COIN_VALUE,
-                from_delegation: false,
-                record_index: None,
-                delegatee_address: None,
-            },
-            0,
-        );
-        state.apply_energy_payload(&tx1).await.unwrap();
-
-        let recyclable = state.get_recyclable_tos(&sender_pub).await.unwrap();
-        assert_eq!(recyclable, 2 * COIN_VALUE);
-
-        let tx2 = build_energy_tx(
-            &sender,
-            EnergyPayload::FreezeTos {
-                amount: 3 * COIN_VALUE,
-                duration,
-            },
-            1,
-        );
-        state.apply_energy_payload(&tx2).await.unwrap();
-
-        let resource = state.energy_resources.get(&sender_pub).unwrap();
-        assert_eq!(resource.energy, 24);
-    }
-
-    #[tokio::test]
-    async fn test_mempool_recyclable_tos_reflects_prior_txs() {
-        let (_temp_dir, storage) = create_storage().await;
-        let sender = KeyPair::new();
-        let sender_pub = sender.get_public_key().compress();
-        setup_account(&storage, &sender_pub, 1000 * COIN_VALUE, 0)
-            .await
-            .unwrap();
-
-        let network = Network::Devnet;
-        let duration = FreezeDuration::new(3).unwrap();
-        let freeze_topoheight = 0;
-        let unlock_topoheight =
-            freeze_topoheight + duration.duration_in_blocks_for_network(&network);
-
-        let mut energy_resource = EnergyResource::new();
-        energy_resource
-            .freeze_tos_for_energy_with_network(
-                2 * COIN_VALUE,
-                duration,
-                freeze_topoheight,
-                &network,
-            )
-            .unwrap();
-
-        {
-            let mut storage_write = storage.write().await;
-            storage_write
-                .set_energy_resource(&sender_pub, 0, &energy_resource)
-                .await
-                .unwrap();
-        }
-
-        let environment = Environment::new();
-        let mempool = Mempool::new(network, true);
-        let storage_read = storage.read().await;
-        let mut state = MempoolState::new(
-            &mempool,
-            &*storage_read,
-            &environment,
-            unlock_topoheight,
-            unlock_topoheight,
-            BlockVersion::Nobunaga,
-            network.is_mainnet(),
-            None,
-        );
-
-        let tx1 = build_energy_tx(
-            &sender,
-            EnergyPayload::FreezeTos {
-                amount: 2 * COIN_VALUE,
-                duration,
-            },
-            0,
-        );
-        state.apply_energy_payload(&tx1).await.unwrap();
-
-        let recyclable = state.get_recyclable_tos(&sender_pub).await.unwrap();
-        assert_eq!(recyclable, 0);
     }
 }

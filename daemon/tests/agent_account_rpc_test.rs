@@ -93,7 +93,6 @@ async fn test_agent_account_rpc_getters() {
             controller: controller_pub,
             policy_hash: Hash::new([1u8; 32]),
             status: 0,
-            energy_pool: None,
             session_key_root: None,
         };
         storage

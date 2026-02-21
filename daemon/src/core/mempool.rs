@@ -5,7 +5,7 @@ use log::{debug, info, trace, warn};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, mem, sync::Arc};
 use tos_common::{
-    account::{AgentAccountMeta, EnergyResource, Nonce, SessionKey},
+    account::{AgentAccountMeta, Nonce, SessionKey},
     api::daemon::FeeRatesEstimated,
     block::{BlockVersion, TopoHeight},
     config::{BYTES_PER_KB, FEE_PER_KB},
@@ -43,8 +43,6 @@ pub struct AccountCache {
     balances: HashMap<Hash, u64>,
     // Expected multisig after all txs in this cache
     multisig: Option<MultiSigPayload>,
-    // Expected energy resource after all txs in this cache
-    energy_resource: Option<tos_common::account::EnergyResource>,
     // Expected agent account meta after all txs in this cache
     agent_account_meta: Option<AgentAccountMeta>,
     // Agent session key updates (None = delete)
@@ -158,10 +156,7 @@ impl Mempool {
         let tx_cache = TxCache::new(storage, self, self.disable_zkp_cache);
         tx.verify(&hash, &mut state, &tx_cache).await?;
 
-        state.consume_energy_for_transaction(&tx).await?;
-        state.apply_energy_payload(&tx).await?;
-
-        let (balances, multisig, energy_resource, agent_account_meta, agent_session_keys) =
+        let (balances, multisig, agent_account_meta, agent_session_keys) =
             state.get_sender_cache(tx.get_source()).ok_or_else(|| {
                 BlockchainError::AccountNotFound(tx.get_source().as_address(self.mainnet))
             })?;
@@ -175,7 +170,6 @@ impl Mempool {
             hash.clone(),
             balances,
             multisig,
-            energy_resource,
             agent_account_meta,
             agent_session_keys,
         );
@@ -199,7 +193,6 @@ impl Mempool {
         hash: Arc<Hash>,
         balances: HashMap<Hash, u64>,
         multisig: Option<MultiSigPayload>,
-        energy_resource: Option<EnergyResource>,
         agent_account_meta: Option<AgentAccountMeta>,
         agent_session_keys: HashMap<u64, Option<SessionKey>>,
     ) {
@@ -217,9 +210,6 @@ impl Mempool {
 
             cache.set_balances(balances);
             cache.set_multisig(multisig);
-            if energy_resource.is_some() {
-                cache.set_energy_resource(energy_resource);
-            }
             if agent_account_meta.is_some() {
                 cache.set_agent_account_meta(agent_account_meta);
             }
@@ -236,7 +226,6 @@ impl Mempool {
                 txs,
                 balances,
                 multisig,
-                energy_resource,
                 agent_account_meta,
                 agent_session_keys,
             };
@@ -763,19 +752,6 @@ impl AccountCache {
         &self.multisig
     }
 
-    // Set the expected energy resource
-    pub fn set_energy_resource(
-        &mut self,
-        energy_resource: Option<tos_common::account::EnergyResource>,
-    ) {
-        self.energy_resource = energy_resource;
-    }
-
-    // Get the expected energy resource
-    pub fn get_energy_resource(&self) -> Option<&tos_common::account::EnergyResource> {
-        self.energy_resource.as_ref()
-    }
-
     pub fn set_agent_account_meta(&mut self, meta: Option<AgentAccountMeta>) {
         self.agent_account_meta = meta;
     }
@@ -836,9 +812,6 @@ impl AccountCache {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use indexmap::IndexSet;
-    use std::collections::HashMap;
-    use tos_common::{config::TOS_ASSET, crypto::KeyPair};
 
     #[test]
     fn test_estimated_fee_rates() {
@@ -882,47 +855,5 @@ mod tests {
         assert_eq!(estimated.medium, (FEE_PER_KB as f64 * 2.5) as u64);
         assert_eq!(estimated.low, FEE_PER_KB * 2);
         assert_eq!(estimated.default, FEE_PER_KB);
-    }
-
-    #[test]
-    fn test_mempool_energy_cache_preserved_on_non_energy_tx() {
-        let mut mempool = Mempool::new(Network::Devnet, true);
-        let sender = KeyPair::new().get_public_key().compress();
-
-        let mut energy_resource = EnergyResource::new();
-        energy_resource.energy = 42;
-
-        let mut balances = HashMap::new();
-        balances.insert(TOS_ASSET, 1000);
-
-        let mut txs = IndexSet::new();
-        txs.insert(Arc::new(Hash::zero()));
-
-        let cache = AccountCache {
-            min: 0,
-            max: 0,
-            txs,
-            balances: balances.clone(),
-            multisig: None,
-            energy_resource: Some(energy_resource),
-            agent_account_meta: None,
-            agent_session_keys: HashMap::new(),
-        };
-        mempool.caches.insert(sender.clone(), cache);
-
-        let hash = Arc::new(Hash::new([1u8; 32]));
-        mempool.update_cache_for_sender(
-            &sender,
-            1,
-            hash,
-            balances,
-            None,
-            None,
-            None,
-            HashMap::new(),
-        );
-
-        let cache = mempool.get_cache_for(&sender).unwrap();
-        assert_eq!(cache.get_energy_resource().unwrap().energy, 42);
     }
 }

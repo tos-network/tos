@@ -17,13 +17,12 @@ pub use unsigned::UnsignedTransaction;
 use super::{
     extra_data::{ExtraDataType, PlaintextData, UnknownExtraDataFormat},
     payload::{ShieldTransferPayload, UnoTransferPayload, UnshieldTransferPayload},
-    AgentAccountPayload, BurnPayload, ContractDeposit, DeployContractPayload, Deposits,
-    EnergyPayload, FeeType, InvokeConstructorPayload, InvokeContractPayload, MultiSigPayload,
-    RegisterNamePayload, Role, SourceCommitment, Transaction, TransactionType, TransferPayload,
-    TxVersion, EXTRA_DATA_LIMIT_SIZE, EXTRA_DATA_LIMIT_SUM_SIZE, MAX_MULTISIG_PARTICIPANTS,
+    AgentAccountPayload, BurnPayload, ContractDeposit, DeployContractPayload, Deposits, FeeType,
+    InvokeConstructorPayload, InvokeContractPayload, MultiSigPayload, RegisterNamePayload, Role,
+    SourceCommitment, Transaction, TransactionType, TransferPayload, TxVersion,
+    EXTRA_DATA_LIMIT_SIZE, EXTRA_DATA_LIMIT_SUM_SIZE, MAX_MULTISIG_PARTICIPANTS,
     MAX_TRANSFER_COUNT,
 };
-use crate::account::FreezeDuration;
 use crate::{
     config::{
         BURN_PER_CONTRACT, MAX_GAS_USAGE_PER_TX, MIN_SHIELD_TOS_AMOUNT, TOS_ASSET, UNO_ASSET,
@@ -99,8 +98,6 @@ pub enum GenerationError<T> {
     InvalidModule,
     #[error("Configured max gas is above the network limit")]
     MaxGasReached,
-    #[error("Energy fee type can only be used with transfer-type transactions")]
-    InvalidEnergyFeeType,
     #[error("UNO fee type can only be used with UnoTransfers")]
     InvalidUnoFeeType,
     #[error("UNO transfers must use UNO_ASSET")]
@@ -126,7 +123,6 @@ pub enum TransactionTypeBuilder {
     MultiSig(MultiSigBuilder),
     InvokeContract(InvokeContractBuilder),
     DeployContract(DeployContractBuilder),
-    Energy(EnergyBuilder),
     AgentAccount(AgentAccountPayload),
     /// TNS: Register a human-readable name (e.g., alice@tos.network)
     RegisterName(RegisterNamePayload),
@@ -141,7 +137,7 @@ pub struct TransactionBuilder {
     required_thresholds: Option<u8>,
     data: TransactionTypeBuilder,
     fee_builder: FeeBuilder,
-    /// Optional fee type (TOS, Energy, or UNO). If None, use default logic.
+    /// Optional fee type (TOS or UNO). If None, use default logic.
     fee_type: Option<super::FeeType>,
 }
 
@@ -167,14 +163,6 @@ impl TransactionBuilder {
     /// Set the fee type for this transaction
     pub fn with_fee_type(mut self, fee_type: super::FeeType) -> Self {
         self.fee_type = Some(fee_type);
-        self
-    }
-
-    /// Create a transaction builder with energy-based fees (fee = 0)
-    /// Energy can only be used for Transfer transactions to provide free TOS and other token transfers
-    pub fn with_energy_fees(mut self) -> Self {
-        self.fee_builder = FeeBuilder::Value(0);
-        self.fee_type = Some(FeeType::Energy);
         self
     }
 
@@ -206,7 +194,7 @@ impl TransactionBuilder {
         + 1
         // Fee u64
         + 8
-        // Fee type byte (TOS, Energy, or UNO)
+        // Fee type byte (TOS or UNO)
         + 1
         // Nonce u64
         + 8
@@ -326,40 +314,6 @@ impl TransactionBuilder {
                     size += deposits_size + invoke.max_gas.size();
                 }
             }
-            TransactionTypeBuilder::Energy(payload) => {
-                // Convert EnergyBuilder to EnergyPayload for size calculation
-                let energy_payload = if payload.is_withdraw {
-                    EnergyPayload::WithdrawUnfrozen
-                } else if payload.is_freeze {
-                    if let Some(delegatees) = payload.delegatees.clone() {
-                        let duration = payload
-                            .freeze_duration
-                            .unwrap_or_else(FreezeDuration::default);
-                        EnergyPayload::FreezeTosDelegate {
-                            delegatees,
-                            duration,
-                        }
-                    } else {
-                        let duration = payload
-                            .freeze_duration
-                            .unwrap_or_else(FreezeDuration::default);
-                        EnergyPayload::FreezeTos {
-                            amount: payload.amount,
-                            duration,
-                        }
-                    }
-                } else {
-                    EnergyPayload::UnfreezeTos {
-                        amount: payload.amount,
-                        from_delegation: payload.from_delegation,
-                        record_index: payload.record_index,
-                        delegatee_address: payload.delegatee_address.clone(),
-                    }
-                };
-
-                // Payload size
-                size += energy_payload.size();
-            }
             TransactionTypeBuilder::AgentAccount(payload) => {
                 size += payload.size();
             }
@@ -456,10 +410,6 @@ impl TransactionBuilder {
         &self,
         state: &mut B,
     ) -> Result<u64, GenerationError<B::Error>> {
-        if matches!(self.data, TransactionTypeBuilder::Energy(_)) {
-            return Ok(0);
-        }
-
         if let Some(fee_type) = &self.fee_type {
             if *fee_type == FeeType::UNO
                 && matches!(self.data, TransactionTypeBuilder::UnoTransfers(_))
@@ -518,18 +468,6 @@ impl TransactionBuilder {
                         && matches!(self.data, TransactionTypeBuilder::UnoTransfers(_))
                     {
                         // UNO fee is burned from encrypted balance, fee field stays 0
-                        0
-                    } else if *fee_type == FeeType::Energy
-                        && matches!(
-                            self.data,
-                            TransactionTypeBuilder::Transfers(_)
-                                | TransactionTypeBuilder::UnoTransfers(_)
-                                | TransactionTypeBuilder::ShieldTransfers(_)
-                                | TransactionTypeBuilder::UnshieldTransfers(_)
-                        )
-                    {
-                        // Energy fee transactions must have fee = 0
-                        // Energy cost is paid via energy consumption, not the fee field
                         0
                     } else {
                         // Use regular fee calculation (TOS or UNO/Shield/Unshield)
@@ -594,8 +532,7 @@ impl TransactionBuilder {
 
     /// Compute the full cost of the transaction
     /// In Stake 2.0, fee_limit is the max TOS willing to burn
-    /// Actual fee deduction happens during execution based on energy consumption
-    /// When fee_type is Energy, fees are not deducted from TOS balance
+    /// Actual fee deduction happens during execution.
     pub fn get_transaction_cost(
         &self,
         fee_limit: u64,
@@ -604,14 +541,9 @@ impl TransactionBuilder {
     ) -> Option<u64> {
         let mut cost = 0u64;
 
-        // fee_limit is added to TOS cost only when fee_type is TOS (or unspecified)
-        // When fee_type is Energy, fees are paid via energy consumption, not TOS
+        // fee_limit is added to TOS cost for all current fee modes.
         if *asset == TOS_ASSET {
-            // Only add fee to TOS cost if fee_type is not Energy
-            let is_energy_fee = fee_type.map(|ft| ft.is_energy()).unwrap_or(false);
-            if !is_energy_fee {
-                cost = cost.checked_add(fee_limit)?;
-            }
+            cost = cost.checked_add(fee_limit)?;
         }
 
         match &self.data {
@@ -658,11 +590,6 @@ impl TransactionBuilder {
                     if *asset == TOS_ASSET {
                         cost = cost.checked_add(invoke.max_gas)?;
                     }
-                }
-            }
-            TransactionTypeBuilder::Energy(payload) => {
-                if *asset == TOS_ASSET {
-                    cost = cost.checked_add(payload.amount)?;
                 }
             }
             TransactionTypeBuilder::AgentAccount(_) => {}
@@ -733,22 +660,7 @@ impl TransactionBuilder {
     where
         <B as FeeHelper>::Error: for<'a> std::convert::From<&'a str>,
     {
-        // Validate that Energy fee type can only be used with transfer-type transactions
         if let Some(fee_type) = &self.fee_type {
-            if *fee_type == FeeType::Energy {
-                match &self.data {
-                    TransactionTypeBuilder::Transfers(_)
-                    | TransactionTypeBuilder::UnoTransfers(_)
-                    | TransactionTypeBuilder::ShieldTransfers(_)
-                    | TransactionTypeBuilder::UnshieldTransfers(_) => {
-                        // These transaction types can use Energy fees
-                    }
-                    _ => {
-                        return Err(GenerationError::InvalidEnergyFeeType);
-                    }
-                }
-            }
-
             if *fee_type == FeeType::UNO {
                 match &self.data {
                     TransactionTypeBuilder::UnoTransfers(_) => {}
@@ -757,9 +669,6 @@ impl TransactionBuilder {
                     }
                 }
             }
-
-            // NOTE: Energy fee type is now allowed for transfers to new addresses
-            // The previous restriction has been removed to improve Energy usability
         }
 
         // Compute the fees
@@ -947,37 +856,6 @@ impl TransactionBuilder {
                         None
                     },
                 })
-            }
-            TransactionTypeBuilder::Energy(ref payload) => {
-                let energy_payload = if payload.is_withdraw {
-                    EnergyPayload::WithdrawUnfrozen
-                } else if payload.is_freeze {
-                    if let Some(delegatees) = payload.delegatees.clone() {
-                        let duration = payload.freeze_duration.ok_or_else(|| {
-                            GenerationError::State("Freeze duration is required".into())
-                        })?;
-                        EnergyPayload::FreezeTosDelegate {
-                            delegatees,
-                            duration,
-                        }
-                    } else {
-                        let duration = payload.freeze_duration.ok_or_else(|| {
-                            GenerationError::State("Freeze duration is required".into())
-                        })?;
-                        EnergyPayload::FreezeTos {
-                            amount: payload.amount,
-                            duration,
-                        }
-                    }
-                } else {
-                    EnergyPayload::UnfreezeTos {
-                        amount: payload.amount,
-                        from_delegation: payload.from_delegation,
-                        record_index: payload.record_index,
-                        delegatee_address: payload.delegatee_address.clone(),
-                    }
-                };
-                TransactionType::Energy(energy_payload)
             }
             TransactionTypeBuilder::AgentAccount(ref payload) => {
                 TransactionType::AgentAccount(payload.clone())
@@ -1205,11 +1083,9 @@ impl TransactionBuilder {
                     PedersenCommitment::new_with_opening(source_new_balance, &new_source_opening)
                         .compress();
 
-                // Compute new source ciphertext by subtracting transfers
+                // Compute new source ciphertext by subtracting transfers and fees.
                 let mut new_source_ciphertext = source_current_ciphertext;
-                // Only subtract fee from TOS ciphertext if fee_type is not Energy
-                // When fee_type is Energy, fees are paid via energy consumption, not TOS
-                if **asset == TOS_ASSET && !fee_type.is_energy() {
+                if **asset == TOS_ASSET {
                     new_source_ciphertext -= Scalar::from(fee);
                 }
                 if **asset == UNO_ASSET && fee_type.is_uno() {
@@ -1420,21 +1296,10 @@ impl TransactionBuilder {
         let fee = self.estimate_fees(state)?;
         let total_amount: u64 = shield_transfers.iter().map(|t| t.amount).sum();
 
-        // Determine if fee is Energy-based (fee not deducted from TOS)
-        let is_energy_fee = self
-            .fee_type
-            .as_ref()
-            .map(|ft| ft.is_energy())
-            .unwrap_or(false);
-
-        // Calculate TOS cost: amount + fee (unless Energy fee)
-        let tos_cost = if is_energy_fee {
-            total_amount
-        } else {
-            total_amount
-                .checked_add(fee)
-                .ok_or_else(|| GenerationError::State("Overflow in shield transfer cost".into()))?
-        };
+        // Calculate TOS cost: amount + fee.
+        let tos_cost = total_amount
+            .checked_add(fee)
+            .ok_or_else(|| GenerationError::State("Overflow in shield transfer cost".into()))?;
 
         // Check and deduct TOS balance
         let current_balance = state
@@ -1548,25 +1413,22 @@ impl TransactionBuilder {
         // Calculate total unshield amount
         let total_amount: u64 = unshield_transfers.iter().map(|t| t.amount).sum();
 
-        // Fees are paid from TOS balance (plaintext) or Energy
+        // Fees are paid from TOS balance (plaintext).
         let fee = self.estimate_fees(state)?;
         // Use builder's fee_type if set, otherwise default to TOS
         let fee_type = self.fee_type.clone().unwrap_or(FeeType::TOS);
 
-        // Only deduct TOS balance for fees when fee_type is not Energy
-        if !fee_type.is_energy() {
-            let current_tos_balance = state
-                .get_account_balance(&TOS_ASSET)
-                .map_err(GenerationError::State)?;
+        let current_tos_balance = state
+            .get_account_balance(&TOS_ASSET)
+            .map_err(GenerationError::State)?;
 
-            let new_tos_balance = current_tos_balance.checked_sub(fee).ok_or_else(|| {
-                GenerationError::InsufficientFunds(TOS_ASSET, fee, current_tos_balance)
-            })?;
+        let new_tos_balance = current_tos_balance.checked_sub(fee).ok_or_else(|| {
+            GenerationError::InsufficientFunds(TOS_ASSET, fee, current_tos_balance)
+        })?;
 
-            state
-                .update_account_balance(&TOS_ASSET, new_tos_balance)
-                .map_err(GenerationError::State)?;
-        }
+        state
+            .update_account_balance(&TOS_ASSET, new_tos_balance)
+            .map_err(GenerationError::State)?;
 
         // Check UNO balance and create source commitment with range proof
         // This is critical to prevent spending more UNO than available
@@ -1876,192 +1738,6 @@ pub fn compute_contract_address(deployer: &CompressedPublicKey, bytecode: &[u8])
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
-    #[derive(Default)]
-    struct DummyFeeState;
-
-    impl FeeHelper for DummyFeeState {
-        type Error = ();
-
-        fn account_exists(&self, _account: &CompressedPublicKey) -> Result<bool, Self::Error> {
-            Ok(true)
-        }
-    }
-
-    #[test]
-    fn test_energy_tx_default_fee_is_zero() {
-        let duration = FreezeDuration::new(3).unwrap();
-        let energy_builder = EnergyBuilder::freeze_tos(crate::config::COIN_VALUE, duration);
-
-        let builder = TransactionBuilder::new(
-            TxVersion::T1,
-            0,
-            CompressedPublicKey::new(
-                tos_crypto::curve25519_dalek::ristretto::CompressedRistretto::default(),
-            ),
-            None,
-            TransactionTypeBuilder::Energy(energy_builder),
-            FeeBuilder::default(),
-        );
-
-        let mut state = DummyFeeState;
-        let fee = builder.estimate_fees(&mut state).unwrap();
-        assert_eq!(fee, 0);
-    }
-
-    #[test]
-    fn test_energy_fee_type_validation() {
-        use super::super::FeeType;
-
-        // Test valid case: Energy fee with Transfer transaction
-        let transfer_builder = TransactionTypeBuilder::Transfers(vec![]);
-        let energy_fee = FeeType::Energy;
-
-        // This should not cause an error during construction
-        let _ = TransactionBuilder::new(
-            TxVersion::T1,
-            0, // chain_id: 0 for tests
-            CompressedPublicKey::new(
-                tos_crypto::curve25519_dalek::ristretto::CompressedRistretto::default(),
-            ),
-            None,
-            transfer_builder,
-            FeeBuilder::Value(0),
-        )
-        .with_fee_type(energy_fee.clone());
-
-        // Test invalid case: Energy fee with non-transfer-type transaction (e.g., Burn)
-        let burn_builder = TransactionTypeBuilder::Burn(BurnPayload {
-            asset: Hash::zero(),
-            amount: 100,
-        });
-
-        // This should cause an error when building
-        let _builder = TransactionBuilder::new(
-            TxVersion::T1,
-            0, // chain_id: 0 for tests
-            CompressedPublicKey::new(
-                tos_crypto::curve25519_dalek::ristretto::CompressedRistretto::default(),
-            ),
-            None,
-            burn_builder.clone(),
-            FeeBuilder::Value(0),
-        )
-        .with_fee_type(energy_fee.clone());
-
-        // The validation should happen during build_unsigned, but we'll test the logic directly
-        // by checking that the fee_type validation is in place
-        assert!(matches!(energy_fee, FeeType::Energy));
-        assert!(matches!(burn_builder, TransactionTypeBuilder::Burn(_)));
-
-        // Verify that the validation logic is correct:
-        // Energy fee should only be allowed with transfer-type transactions
-        // (Transfers, UnoTransfers, ShieldTransfers, UnshieldTransfers)
-        let fee_type = Some(FeeType::Energy);
-        let is_transfer_type = matches!(
-            burn_builder,
-            TransactionTypeBuilder::Transfers(_)
-                | TransactionTypeBuilder::UnoTransfers(_)
-                | TransactionTypeBuilder::ShieldTransfers(_)
-                | TransactionTypeBuilder::UnshieldTransfers(_)
-        );
-        let should_fail = fee_type == Some(FeeType::Energy) && !is_transfer_type;
-
-        assert!(
-            should_fail,
-            "Energy fee type should only be allowed with transfer-type transactions"
-        );
-    }
-
-    #[test]
-    fn test_energy_fee_allowed_for_new_addresses() {
-        use super::super::FeeType;
-
-        // Test that Energy fee type IS now allowed for transfers to new addresses
-        // (This restriction has been removed to improve Energy usability)
-        let energy_fee = FeeType::Energy;
-
-        // Create a transfer transaction
-        let transfer_builder = TransactionTypeBuilder::Transfers(vec![]);
-
-        // Energy fee with transfers is valid (new address restriction removed)
-        let _builder = TransactionBuilder::new(
-            TxVersion::T1,
-            0, // chain_id: 0 for tests
-            CompressedPublicKey::new(
-                tos_crypto::curve25519_dalek::ristretto::CompressedRistretto::default(),
-            ),
-            None,
-            transfer_builder.clone(),
-            FeeBuilder::Value(0),
-        )
-        .with_fee_type(energy_fee.clone());
-
-        // Verify Energy + Transfers is a valid combination
-        let fee_type = Some(FeeType::Energy);
-        let is_transfer = matches!(transfer_builder, TransactionTypeBuilder::Transfers(_));
-        let is_valid_combination = fee_type == Some(FeeType::Energy) && is_transfer;
-
-        assert!(
-            is_valid_combination,
-            "Energy fee type should be allowed with Transfer transactions (including to new addresses)"
-        );
-    }
-
-    #[test]
-    fn test_energy_fee_type_allowed_for_uno_shield_unshield() {
-        use super::super::FeeType;
-
-        // Test that Energy fee type is allowed for all transfer-type transactions
-        let energy_fee = FeeType::Energy;
-
-        // UnoTransfers should be allowed
-        let uno_builder = TransactionTypeBuilder::UnoTransfers(vec![]);
-        let is_uno_allowed = matches!(
-            uno_builder,
-            TransactionTypeBuilder::Transfers(_)
-                | TransactionTypeBuilder::UnoTransfers(_)
-                | TransactionTypeBuilder::ShieldTransfers(_)
-                | TransactionTypeBuilder::UnshieldTransfers(_)
-        );
-        assert!(
-            is_uno_allowed,
-            "Energy fee should be allowed for UnoTransfers"
-        );
-
-        // ShieldTransfers should be allowed
-        let shield_builder = TransactionTypeBuilder::ShieldTransfers(vec![]);
-        let is_shield_allowed = matches!(
-            shield_builder,
-            TransactionTypeBuilder::Transfers(_)
-                | TransactionTypeBuilder::UnoTransfers(_)
-                | TransactionTypeBuilder::ShieldTransfers(_)
-                | TransactionTypeBuilder::UnshieldTransfers(_)
-        );
-        assert!(
-            is_shield_allowed,
-            "Energy fee should be allowed for ShieldTransfers"
-        );
-
-        // UnshieldTransfers should be allowed
-        let unshield_builder = TransactionTypeBuilder::UnshieldTransfers(vec![]);
-        let is_unshield_allowed = matches!(
-            unshield_builder,
-            TransactionTypeBuilder::Transfers(_)
-                | TransactionTypeBuilder::UnoTransfers(_)
-                | TransactionTypeBuilder::ShieldTransfers(_)
-                | TransactionTypeBuilder::UnshieldTransfers(_)
-        );
-        assert!(
-            is_unshield_allowed,
-            "Energy fee should be allowed for UnshieldTransfers"
-        );
-
-        // Verify Energy fee type is set correctly
-        assert!(matches!(energy_fee, FeeType::Energy));
-    }
-
     #[test]
     fn test_shield_minimum_amount_validation() {
         // Test that Shield minimum amount is enforced (100 TOS)

@@ -67,7 +67,6 @@ impl AccountProvider for RocksStorage {
         account.registered_at = None;
         account.nonce_pointer = None;
         account.multisig_pointer = None;
-        account.energy_pointer = None;
 
         self.insert_into_disk(Column::Account, key.as_bytes(), &account)
     }
@@ -371,7 +370,6 @@ impl RocksStorage {
                     registered_at: None,
                     nonce_pointer: None,
                     multisig_pointer: None,
-                    energy_pointer: None,
                 };
 
                 self.insert_into_disk(

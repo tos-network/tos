@@ -85,9 +85,6 @@ pub mod tier3_e2e;
 /// Tier 3 DAG: E2E testing for DAG networks
 pub mod tier3_e2e_dag;
 
-/// Transaction Fixture Testing Framework (declarative YAML-based tests)
-pub mod fixtures;
-
 /// Tier 4: Chaos & property-based testing
 #[cfg(feature = "chaos")]
 pub mod tier4_chaos;
@@ -176,12 +173,6 @@ pub use tier1_component::{TestBlockchain, TestBlockchainBuilder};
 pub use tier1_5::{
     BlockWarp, ChainClient, ChainClientConfig, ConfirmationDepth, ContractTest,
     ContractTestContext, FeatureSet, SimulationResult, TransactionError, TxResult,
-};
-
-// Re-export fixtures types
-pub use fixtures::{
-    create_backend, execute_fixture, parse_fixture, run_fixture_on_backend, FixtureBackend,
-    FixtureResult, Tier,
 };
 
 // Re-export conformance types

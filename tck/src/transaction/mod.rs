@@ -5,12 +5,6 @@
 //! ordering, block assembly, verify/apply phase separation, mempool
 //! operations, and chain reorganization handling.
 
-/// Fee model tests - pure function testing for fee calculation
-pub mod fee_model;
-
-/// Transaction selector tests - priority ordering and block packing
-pub mod tx_selector;
-
 /// Nonce ordering tests - per-account sequencing and gap handling
 pub mod nonce_ordering;
 
@@ -158,7 +152,7 @@ impl MockTransactionBuilder {
         self
     }
 
-    /// Set the fee type (TOS, Energy, or UNO).
+    /// Set the fee type (TOS or UNO).
     pub fn with_fee_type(mut self, fee_type: FeeType) -> Self {
         self.fee_type = fee_type;
         self
@@ -205,7 +199,7 @@ impl MockTransactionBuilder {
                 TransactionType::UnoTransfers(transfers)
             }
             _ => {
-                // For TOS and Energy fee types, use regular transfers
+                // For TOS fee type, use regular transfers
                 let transfers: Vec<TransferPayload> = (0..self.transfer_count)
                     .map(|i| {
                         TransferPayload::new(

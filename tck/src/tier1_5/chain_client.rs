@@ -63,14 +63,6 @@ pub enum TransactionType {
         data: Vec<u8>,
         deposits: Vec<CallDeposit>,
     },
-    /// Freeze TOS for energy
-    Freeze { amount: u64 },
-    /// Unfreeze TOS
-    Unfreeze { amount: u64 },
-    /// Delegate frozen TOS
-    Delegate { to: Hash, amount: u64 },
-    /// Remove delegation
-    Undelegate { from: Hash, amount: u64 },
 }
 
 /// Error type for ChainClient operations.
@@ -1640,10 +1632,6 @@ impl ChainClient {
         let (recipient, amount) = match &tx_type {
             TransactionType::Transfer { to, amount } => (to.clone(), *amount),
             TransactionType::UnoTransfer { to, amount, .. } => (to.clone(), *amount),
-            TransactionType::Freeze { amount } => (sender.clone(), *amount),
-            TransactionType::Unfreeze { amount } => (sender.clone(), *amount),
-            TransactionType::Delegate { to, amount } => (to.clone(), *amount),
-            TransactionType::Undelegate { from, amount } => (from.clone(), *amount),
             TransactionType::DeployContract { .. } => (Hash::zero(), 0),
             TransactionType::CallContract { contract, .. } => (contract.clone(), 0),
         };

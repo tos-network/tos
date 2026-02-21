@@ -9,7 +9,7 @@ use clap::Parser;
 use indexmap::IndexSet;
 #[allow(unused_imports)]
 use log::{error, info, warn};
-use std::{borrow::Cow, fs::File, io::Write, path::Path, sync::Arc};
+use std::{fs::File, io::Write, path::Path, sync::Arc};
 use tos_common::{
     account::SessionKey,
     async_handler,
@@ -26,12 +26,11 @@ use tos_common::{
     tokio,
     transaction::{
         builder::{
-            ContractDepositBuilder, DeployContractBuilder, EnergyBuilder, FeeBuilder,
-            InvokeContractBuilder, MultiSigBuilder, TransactionTypeBuilder, TransferBuilder,
-            UnoTransferBuilder,
+            ContractDepositBuilder, DeployContractBuilder, FeeBuilder, InvokeContractBuilder,
+            MultiSigBuilder, TransactionTypeBuilder, TransferBuilder, UnoTransferBuilder,
         },
         multisig::{MultiSig, SignatureId},
-        AgentAccountPayload, BurnPayload, DelegationEntry, MultiSigPayload, Transaction, TxVersion,
+        AgentAccountPayload, BurnPayload, MultiSigPayload, Transaction, TxVersion,
     },
     utils::{format_coin, format_tos, from_coin},
 };
@@ -106,19 +105,6 @@ fn get_optional_arg(
         return Ok(Some(args.get_value(name)?.to_string_value()?));
     }
     Ok(None)
-}
-
-fn parse_optional_address(value: Option<String>) -> Result<Option<Address>, CommandError> {
-    let Some(value) = value else {
-        return Ok(None);
-    };
-    if value.eq_ignore_ascii_case("none") || value.eq_ignore_ascii_case("null") {
-        return Ok(None);
-    }
-    Address::from_string(&value)
-        .map(Some)
-        .context("Invalid address")
-        .map_err(CommandError::Any)
 }
 
 fn parse_optional_hash(value: Option<String>) -> Result<Option<Hash>, CommandError> {
@@ -552,24 +538,6 @@ async fn register_default_commands(manager: &CommandManager) -> Result<(), Comma
     Ok(())
 }
 
-fn unfreeze_tos_delegate_args() -> (Vec<Arg>, Vec<Arg>) {
-    (
-        vec![Arg::new(
-            "amount",
-            ArgType::String,
-            "Amount of TOS to unfreeze",
-        )],
-        vec![
-            Arg::new("delegatee", ArgType::String, "Delegatee address"),
-            Arg::new(
-                "record_index",
-                ArgType::Number,
-                "Delegation record index (required if multiple records exist)",
-            ),
-        ],
-    )
-}
-
 #[cfg(feature = "xswd")]
 // This must be run in a separate task
 async fn xswd_handler(mut receiver: UnboundedReceiver<XSWDEvent>, prompt: ShareablePrompt) {
@@ -817,7 +785,7 @@ async fn setup_wallet_command_manager(
         vec![Arg::new(
             "fee_type",
             ArgType::String,
-            "Fee payment type: 'tos' or 'energy'",
+            "Fee payment type: 'tos' or 'uno'",
         )],
         CommandHandler::Async(async_handler!(transfer)),
     ))?;
@@ -831,7 +799,7 @@ async fn setup_wallet_command_manager(
         vec![Arg::new(
             "fee_type",
             ArgType::String,
-            "Fee payment type: 'tos' or 'energy'",
+            "Fee payment type: 'tos' or 'uno'",
         )],
         CommandHandler::Async(async_handler!(transfer_all)),
     ))?;
@@ -981,64 +949,6 @@ async fn setup_wallet_command_manager(
             "Output filename for CSV export",
         )],
         CommandHandler::Async(async_handler!(export_transactions_csv)),
-    ))?;
-    command_manager.add_command(Command::with_required_arguments(
-        "freeze_tos",
-        "Freeze TOS to get energy with duration-based rewards (3/7/14 days)",
-        vec![
-            Arg::new("amount", ArgType::String, "Amount of TOS to freeze"),
-            Arg::new(
-                "duration",
-                ArgType::Number,
-                "Freeze duration in days (3/7/14/30, longer = higher rewards)",
-            ),
-        ],
-        CommandHandler::Async(async_handler!(freeze_tos)),
-    ))?;
-    command_manager.add_command(Command::with_required_arguments(
-        "freeze_tos_delegate",
-        "Freeze TOS and delegate energy to other accounts",
-        vec![
-            Arg::new(
-                "duration",
-                ArgType::Number,
-                "Freeze duration in days (3/7/14/30, longer = higher rewards)",
-            ),
-            Arg::new(
-                "delegatees",
-                ArgType::String,
-                "Comma-separated list of delegatees as address:amount",
-            ),
-        ],
-        CommandHandler::Async(async_handler!(freeze_tos_delegate)),
-    ))?;
-    command_manager.add_command(Command::with_required_arguments(
-        "unfreeze_tos",
-        "Unfreeze TOS (release frozen TOS after lock period)",
-        vec![Arg::new(
-            "amount",
-            ArgType::String,
-            "Amount of TOS to unfreeze",
-        )],
-        CommandHandler::Async(async_handler!(unfreeze_tos)),
-    ))?;
-    let (required_args, optional_args) = unfreeze_tos_delegate_args();
-    command_manager.add_command(Command::with_arguments(
-        "unfreeze_tos_delegate",
-        "Unfreeze delegated TOS (delegatee optional for single-entry records)",
-        required_args,
-        optional_args,
-        CommandHandler::Async(async_handler!(unfreeze_tos_delegate)),
-    ))?;
-    command_manager.add_command(Command::new(
-        "withdraw_unfrozen",
-        "Withdraw all expired pending unfreezes",
-        CommandHandler::Async(async_handler!(withdraw_unfrozen)),
-    ))?;
-    command_manager.add_command(Command::new(
-        "energy_info",
-        "Show energy information and freeze records",
-        CommandHandler::Async(async_handler!(energy_info)),
     ))?;
     command_manager.add_command(Command::with_required_arguments(
         "set_asset_name",
@@ -1239,18 +1149,11 @@ async fn setup_wallet_command_manager(
             ),
             Arg::new("policy_hash", ArgType::Hash, "Policy hash"),
         ],
-        vec![
-            Arg::new(
-                "energy_pool",
-                ArgType::String,
-                "Energy pool address (optional, use 'none' to clear)",
-            ),
-            Arg::new(
-                "session_key_root",
-                ArgType::String,
-                "Session key root hash (optional, use 'none' to clear)",
-            ),
-        ],
+        vec![Arg::new(
+            "session_key_root",
+            ArgType::String,
+            "Session key root hash (optional, use 'none' to clear)",
+        )],
         CommandHandler::Async(async_handler!(agent_register)),
     ))?;
     command_manager.add_command(Command::with_arguments(
@@ -1277,16 +1180,6 @@ async fn setup_wallet_command_manager(
         vec![Arg::new("status", ArgType::Number, "Status value (0 or 1)")],
         vec![],
         CommandHandler::Async(async_handler!(agent_set_status)),
-    ))?;
-    command_manager.add_command(Command::with_optional_arguments(
-        "agent_set_energy_pool",
-        "Set agent account energy pool (use 'none' to clear)",
-        vec![Arg::new(
-            "energy_pool",
-            ArgType::String,
-            "Energy pool address or 'none'",
-        )],
-        CommandHandler::Async(async_handler!(agent_set_energy_pool)),
     ))?;
     command_manager.add_command(Command::with_optional_arguments(
         "agent_set_session_key_root",
@@ -2098,22 +1991,15 @@ async fn transfer(manager: &CommandManager, mut args: ArgumentManager) -> Result
         let fee_type_str = args.get_value("fee_type")?.to_string_value()?;
         match fee_type_str.to_lowercase().as_str() {
             "tos" => Some(tos_common::transaction::FeeType::TOS),
-            "energy" => Some(tos_common::transaction::FeeType::Energy),
             "uno" => Some(tos_common::transaction::FeeType::UNO),
             _ => {
-                manager.error("Invalid fee_type. Use 'tos', 'energy', or 'uno'");
+                manager.error("Invalid fee_type. Use 'tos' or 'uno'");
                 return Ok(());
             }
         }
     } else {
         None
     };
-
-    // Validate fee_type for energy
-    if fee_type.as_ref() == Some(&tos_common::transaction::FeeType::Energy) && asset != TOS_ASSET {
-        manager.error("Energy fees can only be used for TOS transfers");
-        return Ok(());
-    }
 
     manager.message(format!(
         "Sending {} of {} ({}) to {}",
@@ -2162,16 +2048,7 @@ async fn transfer(manager: &CommandManager, mut args: ArgumentManager) -> Result
         .await
         .context("Error while getting tx version")?;
 
-    // Create a custom fee builder if energy fees are requested
-    let fee_builder = if let Some(ref ft) = fee_type {
-        if *ft == tos_common::transaction::FeeType::Energy {
-            FeeBuilder::Value(0) // Energy fees are 0 TOS
-        } else {
-            FeeBuilder::default()
-        }
-    } else {
-        FeeBuilder::default()
-    };
+    let fee_builder = FeeBuilder::default();
 
     // Create transaction builder with fee type
     let mut builder = tos_common::transaction::builder::TransactionBuilder::new(
@@ -2197,7 +2074,6 @@ async fn transfer(manager: &CommandManager, mut args: ArgumentManager) -> Result
                     .unwrap_or(&tos_common::transaction::FeeType::TOS)
                 {
                     tos_common::transaction::FeeType::TOS => "TOS",
-                    tos_common::transaction::FeeType::Energy => "Energy",
                     tos_common::transaction::FeeType::UNO => "UNO",
                 }
             ));
@@ -2288,22 +2164,15 @@ async fn transfer_all(
         let fee_type_str = args.get_value("fee_type")?.to_string_value()?;
         match fee_type_str.to_lowercase().as_str() {
             "tos" => Some(tos_common::transaction::FeeType::TOS),
-            "energy" => Some(tos_common::transaction::FeeType::Energy),
             "uno" => Some(tos_common::transaction::FeeType::UNO),
             _ => {
-                manager.error("Invalid fee_type. Use 'tos', 'energy', or 'uno'");
+                manager.error("Invalid fee_type. Use 'tos' or 'uno'");
                 return Ok(());
             }
         }
     } else {
         None
     };
-
-    // Validate fee_type for energy
-    if fee_type.as_ref() == Some(&tos_common::transaction::FeeType::Energy) && asset != TOS_ASSET {
-        manager.error("Energy fees can only be used for TOS transfers");
-        return Ok(());
-    }
 
     // Query balance, asset data, and multisig from daemon API (stateless)
 
@@ -2349,25 +2218,12 @@ async fn transfer_all(
     };
     let tx_type = TransactionTypeBuilder::Transfers(vec![transfer]);
 
-    // Estimate fees based on fee type
-    let estimated_fees = if let Some(ref ft) = fee_type {
-        if *ft == tos_common::transaction::FeeType::Energy {
-            // For energy fees, we don't deduct from TOS balance
-            0
-        } else {
-            wallet
-                .estimate_fees(tx_type.clone(), FeeBuilder::default())
-                .await
-                .context("Error while estimating fees")?
-        }
-    } else {
-        wallet
-            .estimate_fees(tx_type.clone(), FeeBuilder::default())
-            .await
-            .context("Error while estimating fees")?
-    };
+    let estimated_fees = wallet
+        .estimate_fees(tx_type.clone(), FeeBuilder::default())
+        .await
+        .context("Error while estimating fees")?;
 
-    if asset == TOS_ASSET && fee_type.as_ref() != Some(&tos_common::transaction::FeeType::Energy) {
+    if asset == TOS_ASSET {
         amount = amount
             .checked_sub(estimated_fees)
             .context("Insufficient balance to pay fees")?;
@@ -2378,7 +2234,6 @@ async fn transfer_all(
             tos_common::transaction::FeeType::TOS => {
                 format!("TOS fees: {}", format_tos(estimated_fees))
             }
-            tos_common::transaction::FeeType::Energy => "Energy fees: 0 TOS".to_string(),
             tos_common::transaction::FeeType::UNO => "UNO fees: 0 TOS".to_string(),
         }
     } else {
@@ -2434,16 +2289,7 @@ async fn transfer_all(
             .context("Error while getting tx version")?;
         let threshold = None;
 
-        // Create a custom fee builder if energy fees are requested
-        let fee_builder = if let Some(ref ft) = fee_type {
-            if *ft == tos_common::transaction::FeeType::Energy {
-                FeeBuilder::Value(0) // Energy fees are 0 TOS
-            } else {
-                FeeBuilder::default()
-            }
-        } else {
-            FeeBuilder::default()
-        };
+        let fee_builder = FeeBuilder::default();
 
         // Create transaction builder with fee type
         let mut builder = tos_common::transaction::builder::TransactionBuilder::new(
@@ -2469,7 +2315,6 @@ async fn transfer_all(
                         .unwrap_or(&tos_common::transaction::FeeType::TOS)
                     {
                         tos_common::transaction::FeeType::TOS => "TOS",
-                        tos_common::transaction::FeeType::Energy => "Energy",
                         tos_common::transaction::FeeType::UNO => "UNO",
                     }
                 ));
@@ -3339,12 +3184,6 @@ async fn history(
                     format!("Contract call: {} (entry {})", contract, entry_id)
                 }
                 AccountHistoryType::DeployContract => "Contract deployed".to_string(),
-                AccountHistoryType::FreezeTos { amount, duration } => {
-                    format!("Freeze: {} TOS for {}", format_tos(*amount), duration)
-                }
-                AccountHistoryType::UnfreezeTos { amount } => {
-                    format!("Unfreeze: {} TOS", format_tos(*amount))
-                }
             };
 
             manager.message(format!(
@@ -3433,50 +3272,12 @@ async fn transaction(
             TransactionType::DeployContract(_) => {
                 manager.message("Type: DeployContract".to_string());
             }
-            TransactionType::Energy(payload) => {
-                use tos_common::transaction::EnergyPayload;
-                match payload {
-                    EnergyPayload::FreezeTos { amount, duration } => {
-                        manager.message("Type: FreezeTos".to_string());
-                        manager.message(format!("  Amount: {} TOS", format_tos(*amount)));
-                        manager.message(format!("  Duration: {:?}", duration));
-                    }
-                    EnergyPayload::FreezeTosDelegate {
-                        delegatees,
-                        duration,
-                    } => {
-                        manager.message("Type: FreezeTosDelegate".to_string());
-                        manager.message(format!("  Delegatees: {} accounts", delegatees.len()));
-                        manager.message(format!("  Duration: {:?}", duration));
-                    }
-                    EnergyPayload::UnfreezeTos {
-                        amount,
-                        from_delegation,
-                        record_index,
-                        delegatee_address,
-                    } => {
-                        manager.message("Type: UnfreezeTos".to_string());
-                        manager.message(format!("  Amount: {} TOS", format_tos(*amount)));
-                        manager.message(format!("  From Delegation: {}", from_delegation));
-                        if let Some(idx) = record_index {
-                            manager.message(format!("  Record Index: {}", idx));
-                        }
-                        if let Some(addr) = delegatee_address {
-                            manager.message(format!("  Delegatee: {:?}", addr));
-                        }
-                    }
-                    EnergyPayload::WithdrawUnfrozen => {
-                        manager.message("Type: WithdrawUnfrozen".to_string());
-                    }
-                }
-            }
             TransactionType::AgentAccount(payload) => {
                 manager.message("Type: AgentAccount".to_string());
                 match payload {
                     AgentAccountPayload::Register {
                         controller,
                         policy_hash,
-                        energy_pool,
                         session_key_root,
                     } => {
                         manager.message("  Action: Register".to_string());
@@ -3485,12 +3286,6 @@ async fn transaction(
                             controller.as_address(wallet.get_network().is_mainnet())
                         ));
                         manager.message(format!("  Policy Hash: {}", policy_hash));
-                        if let Some(pool) = energy_pool.as_ref() {
-                            manager.message(format!(
-                                "  Energy Pool: {}",
-                                pool.as_address(wallet.get_network().is_mainnet())
-                            ));
-                        }
                         if let Some(root) = session_key_root.as_ref() {
                             manager.message(format!("  Session Key Root: {}", root));
                         }
@@ -3509,17 +3304,6 @@ async fn transaction(
                     AgentAccountPayload::SetStatus { status } => {
                         manager.message("  Action: SetStatus".to_string());
                         manager.message(format!("  Status: {}", status));
-                    }
-                    AgentAccountPayload::SetEnergyPool { energy_pool } => {
-                        manager.message("  Action: SetEnergyPool".to_string());
-                        if let Some(pool) = energy_pool.as_ref() {
-                            manager.message(format!(
-                                "  Energy Pool: {}",
-                                pool.as_address(wallet.get_network().is_mainnet())
-                            ));
-                        } else {
-                            manager.message("  Energy Pool: none".to_string());
-                        }
                     }
                     AgentAccountPayload::SetSessionKeyRoot { session_key_root } => {
                         manager.message("  Action: SetSessionKeyRoot".to_string());
@@ -3666,12 +3450,6 @@ async fn export_transactions_csv(
                     format!("InvokeContract,contract:{} entry:{}", contract, entry_id)
                 }
                 AccountHistoryType::DeployContract => "DeployContract,".to_string(),
-                AccountHistoryType::FreezeTos { amount, duration } => {
-                    format!("FreezeTos,amount:{} duration:{}", amount, duration)
-                }
-                AccountHistoryType::UnfreezeTos { amount } => {
-                    format!("UnfreezeTos,amount:{}", amount)
-                }
             };
 
             writeln!(
@@ -4654,534 +4432,6 @@ async fn broadcast_tx(wallet: &Wallet, manager: &CommandManager, tx: Transaction
     }
 }
 
-/// Freeze TOS to get energy with duration-based rewards
-async fn freeze_tos(
-    manager: &CommandManager,
-    mut args: ArgumentManager,
-) -> Result<(), CommandError> {
-    manager.validate_batch_params("freeze_tos", &args)?;
-
-    let context = manager.get_context().lock()?;
-    let wallet: &Arc<Wallet> = context.get()?;
-
-    // Get amount and duration from arguments (batch mode only)
-    let amount_str = if args.has_argument("amount") {
-        args.get_value("amount")?.to_string_value()?
-    } else {
-        return Err(CommandError::MissingArgument("amount".to_string()));
-    };
-
-    let duration_num = if args.has_argument("duration") {
-        args.get_value("duration")?.to_number()?
-    } else {
-        return Err(CommandError::MissingArgument("duration".to_string()));
-    };
-
-    // Parse amount
-    let amount = from_coin(&amount_str, 8).context("Invalid amount")?;
-
-    // Parse duration (3-365 days)
-    let duration = if (3..=365).contains(&duration_num) {
-        tos_common::account::FreezeDuration::new(duration_num as u32)
-            .map_err(|e| CommandError::InvalidArgument(e.to_string()))?
-    } else {
-        return Err(CommandError::InvalidArgument(
-            "Duration must be between 3 and 365 days".to_string(),
-        ));
-    };
-
-    // Create freeze transaction
-    let _payload = tos_common::transaction::EnergyPayload::FreezeTos { amount, duration };
-
-    manager.message("Building transaction...");
-
-    // Create energy transaction builder with validated parameters
-    let energy_builder = EnergyBuilder::freeze_tos(amount, duration);
-
-    // Validate the builder configuration before creating transaction
-    if let Err(e) = energy_builder.validate() {
-        manager.error(format!("Invalid energy builder configuration: {}", e));
-        return Ok(());
-    }
-
-    let tx_type = TransactionTypeBuilder::Energy(energy_builder);
-    let fee = FeeBuilder::default();
-
-    let tx = match wallet.create_transaction(tx_type, fee).await {
-        Ok(tx) => tx,
-        Err(e) => {
-            manager.error(format!("Error while creating transaction: {}", e));
-            return Ok(());
-        }
-    };
-
-    let hash = tx.hash();
-    manager.message(format!("Freeze transaction created: {}", hash));
-    manager.message(format!("Amount: {} TOS", format_coin(amount, 8)));
-    manager.message(format!("Duration: {:?}", duration));
-    manager.message(format!(
-        "Reward multiplier: {}x",
-        duration.reward_multiplier()
-    ));
-
-    // Note: Energy state is now tracked by daemon, not local storage
-    // The actual energy gained will be calculated by daemon when the transaction is confirmed
-    manager.message("Note: Energy will be credited after transaction confirmation.");
-
-    // Broadcast the transaction
-    broadcast_tx(wallet, manager, tx).await;
-
-    Ok(())
-}
-
-/// Freeze TOS and delegate energy to other accounts
-async fn freeze_tos_delegate(
-    manager: &CommandManager,
-    mut args: ArgumentManager,
-) -> Result<(), CommandError> {
-    manager.validate_batch_params("freeze_tos_delegate", &args)?;
-
-    let context = manager.get_context().lock()?;
-    let wallet: &Arc<Wallet> = context.get()?;
-
-    let duration_num = if args.has_argument("duration") {
-        args.get_value("duration")?.to_number()?
-    } else {
-        return Err(CommandError::MissingArgument("duration".to_string()));
-    };
-
-    let delegatees_str = if args.has_argument("delegatees") {
-        args.get_value("delegatees")?.to_string_value()?
-    } else {
-        return Err(CommandError::MissingArgument("delegatees".to_string()));
-    };
-
-    let duration = tos_common::account::FreezeDuration::new(duration_num as u32)
-        .map_err(|e| CommandError::InvalidArgument(e.to_string()))?;
-
-    let mut delegatees = Vec::new();
-    for entry in delegatees_str.split(',') {
-        let entry = entry.trim();
-        if entry.is_empty() {
-            continue;
-        }
-        let mut parts = entry.split(':');
-        let addr_str = parts.next().ok_or_else(|| {
-            CommandError::InvalidArgument("Invalid delegatees format".to_string())
-        })?;
-        let amount_str = parts.next().ok_or_else(|| {
-            CommandError::InvalidArgument("Invalid delegatees format".to_string())
-        })?;
-        if parts.next().is_some() {
-            return Err(CommandError::InvalidArgument(
-                "Invalid delegatees format".to_string(),
-            ));
-        }
-
-        let address: tos_common::crypto::Address = addr_str.parse().map_err(|e| {
-            CommandError::InvalidArgument(format!("Invalid delegatee address: {e}"))
-        })?;
-        if address.is_mainnet() != wallet.get_network().is_mainnet() {
-            return Err(CommandError::InvalidArgument(
-                "Delegatee address network does not match wallet network".to_string(),
-            ));
-        }
-        let amount = from_coin(amount_str, 8).context("Invalid delegatee amount")?;
-
-        delegatees.push(DelegationEntry {
-            delegatee: address.get_public_key().clone(),
-            amount,
-        });
-    }
-
-    if delegatees.is_empty() {
-        return Err(CommandError::InvalidArgument(
-            "Delegatees list cannot be empty".to_string(),
-        ));
-    }
-
-    let energy_builder = EnergyBuilder::freeze_tos_delegate(delegatees, duration)
-        .map_err(|e| CommandError::InvalidArgument(e.to_string()))?;
-
-    if let Err(e) = energy_builder.validate() {
-        manager.error(format!("Invalid energy builder configuration: {}", e));
-        return Ok(());
-    }
-
-    let tx_type = TransactionTypeBuilder::Energy(energy_builder);
-    let fee = FeeBuilder::default();
-
-    let tx = match wallet.create_transaction(tx_type, fee).await {
-        Ok(tx) => tx,
-        Err(e) => {
-            manager.error(format!("Error while creating transaction: {}", e));
-            return Ok(());
-        }
-    };
-
-    let hash = tx.hash();
-    manager.message(format!("Delegation freeze transaction created: {}", hash));
-    manager.message(format!("Duration: {:?}", duration));
-    manager.message(format!(
-        "Delegatees: {} accounts",
-        delegatees_str
-            .split(',')
-            .filter(|s| !s.trim().is_empty())
-            .count()
-    ));
-
-    broadcast_tx(wallet, manager, tx).await;
-
-    Ok(())
-}
-
-/// Unfreeze TOS (release frozen TOS after lock period)
-async fn unfreeze_tos(
-    manager: &CommandManager,
-    mut args: ArgumentManager,
-) -> Result<(), CommandError> {
-    manager.validate_batch_params("unfreeze_tos", &args)?;
-
-    let context = manager.get_context().lock()?;
-    let wallet: &Arc<Wallet> = context.get()?;
-
-    // Get amount from arguments (batch mode only)
-    let amount_str = if args.has_argument("amount") {
-        args.get_value("amount")?.to_string_value()?
-    } else {
-        return Err(CommandError::MissingArgument("amount".to_string()));
-    };
-
-    let amount = from_coin(&amount_str, 8).context("Invalid amount")?;
-
-    // Create unfreeze transaction
-    let _payload = tos_common::transaction::EnergyPayload::UnfreezeTos {
-        amount,
-        from_delegation: false,
-        record_index: None,      // Use FIFO mode by default
-        delegatee_address: None, // No specific delegatee
-    };
-
-    manager.message("Building transaction...");
-
-    // Create energy transaction builder with validated parameters
-    let energy_builder = EnergyBuilder::unfreeze_tos(amount);
-
-    // Validate the builder configuration before creating transaction
-    if let Err(e) = energy_builder.validate() {
-        manager.error(format!("Invalid energy builder configuration: {}", e));
-        return Ok(());
-    }
-
-    let tx_type = TransactionTypeBuilder::Energy(energy_builder);
-    let fee = FeeBuilder::default();
-
-    manager.message("Building transaction...");
-    let tx = match wallet.create_transaction(tx_type, fee).await {
-        Ok(tx) => tx,
-        Err(e) => {
-            manager.error(format!("Error while creating transaction: {}", e));
-            return Ok(());
-        }
-    };
-
-    let hash = tx.hash();
-    manager.message(format!("Unfreeze transaction created: {}", hash));
-    manager.message(format!("Amount: {} TOS", format_coin(amount, 8)));
-
-    // Note: Energy state is now tracked by daemon, not local storage
-    // The actual energy removed will be calculated by daemon when the transaction is confirmed
-    manager.message("Note: Energy will be updated after transaction confirmation.");
-
-    // Broadcast the transaction
-    broadcast_tx(wallet, manager, tx).await;
-
-    Ok(())
-}
-
-/// Unfreeze delegated TOS (delegation revoke)
-async fn unfreeze_tos_delegate(
-    manager: &CommandManager,
-    mut args: ArgumentManager,
-) -> Result<(), CommandError> {
-    manager.validate_batch_params("unfreeze_tos_delegate", &args)?;
-
-    let context = manager.get_context().lock()?;
-    let wallet: &Arc<Wallet> = context.get()?;
-
-    let amount_str = if args.has_argument("amount") {
-        args.get_value("amount")?.to_string_value()?
-    } else {
-        return Err(CommandError::MissingArgument("amount".to_string()));
-    };
-
-    let amount = from_coin(&amount_str, 8).context("Invalid amount")?;
-
-    let delegatee = if args.has_argument("delegatee") {
-        let delegatee_str = args.get_value("delegatee")?.to_string_value()?;
-        let delegatee_addr: tos_common::crypto::Address = delegatee_str.parse().map_err(|e| {
-            CommandError::InvalidArgument(format!("Invalid delegatee address: {e}"))
-        })?;
-        if delegatee_addr.is_mainnet() != wallet.get_network().is_mainnet() {
-            return Err(CommandError::InvalidArgument(
-                "Delegatee address network does not match wallet network".to_string(),
-            ));
-        }
-        Some(delegatee_addr.get_public_key().clone())
-    } else {
-        None
-    };
-
-    let record_index = if args.has_argument("record_index") {
-        Some(args.get_value("record_index")?.to_number()? as u32)
-    } else {
-        None
-    };
-
-    let energy_builder = EnergyBuilder::unfreeze_tos_delegated(amount, record_index, delegatee);
-
-    if let Err(e) = energy_builder.validate() {
-        manager.error(format!("Invalid energy builder configuration: {}", e));
-        return Ok(());
-    }
-
-    // Save delegatee address before moving energy_builder
-    let delegatee_for_display = energy_builder.delegatee_address.clone();
-
-    let tx_type = TransactionTypeBuilder::Energy(energy_builder);
-    let fee = FeeBuilder::default();
-
-    let tx = match wallet.create_transaction(tx_type, fee).await {
-        Ok(tx) => tx,
-        Err(e) => {
-            manager.error(format!("Error while creating transaction: {}", e));
-            return Ok(());
-        }
-    };
-
-    let hash = tx.hash();
-    manager.message(format!("Delegation unfreeze transaction created: {}", hash));
-    manager.message(format!("Amount: {} TOS", format_coin(amount, 8)));
-    if let Some(delegatee_pub) = delegatee_for_display {
-        manager.message(format!(
-            "Delegatee: {}",
-            delegatee_pub.to_address(wallet.get_network().is_mainnet())
-        ));
-    }
-
-    broadcast_tx(wallet, manager, tx).await;
-
-    Ok(())
-}
-
-/// Withdraw all expired pending unfreezes
-async fn withdraw_unfrozen(
-    manager: &CommandManager,
-    _args: ArgumentManager,
-) -> Result<(), CommandError> {
-    let context = manager.get_context().lock()?;
-    let wallet: &Arc<Wallet> = context.get()?;
-
-    let energy_builder = EnergyBuilder::withdraw_unfrozen();
-
-    if let Err(e) = energy_builder.validate() {
-        manager.error(format!("Invalid energy builder configuration: {}", e));
-        return Ok(());
-    }
-
-    let tx_type = TransactionTypeBuilder::Energy(energy_builder);
-    let fee = FeeBuilder::default();
-
-    let tx = match wallet.create_transaction(tx_type, fee).await {
-        Ok(tx) => tx,
-        Err(e) => {
-            manager.error(format!("Error while creating transaction: {}", e));
-            return Ok(());
-        }
-    };
-
-    let hash = tx.hash();
-    manager.message(format!("Withdraw transaction created: {}", hash));
-
-    broadcast_tx(wallet, manager, tx).await;
-
-    Ok(())
-}
-
-/// Show energy information and freeze records
-async fn energy_info(manager: &CommandManager, _args: ArgumentManager) -> Result<(), CommandError> {
-    let context = manager.get_context().lock()?;
-    let wallet: &Arc<Wallet> = context.get()?;
-
-    // Query energy info from daemon API (stateless wallet)
-    let network_handler = wallet.get_network_handler().lock().await;
-    let handler = network_handler.as_ref().ok_or_else(|| {
-        CommandError::InvalidArgument("Wallet not connected to daemon".to_string())
-    })?;
-
-    {
-        let api = handler.get_api();
-        let address = wallet.get_address();
-
-        match api
-            .call(
-                &"get_energy".to_string(),
-                &tos_common::api::daemon::GetEnergyParams {
-                    address: Cow::Borrowed(&address),
-                },
-            )
-            .await
-        {
-            Ok(result) => {
-                let energy_result: tos_common::api::daemon::GetEnergyResult =
-                    serde_json::from_value(result).context("Failed to parse energy result")?;
-
-                manager.message(format!("Energy Information for {}:", address));
-                manager.message(format!(
-                    "  Frozen TOS: {} TOS",
-                    format_tos(energy_result.frozen_tos)
-                ));
-                manager.message(format!("  Energy: {} units", energy_result.energy));
-                manager.message(format!(
-                    "  Available Energy: {} units",
-                    energy_result.available_energy
-                ));
-                manager.message(format!(
-                    "  Last Update: topoheight {}",
-                    energy_result.last_update
-                ));
-
-                if !energy_result.freeze_records.is_empty() {
-                    manager.message("  Freeze Records:");
-                    for (i, record) in energy_result.freeze_records.iter().enumerate() {
-                        manager.message(format!(
-                            "    Record {}: {} TOS for {} days",
-                            i + 1,
-                            format_tos(record.amount),
-                            record.duration
-                        ));
-                        manager.message(format!(
-                            "      Energy Gained: {} units",
-                            record.energy_gained
-                        ));
-                        manager.message(format!(
-                            "      Freeze Time: topoheight {}",
-                            record.freeze_topoheight
-                        ));
-                        manager.message(format!(
-                            "      Unlock Time: topoheight {}",
-                            record.unlock_topoheight
-                        ));
-
-                        if record.can_unlock {
-                            manager.message("      Status: ✅ Unlockable".to_string());
-                        } else {
-                            // Use network-specific blocks per day for accurate display
-                            // Mainnet/Testnet: 86400 blocks/day, Devnet: 10 blocks/day
-                            let blocks_per_day =
-                                wallet.get_network().freeze_duration_multiplier() as f64;
-                            let remaining_days = record.remaining_blocks as f64 / blocks_per_day;
-                            if wallet.get_network().is_devnet() {
-                                // Devnet: show in blocks for clarity
-                                manager.message(format!(
-                                    "      Status: 🔒 Locked ({} blocks remaining, ~{:.1} devnet-days)",
-                                    record.remaining_blocks, remaining_days
-                                ));
-                            } else {
-                                manager.message(format!(
-                                    "      Status: 🔒 Locked ({:.2} days remaining)",
-                                    remaining_days
-                                ));
-                            }
-                        }
-                    }
-                }
-
-                if !energy_result.delegated_records.is_empty() {
-                    manager.message("  Delegated Freeze Records:");
-                    for (i, record) in energy_result.delegated_records.iter().enumerate() {
-                        manager.message(format!(
-                            "    Record {}: {} TOS for {} days",
-                            i + 1,
-                            format_tos(record.total_amount),
-                            record.duration
-                        ));
-                        manager
-                            .message(format!("      Total Energy: {} units", record.total_energy));
-                        manager.message(format!(
-                            "      Freeze Time: topoheight {}",
-                            record.freeze_topoheight
-                        ));
-                        manager.message(format!(
-                            "      Unlock Time: topoheight {}",
-                            record.unlock_topoheight
-                        ));
-
-                        if record.can_unlock {
-                            manager.message("      Status: ✅ Unlockable".to_string());
-                        } else {
-                            let blocks_per_day =
-                                wallet.get_network().freeze_duration_multiplier() as f64;
-                            let remaining_days = record.remaining_blocks as f64 / blocks_per_day;
-                            if wallet.get_network().is_devnet() {
-                                manager.message(format!(
-                                    "      Status: 🔒 Locked ({} blocks remaining, ~{:.1} devnet-days)",
-                                    record.remaining_blocks, remaining_days
-                                ));
-                            } else {
-                                manager.message(format!(
-                                    "      Status: 🔒 Locked ({:.2} days remaining)",
-                                    remaining_days
-                                ));
-                            }
-                        }
-
-                        if !record.entries.is_empty() {
-                            manager.message("      Delegatees:");
-                            for entry in &record.entries {
-                                manager.message(format!(
-                                    "        {}: {} TOS, {} energy",
-                                    entry.delegatee,
-                                    format_tos(entry.amount),
-                                    entry.energy
-                                ));
-                            }
-                        }
-                    }
-                }
-
-                if !energy_result.pending_unfreezes.is_empty() {
-                    manager.message("  Pending Unfreezes:");
-                    for (i, pending) in energy_result.pending_unfreezes.iter().enumerate() {
-                        manager.message(format!(
-                            "    Pending {}: {} TOS",
-                            i + 1,
-                            format_tos(pending.amount)
-                        ));
-                        manager.message(format!(
-                            "      Expire Time: topoheight {}",
-                            pending.expire_topoheight
-                        ));
-                        if pending.can_withdraw {
-                            manager.message("      Status: ✅ Withdrawable".to_string());
-                        } else {
-                            manager.message(format!(
-                                "      Status: 🕒 Cooling ({} blocks remaining)",
-                                pending.remaining_blocks
-                            ));
-                        }
-                    }
-                }
-            }
-            Err(e) => {
-                manager.error(format!("Failed to get energy information: {}", e));
-            }
-        }
-    }
-
-    Ok(())
-}
-
 // ===== Agent Account Commands =====
 
 async fn agent_show(
@@ -5220,12 +4470,6 @@ async fn agent_show(
             manager.message(format!("  Controller: {}", meta.controller));
             manager.message(format!("  Policy Hash: {}", meta.policy_hash));
             manager.message(format!("  Status: {}", meta.status));
-            manager.message(format!(
-                "  Energy Pool: {}",
-                meta.energy_pool
-                    .map(|addr| addr.to_string())
-                    .unwrap_or_else(|| "none".to_string())
-            ));
             manager.message(format!(
                 "  Session Key Root: {}",
                 meta.session_key_root
@@ -5349,23 +4593,12 @@ async fn agent_register(
         .context("Invalid controller address")
         .map_err(CommandError::Any)?;
     let policy_hash = args.get_value("policy_hash")?.to_hash()?;
-    let energy_pool = parse_optional_address(get_optional_arg(&mut args, "energy_pool")?)?
-        .map(|addr| addr.to_public_key());
     let session_key_root = parse_optional_hash(get_optional_arg(&mut args, "session_key_root")?)?;
-    let owner_pub = wallet.get_public_key().clone();
     let controller_pub = controller.to_public_key();
-
-    if let Some(pool) = energy_pool.as_ref() {
-        if pool != &owner_pub && pool != &controller_pub {
-            manager.error("energy_pool must be owner or controller");
-            return Ok(());
-        }
-    }
 
     let payload = AgentAccountPayload::Register {
         controller: controller_pub,
         policy_hash,
-        energy_pool,
         session_key_root,
     };
     let tx_type = TransactionTypeBuilder::AgentAccount(payload);
@@ -5470,61 +4703,6 @@ async fn agent_set_status(
     };
 
     manager.message(format!("AgentAccount set status tx: {}", tx.hash()));
-    broadcast_tx(wallet, manager, tx).await;
-
-    Ok(())
-}
-
-async fn agent_set_energy_pool(
-    manager: &CommandManager,
-    mut args: ArgumentManager,
-) -> Result<(), CommandError> {
-    let context = manager.get_context().lock()?;
-    let wallet: &Arc<Wallet> = context.get()?;
-
-    let energy_pool = parse_optional_address(get_optional_arg(&mut args, "energy_pool")?)?
-        .map(|addr| addr.to_public_key());
-    if let Some(pool) = energy_pool.as_ref() {
-        let address = wallet.get_address();
-        let network_handler = wallet.get_network_handler().lock().await;
-        let handler = network_handler.as_ref().ok_or_else(|| {
-            CommandError::InvalidArgument("Wallet not connected to daemon".to_string())
-        })?;
-        let api = handler.get_api();
-        let meta = api
-            .get_agent_account(&address)
-            .await
-            .map_err(|e| {
-                CommandError::InvalidArgument(format!("Failed to get agent account: {e}"))
-            })?
-            .meta;
-
-        let Some(meta) = meta else {
-            manager.error("Agent account not registered");
-            return Ok(());
-        };
-
-        let owner_pub = meta.owner.get_public_key().clone();
-        let controller_pub = meta.controller.get_public_key().clone();
-        if pool != &owner_pub && pool != &controller_pub {
-            manager.error("energy_pool must be owner or controller");
-            return Ok(());
-        }
-    }
-
-    let payload = AgentAccountPayload::SetEnergyPool { energy_pool };
-    let tx_type = TransactionTypeBuilder::AgentAccount(payload);
-    let fee = FeeBuilder::default();
-
-    let tx = match wallet.create_transaction(tx_type, fee).await {
-        Ok(tx) => tx,
-        Err(e) => {
-            manager.error(format!("Error while creating transaction: {}", e));
-            return Ok(());
-        }
-    };
-
-    manager.message(format!("AgentAccount set energy pool tx: {}", tx.hash()));
     broadcast_tx(wallet, manager, tx).await;
 
     Ok(())
@@ -6328,75 +5506,4 @@ async fn resolve_name(
     }
 
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{
-        unfreeze_tos_delegate_args, ArgumentManager, Command, CommandError, CommandHandler,
-        CommandManager, Prompt, PromptConfig,
-    };
-    use std::fs;
-    use tos_common::prompt::{default_logs_datetime_format, LogLevel, ShareablePrompt};
-
-    fn build_test_prompt() -> Result<ShareablePrompt, CommandError> {
-        let temp_dir = std::env::temp_dir().join("tos_wallet_cli_tests");
-        fs::create_dir_all(&temp_dir).map_err(|e| CommandError::Any(e.into()))?;
-        let dir_path = format!("{}/", temp_dir.display());
-        let config = PromptConfig {
-            level: LogLevel::Off,
-            dir_path: &dir_path,
-            filename_log: "test.log",
-            disable_file_logging: true,
-            disable_file_log_date_based: true,
-            disable_colors: true,
-            enable_auto_compress_logs: false,
-            interactive: false,
-            module_logs: Vec::new(),
-            file_level: LogLevel::Off,
-            show_ascii: false,
-            logs_datetime_format: default_logs_datetime_format(),
-        };
-
-        Prompt::new(config).map_err(|e| CommandError::Any(e.into()))
-    }
-
-    fn noop_handler(_: &CommandManager, _: ArgumentManager) -> Result<(), CommandError> {
-        Ok(())
-    }
-
-    #[::tokio::test]
-    async fn unfreeze_tos_delegate_parses_optional_args() {
-        let prompt = build_test_prompt().expect("prompt init");
-        let manager = CommandManager::new_with_batch_mode(prompt, true);
-        let (required_args, optional_args) = unfreeze_tos_delegate_args();
-        manager
-            .add_command(Command::with_arguments(
-                "unfreeze_tos_delegate",
-                "test",
-                required_args,
-                optional_args,
-                CommandHandler::Sync(noop_handler),
-            ))
-            .expect("register command");
-
-        manager
-            .handle_command("unfreeze_tos_delegate amount=1".to_string())
-            .await
-            .expect("amount only");
-        manager
-            .handle_command("unfreeze_tos_delegate amount=1 record_index=0".to_string())
-            .await
-            .expect("record_index only");
-        manager
-            .handle_command("unfreeze_tos_delegate amount=1 delegatee=addr".to_string())
-            .await
-            .expect("delegatee only");
-        manager
-            .handle_command(
-                "unfreeze_tos_delegate amount=1 delegatee=addr record_index=0".to_string(),
-            )
-            .await
-            .expect("delegatee and record_index");
-    }
 }

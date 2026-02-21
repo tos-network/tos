@@ -884,8 +884,6 @@ impl Storage for RocksStorage {
     }
 }
 
-// EnergyProvider implementation is now in providers/energy.rs
-
 #[cfg(test)]
 mod tests {
     use itertools::Itertools;

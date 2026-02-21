@@ -454,16 +454,6 @@ impl<S: Storage> P2pServer<S> {
                 let map: IndexMap<Hash, PublicKey> = entries.into_iter().collect();
                 StepResponse::TnsNames(map, next_page)
             }
-            StepRequest::EnergyData(keys, topoheight) => {
-                let mut results = Vec::with_capacity(keys.len());
-                for key in keys.iter() {
-                    let energy = storage
-                        .get_energy_resource_at_maximum_topoheight(key, topoheight)
-                        .await?;
-                    results.push(energy);
-                }
-                StepResponse::EnergyData(results)
-            }
             StepRequest::UnoBalances(key, asset, topoheight, page) => {
                 // Use the topoheight as max boundary for first request, then page as cursor
                 let max = page.unwrap_or(topoheight);
@@ -1782,9 +1772,6 @@ impl<S: Storage> P2pServer<S> {
         // 3. Sync UNO balances
         self.sync_uno_balances(peer, stable_topoheight).await?;
 
-        // 4. Sync energy data
-        self.sync_energy_data(peer, stable_topoheight).await?;
-
         if log::log_enabled!(log::Level::Info) {
             info!("TOS extension data sync complete");
         }
@@ -2002,74 +1989,6 @@ impl<S: Storage> P2pServer<S> {
                     storage
                         .import_uno_balance(key, asset, *topo, version)
                         .await?;
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    async fn sync_energy_data(
-        &self,
-        peer: &Arc<Peer>,
-        stable_topoheight: u64,
-    ) -> Result<(), BlockchainError> {
-        // Collect all registered account keys from local storage
-        let all_keys: Vec<PublicKey> = {
-            let storage = self.blockchain.get_storage().read().await;
-            let keys = storage
-                .get_registered_keys(None, None)
-                .await?
-                .collect::<Result<Vec<_>, _>>()?;
-            keys
-        };
-
-        if all_keys.is_empty() {
-            return Ok(());
-        }
-
-        if log::log_enabled!(log::Level::Info) {
-            info!("Syncing energy data for {} accounts", all_keys.len());
-        }
-
-        // Batch keys and request energy data from peer
-        for chunk in all_keys.chunks(MAX_ITEMS_PER_PAGE) {
-            let keys = chunk.to_vec();
-            let StepResponse::EnergyData(results) = peer
-                .request_boostrap_chain(StepRequest::EnergyData(
-                    Cow::Owned(keys.clone()),
-                    stable_topoheight,
-                ))
-                .await?
-            else {
-                if log::log_enabled!(log::Level::Error) {
-                    error!("Received an invalid StepResponse while fetching energy data");
-                }
-                return Err(P2pError::InvalidPacket.into());
-            };
-
-            if results.len() != keys.len() {
-                if log::log_enabled!(log::Level::Error) {
-                    error!(
-                        "Energy data response length mismatch: expected {}, got {}",
-                        keys.len(),
-                        results.len()
-                    );
-                }
-                return Err(P2pError::InvalidPacket.into());
-            }
-
-            // Store non-None energy resources
-            let has_entries = results.iter().any(|e| e.is_some());
-            if has_entries {
-                let _permit = self.blockchain.storage_semaphore().acquire().await?;
-                let mut storage = self.blockchain.get_storage().write().await;
-                for (key, energy_opt) in keys.iter().zip(results.iter()) {
-                    if let Some(energy) = energy_opt {
-                        storage
-                            .set_energy_resource(key, stable_topoheight, energy)
-                            .await?;
-                    }
                 }
             }
         }

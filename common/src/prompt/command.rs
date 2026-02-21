@@ -554,13 +554,6 @@ impl CommandManager {
             "export_transactions" => {
                 self.require_param(args, "filename")?;
             }
-            "freeze_tos" => {
-                self.require_param(args, "amount")?;
-                self.require_param(args, "duration")?;
-            }
-            "unfreeze_tos" => {
-                self.require_param(args, "amount")?;
-            }
             "set_asset_name" => {
                 self.require_param(args, "asset")?;
                 self.require_param(args, "name")?;

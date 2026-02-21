@@ -143,8 +143,6 @@ pub enum DiskContext {
     VersionedMultisig,
     #[error("versioned balance")]
     VersionedBalance,
-    #[error("versioned energy resource")]
-    VersionedEnergyResource,
 }
 
 #[derive(Error, Debug, EnumDiscriminants)]

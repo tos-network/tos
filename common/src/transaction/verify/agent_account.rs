@@ -26,7 +26,6 @@ pub async fn verify_agent_account_payload<'a, E, B: BlockchainVerificationState<
         AgentAccountPayload::Register {
             controller,
             policy_hash,
-            energy_pool,
             session_key_root,
         } => {
             if existing_meta.is_some() {
@@ -46,18 +45,6 @@ pub async fn verify_agent_account_payload<'a, E, B: BlockchainVerificationState<
                 return Err(VerificationError::AgentAccountInvalidParameter);
             }
 
-            if let Some(energy_pool) = energy_pool.as_ref() {
-                if is_zero_key(energy_pool)
-                    || !state
-                        .account_exists(energy_pool)
-                        .await
-                        .map_err(VerificationError::State)?
-                    || (energy_pool != source && energy_pool != controller)
-                {
-                    return Err(VerificationError::AgentAccountInvalidParameter);
-                }
-            }
-
             if let Some(session_key_root) = session_key_root.as_ref() {
                 if is_zero_hash(session_key_root) {
                     return Err(VerificationError::AgentAccountInvalidParameter);
@@ -69,7 +56,6 @@ pub async fn verify_agent_account_payload<'a, E, B: BlockchainVerificationState<
                 controller: controller.clone(),
                 policy_hash: policy_hash.clone(),
                 status: 0,
-                energy_pool: energy_pool.clone(),
                 session_key_root: session_key_root.clone(),
             };
 
@@ -101,11 +87,6 @@ pub async fn verify_agent_account_payload<'a, E, B: BlockchainVerificationState<
             {
                 return Err(VerificationError::AgentAccountInvalidController);
             }
-            // Clear energy_pool if it was set to the old controller
-            // (energy_pool must be owner or controller per spec Section 2.5)
-            if meta.energy_pool.as_ref() == Some(&meta.controller) {
-                meta.energy_pool = None;
-            }
             meta.controller = new_controller.clone();
             state
                 .set_agent_account_meta(source, &meta)
@@ -120,27 +101,6 @@ pub async fn verify_agent_account_payload<'a, E, B: BlockchainVerificationState<
                 return Err(VerificationError::AgentAccountInvalidParameter);
             }
             meta.status = *status;
-            state
-                .set_agent_account_meta(source, &meta)
-                .await
-                .map_err(VerificationError::State)?;
-        }
-        AgentAccountPayload::SetEnergyPool { energy_pool } => {
-            let Some(mut meta) = existing_meta else {
-                return Err(VerificationError::AgentAccountInvalidParameter);
-            };
-            if let Some(energy_pool) = energy_pool.as_ref() {
-                if is_zero_key(energy_pool)
-                    || !state
-                        .account_exists(energy_pool)
-                        .await
-                        .map_err(VerificationError::State)?
-                    || (energy_pool != source && energy_pool != &meta.controller)
-                {
-                    return Err(VerificationError::AgentAccountInvalidParameter);
-                }
-            }
-            meta.energy_pool = energy_pool.clone();
             state
                 .set_agent_account_meta(source, &meta)
                 .await

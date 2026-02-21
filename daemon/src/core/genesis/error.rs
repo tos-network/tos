@@ -53,9 +53,6 @@ pub enum GenesisError {
     #[error("Invalid fork height for {fork}: {value}")]
     InvalidForkHeight { fork: String, value: String },
 
-    #[error("Invalid energy value: {0}")]
-    InvalidEnergy(String),
-
     #[error("Duplicate public key in allocations: {0}")]
     DuplicatePublicKey(String),
 

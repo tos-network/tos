@@ -48,7 +48,6 @@ pub trait Storage:
     + SupplyProvider
     + CacheProvider
     + StateProvider
-    + EnergyProvider
     + UnoBalanceProvider
     + TnsProvider
     + Sync

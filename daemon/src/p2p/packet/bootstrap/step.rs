@@ -9,7 +9,7 @@ use indexmap::{IndexMap, IndexSet};
 use log::debug;
 use std::borrow::Cow;
 use tos_common::{
-    account::{AccountSummary, AgentAccountMeta, Balance, EnergyResource, Nonce, UnoBalance},
+    account::{AccountSummary, AgentAccountMeta, Balance, Nonce, UnoBalance},
     asset::AssetData,
     block::TopoHeight,
     contract::{ScheduledExecution, MAX_KEY_SIZE, MAX_VALUE_SIZE},
@@ -48,7 +48,6 @@ pub enum StepKind {
     MultiSigs,
     Contracts,
     Tns,
-    Energy,
     UnoBalance,
     Agent,
     BlocksMetadata,
@@ -64,8 +63,7 @@ impl StepKind {
             Self::Accounts => Self::MultiSigs,
             Self::MultiSigs => Self::Contracts,
             Self::Contracts => Self::Tns,
-            Self::Tns => Self::Energy,
-            Self::Energy => Self::UnoBalance,
+            Self::Tns => Self::UnoBalance,
             Self::UnoBalance => Self::Agent,
             Self::Agent => Self::BlocksMetadata,
             Self::BlocksMetadata => return None,
@@ -112,8 +110,6 @@ pub enum StepRequest<'a> {
 
     // TNS name records, pagination
     TnsNames(Option<u64>),
-    // Energy data (batch request by keys), topoheight
-    EnergyData(Cow<'a, Vec<PublicKey>>, TopoHeight),
     // UNO balances per key/asset, key, asset, topoheight, pagination
     UnoBalances(Cow<'a, PublicKey>, Cow<'a, Hash>, TopoHeight, Option<u64>),
     // Agent account data, pagination
@@ -141,7 +137,6 @@ impl<'a> StepRequest<'a> {
             Self::ContractStores(_, _, _) => StepKind::Contracts,
             Self::ContractsExecutions(_, _, _) => StepKind::Contracts,
             Self::TnsNames(_) => StepKind::Tns,
-            Self::EnergyData(_, _) => StepKind::Energy,
             Self::UnoBalances(_, _, _, _) => StepKind::UnoBalance,
             Self::AgentData(_) => StepKind::Agent,
             Self::UnoBalanceKeys(_) => StepKind::UnoBalance,
@@ -362,21 +357,6 @@ impl Serializer for StepRequest<'_> {
                 Self::ContractsExecutions(min, max, page)
             }
             22 => Self::TnsNames(Option::read(reader)?),
-            23 => {
-                let len = reader.read_u16()?;
-                if len > MAX_ITEMS_PER_PAGE as u16 {
-                    if log::log_enabled!(log::Level::Debug) {
-                        debug!("Invalid energy data request length: {}", len);
-                    }
-                    return Err(ReaderError::InvalidValue);
-                }
-                let mut keys = Vec::with_capacity(len as usize);
-                for _ in 0..len {
-                    keys.push(PublicKey::read(reader)?);
-                }
-                let topo = reader.read_u64()?;
-                Self::EnergyData(Cow::Owned(keys), topo)
-            }
             25 => {
                 let key = PublicKey::read(reader)?;
                 let asset = Hash::read(reader)?;
@@ -475,14 +455,6 @@ impl Serializer for StepRequest<'_> {
                 writer.write_u8(22);
                 page.write(writer);
             }
-            Self::EnergyData(keys, topo) => {
-                writer.write_u8(23);
-                writer.write_u16(keys.len() as u16);
-                for key in keys.iter() {
-                    key.write(writer);
-                }
-                writer.write_u64(topo);
-            }
             Self::UnoBalances(key, asset, topo, page) => {
                 writer.write_u8(25);
                 key.write(writer);
@@ -528,9 +500,6 @@ impl Serializer for StepRequest<'_> {
             }
             Self::ContractsExecutions(min, max, page) => min.size() + max.size() + page.size(),
             Self::TnsNames(page) => page.size(),
-            Self::EnergyData(keys, topo) => {
-                2 + keys.iter().map(|k| k.size()).sum::<usize>() + topo.size()
-            }
             Self::UnoBalances(key, asset, topo, page) => {
                 key.size() + asset.size() + topo.size() + page.size()
             }
@@ -580,8 +549,6 @@ pub enum StepResponse {
 
     // TNS name -> owner entries, pagination
     TnsNames(IndexMap<Hash, PublicKey>, Option<u64>),
-    // Energy resource data (positional, matching request order)
-    EnergyData(Vec<Option<EnergyResource>>),
     // UNO balance entries, pagination
     UnoBalances(Vec<UnoBalance>, Option<u64>),
     // Agent account entries, pagination
@@ -609,7 +576,6 @@ impl StepResponse {
             Self::ContractStores(_, _) => StepKind::Contracts,
             Self::ContractsExecutions(_, _) => StepKind::Contracts,
             Self::TnsNames(_, _) => StepKind::Tns,
-            Self::EnergyData(_) => StepKind::Energy,
             Self::UnoBalances(_, _) => StepKind::UnoBalance,
             Self::AgentData(_, _) => StepKind::Agent,
             Self::UnoBalanceKeys(_, _) => StepKind::UnoBalance,
@@ -920,10 +886,6 @@ impl Serializer for StepResponse {
                 }
                 Self::TnsNames(entries, page)
             }
-            23 => {
-                let entries = Vec::<Option<EnergyResource>>::read(reader)?;
-                Self::EnergyData(entries)
-            }
             25 => {
                 let entries = Vec::<UnoBalance>::read(reader)?;
                 let page = Option::read(reader)?;
@@ -1091,10 +1053,6 @@ impl Serializer for StepResponse {
                 entries.write(writer);
                 page.write(writer);
             }
-            Self::EnergyData(entries) => {
-                writer.write_u8(23);
-                entries.write(writer);
-            }
             Self::UnoBalances(entries, page) => {
                 writer.write_u8(25);
                 entries.write(writer);
@@ -1138,7 +1096,6 @@ impl Serializer for StepResponse {
             Self::ContractStores(entries, page) => entries.size() + page.size(),
             Self::ContractsExecutions(executions, page) => executions.size() + page.size(),
             Self::TnsNames(entries, page) => entries.size() + page.size(),
-            Self::EnergyData(entries) => entries.size(),
             Self::UnoBalances(entries, page) => entries.size() + page.size(),
             Self::AgentData(entries, page) => entries.size() + page.size(),
             Self::UnoBalanceKeys(entries, page) => {
@@ -1917,23 +1874,6 @@ mod tests {
     }
 
     #[test]
-    fn test_request_energy_data_round_trip() {
-        let key1 = PublicKey::from_bytes(&[1u8; 32]).unwrap();
-        let key2 = PublicKey::from_bytes(&[2u8; 32]).unwrap();
-        let keys = vec![key1, key2];
-        let request = StepRequest::EnergyData(Cow::Owned(keys.clone()), 750);
-        let decoded = round_trip_request(&request);
-        match decoded {
-            StepRequest::EnergyData(decoded_keys, topo) => {
-                assert_eq!(decoded_keys.len(), 2);
-                assert_eq!(topo, 750);
-            }
-            _ => panic!("Expected EnergyData variant"),
-        }
-        verify_size_request(&request);
-    }
-
-    #[test]
     fn test_request_uno_balances_round_trip() {
         let key = PublicKey::from_bytes(&[5u8; 32]).unwrap();
         let request =
@@ -2006,44 +1946,6 @@ mod tests {
     fn test_response_tns_names_kind() {
         let response = StepResponse::TnsNames(IndexMap::new(), None);
         assert_eq!(response.kind(), StepKind::Tns);
-    }
-
-    #[test]
-    fn test_response_energy_data_empty() {
-        let response = StepResponse::EnergyData(Vec::new());
-        let decoded = round_trip_response(&response);
-        match decoded {
-            StepResponse::EnergyData(entries) => {
-                assert!(entries.is_empty());
-            }
-            _ => panic!("Expected EnergyData variant"),
-        }
-        verify_size_response(&response);
-    }
-
-    #[test]
-    fn test_response_energy_data_with_some_none() {
-        let energy = EnergyResource::new();
-        let entries = vec![Some(energy), None, None];
-
-        let response = StepResponse::EnergyData(entries);
-        let decoded = round_trip_response(&response);
-        match decoded {
-            StepResponse::EnergyData(decoded_entries) => {
-                assert_eq!(decoded_entries.len(), 3);
-                assert!(decoded_entries[0].is_some());
-                assert!(decoded_entries[1].is_none());
-                assert!(decoded_entries[2].is_none());
-            }
-            _ => panic!("Expected EnergyData variant"),
-        }
-        verify_size_response(&response);
-    }
-
-    #[test]
-    fn test_response_energy_data_kind() {
-        let response = StepResponse::EnergyData(Vec::new());
-        assert_eq!(response.kind(), StepKind::Energy);
     }
 
     #[test]
@@ -2125,7 +2027,6 @@ mod tests {
             controller: PublicKey::from_bytes(&[2u8; 32]).unwrap(),
             policy_hash: test_hash(10),
             status: 0,
-            energy_pool: None,
             session_key_root: None,
         };
         let mut entries = IndexMap::new();
@@ -2186,12 +2087,8 @@ mod tests {
     #[test]
     fn test_response_tos_too_many_items_rejected() {
         // Test that more than MAX_ITEMS_PER_PAGE is rejected
-        let test_cases: Vec<(&str, u8)> = vec![
-            ("TnsNames", 22),
-            ("EnergyData", 23),
-            ("UnoBalances", 25),
-            ("AgentData", 26),
-        ];
+        let test_cases: Vec<(&str, u8)> =
+            vec![("TnsNames", 22), ("UnoBalances", 25), ("AgentData", 26)];
 
         for (name, id) in test_cases {
             let mut bytes = Vec::new();
@@ -2220,7 +2117,6 @@ mod tests {
         // Verify that each TOS extension request serializes with the correct wire ID
         let test_cases: Vec<(StepRequest, u8)> = vec![
             (StepRequest::TnsNames(None), 22),
-            (StepRequest::EnergyData(Cow::Owned(vec![]), 0), 23),
             (
                 StepRequest::UnoBalances(
                     Cow::Owned(PublicKey::from_bytes(&[0u8; 32]).unwrap()),
@@ -2253,7 +2149,6 @@ mod tests {
         // Verify that each TOS extension response serializes with the correct wire ID
         let test_cases: Vec<(StepResponse, u8)> = vec![
             (StepResponse::TnsNames(IndexMap::new(), None), 22),
-            (StepResponse::EnergyData(Vec::new()), 23),
             (StepResponse::UnoBalances(Vec::new(), None), 25),
             (StepResponse::AgentData(IndexMap::new(), None), 26),
         ];
@@ -2279,7 +2174,7 @@ mod tests {
 
     #[test]
     fn test_step_kind_tos_transitions() {
-        assert_eq!(StepKind::Tns.next(), Some(StepKind::Energy));
+        assert_eq!(StepKind::Tns.next(), Some(StepKind::UnoBalance));
         assert_eq!(StepKind::UnoBalance.next(), Some(StepKind::Agent));
         assert_eq!(StepKind::Agent.next(), Some(StepKind::BlocksMetadata));
         assert_eq!(StepKind::BlocksMetadata.next(), None);
@@ -2288,10 +2183,6 @@ mod tests {
     #[test]
     fn test_step_kind_tos_request_kind_mapping() {
         assert_eq!(StepRequest::TnsNames(None).kind(), StepKind::Tns);
-        assert_eq!(
-            StepRequest::EnergyData(Cow::Owned(vec![]), 0).kind(),
-            StepKind::Energy
-        );
         assert_eq!(
             StepRequest::UnoBalances(
                 Cow::Owned(PublicKey::from_bytes(&[0u8; 32]).unwrap()),

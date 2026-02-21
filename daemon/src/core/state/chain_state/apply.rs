@@ -15,7 +15,7 @@ use std::{
     ops::{Deref, DerefMut},
 };
 use tos_common::{
-    account::{AgentAccountMeta, BalanceType, EnergyResource, Nonce, SessionKey, VersionedNonce},
+    account::{AgentAccountMeta, BalanceType, Nonce, SessionKey, VersionedNonce},
     asset::VersionedAssetData,
     block::{Block, BlockVersion, TopoHeight},
     contract::{
@@ -465,26 +465,6 @@ impl<'a, S: Storage> BlockchainApplyState<'a, S, BlockchainError> for Applicable
 
     async fn remove_contract_module(&mut self, hash: &Hash) -> Result<(), BlockchainError> {
         self.remove_contract_module_internal(hash).await
-    }
-
-    async fn get_energy_resource(
-        &mut self,
-        account: Cow<'a, CompressedPublicKey>,
-    ) -> Result<Option<EnergyResource>, BlockchainError> {
-        self.inner.internal_get_energy_resource(account).await
-    }
-
-    async fn set_energy_resource(
-        &mut self,
-        account: Cow<'a, CompressedPublicKey>,
-        energy_resource: EnergyResource,
-    ) -> Result<(), BlockchainError> {
-        self.inner
-            .cache_energy_resource(account.clone(), energy_resource.clone());
-        self.inner
-            .storage
-            .set_energy_resource(&account, self.inner.topoheight, &energy_resource)
-            .await
     }
 
     fn get_contract_executor(&self) -> std::sync::Arc<dyn tos_common::contract::ContractExecutor> {

@@ -5,7 +5,7 @@
 //! 2. merge_overlay_storage() correctly merges storage
 //! 3. Cache is NOT merged on execution failure
 //!
-//! Related: /Users/tomisetsu/memo/21-NewEnergy/bugs/ISSUE-074-tako-cache-not-persisted.md
+//! Related internal note: ISSUE-074-tako-cache-not-persisted.md
 
 #![allow(clippy::disallowed_methods)]
 
