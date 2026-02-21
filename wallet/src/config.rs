@@ -270,11 +270,6 @@ Smart Contracts:
   get_contract_balance <contract> <asset>  - Get contract balance
   count_contracts                          - Get total deployed contracts
 
-Energy Management:
-  freeze_tos <amount> <duration>  - Freeze TOS to generate energy
-  unfreeze_tos <amount>           - Unfreeze previously frozen TOS
-  energy_info                     - Show energy status
-
 Multisig (2-of-N threshold signatures):
   multisig_setup <threshold> <addresses>  - Configure multisig on wallet
   multisig_show                           - Display multisig configuration
@@ -285,12 +280,11 @@ Agent Account:
   agent_show [address]                   - Show agent account metadata
   agent_session_key <key_id> [address]   - Show a session key by key ID
   agent_session_keys [address]           - List session keys
-  agent_register <controller> <policy_hash> [energy_pool] [session_key_root]
-                                        - Register agent account (energy_pool must be owner/controller)
+  agent_register <controller> <policy_hash> [session_key_root]
+                                        - Register agent account
   agent_update_policy <policy_hash>      - Update policy hash
   agent_rotate_controller <controller>   - Rotate controller address
   agent_set_status <status>              - Set status (0=active,1=frozen)
-  agent_set_energy_pool [energy_pool]    - Set energy pool (owner/controller, use 'none' to clear)
   agent_set_session_key_root [root]      - Set session key root (use 'none' to clear)
   agent_add_session_key <key_id> <public_key> <expiry_topoheight> <max_value_per_window>
                                         [allowed_targets] [allowed_assets]
@@ -390,7 +384,6 @@ Create a JSON file (agent_register.json):
   "params": {
     "controller": "tst1yp0hc5z0csf2jk2ze9tjjxkjg8gawt2upltksyegffmudm29z38qqrkvqzk",
     "policy_hash": "0000000000000000000000000000000000000000000000000000000000000001",
-    "energy_pool": "none",
     "session_key_root": "none"
   }
 }
@@ -407,7 +400,7 @@ CLI example (agent_add_session_key):
 CLI example (agent_register):
 ./tos_wallet --network devnet --daemon-address http://127.0.0.1:8080 \
     --wallet-path my_wallet --password mypass123 \
-    --exec "agent_register controller=tst1... policy_hash=0000000000000000000000000000000000000000000000000000000000000001 energy_pool=none session_key_root=none"
+    --exec "agent_register controller=tst1... policy_hash=0000000000000000000000000000000000000000000000000000000000000001 session_key_root=none"
 
 CLI example (agent_update_policy):
 ./tos_wallet --network devnet --daemon-address http://127.0.0.1:8080 \
@@ -423,12 +416,6 @@ CLI example (agent_set_status):
 ./tos_wallet --network devnet --daemon-address http://127.0.0.1:8080 \
     --wallet-path my_wallet --password mypass123 \
     --exec "agent_set_status status=0"
-
-CLI example (agent_set_energy_pool):
-  # energy_pool must be owner/controller
-./tos_wallet --network devnet --daemon-address http://127.0.0.1:8080 \
-    --wallet-path my_wallet --password mypass123 \
-    --exec "agent_set_energy_pool energy_pool=tst1..."
 
 CLI example (agent_set_session_key_root):
 ./tos_wallet --network devnet --daemon-address http://127.0.0.1:8080 \

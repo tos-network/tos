@@ -257,37 +257,6 @@ pub async fn verify_nonce_monotonicity(
     Ok(())
 }
 
-/// Verify energy weight consistency across all nodes.
-///
-/// Checks that the total energy reported by each node matches the expected
-/// sum of frozen balances. This is a placeholder for integration with the
-/// energy system.
-///
-/// # Arguments
-///
-/// * `network` - The network to verify
-/// * `expected_total_energy` - Expected total network energy weight
-///
-/// # Returns
-///
-/// * `Ok(())` - Energy weight matches expected on all nodes
-/// * `Err(_)` - Energy weight inconsistency detected
-pub async fn verify_energy_consistency(
-    network: &LocalTosNetwork,
-    expected_total_energy: u64,
-) -> Result<()> {
-    // Energy is tracked via frozen balances in the state.
-    // In the current test framework, we verify height consistency as a proxy
-    // for state consistency (including energy). When the energy system is
-    // fully integrated, this will query per-node energy weight directly.
-    let _ = expected_total_energy;
-
-    // For now, ensure all nodes are at least consistent with each other
-    verify_height_consistency(network).await?;
-    verify_tip_consistency(network).await?;
-    Ok(())
-}
-
 /// Comprehensive verification that runs all consistency checks.
 ///
 /// Combines height, tip, nonce, and invariant verification into a single call.
@@ -323,7 +292,6 @@ mod tests {
         let _ = verify_invariants;
         let _ = verify_balance_conservation;
         let _ = verify_nonce_monotonicity;
-        let _ = verify_energy_consistency;
         let _ = verify_comprehensive;
     }
 }

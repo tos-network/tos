@@ -5,11 +5,11 @@ use super::{
 };
 use crate::core::{
     error::BlockchainError,
-    storage::{AccountProvider, BalanceProvider, EnergyProvider, NonceProvider},
+    storage::{AccountProvider, BalanceProvider, NonceProvider},
 };
 use std::{collections::HashSet, path::Path};
 use tos_common::{
-    account::{EnergyResource, VersionedBalance, VersionedNonce},
+    account::{VersionedBalance, VersionedNonce},
     config::{TOS_ASSET, UNO_ASSET},
     crypto::{Address, AddressType, Hash, PublicKey},
     serializer::Serializer,
@@ -91,17 +91,10 @@ pub fn parse_allocations(
             }
         }
 
-        // Parse energy (default to 0 if not specified)
-        let energy_available = match &entry.energy {
-            Some(energy_config) => parse_u64(&energy_config.available, "energy.available")?,
-            None => 0,
-        };
-
         parsed.push(ParsedAllocEntry {
             public_key,
             nonce,
             balance,
-            energy_available,
         });
     }
 
@@ -114,7 +107,7 @@ pub async fn apply_genesis_state<S>(
     alloc: &[ParsedAllocEntry],
 ) -> Result<(), BlockchainError>
 where
-    S: AccountProvider + BalanceProvider + NonceProvider + EnergyProvider,
+    S: AccountProvider + BalanceProvider + NonceProvider,
 {
     for entry in alloc {
         // Register account at topoheight 0
@@ -132,14 +125,6 @@ where
         let nonce = VersionedNonce::new(entry.nonce, None);
         storage
             .set_last_nonce_to(&entry.public_key, 0, &nonce)
-            .await?;
-
-        // Always set energy resource (PLAN-B spec requires always setting it)
-        let mut energy = EnergyResource::new();
-        energy.energy = entry.energy_available;
-        energy.last_update = 0;
-        storage
-            .set_energy_resource(&entry.public_key, 0, &energy)
             .await?;
     }
 
@@ -448,7 +433,6 @@ fn parse_u64(value: &str, field_name: &str) -> Result<u64, GenesisError> {
     value.parse::<u64>().map_err(|_| match field_name {
         "nonce" => GenesisError::InvalidNonce(value.to_string()),
         "balance" => GenesisError::InvalidBalance(value.to_string()),
-        "energy.available" => GenesisError::InvalidEnergy(value.to_string()),
         _ => GenesisError::InvalidBalance(format!("{}: {}", field_name, value)),
     })
 }
@@ -533,14 +517,12 @@ mod tests {
                 address: None,
                 nonce: "0".to_string(),
                 balance: "1000".to_string(),
-                energy: None,
             },
             AllocEntry {
                 public_key: "01".repeat(32), // Duplicate
                 address: None,
                 nonce: "0".to_string(),
                 balance: "2000".to_string(),
-                energy: None,
             },
         ];
 
@@ -557,14 +539,12 @@ mod tests {
                 address: None,
                 nonce: "0".to_string(),
                 balance: "1000".to_string(),
-                energy: None,
             },
             AllocEntry {
                 public_key: "02".repeat(32),
                 address: None,
                 nonce: "0".to_string(),
                 balance: "1000".to_string(),
-                energy: None,
             },
         ];
 

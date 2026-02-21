@@ -866,9 +866,6 @@ pub fn register_methods<S: Storage>(
         async_handler!(get_p2p_block_propagation::<S>),
     );
 
-    // Energy management
-    handler.register_method("get_energy", async_handler!(get_energy::<S>));
-
     // QR Code Payment methods
     handler.register_method(
         "create_payment_request",
@@ -2405,71 +2402,6 @@ async fn get_account_history<S: Storage>(
                         });
                     }
                 }
-                TransactionType::Energy(payload) => {
-                    if is_sender {
-                        match payload {
-                            tos_common::transaction::EnergyPayload::FreezeTos {
-                                amount,
-                                duration,
-                            } => {
-                                history.push(AccountHistoryEntry {
-                                    topoheight: topo,
-                                    hash: tx_hash.clone(),
-                                    history_type: AccountHistoryType::FreezeTos {
-                                        amount: *amount,
-                                        duration: format!("{}_days", duration.get_days()),
-                                    },
-                                    block_timestamp: block_header.get_timestamp(),
-                                });
-                            }
-                            tos_common::transaction::EnergyPayload::FreezeTosDelegate {
-                                delegatees,
-                                duration,
-                            } => {
-                                let total_amount = delegatees
-                                    .iter()
-                                    .try_fold(0u64, |acc, d| acc.checked_add(d.amount))
-                                    .unwrap_or(u64::MAX);
-                                history.push(AccountHistoryEntry {
-                                    topoheight: topo,
-                                    hash: tx_hash.clone(),
-                                    history_type: AccountHistoryType::FreezeTos {
-                                        amount: total_amount,
-                                        duration: format!(
-                                            "{}_days_delegation",
-                                            duration.get_days()
-                                        ),
-                                    },
-                                    block_timestamp: block_header.get_timestamp(),
-                                });
-                            }
-                            tos_common::transaction::EnergyPayload::UnfreezeTos {
-                                amount, ..
-                            } => {
-                                history.push(AccountHistoryEntry {
-                                    topoheight: topo,
-                                    hash: tx_hash.clone(),
-                                    history_type: AccountHistoryType::UnfreezeTos {
-                                        amount: *amount,
-                                    },
-                                    block_timestamp: block_header.get_timestamp(),
-                                });
-                            }
-                            tos_common::transaction::EnergyPayload::WithdrawUnfrozen => {
-                                // Withdraw unfrozen is recorded when TOS is returned
-                                // Amount is determined at execution time
-                                history.push(AccountHistoryEntry {
-                                    topoheight: topo,
-                                    hash: tx_hash.clone(),
-                                    history_type: AccountHistoryType::UnfreezeTos {
-                                        amount: 0, // Amount determined at execution
-                                    },
-                                    block_timestamp: block_header.get_timestamp(),
-                                });
-                            }
-                        }
-                    }
-                }
                 TransactionType::AgentAccount(_) => {
                     // Agent account transactions don't affect account history for now
                 }
@@ -3005,7 +2937,6 @@ async fn get_agent_account<S: Storage>(
         controller: meta.controller.to_address(mainnet),
         policy_hash: meta.policy_hash,
         status: meta.status,
-        energy_pool: meta.energy_pool.map(|pool| pool.to_address(mainnet)),
         session_key_root: meta.session_key_root,
     });
 
@@ -3298,129 +3229,6 @@ async fn get_p2p_block_propagation<S: Storage>(
         first_seen,
         processing_at
     }))
-}
-
-// Energy management RPC methods
-
-/// Get energy information for an account
-async fn get_energy<S: Storage>(context: &Context, body: Value) -> Result<Value, InternalRpcError> {
-    let params: GetEnergyParams = parse_params(body)?;
-    let blockchain: &Arc<Blockchain<S>> = context.get()?;
-    let storage = blockchain.get_storage().read().await;
-
-    // Get current topoheight
-    let current_topoheight = storage.get_top_topoheight().await?;
-
-    // Get energy resource for the account
-    let pubkey = params.address.into_owned().to_public_key();
-    let energy_resource = storage.get_energy_resource(&pubkey).await?;
-    let mainnet = blockchain.get_network().is_mainnet();
-
-    let result = if let Some(energy_resource) = energy_resource {
-        // Convert freeze records to FreezeRecordInfo format
-        let freeze_records = energy_resource
-            .freeze_records
-            .iter()
-            .map(|record| FreezeRecordInfo {
-                amount: record
-                    .amount
-                    .checked_mul(tos_common::config::COIN_VALUE)
-                    .unwrap_or(u64::MAX),
-                duration: format!("{}_days", record.duration.get_days()),
-                freeze_topoheight: record.freeze_topoheight,
-                unlock_topoheight: record.unlock_topoheight,
-                energy_gained: record.energy_gained,
-                can_unlock: record.can_unlock(current_topoheight),
-                remaining_blocks: if record.can_unlock(current_topoheight) {
-                    0
-                } else {
-                    record.unlock_topoheight.saturating_sub(current_topoheight)
-                },
-            })
-            .collect::<Vec<_>>();
-
-        let delegated_records = energy_resource
-            .delegated_records
-            .iter()
-            .map(|record| {
-                let can_unlock = record.can_unlock(current_topoheight);
-                DelegatedFreezeRecordInfo {
-                    duration: format!("{}_days", record.duration.get_days()),
-                    freeze_topoheight: record.freeze_topoheight,
-                    unlock_topoheight: record.unlock_topoheight,
-                    total_amount: record
-                        .total_amount
-                        .checked_mul(tos_common::config::COIN_VALUE)
-                        .unwrap_or(u64::MAX),
-                    total_energy: record.total_energy,
-                    can_unlock,
-                    remaining_blocks: if can_unlock {
-                        0
-                    } else {
-                        record.unlock_topoheight.saturating_sub(current_topoheight)
-                    },
-                    entries: record
-                        .entries
-                        .iter()
-                        .map(|entry| DelegatedFreezeEntryInfo {
-                            delegatee: entry.delegatee.clone().to_address(mainnet),
-                            amount: entry
-                                .amount
-                                .checked_mul(tos_common::config::COIN_VALUE)
-                                .unwrap_or(u64::MAX),
-                            energy: entry.energy,
-                        })
-                        .collect(),
-                }
-            })
-            .collect::<Vec<_>>();
-
-        let pending_unfreezes = energy_resource
-            .pending_unfreezes
-            .iter()
-            .map(|pending| {
-                let can_withdraw = pending.is_expired(current_topoheight);
-                PendingUnfreezeInfo {
-                    amount: pending
-                        .amount
-                        .checked_mul(tos_common::config::COIN_VALUE)
-                        .unwrap_or(u64::MAX),
-                    expire_topoheight: pending.expire_topoheight,
-                    can_withdraw,
-                    remaining_blocks: if can_withdraw {
-                        0
-                    } else {
-                        pending.expire_topoheight.saturating_sub(current_topoheight)
-                    },
-                }
-            })
-            .collect::<Vec<_>>();
-
-        json!(GetEnergyResult {
-            frozen_tos: energy_resource
-                .frozen_tos
-                .checked_mul(tos_common::config::COIN_VALUE)
-                .unwrap_or(u64::MAX),
-            energy: energy_resource.energy,
-            available_energy: energy_resource.available_energy_at(current_topoheight),
-            last_update: energy_resource.last_update,
-            freeze_records,
-            delegated_records,
-            pending_unfreezes,
-        })
-    } else {
-        json!(GetEnergyResult {
-            frozen_tos: 0,
-            energy: 0,
-            available_energy: 0,
-            last_update: current_topoheight,
-            freeze_records: Vec::new(),
-            delegated_records: Vec::new(),
-            pending_unfreezes: Vec::new(),
-        })
-    };
-
-    Ok(result)
 }
 
 // Get contract address from a DeployContract transaction

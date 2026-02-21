@@ -53,7 +53,6 @@ pub enum TransactionType {
     MultiSig(MultiSigPayload),
     InvokeContract(InvokeContractPayload),
     DeployContract(DeployContractPayload),
-    Energy(EnergyPayload),
     AgentAccount(AgentAccountPayload),
     /// UNO privacy transfers (encrypted amounts)
     UnoTransfers(Vec<UnoTransferPayload>),
@@ -69,17 +68,11 @@ pub enum TransactionType {
 pub enum FeeType {
     /// Transaction uses TOS for fees (traditional fee model)
     TOS,
-    /// Transaction uses Energy for fees (only available for Transfer transactions)
-    Energy,
     /// Transaction uses UNO for fees (UnoTransfers only, fee burned)
     UNO,
 }
 
 impl FeeType {
-    /// Check if this fee type is Energy-based
-    pub fn is_energy(&self) -> bool {
-        matches!(self, FeeType::Energy)
-    }
     /// Check if this fee type is TOS-based
     pub fn is_tos(&self) -> bool {
         matches!(self, FeeType::TOS)
@@ -94,7 +87,6 @@ impl Serializer for FeeType {
     fn write(&self, writer: &mut Writer) {
         let v = match self {
             FeeType::TOS => 0u8,
-            FeeType::Energy => 1u8,
             FeeType::UNO => 2u8,
         };
         writer.write_u8(v);
@@ -102,7 +94,6 @@ impl Serializer for FeeType {
     fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
         match reader.read_u8()? {
             0 => Ok(FeeType::TOS),
-            1 => Ok(FeeType::Energy),
             2 => Ok(FeeType::UNO),
             _ => Err(ReaderError::InvalidValue),
         }
@@ -124,9 +115,9 @@ pub struct Transaction {
     source: CompressedPublicKey,
     /// Type of the transaction
     data: TransactionType,
-    /// Fees in Tos (TOS or Energy depending on fee_type)
+    /// Fees in Tos (TOS or UNO depending on fee_type)
     fee: u64,
-    /// Fee type: TOS, Energy, or UNO
+    /// Fee type: TOS or UNO
     fee_type: FeeType,
     /// nonce must be equal to the one on chain account
     /// used to prevent replay attacks and have ordered transactions
@@ -226,7 +217,6 @@ impl Transaction {
             b"fee_type",
             match fee_type {
                 FeeType::TOS => 0u64,
-                FeeType::Energy => 1u64,
                 FeeType::UNO => 2u64,
             },
         );
@@ -357,7 +347,7 @@ impl Transaction {
                     }
                 }
             }
-            // Energy and MultiSig don't have explicit assets
+            // MultiSig and agent/account-like payloads don't have explicit assets
             _ => {}
         }
 
@@ -381,29 +371,6 @@ impl Transaction {
     // Get the fee type
     pub fn get_fee_type(&self) -> &FeeType {
         &self.fee_type
-    }
-
-    /// Calculate energy cost for this transaction
-    /// Applicable for transfer-type transactions with energy fees
-    /// (Transfers, UnoTransfers, ShieldTransfers, UnshieldTransfers)
-    pub fn calculate_energy_cost(&self) -> u64 {
-        if !self.fee_type.is_energy() {
-            return 0;
-        }
-
-        let output_count = match &self.data {
-            TransactionType::Transfers(transfers) => transfers.len(),
-            TransactionType::UnoTransfers(transfers) => transfers.len(),
-            TransactionType::ShieldTransfers(transfers) => transfers.len(),
-            TransactionType::UnshieldTransfers(transfers) => transfers.len(),
-            _ => return 0, // Only transfer-type transactions can use energy fees
-        };
-
-        let tx_size = self.size();
-        let new_addresses = 0; // This would need to be calculated from state
-
-        use crate::utils::calculate_energy_fee;
-        calculate_energy_fee(tx_size, output_count, new_addresses)
     }
 
     /// Get the bytes that were used for signing this transaction
@@ -488,10 +455,6 @@ impl Serializer for TransactionType {
                 writer.write_u8(4);
                 module.write(writer);
             }
-            TransactionType::Energy(payload) => {
-                writer.write_u8(5);
-                payload.write(writer);
-            }
             TransactionType::AgentAccount(payload) => {
                 writer.write_u8(23);
                 payload.write(writer);
@@ -548,7 +511,6 @@ impl Serializer for TransactionType {
             2 => TransactionType::MultiSig(MultiSigPayload::read(reader)?),
             3 => TransactionType::InvokeContract(InvokeContractPayload::read(reader)?),
             4 => TransactionType::DeployContract(DeployContractPayload::read(reader)?),
-            5 => TransactionType::Energy(EnergyPayload::read(reader)?),
             18 => {
                 let txs_count = reader.read_u16()?;
                 if txs_count == 0 || txs_count as usize > MAX_TRANSFER_COUNT {
@@ -605,7 +567,6 @@ impl Serializer for TransactionType {
             }
             TransactionType::InvokeContract(payload) => payload.size(),
             TransactionType::DeployContract(module) => module.size(),
-            TransactionType::Energy(payload) => payload.size(),
             TransactionType::AgentAccount(payload) => payload.size(),
             TransactionType::UnoTransfers(txs) => {
                 let mut size = 2;

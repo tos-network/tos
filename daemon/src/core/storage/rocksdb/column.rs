@@ -117,11 +117,6 @@ pub enum Column {
     // {topoheight}{asset_id} => {version}
     VersionedAssetsSupply,
 
-    // Versioned energy resources for each account
-    // Energy pointer is now stored in Account.energy_pointer
-    // {topoheight}_{account_address} => {energy_resource}
-    VersionedEnergyResources,
-
     // Contract events storage for LOG0-LOG4 syscalls
     // {contract_id}{topoheight}{log_index} => {StoredContractEvent}
     ContractEvents,
@@ -155,15 +150,6 @@ pub enum Column {
     // Used to check if account already has a registered name
     // {owner_public_key (32 bytes)} => {Hash (32 bytes)}
     TnsAccountToName,
-
-    // ===== Delegation =====
-
-    // Delegation records for energy delegation
-    // Key: {delegator_pubkey[32]}{record_index[4 BE]} => {DelegatedFreezeRecord}
-    DelegationRecords,
-    // Delegator state tracking active record indices
-    // Key: {delegator_pubkey[32]} => {DelegatorState (136 bytes)}
-    DelegatorState,
 }
 
 impl Column {
@@ -181,8 +167,7 @@ impl Column {
             | VersionedContractsBalances
             | VersionedContractsAssetExt
             | VersionedContractsData
-            | PrefixedRegistrations
-            | VersionedEnergyResources => Some(PREFIX_TOPOHEIGHT_LEN),
+            | PrefixedRegistrations => Some(PREFIX_TOPOHEIGHT_LEN),
 
             UnoBalances => Some(PREFIX_ID_LEN),
 
@@ -217,15 +202,11 @@ mod tests {
 
     #[test]
     fn test_column_family_alignment() {
-        // Verify total CF count is 48 (aligned with Avatar)
-        assert_eq!(Column::iter().count(), 48);
-
-        // Verify the new delegation CFs are at the expected positions
-        assert_eq!(Column::DelegationRecords as usize, 46);
-        assert_eq!(Column::DelegatorState as usize, 47);
+        // Verify total CF count
+        assert_eq!(Column::iter().count(), 45);
 
         // Verify the first and last known CFs for sanity
         assert_eq!(Column::Transactions as usize, 0);
-        assert_eq!(Column::TnsAccountToName as usize, 45);
+        assert_eq!(Column::TnsAccountToName as usize, 44);
     }
 }

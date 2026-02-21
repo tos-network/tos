@@ -10,7 +10,6 @@ pub enum AgentAccountPayload {
     Register {
         controller: PublicKey,
         policy_hash: Hash,
-        energy_pool: Option<PublicKey>,
         session_key_root: Option<Hash>,
     },
     UpdatePolicy {
@@ -21,9 +20,6 @@ pub enum AgentAccountPayload {
     },
     SetStatus {
         status: u8,
-    },
-    SetEnergyPool {
-        energy_pool: Option<PublicKey>,
     },
     SetSessionKeyRoot {
         session_key_root: Option<Hash>,
@@ -42,13 +38,11 @@ impl Serializer for AgentAccountPayload {
             Self::Register {
                 controller,
                 policy_hash,
-                energy_pool,
                 session_key_root,
             } => {
                 writer.write_u8(0);
                 controller.write(writer);
                 policy_hash.write(writer);
-                energy_pool.write(writer);
                 session_key_root.write(writer);
             }
             Self::UpdatePolicy { policy_hash } => {
@@ -62,10 +56,6 @@ impl Serializer for AgentAccountPayload {
             Self::SetStatus { status } => {
                 writer.write_u8(3);
                 status.write(writer);
-            }
-            Self::SetEnergyPool { energy_pool } => {
-                writer.write_u8(4);
-                energy_pool.write(writer);
             }
             Self::SetSessionKeyRoot { session_key_root } => {
                 writer.write_u8(5);
@@ -87,7 +77,6 @@ impl Serializer for AgentAccountPayload {
             0 => Self::Register {
                 controller: PublicKey::read(reader)?,
                 policy_hash: Hash::read(reader)?,
-                energy_pool: Option::read(reader)?,
                 session_key_root: Option::read(reader)?,
             },
             1 => Self::UpdatePolicy {
@@ -98,9 +87,6 @@ impl Serializer for AgentAccountPayload {
             },
             3 => Self::SetStatus {
                 status: u8::read(reader)?,
-            },
-            4 => Self::SetEnergyPool {
-                energy_pool: Option::read(reader)?,
             },
             5 => Self::SetSessionKeyRoot {
                 session_key_root: Option::read(reader)?,
@@ -120,18 +106,11 @@ impl Serializer for AgentAccountPayload {
             Self::Register {
                 controller,
                 policy_hash,
-                energy_pool,
                 session_key_root,
-            } => {
-                controller.size()
-                    + policy_hash.size()
-                    + energy_pool.size()
-                    + session_key_root.size()
-            }
+            } => controller.size() + policy_hash.size() + session_key_root.size(),
             Self::UpdatePolicy { policy_hash } => policy_hash.size(),
             Self::RotateController { new_controller } => new_controller.size(),
             Self::SetStatus { status } => status.size(),
-            Self::SetEnergyPool { energy_pool } => energy_pool.size(),
             Self::SetSessionKeyRoot { session_key_root } => session_key_root.size(),
             Self::AddSessionKey { key } => key.size(),
             Self::RevokeSessionKey { key_id } => key_id.size(),

@@ -5544,25 +5544,12 @@ pub async fn estimate_required_tx_fees<P: AccountProvider>(
         }
     }
 
-    // Energy transactions (freeze/unfreeze/withdraw) are always free
-    if matches!(tx.get_data(), TransactionType::Energy(_)) {
-        return Ok(0);
-    }
-
-    // Check if this transaction uses energy fees
-    if tx.get_fee_type().is_energy() {
-        // For energy fees, we return 0 TOS fee requirement
-        // The energy consumption is handled separately in the transaction verification
-        Ok(0)
-    } else {
-        // For TOS fees, use the traditional fee calculation
-        Ok(calculate_tx_fee(
-            tx.size(),
-            output_count,
-            processed_keys.len(),
-            tx.get_multisig_count(),
-        ))
-    }
+    Ok(calculate_tx_fee(
+        tx.size(),
+        output_count,
+        processed_keys.len(),
+        tx.get_multisig_count(),
+    ))
 }
 
 // Get the block reward for a side block based on how many side blocks exists at same height

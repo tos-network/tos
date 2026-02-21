@@ -246,7 +246,6 @@ struct AccountTestVector {
     registered_at: Option<u64>,
     nonce_pointer: Option<u64>,
     multisig_pointer: Option<u64>,
-    energy_pointer: Option<u64>,
     // Expected output
     serialized_hex: String,
     serialized_len: usize,
@@ -257,51 +256,45 @@ fn serialize_account(
     registered_at: Option<u64>,
     nonce_pointer: Option<u64>,
     multisig_pointer: Option<u64>,
-    energy_pointer: Option<u64>,
 ) -> Vec<u8> {
     let mut buf = Vec::new();
     buf.extend(write_u64_be(id));
     buf.extend(write_option_u64_be(registered_at));
     buf.extend(write_option_u64_be(nonce_pointer));
     buf.extend(write_option_u64_be(multisig_pointer));
-    buf.extend(write_option_u64_be(energy_pointer));
     buf
 }
 
 fn generate_account_vectors() -> Vec<AccountTestVector> {
     let mut vectors = Vec::new();
 
-    // === All 16 combinations of optional fields (2^4) ===
-    // Format: RNME where R=registered_at, N=nonce, M=multisig, E=energy
+    // === All 8 combinations of optional fields (2^3) ===
+    // Format: RNM where R=registered_at, N=nonce, M=multisig
     // 0 = None, 1 = Some
 
-    for mask in 0u8..16 {
-        let has_r = (mask & 0b1000) != 0;
-        let has_n = (mask & 0b0100) != 0;
-        let has_m = (mask & 0b0010) != 0;
-        let has_e = (mask & 0b0001) != 0;
+    for mask in 0u8..8 {
+        let has_r = (mask & 0b100) != 0;
+        let has_n = (mask & 0b010) != 0;
+        let has_m = (mask & 0b001) != 0;
 
         let r = if has_r { Some(100) } else { None };
         let n = if has_n { Some(200) } else { None };
         let m = if has_m { Some(300) } else { None };
-        let e = if has_e { Some(400) } else { None };
 
-        let s = serialize_account(mask as u64, r, n, m, e);
-        let pattern = format!("{}{}{}{}",
+        let s = serialize_account(mask as u64, r, n, m);
+        let pattern = format!("{}{}{}",
             if has_r { "R" } else { "_" },
             if has_n { "N" } else { "_" },
-            if has_m { "M" } else { "_" },
-            if has_e { "E" } else { "_" }
+            if has_m { "M" } else { "_" }
         );
 
         vectors.push(AccountTestVector {
             name: format!("account_combo_{:02}_{}", mask, pattern),
-            description: format!("Account with optional fields: {} (mask=0b{:04b})", pattern, mask),
+            description: format!("Account with optional fields: {} (mask=0b{:03b})", pattern, mask),
             id: mask as u64,
             registered_at: r,
             nonce_pointer: n,
             multisig_pointer: m,
-            energy_pointer: e,
             serialized_hex: to_hex(&s),
             serialized_len: s.len(),
         });
@@ -311,7 +304,7 @@ fn generate_account_vectors() -> Vec<AccountTestVector> {
 
     // All fields at maximum
     {
-        let s = serialize_account(u64::MAX, Some(u64::MAX), Some(u64::MAX), Some(u64::MAX), Some(u64::MAX));
+        let s = serialize_account(u64::MAX, Some(u64::MAX), Some(u64::MAX), Some(u64::MAX));
         vectors.push(AccountTestVector {
             name: "account_all_max".to_string(),
             description: "All fields at maximum u64 value".to_string(),
@@ -319,7 +312,6 @@ fn generate_account_vectors() -> Vec<AccountTestVector> {
             registered_at: Some(u64::MAX),
             nonce_pointer: Some(u64::MAX),
             multisig_pointer: Some(u64::MAX),
-            energy_pointer: Some(u64::MAX),
             serialized_hex: to_hex(&s),
             serialized_len: s.len(),
         });
@@ -327,7 +319,7 @@ fn generate_account_vectors() -> Vec<AccountTestVector> {
 
     // All fields at zero (but Some)
     {
-        let s = serialize_account(0, Some(0), Some(0), Some(0), Some(0));
+        let s = serialize_account(0, Some(0), Some(0), Some(0));
         vectors.push(AccountTestVector {
             name: "account_all_zero_some".to_string(),
             description: "All optional fields are Some(0)".to_string(),
@@ -335,7 +327,6 @@ fn generate_account_vectors() -> Vec<AccountTestVector> {
             registered_at: Some(0),
             nonce_pointer: Some(0),
             multisig_pointer: Some(0),
-            energy_pointer: Some(0),
             serialized_hex: to_hex(&s),
             serialized_len: s.len(),
         });
@@ -343,7 +334,7 @@ fn generate_account_vectors() -> Vec<AccountTestVector> {
 
     // Typical genesis account
     {
-        let s = serialize_account(0, Some(0), Some(0), None, None);
+        let s = serialize_account(0, Some(0), Some(0), None);
         vectors.push(AccountTestVector {
             name: "account_genesis_typical".to_string(),
             description: "Typical genesis account (registered at topo 0, nonce 0)".to_string(),
@@ -351,23 +342,21 @@ fn generate_account_vectors() -> Vec<AccountTestVector> {
             registered_at: Some(0),
             nonce_pointer: Some(0),
             multisig_pointer: None,
-            energy_pointer: None,
             serialized_hex: to_hex(&s),
             serialized_len: s.len(),
         });
     }
 
-    // Active account with energy
+    // Active account
     {
-        let s = serialize_account(12345, Some(1000), Some(5000), None, Some(8000));
+        let s = serialize_account(12345, Some(1000), Some(5000), None);
         vectors.push(AccountTestVector {
-            name: "account_active_with_energy".to_string(),
-            description: "Active account with energy staking".to_string(),
+            name: "account_active".to_string(),
+            description: "Active account with recent nonce".to_string(),
             id: 12345,
             registered_at: Some(1000),
             nonce_pointer: Some(5000),
             multisig_pointer: None,
-            energy_pointer: Some(8000),
             serialized_hex: to_hex(&s),
             serialized_len: s.len(),
         });
@@ -375,7 +364,7 @@ fn generate_account_vectors() -> Vec<AccountTestVector> {
 
     // Multisig account
     {
-        let s = serialize_account(99999, Some(500), Some(600), Some(700), Some(800));
+        let s = serialize_account(99999, Some(500), Some(600), Some(700));
         vectors.push(AccountTestVector {
             name: "account_multisig_full".to_string(),
             description: "Multisig account with all features".to_string(),
@@ -383,7 +372,6 @@ fn generate_account_vectors() -> Vec<AccountTestVector> {
             registered_at: Some(500),
             nonce_pointer: Some(600),
             multisig_pointer: Some(700),
-            energy_pointer: Some(800),
             serialized_hex: to_hex(&s),
             serialized_len: s.len(),
         });
@@ -391,7 +379,7 @@ fn generate_account_vectors() -> Vec<AccountTestVector> {
 
     // Large account ID
     {
-        let s = serialize_account(u64::MAX - 1, Some(1), None, None, None);
+        let s = serialize_account(u64::MAX - 1, Some(1), None, None);
         vectors.push(AccountTestVector {
             name: "account_large_id".to_string(),
             description: "Account with very large ID".to_string(),
@@ -399,7 +387,6 @@ fn generate_account_vectors() -> Vec<AccountTestVector> {
             registered_at: Some(1),
             nonce_pointer: None,
             multisig_pointer: None,
-            energy_pointer: None,
             serialized_hex: to_hex(&s),
             serialized_len: s.len(),
         });
@@ -1191,86 +1178,6 @@ fn generate_block_difficulty_vectors() -> Vec<BlockDifficultyTestVector> {
 }
 
 // ============================================================================
-// EnergyResource Serialization (simplified - empty vectors)
-// Structure: energy (u64) + frozen_tos (u64) + last_update (u64) + 3 Vec counts (u64 each)
-// ============================================================================
-
-#[derive(Serialize)]
-struct EnergyResourceTestVector {
-    name: String,
-    description: String,
-    energy: u64,
-    frozen_tos: u64,
-    last_update: u64,
-    freeze_records_count: u64,
-    delegated_records_count: u64,
-    pending_unfreezes_count: u64,
-    serialized_hex: String,
-    serialized_len: usize,
-}
-
-fn serialize_energy_resource_empty(energy: u64, frozen_tos: u64, last_update: u64) -> Vec<u8> {
-    let mut buf = Vec::new();
-    buf.extend(write_u64_be(energy));
-    buf.extend(write_u64_be(frozen_tos));
-    buf.extend(write_u64_be(last_update));
-    buf.extend(write_u64_be(0)); // freeze_records count
-    buf.extend(write_u64_be(0)); // delegated_records count
-    buf.extend(write_u64_be(0)); // pending_unfreezes count
-    buf
-}
-
-fn generate_energy_resource_vectors() -> Vec<EnergyResourceTestVector> {
-    vec![
-        {
-            let s = serialize_energy_resource_empty(0, 0, 0);
-            EnergyResourceTestVector {
-                name: "energy_default".to_string(),
-                description: "Default empty energy resource".to_string(),
-                energy: 0,
-                frozen_tos: 0,
-                last_update: 0,
-                freeze_records_count: 0,
-                delegated_records_count: 0,
-                pending_unfreezes_count: 0,
-                serialized_hex: to_hex(&s),
-                serialized_len: s.len(),
-            }
-        },
-        {
-            let s = serialize_energy_resource_empty(1_000_000, 100, 5000);
-            EnergyResourceTestVector {
-                name: "energy_active".to_string(),
-                description: "Active staking account".to_string(),
-                energy: 1_000_000,
-                frozen_tos: 100,
-                last_update: 5000,
-                freeze_records_count: 0,
-                delegated_records_count: 0,
-                pending_unfreezes_count: 0,
-                serialized_hex: to_hex(&s),
-                serialized_len: s.len(),
-            }
-        },
-        {
-            let s = serialize_energy_resource_empty(u64::MAX, u64::MAX, u64::MAX);
-            EnergyResourceTestVector {
-                name: "energy_max".to_string(),
-                description: "Maximum values (empty records)".to_string(),
-                energy: u64::MAX,
-                frozen_tos: u64::MAX,
-                last_update: u64::MAX,
-                freeze_records_count: 0,
-                delegated_records_count: 0,
-                pending_unfreezes_count: 0,
-                serialized_hex: to_hex(&s),
-                serialized_len: s.len(),
-            }
-        },
-    ]
-}
-
-// ============================================================================
 // Main Output Structure
 // ============================================================================
 
@@ -1291,7 +1198,6 @@ struct SerializationTestVectors {
     topo_metadata_vectors: Vec<TopoHeightMetadataTestVector>,
     varuint_vectors: Vec<VarUintTestVector>,
     block_difficulty_vectors: Vec<BlockDifficultyTestVector>,
-    energy_resource_vectors: Vec<EnergyResourceTestVector>,
 }
 
 fn main() {
@@ -1306,13 +1212,12 @@ fn main() {
     let topo_metadata_vectors = generate_topo_metadata_vectors();
     let varuint_vectors = generate_varuint_vectors();
     let block_difficulty_vectors = generate_block_difficulty_vectors();
-    let energy_resource_vectors = generate_energy_resource_vectors();
 
     let total = be_vectors.len() + opt_vectors.len() + acc_vectors.len()
         + nonce_vectors.len() + balance_vectors.len()
         + asset_vectors.len() + contract_vectors.len() + agent_meta_vectors.len()
         + topo_metadata_vectors.len() + varuint_vectors.len()
-        + block_difficulty_vectors.len() + energy_resource_vectors.len();
+        + block_difficulty_vectors.len();
 
     let vectors = SerializationTestVectors {
         description: "RocksDB serialization test vectors for TOS/Avatar compatibility".to_string(),
@@ -1330,7 +1235,6 @@ fn main() {
         topo_metadata_vectors,
         varuint_vectors,
         block_difficulty_vectors,
-        energy_resource_vectors,
     };
 
     let yaml = serde_yaml::to_string(&vectors).expect("Failed to serialize to YAML");
@@ -1348,7 +1252,6 @@ fn main() {
     println!("    - {} account vectors", vectors.account_vectors.len());
     println!("    - {} versioned_nonce vectors", vectors.versioned_nonce_vectors.len());
     println!("    - {} versioned_balance vectors", vectors.versioned_balance_vectors.len());
-    println!("    - {} energy_resource vectors", vectors.energy_resource_vectors.len());
     println!("  Asset/Contract Types:");
     println!("    - {} asset vectors", vectors.asset_vectors.len());
     println!("    - {} contract vectors", vectors.contract_vectors.len());

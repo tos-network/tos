@@ -110,7 +110,6 @@ async fn start_daemon(
             controller,
             policy_hash: Hash::new([1u8; 32]),
             status: 0,
-            energy_pool: None,
             session_key_root: None,
         };
         storage

@@ -89,7 +89,6 @@ fn decode_tx_strict(hex_str: &str) -> Result<Transaction, ReaderError> {
 fn fee_type_id(ft: &FeeType) -> u8 {
     match ft {
         FeeType::TOS => 0,
-        FeeType::Energy => 1,
         FeeType::UNO => 2,
     }
 }
@@ -102,7 +101,6 @@ fn tx_type_name(data: &TransactionType) -> &'static str {
         TransactionType::MultiSig(_) => "multisig",
         TransactionType::InvokeContract(_) => "invoke_contract",
         TransactionType::DeployContract(_) => "deploy_contract",
-        TransactionType::Energy(_) => "energy",
         TransactionType::AgentAccount(_) => "agent_account",
         TransactionType::UnoTransfers(_) => "uno_transfers",
         TransactionType::ShieldTransfers(_) => "shield_transfers",

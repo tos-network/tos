@@ -11,7 +11,6 @@ pub struct AgentAccountMeta {
     // Off-chain policy reference; consensus only enforces session-key constraints.
     pub policy_hash: Hash,
     pub status: u8,
-    pub energy_pool: Option<PublicKey>,
     pub session_key_root: Option<Hash>,
 }
 
@@ -22,7 +21,6 @@ impl Serializer for AgentAccountMeta {
             controller: PublicKey::read(reader)?,
             policy_hash: Hash::read(reader)?,
             status: u8::read(reader)?,
-            energy_pool: Option::read(reader)?,
             session_key_root: Option::read(reader)?,
         })
     }
@@ -32,7 +30,6 @@ impl Serializer for AgentAccountMeta {
         self.controller.write(writer);
         self.policy_hash.write(writer);
         self.status.write(writer);
-        self.energy_pool.write(writer);
         self.session_key_root.write(writer);
     }
 
@@ -41,7 +38,6 @@ impl Serializer for AgentAccountMeta {
             + self.controller.size()
             + self.policy_hash.size()
             + self.status.size()
-            + self.energy_pool.size()
             + self.session_key_root.size()
     }
 }

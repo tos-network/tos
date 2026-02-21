@@ -8,14 +8,11 @@ use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-use tos_common::account::{
-    AgentAccountMeta, EnergyResource, FreezeDuration, FreezeRecord, PendingUnfreeze,
-    VersionedBalance, VersionedNonce,
-};
+use tos_common::account::{AgentAccountMeta, VersionedBalance, VersionedNonce};
 use tos_common::asset::{AssetData, VersionedAssetData};
 use tos_common::block::{Block, BlockHeader, EXTRA_NONCE_SIZE};
 use tos_common::config::{
-    COIN_DECIMALS, COIN_VALUE, MAXIMUM_SUPPLY, MAX_GAS_USAGE_PER_TX, TOS_ASSET, UNO_ASSET,
+    COIN_DECIMALS, MAXIMUM_SUPPLY, MAX_GAS_USAGE_PER_TX, TOS_ASSET, UNO_ASSET,
 };
 use tos_common::crypto::{hash as blake3_hash, Hash, Hashable, PublicKey, Signature};
 use tos_common::network::Network;
@@ -39,7 +36,7 @@ use tos_daemon::core::state::ApplicableChainState;
 use tos_daemon::core::storage::rocksdb::RocksStorage;
 use tos_daemon::core::storage::{
     AccountProvider, AgentAccountProvider, AssetProvider, BalanceProvider, ContractProvider,
-    DagOrderProvider, DifficultyProvider, EnergyProvider, NonceProvider, TipsProvider, TnsProvider,
+    DagOrderProvider, DifficultyProvider, NonceProvider, TipsProvider, TnsProvider,
     VersionedContract,
 };
 use tos_daemon::vrf::WrappedMinerSecret;
@@ -50,8 +47,6 @@ struct GlobalState {
     total_supply: u64,
     #[serde(default)]
     total_burned: u64,
-    #[serde(default)]
-    total_energy: u64,
     #[serde(default)]
     block_height: u64,
     #[serde(default)]
@@ -65,10 +60,6 @@ struct AccountState {
     balance: u64,
     #[serde(default)]
     nonce: u64,
-    #[serde(default)]
-    frozen: u64,
-    #[serde(default)]
-    energy: u64,
     #[serde(default)]
     flags: u64,
     #[serde(default)]
@@ -94,43 +85,6 @@ struct TnsNameEntry {
     owner: String,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
-struct EnergyResourceEntry {
-    address: String,
-    #[serde(default)]
-    energy: u64,
-    #[serde(default)]
-    frozen_tos: u64,
-    #[serde(default)]
-    last_update: u64,
-    #[serde(default)]
-    freeze_records: Vec<FreezeRecordEntry>,
-    #[serde(default)]
-    pending_unfreezes: Vec<PendingUnfreezeEntry>,
-}
-
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
-struct FreezeRecordEntry {
-    #[serde(default)]
-    amount: u64,
-    #[serde(default)]
-    energy_gained: u64,
-    #[serde(default)]
-    freeze_height: u64,
-    #[serde(default)]
-    unlock_height: u64,
-    #[serde(default)]
-    duration_days: u32,
-}
-
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
-struct PendingUnfreezeEntry {
-    #[serde(default)]
-    amount: u64,
-    #[serde(default)]
-    expire_height: u64,
-}
-
 // Contract entry for pre-loading deployed contracts
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 struct ContractEntry {
@@ -154,8 +108,6 @@ struct PreState {
     agent_accounts: Vec<AgentAccountEntry>,
     #[serde(default)]
     tns_names: Vec<TnsNameEntry>,
-    #[serde(default)]
-    energy_resources: Vec<EnergyResourceEntry>,
     #[serde(default)]
     contracts: Vec<ContractEntry>,
 }
@@ -312,15 +264,11 @@ fn build_meta_from_genesis(
 ) -> Result<MetaState, String> {
     let mut account_meta = HashMap::new();
     let mut total_supply: u128 = 0;
-    let mut total_energy: u128 = 0;
 
     for entry in alloc {
         total_supply = total_supply
             .checked_add(entry.balance as u128)
             .ok_or_else(|| "total_supply overflow".to_string())?;
-        total_energy = total_energy
-            .checked_add(entry.energy_available as u128)
-            .ok_or_else(|| "total_energy overflow".to_string())?;
 
         let address = tos_common::crypto::Address::new(
             network.is_mainnet(),
@@ -336,8 +284,6 @@ fn build_meta_from_genesis(
                 address,
                 balance: entry.balance,
                 nonce: entry.nonce,
-                frozen: 0,
-                energy: entry.energy_available,
                 flags: 0,
                 data: String::new(),
             },
@@ -348,8 +294,6 @@ fn build_meta_from_genesis(
         total_supply: u64::try_from(total_supply)
             .map_err(|_| "total_supply overflow".to_string())?,
         total_burned: 0,
-        total_energy: u64::try_from(total_energy)
-            .map_err(|_| "total_energy overflow".to_string())?,
         block_height: 0,
         timestamp: genesis_timestamp_ms,
     };
@@ -369,7 +313,6 @@ fn parsed_alloc_from_pre_state(accounts: &[AccountState]) -> Result<Vec<ParsedAl
             public_key,
             nonce: acc.nonce,
             balance: acc.balance,
-            energy_available: acc.energy,
         });
     }
     Ok(out)
@@ -427,7 +370,6 @@ fn parse_agent_account_entry(
             controller,
             policy_hash,
             status: entry.status,
-            energy_pool: None,
             session_key_root: None,
         },
     ))
@@ -439,46 +381,12 @@ fn parse_tns_entry(entry: &TnsNameEntry) -> Result<(Hash, PublicKey), String> {
     Ok((name_hash, owner))
 }
 
-fn parse_energy_resource_entry(
-    entry: &EnergyResourceEntry,
-) -> Result<(PublicKey, EnergyResource), String> {
-    let pubkey = to_public_key(&entry.address)?;
-    let mut resource = EnergyResource::new();
-    // Convert from atomic units (Python) to whole TOS units (Rust internal convention)
-    resource.frozen_tos = entry.frozen_tos / COIN_VALUE;
-    resource.energy = entry.energy;
-    resource.last_update = entry.last_update;
-    for fr in &entry.freeze_records {
-        let duration = FreezeDuration::new(if fr.duration_days > 0 {
-            fr.duration_days
-        } else {
-            7
-        })
-        .unwrap_or_else(|_| FreezeDuration::new(7).unwrap_or_else(|_| unreachable!()));
-        resource.freeze_records.push(FreezeRecord {
-            amount: fr.amount / COIN_VALUE,
-            duration,
-            freeze_topoheight: fr.freeze_height,
-            unlock_topoheight: fr.unlock_height,
-            energy_gained: fr.energy_gained,
-        });
-    }
-    for pu in &entry.pending_unfreezes {
-        resource.pending_unfreezes.push(PendingUnfreeze {
-            amount: pu.amount / COIN_VALUE,
-            expire_topoheight: pu.expire_height,
-        });
-    }
-    Ok((pubkey, resource))
-}
-
 fn compute_state_digest(state: &PreState) -> String {
     let mut buf = Vec::new();
     let gs = &state.global_state;
     for value in [
         gs.total_supply,
         gs.total_burned,
-        gs.total_energy,
         gs.block_height,
         gs.timestamp,
     ] {
@@ -489,7 +397,7 @@ fn compute_state_digest(state: &PreState) -> String {
     for acc in accounts {
         let addr = hex::decode(acc.address).unwrap_or_default();
         buf.extend_from_slice(&addr);
-        for value in [acc.balance, acc.nonce, acc.frozen, acc.energy, acc.flags] {
+        for value in [acc.balance, acc.nonce, acc.flags] {
             buf.extend_from_slice(&value.to_be_bytes());
         }
         let data = hex::decode(acc.data).unwrap_or_default();
@@ -575,16 +483,6 @@ fn map_error_code(err: &BlockchainError) -> u16 {
             if msg.contains("Insufficient funds") {
                 0x0300
             }
-            // === Insufficient energy (0x0302) ===
-            else if msg.contains("Insufficient energy") {
-                0x0302
-            }
-            // === Insufficient frozen / self-frozen (0x0303) ===
-            else if msg.contains("Insufficient self-frozen TOS")
-                || msg.contains("Insufficient frozen")
-            {
-                0x0303
-            }
             // === Insufficient fee (0x0301) ===
             else if msg.contains("Insufficient TNS fee") || msg.contains("registration fee") {
                 0x0301
@@ -592,8 +490,6 @@ fn map_error_code(err: &BlockchainError) -> u16 {
             // === Overflow (0x0304) ===
             else if msg.contains("Arithmetic overflow")
                 || msg.contains("UNO balance overflow")
-                || msg.contains("Energy overflow")
-                || msg.contains("Frozen TOS overflow")
                 || msg.contains("Overflow detected")
             {
                 0x0304
@@ -607,8 +503,7 @@ fn map_error_code(err: &BlockchainError) -> u16 {
                 0x0103
             }
             // === Self-referential operations (0x0409) ===
-            else if msg.contains("Cannot delegate energy to yourself")
-                || msg.contains("self-referral")
+            else if msg.contains("self-referral")
                 || msg.contains("SelfReferral")
                 || msg.contains("Sender is receiver")
                 || msg.contains("Cannot send message to yourself")
@@ -699,23 +594,6 @@ fn map_error_code(err: &BlockchainError) -> u16 {
                 || msg.contains("Consecutive separators")
                 || msg.contains("Reserved name")
                 || msg.contains("Confusing name")
-            // Energy transaction errors
-                || msg.contains("must have zero fee")
-                || msg.contains("Energy transactions")
-                || msg.contains("Duplicate delegatee")
-                || msg.contains("Too many delegatees")
-                || msg.contains("Freeze duration must be")
-                || msg.contains("Invalid fee: expected")
-                || msg.contains("Maximum freeze records")
-                || msg.contains("Maximum pending unfreezes")
-                || msg.contains("No energy resource found")
-                || msg.contains("No expired unfreezes")
-                || msg.contains("No delegated records")
-                || msg.contains("Record index out of bounds")
-                || msg.contains("record_index required")
-                || msg.contains("Delegatee address required")
-                || msg.contains("Delegatee not found")
-                || msg.contains("delegatee_address usage")
             // KYC errors
                 || msg.contains("requires at least")
                 || msg.contains("Duplicate approver")
@@ -798,7 +676,6 @@ fn map_error_code(err: &BlockchainError) -> u16 {
             // Other validation errors
                 || msg.contains("stake too low")
                 || msg.contains("list cannot be empty")
-                || msg.contains("No pending unfreezes")
                 || msg.contains("MultiSig not configured")
                 || msg.contains("Invalid batch referral")
                 || msg.contains("multisig")
@@ -841,7 +718,6 @@ fn map_verify_error_code(
         VE::InvalidChainId { .. } => 0x0102,
         VE::InvalidFee(_, _) => 0x0301,
         VE::InsufficientFunds { .. } => 0x0300,
-        VE::InsufficientEnergy(_) => 0x0302,
         VE::TransferExtraDataSize | VE::TransactionExtraDataSize | VE::InvalidFormat => 0x0100,
         VE::AgentAccountInvalidParameter
         | VE::AgentAccountUnauthorized
@@ -1089,27 +965,6 @@ async fn handle_state_load(state: web::Data<AppState>, body: web::Json<PreState>
                     .json(json!({ "success": false, "error": err.to_string() }));
             }
 
-            // Auto-create energy resources for accounts with frozen > 0
-            for acc in &pre_state.accounts {
-                if acc.frozen > 0 {
-                    let already_provided = pre_state
-                        .energy_resources
-                        .iter()
-                        .any(|er| er.address == acc.address);
-                    if !already_provided {
-                        if let Ok(pubkey) = to_public_key(&acc.address) {
-                            let mut resource = EnergyResource::new();
-                            resource.frozen_tos = acc.frozen / COIN_VALUE;
-                            resource.energy = acc.energy;
-                            resource.last_update = 0;
-                            let _ = storage
-                                .set_energy_resource(&pubkey, topoheight, &resource)
-                                .await;
-                        }
-                    }
-                }
-            }
-
             // Load domain data: agent accounts
             for entry in &pre_state.agent_accounts {
                 match parse_agent_account_entry(entry) {
@@ -1128,21 +983,6 @@ async fn handle_state_load(state: web::Data<AppState>, body: web::Json<PreState>
                 match parse_tns_entry(entry) {
                     Ok((name_hash, owner)) => {
                         let _ = storage.register_name(name_hash, owner).await;
-                    }
-                    Err(err) => {
-                        return HttpResponse::BadRequest()
-                            .json(json!({ "success": false, "error": err }));
-                    }
-                }
-            }
-
-            // Load domain data: energy resources (explicit entries)
-            for entry in &pre_state.energy_resources {
-                match parse_energy_resource_entry(entry) {
-                    Ok((pubkey, resource)) => {
-                        let _ = storage
-                            .set_energy_resource(&pubkey, topoheight, &resource)
-                            .await;
                     }
                     Err(err) => {
                         return HttpResponse::BadRequest()
@@ -1214,11 +1054,6 @@ async fn handle_state_load(state: web::Data<AppState>, body: web::Json<PreState>
             let miner_balance = VersionedBalance::new(0, None);
             let _ = storage
                 .set_last_balance_to(&miner_key, &TOS_ASSET, topoheight, &miner_balance)
-                .await;
-            let mut miner_energy = EnergyResource::new();
-            miner_energy.last_update = topoheight;
-            let _ = storage
-                .set_energy_resource(&miner_key, topoheight, &miner_energy)
                 .await;
         }
         pending_meta
@@ -1330,19 +1165,7 @@ async fn handle_json_rpc(
                 .get(addr)
                 .cloned()
                 .unwrap_or_default();
-            let (frozen, energy) = match storage.get_energy_resource(&key).await {
-                Ok(Some(resource)) => (
-                    resource.frozen_tos.saturating_mul(COIN_VALUE),
-                    resource.energy,
-                ),
-                _ => (meta.frozen, meta.energy),
-            };
-            if balance == 0
-                && nonce == 0
-                && frozen == 0
-                && energy == 0
-                && !engine.meta.account_meta.contains_key(addr)
-            {
+            if balance == 0 && nonce == 0 && !engine.meta.account_meta.contains_key(addr) {
                 return HttpResponse::Ok().json(jsonrpc_ok(&req.id, serde_json::Value::Null));
             }
             HttpResponse::Ok().json(jsonrpc_ok(
@@ -1351,67 +1174,8 @@ async fn handle_json_rpc(
                     "address": addr,
                     "balance": balance,
                     "nonce": nonce,
-                    "frozen": frozen,
-                    "energy": energy,
                     "flags": meta.flags,
                     "data": meta.data,
-                }),
-            ))
-        }
-        "tos_energyGet" => {
-            let addr = req
-                .params
-                .get("address")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            let key = match to_public_key(addr) {
-                Ok(k) => k,
-                Err(_) => {
-                    return HttpResponse::Ok().json(jsonrpc_err(
-                        &req.id,
-                        -32602,
-                        "Invalid params: address",
-                    ));
-                }
-            };
-            let resource = match storage.get_energy_resource(&key).await {
-                Ok(Some(r)) => r,
-                _ => {
-                    return HttpResponse::Ok().json(jsonrpc_ok(&req.id, serde_json::Value::Null));
-                }
-            };
-            let freeze_records: Vec<serde_json::Value> = resource
-                .freeze_records
-                .iter()
-                .map(|fr| {
-                    json!({
-                        "amount": fr.amount.saturating_mul(COIN_VALUE),
-                        "energy_gained": fr.energy_gained,
-                        "freeze_height": fr.freeze_topoheight,
-                        "unlock_height": fr.unlock_topoheight,
-                        "duration_days": fr.duration.get_days(),
-                    })
-                })
-                .collect();
-            let pending_unfreezes: Vec<serde_json::Value> = resource
-                .pending_unfreezes
-                .iter()
-                .map(|pu| {
-                    json!({
-                        "amount": pu.amount.saturating_mul(COIN_VALUE),
-                        "expire_height": pu.expire_topoheight,
-                    })
-                })
-                .collect();
-            HttpResponse::Ok().json(jsonrpc_ok(
-                &req.id,
-                json!({
-                    "address": addr,
-                    "energy": resource.energy,
-                    "frozen_tos": resource.frozen_tos.saturating_mul(COIN_VALUE),
-                    "last_update": resource.last_update,
-                    "freeze_records": freeze_records,
-                    "pending_unfreezes": pending_unfreezes,
                 }),
             ))
         }
@@ -1478,7 +1242,6 @@ async fn handle_json_rpc(
                 "tos_stateDigest",
                 "tos_stateExport",
                 "tos_accountGet",
-                "tos_energyGet",
                 "tos_tnsResolve",
                 "tos_contractGet",
                 "tos_methods"
@@ -1671,10 +1434,7 @@ async fn handle_tx_execute(
 
     // Fee pre-check: spec treats inability to pay fee as INSUFFICIENT_FEE precedence.
     // The daemon may surface this as a generic balance error; normalize here.
-    if matches!(tx_for_apply.get_fee_type(), FeeType::TOS)
-        && tx_for_apply.get_fee() > 0
-        && !matches!(tx_for_apply.get_data(), TransactionType::Energy(_))
-    {
+    if matches!(tx_for_apply.get_fee_type(), FeeType::TOS) && tx_for_apply.get_fee() > 0 {
         let storage = engine.blockchain.get_storage().read().await;
         let sender_balance = storage
             .get_last_balance(tx_for_apply.get_source(), &TOS_ASSET)
@@ -1750,64 +1510,8 @@ async fn handle_tx_execute(
                 });
             }
 
-            // Fee rules (spec): Energy fee must be zero and consumes energy on success.
-            if matches!(tx_for_apply.get_fee_type(), FeeType::Energy) && tx_for_apply.get_fee() != 0
-            {
-                return HttpResponse::Ok().json(ExecResult {
-                    success: false,
-                    error_code: 0x0107, // INVALID_PAYLOAD
-                    state_digest: current_state_digest(&engine).await,
-                    error: Some("energy fee must be zero".to_string()),
-                });
-            }
-
             {
                 let mut storage = engine.blockchain.get_storage().write().await;
-
-                // Consume energy on success for transfer-type txs using energy fees.
-                if matches!(tx_for_apply.get_fee_type(), FeeType::Energy) {
-                    let energy_cost = tx_for_apply.calculate_energy_cost();
-                    if energy_cost > 0 {
-                        match storage.get_energy_resource(tx_for_apply.get_source()).await {
-                            Ok(Some(mut resource)) => {
-                                if !resource.has_enough_energy(next_topoheight, energy_cost) {
-                                    return HttpResponse::Ok().json(ExecResult {
-                                        success: false,
-                                        error_code: 0x0302, // INSUFFICIENT_ENERGY
-                                        state_digest: current_state_digest(&engine).await,
-                                        error: Some("insufficient energy".to_string()),
-                                    });
-                                }
-                                if resource
-                                    .consume_energy(energy_cost, next_topoheight)
-                                    .is_err()
-                                {
-                                    return HttpResponse::Ok().json(ExecResult {
-                                        success: false,
-                                        error_code: 0x0302, // INSUFFICIENT_ENERGY
-                                        state_digest: current_state_digest(&engine).await,
-                                        error: Some("insufficient energy".to_string()),
-                                    });
-                                }
-                                let _ = storage
-                                    .set_energy_resource(
-                                        tx_for_apply.get_source(),
-                                        next_topoheight,
-                                        &resource,
-                                    )
-                                    .await;
-                            }
-                            _ => {
-                                return HttpResponse::Ok().json(ExecResult {
-                                    success: false,
-                                    error_code: 0x0302, // INSUFFICIENT_ENERGY
-                                    state_digest: current_state_digest(&engine).await,
-                                    error: Some("insufficient energy".to_string()),
-                                });
-                            }
-                        }
-                    }
-                }
 
                 // Deduct fee (TOS) and bump nonce. Fee availability for FeeType::TOS is pre-checked above.
                 let sender_balance = storage
@@ -1998,17 +1702,6 @@ async fn handle_tx_execute(
                 });
             }
 
-            // Fee rules (spec): Energy fee must be zero and consumes energy on success.
-            if matches!(tx_for_apply.get_fee_type(), FeeType::Energy) && tx_for_apply.get_fee() != 0
-            {
-                return HttpResponse::Ok().json(ExecResult {
-                    success: false,
-                    error_code: 0x0107, // INVALID_PAYLOAD
-                    state_digest: current_state_digest(&engine).await,
-                    error: Some("energy fee must be zero".to_string()),
-                });
-            }
-
             // Amount rules (spec) and apply: credit receiver balances; fee+nonce applied here.
             let mut outs: Vec<(PublicKey, String, u64)> = Vec::with_capacity(transfers.len());
             for t in transfers {
@@ -2052,51 +1745,6 @@ async fn handle_tx_execute(
                     let _ = storage
                         .set_last_balance_to(dest, &TOS_ASSET, next_topoheight, &vb)
                         .await;
-                }
-
-                // Consume 1 energy on success for transfer-type txs using energy fees.
-                if matches!(tx_for_apply.get_fee_type(), FeeType::Energy) {
-                    let energy_cost = tx_for_apply.calculate_energy_cost();
-                    if energy_cost > 0 {
-                        match storage.get_energy_resource(tx_for_apply.get_source()).await {
-                            Ok(Some(mut resource)) => {
-                                if !resource.has_enough_energy(next_topoheight, energy_cost) {
-                                    return HttpResponse::Ok().json(ExecResult {
-                                        success: false,
-                                        error_code: 0x0302, // INSUFFICIENT_ENERGY
-                                        state_digest: current_state_digest(&engine).await,
-                                        error: Some("insufficient energy".to_string()),
-                                    });
-                                }
-                                if resource
-                                    .consume_energy(energy_cost, next_topoheight)
-                                    .is_err()
-                                {
-                                    return HttpResponse::Ok().json(ExecResult {
-                                        success: false,
-                                        error_code: 0x0302, // INSUFFICIENT_ENERGY
-                                        state_digest: current_state_digest(&engine).await,
-                                        error: Some("insufficient energy".to_string()),
-                                    });
-                                }
-                                let _ = storage
-                                    .set_energy_resource(
-                                        tx_for_apply.get_source(),
-                                        next_topoheight,
-                                        &resource,
-                                    )
-                                    .await;
-                            }
-                            _ => {
-                                return HttpResponse::Ok().json(ExecResult {
-                                    success: false,
-                                    error_code: 0x0302, // INSUFFICIENT_ENERGY
-                                    state_digest: current_state_digest(&engine).await,
-                                    error: Some("insufficient energy".to_string()),
-                                });
-                            }
-                        }
-                    }
                 }
 
                 // Deduct fee and bump nonce.
@@ -2304,7 +1952,6 @@ fn tx_from_json(value: &serde_json::Value) -> Result<Transaction, String> {
     let version = TxVersion::try_from(version as u8).map_err(|_| "invalid version")?;
     let fee_type = match fee_type {
         0 => FeeType::TOS,
-        1 => FeeType::Energy,
         2 => FeeType::UNO,
         _ => return Err("invalid fee_type".to_string()),
     };
@@ -3164,20 +2811,10 @@ async fn build_export(engine: &Engine) -> PreState {
                 .await
                 .map(|(_, v)| v.get_nonce())
                 .unwrap_or(0);
-            // Read frozen/energy from EnergyResource storage (post-execution state)
-            let (frozen, energy) = match storage.get_energy_resource(&key).await {
-                Ok(Some(resource)) => (
-                    resource.frozen_tos.saturating_mul(COIN_VALUE),
-                    resource.energy,
-                ),
-                _ => (meta.frozen, meta.energy),
-            };
             accounts.push(AccountState {
                 address: addr.clone(),
                 balance,
                 nonce,
-                frozen,
-                energy,
                 flags: meta.flags,
                 data: meta.data.clone(),
             });
@@ -3205,29 +2842,17 @@ async fn build_export(engine: &Engine) -> PreState {
                 .get(&addr)
                 .cloned()
                 .unwrap_or_default();
-            // Read frozen/energy from EnergyResource storage (post-execution state)
-            let (frozen, energy) = match storage.get_energy_resource(&key).await {
-                Ok(Some(resource)) => (
-                    resource.frozen_tos.saturating_mul(COIN_VALUE),
-                    resource.energy,
-                ),
-                _ => (meta.frozen, meta.energy),
-            };
             accounts.push(AccountState {
                 address: addr,
                 balance,
                 nonce,
-                frozen,
-                energy,
                 flags: meta.flags,
                 data: meta.data,
             });
         }
     }
 
-    // Compute total_energy as sum of all account energy values
-    let mut gs = engine.meta.global_state.clone();
-    gs.total_energy = accounts.iter().map(|a| a.energy).sum();
+    let gs = engine.meta.global_state.clone();
 
     // Export deployed contracts from storage
     let mut contracts = Vec::new();
@@ -3259,7 +2884,6 @@ async fn build_export(engine: &Engine) -> PreState {
         accounts,
         agent_accounts: Vec::new(),
         tns_names: Vec::new(),
-        energy_resources: Vec::new(),
         contracts,
     }
 }

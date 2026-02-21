@@ -16,18 +16,6 @@ pub enum BalanceError {
 }
 
 #[derive(Debug, Error)]
-pub enum EnergyError {
-    #[error("Energy calculation overflow")]
-    Overflow,
-
-    #[error("Division by zero in energy calculation")]
-    DivisionByZero,
-
-    #[error("Invalid freeze record amount (zero)")]
-    InvalidRecordAmount,
-}
-
-#[derive(Debug, Error)]
 pub enum StorageError {
     #[error("Team size calculation limit exceeded")]
     TeamSizeLimitExceeded,

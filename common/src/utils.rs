@@ -10,8 +10,6 @@ use crate::{
     varuint::VarUint,
 };
 
-pub mod energy_fee;
-
 /// Static assert macro to check conditions at compile time
 /// Usage: `static_assert!(condition);` or `static_assert!(condition, "Error message");`
 #[macro_export]
@@ -173,14 +171,6 @@ fn calculate_fee_with_schedule(
         + output_count as u64 * fee_per_transfer
         + new_addresses as u64 * fee_per_account_creation
         + multisig as u64 * fee_per_transfer
-}
-
-// Calculate energy fee for a transaction (only transfer supported)
-pub fn calculate_energy_fee(tx_size: usize, output_count: usize, new_addresses: usize) -> u64 {
-    use crate::utils::energy_fee::EnergyFeeCalculator;
-
-    // Only transfer operations consume energy, so we only need these 3 parameters
-    EnergyFeeCalculator::calculate_energy_cost(tx_size, output_count, new_addresses)
 }
 
 const HASHRATE_FORMATS: [&str; 7] = ["H/s", "KH/s", "MH/s", "GH/s", "TH/s", "PH/s", "EH/s"];

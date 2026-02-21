@@ -62,7 +62,6 @@ impl FeatureRegistry {
             .register(features::NFT_V2)
             .register(features::FEE_MODEL_V2)
             .register(features::BLOCKDAG_V2_ORDERING)
-            .register(features::ENERGY_DELEGATION_V2)
             .register(features::P2P_COMPRESSION)
             .register(features::RPC_V2_RESPONSES)
             .register(features::MAX_BLOCK_SIZE_INCREASE)
@@ -109,13 +108,6 @@ pub mod features {
     pub const BLOCKDAG_V2_ORDERING: Feature = Feature {
         id: "blockdag_v2_ordering",
         description: "Improved DAG ordering algorithm",
-        activation_height: None,
-    };
-
-    /// New delegation rules for energy system
-    pub const ENERGY_DELEGATION_V2: Feature = Feature {
-        id: "energy_delegation_v2",
-        description: "New delegation rules for energy",
         activation_height: None,
     };
 

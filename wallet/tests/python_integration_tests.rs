@@ -122,34 +122,6 @@ mod tests {
     }
 
     #[test]
-    fn test_energy_commands() -> Result<()> {
-        let script_path = Path::new("tests/test_energy_commands.py");
-        if !script_path.exists() {
-            println!("Energy commands test script not found at {:?}", script_path);
-            println!("Skipping energy commands test");
-            return Ok(());
-        }
-
-        let output = Command::new("python3")
-            .arg(script_path)
-            .current_dir(".")
-            .output()?;
-
-        println!(
-            "Energy commands test stdout: {}",
-            String::from_utf8_lossy(&output.stdout)
-        );
-        println!(
-            "Energy commands test stderr: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-
-        assert!(output.status.success(), "Energy commands test failed");
-
-        Ok(())
-    }
-
-    #[test]
     fn test_transaction_commands() -> Result<()> {
         let script_path = Path::new("tests/test_transaction_commands.py");
         if !script_path.exists() {

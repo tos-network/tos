@@ -80,38 +80,6 @@ impl Network {
         matches!(self, Self::Devnet)
     }
 
-    /// Get minimum freeze duration in blocks for this network
-    /// - Mainnet/Testnet: 3 days = 259200 blocks (1 block per second)
-    /// - Devnet: 30 blocks (30 seconds for quick testing)
-    pub fn min_freeze_duration_blocks(&self) -> u64 {
-        match self {
-            Self::Mainnet | Self::Testnet | Self::Stagenet => {
-                crate::config::MIN_FREEZE_DURATION_DAYS as u64 * 24 * 60 * 60
-            }
-            Self::Devnet => 30, // 30 seconds for quick testing
-        }
-    }
-
-    /// Get the freeze duration multiplier for converting days to blocks
-    /// - Mainnet/Testnet: 1 day = 86400 blocks
-    /// - Devnet: 1 day = 10 blocks (accelerated for testing)
-    pub fn freeze_duration_multiplier(&self) -> u64 {
-        match self {
-            Self::Mainnet | Self::Testnet | Self::Stagenet => 24 * 60 * 60, // 86400 blocks per day
-            Self::Devnet => 10, // 10 blocks per "day" for quick testing
-        }
-    }
-
-    /// Get blocks per day for this network
-    pub fn blocks_per_day(&self) -> u64 {
-        self.freeze_duration_multiplier()
-    }
-
-    /// Get unfreeze cooldown blocks for this network
-    pub fn unfreeze_cooldown_blocks(&self) -> u64 {
-        crate::config::UNFREEZE_COOLDOWN_DAYS * self.blocks_per_day()
-    }
-
     /// Get the bootstrap address for this network.
     /// Only the bootstrap address holder can create the Global Committee.
     pub fn bootstrap_address(&self) -> &'static str {

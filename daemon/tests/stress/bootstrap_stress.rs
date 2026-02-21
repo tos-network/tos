@@ -349,10 +349,6 @@ async fn stress_bootstrap_all_step_request_types() {
             StepRequest::ContractModule(0, 100, Cow::Owned(make_hash(0))),
         ),
         ("TnsNames", StepRequest::TnsNames(Some(1))),
-        (
-            "EnergyData",
-            StepRequest::EnergyData(Cow::Owned(vec![make_pubkey(0), make_pubkey(1)]), 100),
-        ),
         ("AgentData", StepRequest::AgentData(Some(2))),
         ("UnoBalanceKeys", StepRequest::UnoBalanceKeys(None)),
         ("BlocksMetadata", StepRequest::BlocksMetadata(50)),

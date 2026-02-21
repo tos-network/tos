@@ -399,7 +399,7 @@ pub enum StateChange {
     StorageDelete { key: Vec<u8>, old_value: Vec<u8> },
     /// Contract deployed
     ContractDeployed { code_hash: Hash },
-    /// Energy/frozen balance changed
+    /// Frozen balance changed
     FrozenBalanceChange { before: u64, after: u64 },
 }
 

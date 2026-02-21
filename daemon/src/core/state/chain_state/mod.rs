@@ -10,8 +10,7 @@ use std::{
 };
 use tos_common::{
     account::{
-        AgentAccountMeta, EnergyResource, Nonce, SessionKey, VersionedBalance, VersionedNonce,
-        VersionedUnoBalance,
+        AgentAccountMeta, Nonce, SessionKey, VersionedBalance, VersionedNonce, VersionedUnoBalance,
     },
     block::{BlockVersion, TopoHeight},
     config::TOS_ASSET,
@@ -147,8 +146,6 @@ pub struct ChainState<'a, S: Storage> {
     // Sender accounts
     // This is used to verify ZK Proofs and store/update nonces
     accounts: HashMap<Cow<'a, PublicKey>, Account>,
-    // Cached energy resources
-    energy_resources: HashMap<Cow<'a, PublicKey>, EnergyResource>,
     // Agent account metadata updates (None = delete)
     agent_account_meta: HashMap<Cow<'a, PublicKey>, Option<AgentAccountMeta>>,
     // Agent session key updates (None = delete)
@@ -183,7 +180,6 @@ impl<'a, S: Storage> ChainState<'a, S> {
             receiver_balances: HashMap::new(),
             receiver_uno_balances: HashMap::new(),
             accounts: HashMap::new(),
-            energy_resources: HashMap::new(),
             agent_account_meta: HashMap::new(),
             agent_session_keys: HashMap::new(),
             stable_topoheight,
@@ -532,31 +528,6 @@ impl<'a, S: Storage> ChainState<'a, S> {
                     .get_balance())
             }
         }
-    }
-
-    async fn internal_get_energy_resource(
-        &mut self,
-        account: Cow<'a, PublicKey>,
-    ) -> Result<Option<EnergyResource>, BlockchainError> {
-        if let Some(resource) = self.energy_resources.get(&account) {
-            return Ok(Some(resource.clone()));
-        }
-
-        let resource = self.storage.get_energy_resource(&account).await?;
-        if let Some(ref energy_resource) = resource {
-            self.energy_resources
-                .insert(account.clone(), energy_resource.clone());
-        }
-
-        Ok(resource)
-    }
-
-    fn cache_energy_resource(
-        &mut self,
-        account: Cow<'a, PublicKey>,
-        energy_resource: EnergyResource,
-    ) {
-        self.energy_resources.insert(account, energy_resource);
     }
 
     // Update the output echanges of an account
@@ -1188,16 +1159,8 @@ impl<'a, S: Storage> BlockchainVerificationState<'a, BlockchainError> for ChainS
 
     /// Get the recyclable TOS amount from expired freeze records
     async fn get_recyclable_tos(&mut self, account: &'a PublicKey) -> Result<u64, BlockchainError> {
-        let energy_resource = self
-            .internal_get_energy_resource(Cow::Borrowed(account))
-            .await?;
-        let recyclable = match energy_resource {
-            Some(resource) => resource
-                .get_recyclable_tos(self.topoheight)
-                .map_err(|_| BlockchainError::Overflow)?,
-            None => 0,
-        };
-        Ok(recyclable)
+        let _ = account;
+        Ok(0)
     }
 
     /// Set the multisig state for an account

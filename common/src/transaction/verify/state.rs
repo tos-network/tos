@@ -263,19 +263,6 @@ pub trait BlockchainApplyState<'a, P: ContractProvider, E>:
     /// Remove the contract module
     async fn remove_contract_module(&mut self, hash: &Hash) -> Result<(), E>;
 
-    /// Get the energy resource for an account
-    async fn get_energy_resource(
-        &mut self,
-        account: Cow<'a, CompressedPublicKey>,
-    ) -> Result<Option<crate::account::EnergyResource>, E>;
-
-    /// Set the energy resource for an account
-    async fn set_energy_resource(
-        &mut self,
-        account: Cow<'a, CompressedPublicKey>,
-        energy_resource: crate::account::EnergyResource,
-    ) -> Result<(), E>;
-
     /// Get the contract executor for executing contracts
     fn get_contract_executor(&self) -> std::sync::Arc<dyn crate::contract::ContractExecutor>;
 

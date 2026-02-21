@@ -140,9 +140,6 @@ fn write_alloc_bytes(writer: &mut Writer, alloc: &[ParsedAllocEntry]) {
 
         // balance (u64, BE)
         writer.write_u64(&entry.balance);
-
-        // energy_available (u64, BE)
-        writer.write_u64(&entry.energy_available);
     }
 }
 
@@ -181,7 +178,6 @@ mod tests {
             public_key: pub_key,
             nonce: 0,
             balance: 1000,
-            energy_available: 0,
         }]
     }
 

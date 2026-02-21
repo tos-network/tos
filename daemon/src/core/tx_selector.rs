@@ -33,20 +33,15 @@ impl Eq for TxSelectorEntry<'_> {}
 struct Transactions<'a>(VecDeque<TxSelectorEntry<'a>>);
 
 /// Compares two transactions for ordering in the TX selector.
-/// Priority order: TOS > Energy > UNO. Within the same fee type, higher fees have priority.
+/// Priority order: TOS > UNO. Within the same fee type, higher fees have priority.
 fn compare_tx_priority(a: &Transaction, b: &Transaction) -> Ordering {
     let a_fee_type = a.get_fee_type();
     let b_fee_type = b.get_fee_type();
 
     match (a_fee_type, b_fee_type) {
-        (FeeType::TOS, FeeType::Energy) | (FeeType::TOS, FeeType::UNO) => Ordering::Greater,
-        (FeeType::Energy, FeeType::TOS) | (FeeType::UNO, FeeType::TOS) => Ordering::Less,
-        (FeeType::Energy, FeeType::UNO) => Ordering::Greater,
-        (FeeType::UNO, FeeType::Energy) => Ordering::Less,
+        (FeeType::TOS, FeeType::UNO) => Ordering::Greater,
+        (FeeType::UNO, FeeType::TOS) => Ordering::Less,
         (FeeType::TOS, FeeType::TOS) => a.get_fee().cmp(&b.get_fee()),
-        (FeeType::Energy, FeeType::Energy) => {
-            a.calculate_energy_cost().cmp(&b.calculate_energy_cost())
-        }
         (FeeType::UNO, FeeType::UNO) => {
             let a_count = match a.get_data() {
                 tos_common::transaction::TransactionType::Transfers(t) => t.len(),

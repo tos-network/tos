@@ -74,17 +74,6 @@ pub struct AllocEntry {
 
     /// TOS balance (parsed to u64)
     pub balance: String,
-
-    /// Energy configuration (default: { available: "0" })
-    #[serde(default)]
-    pub energy: Option<EnergyConfig>,
-}
-
-/// Energy configuration for an account
-#[derive(Debug, Deserialize, Default)]
-pub struct EnergyConfig {
-    /// Available energy (parsed to u64)
-    pub available: String,
 }
 
 /// Pre-computed values for verification
@@ -108,7 +97,4 @@ pub struct ParsedAllocEntry {
 
     /// Validated TOS balance (atomic units)
     pub balance: u64,
-
-    /// Validated available energy
-    pub energy_available: u64,
 }

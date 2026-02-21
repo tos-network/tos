@@ -60,8 +60,7 @@ pub use transport::{
     TransportStats,
 };
 pub use verification::{
-    verify_balance_conservation, verify_comprehensive, verify_energy_consistency,
-    verify_nonce_monotonicity,
+    verify_balance_conservation, verify_comprehensive, verify_nonce_monotonicity,
 };
 pub use waiters::{
     wait_all_tips_equal_with_config, wait_for_new_blocks, wait_for_sync_complete,
