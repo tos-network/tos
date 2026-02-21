@@ -137,20 +137,6 @@ pub trait BlockchainVerificationState<'a, E> {
         &self,
         hash: &Hash,
     ) -> Result<(&Module, &Environment), E>;
-
-    // ===== TNS (TOS Name Service) Verification Methods =====
-
-    /// Check if a TNS name hash is registered
-    async fn is_name_registered(&self, name_hash: &Hash) -> Result<bool, E>;
-
-    /// Check if an account already has a registered TNS name
-    async fn account_has_name(&self, account: &'a CompressedPublicKey) -> Result<bool, E>;
-
-    /// Get the TNS name hash for an account
-    async fn get_account_name_hash(
-        &self,
-        account: &'a CompressedPublicKey,
-    ) -> Result<Option<Hash>, E>;
 }
 
 pub struct ContractEnvironment<'a, P: ContractProvider> {
@@ -217,14 +203,5 @@ pub trait BlockchainApplyState<'a, P: ContractProvider, E>:
         events: Vec<crate::contract::ContractEvent>,
         contract: &Hash,
         tx_hash: &'a Hash,
-    ) -> Result<(), E>;
-
-    // ===== TNS (TOS Name Service) Apply Methods =====
-
-    /// Register a TNS name for an account
-    async fn register_name(
-        &mut self,
-        name_hash: Hash,
-        owner: &'a CompressedPublicKey,
     ) -> Result<(), E>;
 }

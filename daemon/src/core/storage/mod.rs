@@ -48,7 +48,6 @@ pub trait Storage:
     + CacheProvider
     + StateProvider
     + UnoBalanceProvider
-    + TnsProvider
     + Sync
     + Send
     + 'static

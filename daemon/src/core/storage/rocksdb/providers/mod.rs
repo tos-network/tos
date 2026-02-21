@@ -18,7 +18,6 @@ mod pruned_topoheight;
 mod snapshot;
 mod state;
 mod tips;
-mod tns;
 mod transaction;
 mod uno_balance;
 mod versioned;

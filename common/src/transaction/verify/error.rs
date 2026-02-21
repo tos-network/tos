@@ -73,50 +73,6 @@ pub enum VerificationError<T> {
     #[error("Too many contract events: {count} (max {max})")]
     TooManyContractEvents { count: usize, max: usize },
 
-    // ===== TNS Name Registration Errors =====
-    #[error("Invalid name length: {0} (expected 3-64)")]
-    InvalidNameLength(usize),
-    #[error("Name must start with a letter")]
-    InvalidNameStart,
-    #[error("Name cannot end with separator")]
-    InvalidNameEnd,
-    #[error("Invalid character in name: {0}")]
-    InvalidNameCharacter(char),
-    #[error("Consecutive separators not allowed")]
-    ConsecutiveSeparators,
-    #[error("Reserved name: {0}")]
-    ReservedName(String),
-    #[error("Confusing name (phishing risk): {0}")]
-    ConfusingName(String),
-    #[error("Name already registered")]
-    NameAlreadyRegistered,
-    #[error("Account already has a registered name")]
-    AccountAlreadyHasName,
-
-    // ===== Ephemeral Message Errors =====
-    #[error("Invalid message TTL: {0} (expected 100-86400)")]
-    InvalidMessageTTL(u32),
-    #[error("Message too large: {0} bytes (max 188)")]
-    MessageTooLarge(usize),
-    #[error("Message cannot be empty")]
-    EmptyMessage,
-    #[error("Recipient name not registered")]
-    RecipientNotFound,
-    #[error("Sender must have a registered TNS name")]
-    SenderNotRegistered,
-    #[error("Sender name hash mismatch (forged payload)")]
-    InvalidSender,
-    #[error("Cannot send message to yourself")]
-    SelfMessage,
-    #[error("Message with this nonce already exists (replay attack)")]
-    MessageAlreadyExists,
-    #[error("Message nonce must equal transaction nonce")]
-    InvalidMessageNonce,
-    #[error("Invalid receiver handle (not a valid curve point)")]
-    InvalidReceiverHandle,
-    #[error("Insufficient TNS fee: required {required}, provided {provided}")]
-    InsufficientTnsFee { required: u64, provided: u64 },
-
     // ===== Arbiter Registration Errors =====
     #[error("Arbiter name length {len} exceeds max {max}")]
     ArbiterNameLength { len: usize, max: usize },

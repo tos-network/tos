@@ -88,15 +88,6 @@ fn build_accounts_request(min_topo: u64, max_topo: u64, count: usize) -> StepReq
     StepRequest::Accounts(min_topo, max_topo, Cow::Owned(keys))
 }
 
-/// Build a TNS Names response with `count` entries
-fn build_tns_names_response(count: usize, next_page: Option<u64>) -> StepResponse {
-    let mut entries = IndexMap::with_capacity(count);
-    for i in 0..count {
-        entries.insert(make_hash(i as u64), make_pubkey(i as u64));
-    }
-    StepResponse::TnsNames(entries, next_page)
-}
-
 /// Build a ChainInfo StepResponse
 fn build_chain_info_response() -> StepResponse {
     let common_point = Some(CommonPoint::new(make_hash(0), 100));
@@ -252,42 +243,6 @@ async fn stress_bootstrap_keys_response_throughput() {
     assert_eq!(wrapped_success, ITERATIONS);
 }
 
-/// Test 3: TNS Names response roundtrip throughput
-/// 5,000 serialize/deserialize cycles of tns names responses (100 entries with hash+pubkey)
-#[tokio::test]
-#[ignore = "Stress test - run with --ignored"]
-async fn stress_bootstrap_tns_names_response_throughput() {
-    const ITERATIONS: usize = 5_000;
-    const ENTRIES: usize = 100;
-
-    let resp = build_tns_names_response(ENTRIES, Some(5));
-
-    // Warmup
-    for _ in 0..10 {
-        let _ = roundtrip_response(&resp);
-    }
-
-    let start = Instant::now();
-    let mut success_count = 0usize;
-
-    for _ in 0..ITERATIONS {
-        if roundtrip_response(&resp) {
-            success_count += 1;
-        }
-    }
-
-    let elapsed = start.elapsed();
-
-    println!("Bootstrap TNS Names response throughput:");
-    println!("  Entries per response: {}", ENTRIES);
-    println!("  Iterations: {}", ITERATIONS);
-    println!("  Successful: {}", success_count);
-    println!("  Duration: {:?}", elapsed);
-    format_throughput("TNS Names response roundtrip", success_count, elapsed);
-
-    assert_eq!(success_count, ITERATIONS);
-}
-
 /// Test 4: KeyBalances response roundtrip throughput
 /// 5,000 serialize/deserialize cycles of key_balances responses (100 entries)
 #[tokio::test]
@@ -348,7 +303,6 @@ async fn stress_bootstrap_all_step_request_types() {
             "ContractModule",
             StepRequest::ContractModule(0, 100, Cow::Owned(make_hash(0))),
         ),
-        ("TnsNames", StepRequest::TnsNames(Some(1))),
         ("UnoBalanceKeys", StepRequest::UnoBalanceKeys(None)),
         ("BlocksMetadata", StepRequest::BlocksMetadata(50)),
     ];
@@ -455,7 +409,6 @@ struct MockBootstrapState {
     keys: RwLock<IndexSet<PublicKey>>,
     balances: RwLock<HashMap<PublicKey, Vec<Hash>>>,
     accounts: RwLock<HashMap<PublicKey, u64>>, // key -> nonce
-    tns_names: RwLock<IndexMap<Hash, PublicKey>>,
     blocks_metadata: RwLock<Vec<Hash>>,
     progress: AtomicU64,
     batch_count: AtomicU64,
@@ -467,7 +420,6 @@ impl MockBootstrapState {
             keys: RwLock::new(IndexSet::new()),
             balances: RwLock::new(HashMap::new()),
             accounts: RwLock::new(HashMap::new()),
-            tns_names: RwLock::new(IndexMap::new()),
             blocks_metadata: RwLock::new(Vec::new()),
             progress: AtomicU64::new(0),
             batch_count: AtomicU64::new(0),
@@ -505,16 +457,6 @@ impl MockBootstrapState {
         count
     }
 
-    async fn apply_tns_names(&self, entries: &IndexMap<Hash, PublicKey>) -> usize {
-        let mut state = self.tns_names.write().await;
-        let count = entries.len();
-        for (hash, key) in entries {
-            state.insert(hash.clone(), key.clone());
-        }
-        self.progress.fetch_add(count as u64, Ordering::SeqCst);
-        count
-    }
-
     async fn apply_blocks_metadata(&self, hashes: &[Hash]) -> usize {
         let mut state = self.blocks_metadata.write().await;
         let count = hashes.len();
@@ -533,7 +475,6 @@ impl MockBootstrapState {
         self.keys.write().await.clear();
         self.balances.write().await.clear();
         self.accounts.write().await.clear();
-        self.tns_names.write().await.clear();
         self.blocks_metadata.write().await.clear();
         self.progress.store(0, Ordering::SeqCst);
         self.batch_count.store(0, Ordering::SeqCst);
@@ -673,14 +614,14 @@ async fn stress_bootstrap_batch_size_variation() {
             let remaining = TOTAL_ITEMS - applied;
             let this_batch = remaining.min(batch_max);
 
-            // Build and apply a batch of TNS names
-            let mut entries = IndexMap::with_capacity(this_batch);
+            // Build and apply a batch of keys
+            let mut entries = IndexSet::with_capacity(this_batch);
             for i in 0..this_batch {
                 let seed = (applied + i) as u64;
-                entries.insert(make_hash(seed), make_pubkey(seed));
+                entries.insert(make_pubkey(seed));
             }
 
-            state.apply_tns_names(&entries).await;
+            state.apply_keys(&entries).await;
             batch_applied += 1;
 
             if batch_applied >= batch_max / batch_max.max(1) || applied + this_batch >= TOTAL_ITEMS
@@ -711,8 +652,8 @@ async fn stress_bootstrap_batch_size_variation() {
         assert_eq!(progress, TOTAL_ITEMS as u64);
 
         // Verify data integrity
-        let tns = state.tns_names.read().await;
-        assert_eq!(tns.len(), TOTAL_ITEMS);
+        let keys = state.keys.read().await;
+        assert_eq!(keys.len(), TOTAL_ITEMS);
     }
 }
 
@@ -773,7 +714,7 @@ async fn stress_bootstrap_apply_reset_cycle() {
 }
 
 /// Test 11: Full sync simulation
-/// ChainInfo -> keys -> key_balances -> accounts -> tns_names -> blocks_metadata
+/// ChainInfo -> keys -> key_balances -> accounts -> blocks_metadata
 /// in sequence, 100 items each, verify all counters correct
 #[tokio::test]
 #[ignore = "Stress test - run with --ignored"]
@@ -844,20 +785,7 @@ async fn stress_bootstrap_full_sync_simulation() {
         step_timings.push(("Accounts", step_start.elapsed()));
     }
 
-    // Step 5: TNS Names
-    {
-        let step_start = Instant::now();
-        let resp = build_tns_names_response(ITEMS_PER_STEP, None);
-        let bytes = resp.to_bytes();
-        let decoded = StepResponse::from_bytes(&bytes).unwrap();
-        if let StepResponse::TnsNames(entries, _) = decoded {
-            state.apply_tns_names(&entries).await;
-        }
-        state.commit_batch().await;
-        step_timings.push(("TnsNames", step_start.elapsed()));
-    }
-
-    // Step 6: BlocksMetadata
+    // Step 5: BlocksMetadata
     {
         let step_start = Instant::now();
         let mut hashes = Vec::with_capacity(ITEMS_PER_STEP);
@@ -881,16 +809,15 @@ async fn stress_bootstrap_full_sync_simulation() {
     println!("  Total batches: {}", state.get_batch_count());
     println!("  Total duration: {:?}", elapsed);
 
-    // Verify counters: keys(100) + key_balances(100) + accounts(100) + tns(100) + blocks(100)
-    let expected_progress = (ITEMS_PER_STEP * 5) as u64;
+    // Verify counters: keys(100) + key_balances(100) + accounts(100) + blocks(100)
+    let expected_progress = (ITEMS_PER_STEP * 4) as u64;
     assert_eq!(progress, expected_progress);
-    assert_eq!(state.get_batch_count(), 5); // 5 commit_batch calls (keys, balances, accounts, tns, blocks)
+    assert_eq!(state.get_batch_count(), 4); // 4 commit_batch calls (keys, balances, accounts, blocks)
 
     // Verify individual state
     assert_eq!(state.keys.read().await.len(), ITEMS_PER_STEP);
     assert_eq!(state.balances.read().await.len(), ITEMS_PER_STEP);
     assert_eq!(state.accounts.read().await.len(), ITEMS_PER_STEP);
-    assert_eq!(state.tns_names.read().await.len(), ITEMS_PER_STEP);
     assert_eq!(state.blocks_metadata.read().await.len(), ITEMS_PER_STEP);
 }
 
@@ -1030,12 +957,6 @@ mod unit_tests {
     #[test]
     fn test_keys_response_roundtrip() {
         let resp = build_keys_response(10, Some(2));
-        assert!(roundtrip_response(&resp));
-    }
-
-    #[test]
-    fn test_tns_names_response_roundtrip() {
-        let resp = build_tns_names_response(10, None);
         assert!(roundtrip_response(&resp));
     }
 

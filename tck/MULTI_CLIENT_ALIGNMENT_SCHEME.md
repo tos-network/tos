@@ -284,11 +284,6 @@ All transactions share a common envelope structure:
 | 30 | EscrowAppeal | Variable | Appeal verdict |
 | 31 | EscrowResolve | Variable | Final resolution |
 | 32 | EscrowCancel | Variable | Cancel escrow |
-| 40 | TNSRegister | Variable | Register domain name |
-| 41 | TNSTransfer | Variable | Transfer domain |
-| 42 | TNSUpdate | Variable | Update domain record |
-| 43 | TNSExtend | Variable | Extend domain registration |
-| 44 | TNSRelease | Variable | Release domain |
 | 50 | ContractDeploy | Variable | Deploy smart contract |
 | 51 | ContractCall | Variable | Call contract method |
 | 52 | ContractUpgrade | Variable | Upgrade contract |
@@ -981,9 +976,6 @@ All error codes are standardized as u16 values:
 | 0x0401 | ACCOUNT_EXISTS | Account already exists |
 | 0x0402 | ESCROW_NOT_FOUND | Escrow does not exist |
 | 0x0403 | ESCROW_WRONG_STATE | Escrow in wrong state for operation |
-| 0x0404 | DOMAIN_NOT_FOUND | TNS domain does not exist |
-| 0x0405 | DOMAIN_EXISTS | TNS domain already registered |
-| 0x0406 | DOMAIN_EXPIRED | TNS domain has expired |
 | 0x0407 | DELEGATION_NOT_FOUND | Delegation does not exist |
 | 0x0408 | DELEGATION_EXISTS | Delegation already exists |
 | 0x0409 | SELF_OPERATION | Cannot perform operation on self |

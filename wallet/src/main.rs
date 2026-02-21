@@ -1168,30 +1168,6 @@ async fn setup_wallet_command_manager(
         CommandHandler::Async(async_handler!(count_contracts)),
     ))?;
 
-    // ========== TNS (TOS Name Service) Commands ==========
-
-    command_manager.add_command(Command::with_required_arguments(
-        "register_name",
-        "Register a TNS name (e.g., 'alice' for alice@tos.network)",
-        vec![Arg::new(
-            "name",
-            ArgType::String,
-            "Name to register (e.g., 'alice')",
-        )],
-        CommandHandler::Async(async_handler!(register_name)),
-    ))?;
-
-    command_manager.add_command(Command::with_required_arguments(
-        "resolve_name",
-        "Resolve a TNS name to its address",
-        vec![Arg::new(
-            "name",
-            ArgType::String,
-            "Name to resolve (e.g., 'alice' or 'alice@tos.network')",
-        )],
-        CommandHandler::Async(async_handler!(resolve_name)),
-    ))?;
-
     let mut context = command_manager.get_context().lock()?;
     context.store(wallet);
 
@@ -1707,48 +1683,14 @@ async fn transfer(manager: &CommandManager, mut args: ArgumentManager) -> Result
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
 
-    // read address (batch mode only) - supports both regular addresses and TNS names
+    // read address (batch mode only)
     let str_address = if args.has_argument("address") {
         args.get_value("address")?.to_string_value()?
     } else {
         return Err(CommandError::MissingArgument("address".to_string()));
     };
 
-    // Check if this is a TNS name (ends with @tos.network)
-    let address = if str_address.ends_with("@tos.network") {
-        // Extract the name part (without @tos.network suffix)
-        let name_part = &str_address[..str_address.len() - 12];
-
-        // Resolve TNS name to address
-        let network_handler = wallet.get_network_handler().lock().await;
-        let handler = network_handler.as_ref().ok_or_else(|| {
-            CommandError::InvalidArgument("Wallet not connected to daemon".to_string())
-        })?;
-        let daemon_api = handler.get_api();
-
-        let result = daemon_api.resolve_name(name_part).await.map_err(|e| {
-            CommandError::Any(anyhow::anyhow!(
-                "Failed to resolve TNS name '{}': {}",
-                name_part,
-                e
-            ))
-        })?;
-
-        match result.address {
-            Some(addr) => {
-                manager.message(format!("Resolved {}@tos.network -> {}", name_part, addr));
-                addr.into_owned()
-            }
-            None => {
-                return Err(CommandError::InvalidArgument(format!(
-                    "TNS name '{}' is not registered",
-                    name_part
-                )));
-            }
-        }
-    } else {
-        Address::from_string(&str_address).context("Invalid address")?
-    };
+    let address = Address::from_string(&str_address).context("Invalid address")?;
 
     // Parse asset - TOS or hash only (no name lookup from local storage)
     let asset = if args.has_argument("asset") {
@@ -1926,48 +1868,14 @@ async fn transfer_all(
     let context = manager.get_context().lock()?;
     let wallet: &Arc<Wallet> = context.get()?;
 
-    // read address (batch mode only) - supports both regular addresses and TNS names
+    // read address (batch mode only)
     let str_address = if args.has_argument("address") {
         args.get_value("address")?.to_string_value()?
     } else {
         return Err(CommandError::MissingArgument("address".to_string()));
     };
 
-    // Check if this is a TNS name (ends with @tos.network)
-    let address = if str_address.ends_with("@tos.network") {
-        // Extract the name part (without @tos.network suffix)
-        let name_part = &str_address[..str_address.len() - 12];
-
-        // Resolve TNS name to address
-        let network_handler = wallet.get_network_handler().lock().await;
-        let handler = network_handler.as_ref().ok_or_else(|| {
-            CommandError::InvalidArgument("Wallet not connected to daemon".to_string())
-        })?;
-        let daemon_api = handler.get_api();
-
-        let result = daemon_api.resolve_name(name_part).await.map_err(|e| {
-            CommandError::Any(anyhow::anyhow!(
-                "Failed to resolve TNS name '{}': {}",
-                name_part,
-                e
-            ))
-        })?;
-
-        match result.address {
-            Some(addr) => {
-                manager.message(format!("Resolved {}@tos.network -> {}", name_part, addr));
-                addr.into_owned()
-            }
-            None => {
-                return Err(CommandError::InvalidArgument(format!(
-                    "TNS name '{}' is not registered",
-                    name_part
-                )));
-            }
-        }
-    } else {
-        Address::from_string(&str_address).context("Invalid address")?
-    };
+    let address = Address::from_string(&str_address).context("Invalid address")?;
 
     // Parse asset (batch mode only)
     let asset = if args.has_argument("asset") {
@@ -3140,10 +3048,6 @@ async fn transaction(
                             .as_address(wallet.get_network().is_mainnet())
                     ));
                 }
-            }
-            TransactionType::RegisterName(payload) => {
-                manager.message("Type: Register TNS Name");
-                manager.message(format!("  Name: {}", payload.get_name()));
             }
         }
     }
@@ -4725,174 +4629,6 @@ async fn count_contracts(
             }
         } else {
             manager.error("Not connected to daemon. Ensure daemon is running and accessible.");
-        }
-    }
-
-    Ok(())
-}
-
-// ========== TNS (TOS Name Service) Command Handlers ==========
-
-/// Register a TNS name
-async fn register_name(
-    manager: &CommandManager,
-    mut args: ArgumentManager,
-) -> Result<(), CommandError> {
-    manager.validate_batch_params("register_name", &args)?;
-
-    let context = manager.get_context().lock()?;
-    let wallet: &Arc<Wallet> = context.get()?;
-
-    // Get the name to register
-    let name = get_required_arg_with_example(
-        &mut args,
-        "name",
-        "register_name name=<name>",
-        "register_name name=alice",
-    )?;
-
-    // Validate name format locally before making RPC call
-    let validation = tos_common::tns::validate_name_format(&name);
-    if !validation.valid {
-        return Err(CommandError::InvalidArgument(format!(
-            "Invalid name '{}': {}",
-            name,
-            validation
-                .error
-                .unwrap_or_else(|| "Unknown error".to_string())
-        )));
-    }
-    let normalized_name = validation.normalized.ok_or_else(|| {
-        CommandError::InvalidArgument("Validation passed but normalized name is None".to_string())
-    })?;
-
-    // Check if the name is available
-    {
-        let network_handler = wallet.get_network_handler().lock().await;
-        let handler = network_handler.as_ref().ok_or_else(|| {
-            CommandError::InvalidArgument("Wallet not connected to daemon".to_string())
-        })?;
-        let daemon_api = handler.get_api();
-
-        let availability = daemon_api
-            .is_name_available(&normalized_name)
-            .await
-            .map_err(|e| {
-                CommandError::Any(anyhow::anyhow!("Failed to check name availability: {}", e))
-            })?;
-
-        if !availability.valid_format {
-            return Err(CommandError::InvalidArgument(format!(
-                "Invalid name format: {}",
-                availability
-                    .format_error
-                    .unwrap_or_else(|| "Unknown error".to_string())
-            )));
-        }
-
-        if !availability.available {
-            return Err(CommandError::InvalidArgument(format!(
-                "Name '{}' is already registered.",
-                normalized_name
-            )));
-        }
-    }
-
-    manager.message(format!(
-        "Registering name '{}' ({}@tos.network)...",
-        normalized_name, normalized_name
-    ));
-
-    // Build the transaction
-    // Registration requires REGISTRATION_FEE (10 TOS)
-    let registration_fee = tos_common::tns::REGISTRATION_FEE;
-    let fee_builder = tos_common::transaction::builder::FeeBuilder::Value(registration_fee);
-
-    let payload = tos_common::transaction::RegisterNamePayload::new(normalized_name.clone());
-    let tx_type = tos_common::transaction::builder::TransactionTypeBuilder::RegisterName(payload);
-
-    let storage = wallet.get_storage().read().await;
-    let mut state = wallet
-        .create_transaction_state_with_storage(&storage, &tx_type, &fee_builder, None)
-        .await
-        .context("Error while creating transaction state")?;
-
-    let tx_version = storage
-        .get_tx_version()
-        .await
-        .context("Error while getting tx version")?;
-
-    let builder = tos_common::transaction::builder::TransactionBuilder::new(
-        tx_version,
-        wallet.get_network().chain_id() as u8,
-        wallet.get_public_key().clone(),
-        None,
-        tx_type,
-        fee_builder,
-    );
-
-    let tx = match builder.build(&mut state, wallet.get_keypair()) {
-        Ok(tx) => tx,
-        Err(e) => {
-            manager.error(format!("Error while creating transaction: {}", e));
-            return Ok(());
-        }
-    };
-
-    broadcast_tx(wallet, manager, tx).await;
-    manager.message(format!(
-        "Successfully submitted name registration for '{}'",
-        normalized_name
-    ));
-    Ok(())
-}
-
-/// Resolve a TNS name to an address
-async fn resolve_name(
-    manager: &CommandManager,
-    mut args: ArgumentManager,
-) -> Result<(), CommandError> {
-    manager.validate_batch_params("resolve_name", &args)?;
-
-    let context = manager.get_context().lock()?;
-    let wallet: &Arc<Wallet> = context.get()?;
-
-    // Get the name to resolve
-    let name = get_required_arg_with_example(
-        &mut args,
-        "name",
-        "resolve_name name=<name>",
-        "resolve_name name=alice",
-    )?;
-
-    // Strip @tos.network suffix if present
-    let name_part = if name.ends_with("@tos.network") {
-        &name[..name.len() - 12]
-    } else {
-        &name
-    };
-
-    manager.message(format!("Resolving name '{}'...", name_part));
-
-    {
-        let network_handler = wallet.get_network_handler().lock().await;
-        let handler = network_handler.as_ref().ok_or_else(|| {
-            CommandError::InvalidArgument("Wallet not connected to daemon".to_string())
-        })?;
-        let daemon_api = handler.get_api();
-
-        match daemon_api.resolve_name(name_part).await {
-            Ok(result) => {
-                if let Some(address) = result.address {
-                    // Address implements Display, Cow<T> also implements Display when T does
-                    manager.message(format!("{}@tos.network -> {}", name_part, address));
-                } else {
-                    manager.message(format!("Name '{}' is not registered.", name_part));
-                }
-            }
-            Err(e) => {
-                manager.error(format!("Failed to resolve name: {}", e));
-            }
         }
     }
 

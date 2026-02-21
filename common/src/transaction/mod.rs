@@ -59,8 +59,6 @@ pub enum TransactionType {
     ShieldTransfers(Vec<ShieldTransferPayload>),
     /// Unshield transfers: UNO (encrypted) -> TOS (plaintext)
     UnshieldTransfers(Vec<UnshieldTransferPayload>),
-    /// TNS: Register a human-readable name (e.g., alice@tos.network)
-    RegisterName(RegisterNamePayload),
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -478,10 +476,6 @@ impl Serializer for TransactionType {
                     tx.write(writer);
                 }
             }
-            TransactionType::RegisterName(payload) => {
-                writer.write_u8(21);
-                payload.write(writer);
-            }
         };
     }
 
@@ -539,7 +533,6 @@ impl Serializer for TransactionType {
                 }
                 TransactionType::UnshieldTransfers(txs)
             }
-            21 => TransactionType::RegisterName(RegisterNamePayload::read(reader)?),
             _ => return Err(ReaderError::InvalidValue),
         })
     }
@@ -582,7 +575,6 @@ impl Serializer for TransactionType {
                 }
                 size
             }
-            TransactionType::RegisterName(payload) => payload.size(),
         }
     }
 }

@@ -406,19 +406,6 @@ pub enum BlockchainError {
     #[error("UNO (privacy balance) not implemented yet")]
     UnoNotImplemented,
 
-    // TNS (TOS Name Service) errors
-    #[error("TNS name is already registered")]
-    TnsNameAlreadyRegistered,
-    #[error("Account already has a registered name")]
-    TnsAccountAlreadyHasName,
-    #[error("TNS name not found")]
-    TnsNameNotFound,
-    #[error("Sender does not own the name")]
-    TnsSenderNotNameOwner,
-    #[error("Invalid name format")]
-    TnsInvalidNameFormat,
-    #[error("Name is reserved")]
-    TnsNameReserved,
     #[error("Invalid compressed public key")]
     InvalidPublicKey,
 

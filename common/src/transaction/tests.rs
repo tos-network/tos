@@ -1386,27 +1386,6 @@ impl<'a> BlockchainVerificationState<'a, TestError> for ChainState {
         // Use Mainnet for tests (chain_id = 0)
         crate::network::Network::Mainnet
     }
-
-    // ===== TNS (TOS Name Service) Verification Methods =====
-    // Stub implementations for testing
-
-    async fn is_name_registered(&self, _name_hash: &Hash) -> Result<bool, TestError> {
-        // For test purposes, return false (name not registered)
-        Ok(false)
-    }
-
-    async fn account_has_name(&self, _account: &'a CompressedPublicKey) -> Result<bool, TestError> {
-        // For test purposes, return false (account has no name)
-        Ok(false)
-    }
-
-    async fn get_account_name_hash(
-        &self,
-        _account: &'a CompressedPublicKey,
-    ) -> Result<Option<Hash>, TestError> {
-        // For test purposes, return None (account has no name)
-        Ok(None)
-    }
 }
 
 impl FeeHelper for AccountStateImpl {
