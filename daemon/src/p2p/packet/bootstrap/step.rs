@@ -1059,3 +1059,1022 @@ impl Serializer for StepResponse {
         size + 1
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tos_common::contract::ScheduledExecutionKind;
+    use tos_common::crypto::Hash;
+
+    // Helper: create a deterministic test hash from a byte seed
+    fn test_hash(seed: u8) -> Hash {
+        Hash::new([seed; 32])
+    }
+
+    // Helper: serialize and deserialize a StepRequest, returning the deserialized result
+    fn round_trip_request(request: &StepRequest) -> StepRequest<'static> {
+        let mut bytes = Vec::new();
+        {
+            let mut writer = Writer::new(&mut bytes);
+            request.write(&mut writer);
+        }
+        let mut reader = Reader::new(&bytes);
+        StepRequest::read(&mut reader).expect("Failed to deserialize StepRequest")
+    }
+
+    // Helper: serialize and deserialize a StepResponse, returning the deserialized result
+    fn round_trip_response(response: &StepResponse) -> StepResponse {
+        let mut bytes = Vec::new();
+        {
+            let mut writer = Writer::new(&mut bytes);
+            response.write(&mut writer);
+        }
+        let mut reader = Reader::new(&bytes);
+        StepResponse::read(&mut reader).expect("Failed to deserialize StepResponse")
+    }
+
+    // Helper: verify that size() matches actual serialized bytes
+    fn verify_size_request(request: &StepRequest) {
+        let mut bytes = Vec::new();
+        {
+            let mut writer = Writer::new(&mut bytes);
+            request.write(&mut writer);
+        }
+        assert_eq!(
+            request.size(),
+            bytes.len(),
+            "StepRequest::size() mismatch for {:?}",
+            request.kind()
+        );
+    }
+
+    // Helper: verify that size() matches actual serialized bytes
+    fn verify_size_response(response: &StepResponse) {
+        let mut bytes = Vec::new();
+        {
+            let mut writer = Writer::new(&mut bytes);
+            response.write(&mut writer);
+        }
+        assert_eq!(
+            response.size(),
+            bytes.len(),
+            "StepResponse::size() mismatch for {:?}",
+            response.kind()
+        );
+    }
+
+    // Helper: create a test ScheduledExecution
+    fn test_scheduled_execution(contract_seed: u8, topo: u64) -> ScheduledExecution {
+        ScheduledExecution::new_offercall(
+            test_hash(contract_seed),
+            1,                                          // chunk_id
+            vec![0x01, 0x02],                           // input_data
+            100_000,                                    // max_gas
+            1000,                                       // offer_amount
+            test_hash(contract_seed.wrapping_add(100)), // scheduler_contract
+            ScheduledExecutionKind::TopoHeight(topo),
+            topo.saturating_sub(10), // registration_topoheight
+        )
+    }
+
+    // ========================================================================
+    // StepRequest::AssetsSupply tests
+    // ========================================================================
+
+    #[test]
+    fn test_request_assets_supply_round_trip() {
+        let mut assets = IndexSet::new();
+        assets.insert(test_hash(1));
+        assets.insert(test_hash(2));
+        assets.insert(test_hash(3));
+
+        let request = StepRequest::AssetsSupply(100, Cow::Owned(assets.clone()));
+        let decoded = round_trip_request(&request);
+
+        match decoded {
+            StepRequest::AssetsSupply(topo, decoded_assets) => {
+                assert_eq!(topo, 100);
+                assert_eq!(decoded_assets.into_owned(), assets);
+            }
+            _ => panic!("Expected AssetsSupply variant"),
+        }
+    }
+
+    #[test]
+    fn test_request_assets_supply_single_asset() {
+        let mut assets = IndexSet::new();
+        assets.insert(test_hash(42));
+
+        let request = StepRequest::AssetsSupply(0, Cow::Owned(assets.clone()));
+        let decoded = round_trip_request(&request);
+
+        match decoded {
+            StepRequest::AssetsSupply(topo, decoded_assets) => {
+                assert_eq!(topo, 0);
+                assert_eq!(decoded_assets.into_owned().len(), 1);
+            }
+            _ => panic!("Expected AssetsSupply variant"),
+        }
+    }
+
+    #[test]
+    fn test_request_assets_supply_max_items() {
+        let mut assets = IndexSet::new();
+        for i in 0..MAX_ITEMS_PER_PAGE {
+            // Use i split across multiple bytes to avoid u8 wrapping
+            let mut bytes = [0u8; 32];
+            bytes[0] = (i & 0xFF) as u8;
+            bytes[1] = ((i >> 8) & 0xFF) as u8;
+            assets.insert(Hash::new(bytes));
+        }
+        assert_eq!(assets.len(), MAX_ITEMS_PER_PAGE);
+
+        let request = StepRequest::AssetsSupply(999, Cow::Owned(assets.clone()));
+        let decoded = round_trip_request(&request);
+
+        match decoded {
+            StepRequest::AssetsSupply(topo, decoded_assets) => {
+                assert_eq!(topo, 999);
+                assert_eq!(decoded_assets.into_owned().len(), MAX_ITEMS_PER_PAGE);
+            }
+            _ => panic!("Expected AssetsSupply variant"),
+        }
+    }
+
+    #[test]
+    fn test_request_assets_supply_size_consistency() {
+        let mut assets = IndexSet::new();
+        assets.insert(test_hash(1));
+        assets.insert(test_hash(2));
+
+        let request = StepRequest::AssetsSupply(50, Cow::Owned(assets));
+        verify_size_request(&request);
+    }
+
+    #[test]
+    fn test_request_assets_supply_empty_rejected() {
+        // Empty assets should be rejected during deserialization (len == 0 check)
+        let mut bytes = Vec::new();
+        {
+            let mut writer = Writer::new(&mut bytes);
+            writer.write_u8(11); // AssetsSupply ID
+            writer.write_u64(&0u64); // topoheight
+            writer.write_u16(0); // len = 0 (invalid)
+        }
+        let mut reader = Reader::new(&bytes);
+        let result = StepRequest::read(&mut reader);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_request_assets_supply_too_many_rejected() {
+        // More than MAX_ITEMS_PER_PAGE should be rejected
+        let mut bytes = Vec::new();
+        {
+            let mut writer = Writer::new(&mut bytes);
+            writer.write_u8(11); // AssetsSupply ID
+            writer.write_u64(&0u64); // topoheight
+            writer.write_u16((MAX_ITEMS_PER_PAGE + 1) as u16); // len > max
+        }
+        let mut reader = Reader::new(&bytes);
+        let result = StepRequest::read(&mut reader);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_request_assets_supply_duplicate_rejected() {
+        // Duplicate asset hashes should be rejected
+        let hash = test_hash(1);
+        let mut bytes = Vec::new();
+        {
+            let mut writer = Writer::new(&mut bytes);
+            writer.write_u8(11); // AssetsSupply ID
+            writer.write_u64(&0u64); // topoheight
+            writer.write_u16(2); // len = 2
+            hash.write(&mut writer); // first hash
+            hash.write(&mut writer); // duplicate hash
+        }
+        let mut reader = Reader::new(&bytes);
+        let result = StepRequest::read(&mut reader);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_request_assets_supply_kind() {
+        let request = StepRequest::AssetsSupply(0, Cow::Owned(IndexSet::new()));
+        assert_eq!(request.kind(), StepKind::Assets);
+    }
+
+    #[test]
+    fn test_request_assets_supply_topoheight() {
+        let request = StepRequest::AssetsSupply(12345, Cow::Owned(IndexSet::new()));
+        assert_eq!(request.get_requested_topoheight(), Some(12345));
+    }
+
+    // ========================================================================
+    // StepRequest::ContractsExecutions tests
+    // ========================================================================
+
+    #[test]
+    fn test_request_contracts_executions_round_trip() {
+        let request = StepRequest::ContractsExecutions(10, 100, None);
+        let decoded = round_trip_request(&request);
+
+        match decoded {
+            StepRequest::ContractsExecutions(min, max, page) => {
+                assert_eq!(min, 10);
+                assert_eq!(max, 100);
+                assert_eq!(page, None);
+            }
+            _ => panic!("Expected ContractsExecutions variant"),
+        }
+    }
+
+    #[test]
+    fn test_request_contracts_executions_with_page() {
+        let request = StepRequest::ContractsExecutions(0, 500, Some(3));
+        let decoded = round_trip_request(&request);
+
+        match decoded {
+            StepRequest::ContractsExecutions(min, max, page) => {
+                assert_eq!(min, 0);
+                assert_eq!(max, 500);
+                assert_eq!(page, Some(3));
+            }
+            _ => panic!("Expected ContractsExecutions variant"),
+        }
+    }
+
+    #[test]
+    fn test_request_contracts_executions_invalid_range() {
+        // min > max should be rejected
+        let mut bytes = Vec::new();
+        {
+            let mut writer = Writer::new(&mut bytes);
+            writer.write_u8(12); // ContractsExecutions ID
+            writer.write_u64(&100u64); // min = 100
+            writer.write_u64(&50u64); // max = 50 (invalid: min > max)
+            None::<u64>.write(&mut writer); // no page
+        }
+        let mut reader = Reader::new(&bytes);
+        let result = StepRequest::read(&mut reader);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_request_contracts_executions_page_zero_rejected() {
+        // page = 0 should be rejected (pages are 1-indexed for "next page")
+        let mut bytes = Vec::new();
+        {
+            let mut writer = Writer::new(&mut bytes);
+            writer.write_u8(12); // ContractsExecutions ID
+            writer.write_u64(&0u64); // min
+            writer.write_u64(&100u64); // max
+            Some(0u64).write(&mut writer); // page = 0 (invalid)
+        }
+        let mut reader = Reader::new(&bytes);
+        let result = StepRequest::read(&mut reader);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_request_contracts_executions_size_consistency() {
+        let request = StepRequest::ContractsExecutions(0, 100, Some(2));
+        verify_size_request(&request);
+
+        let request_no_page = StepRequest::ContractsExecutions(10, 500, None);
+        verify_size_request(&request_no_page);
+    }
+
+    #[test]
+    fn test_request_contracts_executions_kind() {
+        let request = StepRequest::ContractsExecutions(0, 100, None);
+        assert_eq!(request.kind(), StepKind::Contracts);
+    }
+
+    #[test]
+    fn test_request_contracts_executions_topoheight() {
+        let request = StepRequest::ContractsExecutions(10, 500, None);
+        assert_eq!(request.get_requested_topoheight(), Some(500));
+    }
+
+    // ========================================================================
+    // StepResponse::AssetsSupply tests
+    // ========================================================================
+
+    #[test]
+    fn test_response_assets_supply_round_trip() {
+        let supply = vec![Some(1000), None, Some(5000), Some(0)];
+        let response = StepResponse::AssetsSupply(supply.clone());
+        let decoded = round_trip_response(&response);
+
+        match decoded {
+            StepResponse::AssetsSupply(decoded_supply) => {
+                assert_eq!(decoded_supply, supply);
+            }
+            _ => panic!("Expected AssetsSupply response variant"),
+        }
+    }
+
+    #[test]
+    fn test_response_assets_supply_empty() {
+        let response = StepResponse::AssetsSupply(vec![]);
+        let decoded = round_trip_response(&response);
+
+        match decoded {
+            StepResponse::AssetsSupply(decoded_supply) => {
+                assert!(decoded_supply.is_empty());
+            }
+            _ => panic!("Expected AssetsSupply response variant"),
+        }
+    }
+
+    #[test]
+    fn test_response_assets_supply_all_none() {
+        let supply = vec![None, None, None];
+        let response = StepResponse::AssetsSupply(supply.clone());
+        let decoded = round_trip_response(&response);
+
+        match decoded {
+            StepResponse::AssetsSupply(decoded_supply) => {
+                assert_eq!(decoded_supply, supply);
+            }
+            _ => panic!("Expected AssetsSupply response variant"),
+        }
+    }
+
+    #[test]
+    fn test_response_assets_supply_all_some() {
+        let supply = vec![Some(100), Some(200), Some(u64::MAX)];
+        let response = StepResponse::AssetsSupply(supply.clone());
+        let decoded = round_trip_response(&response);
+
+        match decoded {
+            StepResponse::AssetsSupply(decoded_supply) => {
+                assert_eq!(decoded_supply, supply);
+            }
+            _ => panic!("Expected AssetsSupply response variant"),
+        }
+    }
+
+    #[test]
+    fn test_response_assets_supply_max_items() {
+        let supply: Vec<Option<u64>> = (0..MAX_ITEMS_PER_PAGE as u64).map(Some).collect();
+        let response = StepResponse::AssetsSupply(supply.clone());
+        let decoded = round_trip_response(&response);
+
+        match decoded {
+            StepResponse::AssetsSupply(decoded_supply) => {
+                assert_eq!(decoded_supply.len(), MAX_ITEMS_PER_PAGE);
+                assert_eq!(decoded_supply, supply);
+            }
+            _ => panic!("Expected AssetsSupply response variant"),
+        }
+    }
+
+    #[test]
+    fn test_response_assets_supply_too_many_rejected() {
+        // Manually construct a response with len > MAX_ITEMS_PER_PAGE
+        let mut bytes = Vec::new();
+        {
+            let mut writer = Writer::new(&mut bytes);
+            writer.write_u8(11); // AssetsSupply response ID
+            writer.write_u16((MAX_ITEMS_PER_PAGE + 1) as u16); // len > max
+        }
+        let mut reader = Reader::new(&bytes);
+        let result = StepResponse::read(&mut reader);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_response_assets_supply_size_consistency() {
+        let response = StepResponse::AssetsSupply(vec![Some(100), None, Some(200)]);
+        verify_size_response(&response);
+
+        let response_empty = StepResponse::AssetsSupply(vec![]);
+        verify_size_response(&response_empty);
+    }
+
+    #[test]
+    fn test_response_assets_supply_kind() {
+        let response = StepResponse::AssetsSupply(vec![]);
+        assert_eq!(response.kind(), StepKind::Assets);
+    }
+
+    // ========================================================================
+    // StepResponse::ContractsExecutions tests
+    // ========================================================================
+
+    #[test]
+    fn test_response_contracts_executions_round_trip() {
+        let executions = vec![
+            test_scheduled_execution(1, 100),
+            test_scheduled_execution(2, 200),
+        ];
+        let response = StepResponse::ContractsExecutions(executions, None);
+        let decoded = round_trip_response(&response);
+
+        match decoded {
+            StepResponse::ContractsExecutions(decoded_execs, page) => {
+                assert_eq!(decoded_execs.len(), 2);
+                assert_eq!(page, None);
+                assert_eq!(decoded_execs[0].contract, test_hash(1));
+                assert_eq!(decoded_execs[1].contract, test_hash(2));
+            }
+            _ => panic!("Expected ContractsExecutions response variant"),
+        }
+    }
+
+    #[test]
+    fn test_response_contracts_executions_with_page() {
+        let executions = vec![test_scheduled_execution(1, 50)];
+        let response = StepResponse::ContractsExecutions(executions, Some(2));
+        let decoded = round_trip_response(&response);
+
+        match decoded {
+            StepResponse::ContractsExecutions(decoded_execs, page) => {
+                assert_eq!(decoded_execs.len(), 1);
+                assert_eq!(page, Some(2));
+            }
+            _ => panic!("Expected ContractsExecutions response variant"),
+        }
+    }
+
+    #[test]
+    fn test_response_contracts_executions_empty() {
+        let response = StepResponse::ContractsExecutions(vec![], None);
+        let decoded = round_trip_response(&response);
+
+        match decoded {
+            StepResponse::ContractsExecutions(decoded_execs, page) => {
+                assert!(decoded_execs.is_empty());
+                assert_eq!(page, None);
+            }
+            _ => panic!("Expected ContractsExecutions response variant"),
+        }
+    }
+
+    #[test]
+    fn test_response_contracts_executions_block_end_kind() {
+        let mut exec = test_scheduled_execution(5, 300);
+        exec.kind = ScheduledExecutionKind::BlockEnd;
+        // Recompute hash with new kind
+        exec.hash = ScheduledExecution::compute_hash(
+            &exec.contract,
+            &exec.kind,
+            exec.registration_topoheight,
+            exec.chunk_id,
+            &exec.scheduler_contract,
+        );
+
+        let response = StepResponse::ContractsExecutions(vec![exec], None);
+        let decoded = round_trip_response(&response);
+
+        match decoded {
+            StepResponse::ContractsExecutions(decoded_execs, _) => {
+                assert_eq!(decoded_execs.len(), 1);
+                assert_eq!(decoded_execs[0].kind, ScheduledExecutionKind::BlockEnd);
+            }
+            _ => panic!("Expected ContractsExecutions response variant"),
+        }
+    }
+
+    #[test]
+    fn test_response_contracts_executions_too_many_rejected() {
+        let mut bytes = Vec::new();
+        {
+            let mut writer = Writer::new(&mut bytes);
+            writer.write_u8(12); // ContractsExecutions response ID
+            writer.write_u16((MAX_ITEMS_PER_PAGE + 1) as u16); // len > max
+        }
+        let mut reader = Reader::new(&bytes);
+        let result = StepResponse::read(&mut reader);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_response_contracts_executions_page_zero_rejected() {
+        let mut bytes = Vec::new();
+        {
+            let mut writer = Writer::new(&mut bytes);
+            writer.write_u8(12); // ContractsExecutions response ID
+            writer.write_u16(0); // empty list
+            Some(0u64).write(&mut writer); // page = 0 (invalid)
+        }
+        let mut reader = Reader::new(&bytes);
+        let result = StepResponse::read(&mut reader);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_response_contracts_executions_size_consistency() {
+        let response =
+            StepResponse::ContractsExecutions(vec![test_scheduled_execution(1, 100)], Some(5));
+        verify_size_response(&response);
+
+        let response_empty = StepResponse::ContractsExecutions(vec![], None);
+        verify_size_response(&response_empty);
+    }
+
+    #[test]
+    fn test_response_contracts_executions_kind() {
+        let response = StepResponse::ContractsExecutions(vec![], None);
+        assert_eq!(response.kind(), StepKind::Contracts);
+    }
+
+    // ========================================================================
+    // Protocol ID consistency tests
+    // ========================================================================
+
+    #[test]
+    fn test_request_wire_ids() {
+        // Verify wire IDs match expected values for protocol compatibility
+        let test_cases: Vec<(StepRequest, u8)> = vec![
+            (
+                StepRequest::AssetsSupply(
+                    0,
+                    Cow::Owned({
+                        let mut s = IndexSet::new();
+                        s.insert(test_hash(1));
+                        s
+                    }),
+                ),
+                11,
+            ),
+            (StepRequest::ContractsExecutions(0, 100, None), 12),
+        ];
+
+        for (request, expected_id) in test_cases {
+            let mut bytes = Vec::new();
+            {
+                let mut writer = Writer::new(&mut bytes);
+                request.write(&mut writer);
+            }
+            assert_eq!(
+                bytes[0],
+                expected_id,
+                "Wire ID mismatch for request {:?}",
+                request.kind()
+            );
+        }
+    }
+
+    #[test]
+    fn test_response_wire_ids() {
+        // Verify response wire IDs
+        let test_cases: Vec<(StepResponse, u8)> = vec![
+            (StepResponse::AssetsSupply(vec![Some(1)]), 11),
+            (StepResponse::ContractsExecutions(vec![], None), 12),
+        ];
+
+        for (response, expected_id) in test_cases {
+            let mut bytes = Vec::new();
+            {
+                let mut writer = Writer::new(&mut bytes);
+                response.write(&mut writer);
+            }
+            assert_eq!(
+                bytes[0],
+                expected_id,
+                "Wire ID mismatch for response {:?}",
+                response.kind()
+            );
+        }
+    }
+
+    #[test]
+    fn test_invalid_step_id_rejected() {
+        // An unknown step ID should be rejected
+        let mut bytes = Vec::new();
+        {
+            let mut writer = Writer::new(&mut bytes);
+            writer.write_u8(255); // invalid ID
+        }
+        let mut reader = Reader::new(&bytes);
+        assert!(StepRequest::read(&mut reader).is_err());
+
+        let mut reader = Reader::new(&bytes);
+        assert!(StepResponse::read(&mut reader).is_err());
+    }
+
+    // ========================================================================
+    // Positional matching verification (AssetsSupply request/response contract)
+    // ========================================================================
+
+    #[test]
+    fn test_assets_supply_positional_contract() {
+        // Verify that response order matches request order
+        // This test documents the positional matching behavior:
+        // request assets [A, B, C] -> response supplies [supply_A, supply_B, supply_C]
+        let assets: IndexSet<Hash> = (0..5u8).map(test_hash).collect();
+        let supply: Vec<Option<u64>> = vec![Some(100), None, Some(300), Some(400), None];
+
+        // Request preserves insertion order
+        let request = StepRequest::AssetsSupply(50, Cow::Owned(assets.clone()));
+        let decoded_req = round_trip_request(&request);
+        let decoded_assets = match decoded_req {
+            StepRequest::AssetsSupply(_, a) => a.into_owned(),
+            _ => panic!("Expected AssetsSupply"),
+        };
+
+        // Response preserves index order
+        let response = StepResponse::AssetsSupply(supply.clone());
+        let decoded_resp = round_trip_response(&response);
+        let decoded_supply = match decoded_resp {
+            StepResponse::AssetsSupply(s) => s,
+            _ => panic!("Expected AssetsSupply"),
+        };
+
+        // Zip should pair correctly
+        let pairs: Vec<(Hash, Option<u64>)> = decoded_assets
+            .into_iter()
+            .zip(decoded_supply.into_iter())
+            .collect();
+
+        assert_eq!(pairs.len(), 5);
+        assert_eq!(pairs[0], (test_hash(0), Some(100)));
+        assert_eq!(pairs[1], (test_hash(1), None));
+        assert_eq!(pairs[2], (test_hash(2), Some(300)));
+        assert_eq!(pairs[3], (test_hash(3), Some(400)));
+        assert_eq!(pairs[4], (test_hash(4), None));
+    }
+
+    // ========================================================================
+    // Other StepRequest variants (regression coverage)
+    // ========================================================================
+
+    #[test]
+    fn test_request_assets_round_trip() {
+        let request = StepRequest::Assets(10, 100, Some(2));
+        let decoded = round_trip_request(&request);
+        match decoded {
+            StepRequest::Assets(min, max, page) => {
+                assert_eq!(min, 10);
+                assert_eq!(max, 100);
+                assert_eq!(page, Some(2));
+            }
+            _ => panic!("Expected Assets variant"),
+        }
+        verify_size_request(&request);
+    }
+
+    #[test]
+    fn test_request_keys_round_trip() {
+        let request = StepRequest::Keys(0, 500, None);
+        let decoded = round_trip_request(&request);
+        match decoded {
+            StepRequest::Keys(min, max, page) => {
+                assert_eq!(min, 0);
+                assert_eq!(max, 500);
+                assert_eq!(page, None);
+            }
+            _ => panic!("Expected Keys variant"),
+        }
+        verify_size_request(&request);
+    }
+
+    #[test]
+    fn test_request_contracts_round_trip() {
+        let request = StepRequest::Contracts(50, 200, Some(1));
+        let decoded = round_trip_request(&request);
+        match decoded {
+            StepRequest::Contracts(min, max, page) => {
+                assert_eq!(min, 50);
+                assert_eq!(max, 200);
+                assert_eq!(page, Some(1));
+            }
+            _ => panic!("Expected Contracts variant"),
+        }
+        verify_size_request(&request);
+    }
+
+    #[test]
+    fn test_request_contract_module_round_trip() {
+        let request = StepRequest::ContractModule(10, 100, Cow::Owned(test_hash(5)));
+        let decoded = round_trip_request(&request);
+        match decoded {
+            StepRequest::ContractModule(min, max, hash) => {
+                assert_eq!(min, 10);
+                assert_eq!(max, 100);
+                assert_eq!(*hash, test_hash(5));
+            }
+            _ => panic!("Expected ContractModule variant"),
+        }
+        verify_size_request(&request);
+    }
+
+    #[test]
+    fn test_request_contract_balances_round_trip() {
+        let request = StepRequest::ContractBalances(Cow::Owned(test_hash(3)), 50, Some(1));
+        let decoded = round_trip_request(&request);
+        match decoded {
+            StepRequest::ContractBalances(hash, topo, page) => {
+                assert_eq!(*hash, test_hash(3));
+                assert_eq!(topo, 50);
+                assert_eq!(page, Some(1));
+            }
+            _ => panic!("Expected ContractBalances variant"),
+        }
+        verify_size_request(&request);
+    }
+
+    #[test]
+    fn test_request_contract_stores_round_trip() {
+        let request = StepRequest::ContractStores(Cow::Owned(test_hash(7)), 200, None);
+        let decoded = round_trip_request(&request);
+        match decoded {
+            StepRequest::ContractStores(hash, topo, page) => {
+                assert_eq!(*hash, test_hash(7));
+                assert_eq!(topo, 200);
+                assert_eq!(page, None);
+            }
+            _ => panic!("Expected ContractStores variant"),
+        }
+        verify_size_request(&request);
+    }
+
+    #[test]
+    fn test_request_blocks_metadata_round_trip() {
+        let request = StepRequest::BlocksMetadata(12345);
+        let decoded = round_trip_request(&request);
+        match decoded {
+            StepRequest::BlocksMetadata(topo) => {
+                assert_eq!(topo, 12345);
+            }
+            _ => panic!("Expected BlocksMetadata variant"),
+        }
+        verify_size_request(&request);
+    }
+
+    // ========================================================================
+    // TOS Extension StepRequest tests
+    // ========================================================================
+
+    #[test]
+    fn test_request_tns_names_round_trip() {
+        let request = StepRequest::TnsNames(Some(10));
+        let decoded = round_trip_request(&request);
+        match decoded {
+            StepRequest::TnsNames(page) => assert_eq!(page, Some(10)),
+            _ => panic!("Expected TnsNames variant"),
+        }
+        verify_size_request(&request);
+    }
+
+    #[test]
+    fn test_request_uno_balances_round_trip() {
+        let key = PublicKey::from_bytes(&[5u8; 32]).unwrap();
+        let request =
+            StepRequest::UnoBalances(Cow::Owned(key), Cow::Owned(test_hash(99)), 800, Some(2));
+        let decoded = round_trip_request(&request);
+        match decoded {
+            StepRequest::UnoBalances(k, asset, topo, page) => {
+                assert_eq!(*k, PublicKey::from_bytes(&[5u8; 32]).unwrap());
+                assert_eq!(*asset, test_hash(99));
+                assert_eq!(topo, 800);
+                assert_eq!(page, Some(2));
+            }
+            _ => panic!("Expected UnoBalances variant"),
+        }
+        verify_size_request(&request);
+    }
+
+    // ========================================================================
+    // TOS Extension StepResponse tests
+    // ========================================================================
+
+    #[test]
+    fn test_response_tns_names_empty() {
+        let response = StepResponse::TnsNames(IndexMap::new(), None);
+        let decoded = round_trip_response(&response);
+        match decoded {
+            StepResponse::TnsNames(entries, page) => {
+                assert!(entries.is_empty());
+                assert_eq!(page, None);
+            }
+            _ => panic!("Expected TnsNames variant"),
+        }
+        verify_size_response(&response);
+    }
+
+    #[test]
+    fn test_response_tns_names_with_entries() {
+        let mut entries = IndexMap::new();
+        let owner = PublicKey::from_bytes(&[10u8; 32]).unwrap();
+        entries.insert(test_hash(1), owner);
+
+        let response = StepResponse::TnsNames(entries, Some(3));
+        let decoded = round_trip_response(&response);
+        match decoded {
+            StepResponse::TnsNames(decoded_entries, page) => {
+                assert_eq!(decoded_entries.len(), 1);
+                assert_eq!(
+                    *decoded_entries.get(&test_hash(1)).unwrap(),
+                    PublicKey::from_bytes(&[10u8; 32]).unwrap()
+                );
+                assert_eq!(page, Some(3));
+            }
+            _ => panic!("Expected TnsNames variant"),
+        }
+        verify_size_response(&response);
+    }
+
+    #[test]
+    fn test_response_tns_names_kind() {
+        let response = StepResponse::TnsNames(IndexMap::new(), None);
+        assert_eq!(response.kind(), StepKind::Tns);
+    }
+
+    #[test]
+    fn test_response_uno_balances_empty() {
+        let response = StepResponse::UnoBalances(Vec::new(), None);
+        let decoded = round_trip_response(&response);
+        match decoded {
+            StepResponse::UnoBalances(entries, page) => {
+                assert!(entries.is_empty());
+                assert_eq!(page, None);
+            }
+            _ => panic!("Expected UnoBalances variant"),
+        }
+        verify_size_response(&response);
+    }
+
+    #[test]
+    fn test_response_uno_balances_with_data() {
+        use tos_common::account::{BalanceType, CiphertextCache};
+        use tos_common::crypto::elgamal::Ciphertext;
+
+        let entries = vec![
+            UnoBalance {
+                topoheight: 100,
+                output_balance: None,
+                final_balance: CiphertextCache::Decompressed(Ciphertext::zero()),
+                balance_type: BalanceType::Input,
+            },
+            UnoBalance {
+                topoheight: 200,
+                output_balance: Some(CiphertextCache::Decompressed(Ciphertext::zero())),
+                final_balance: CiphertextCache::Decompressed(Ciphertext::zero()),
+                balance_type: BalanceType::Both,
+            },
+        ];
+        let response = StepResponse::UnoBalances(entries, Some(3));
+        let decoded = round_trip_response(&response);
+        match decoded {
+            StepResponse::UnoBalances(entries, page) => {
+                assert_eq!(entries.len(), 2);
+                assert_eq!(entries[0].topoheight, 100);
+                assert_eq!(entries[0].balance_type, BalanceType::Input);
+                assert!(entries[0].output_balance.is_none());
+                assert_eq!(entries[1].topoheight, 200);
+                assert_eq!(entries[1].balance_type, BalanceType::Both);
+                assert!(entries[1].output_balance.is_some());
+                assert_eq!(page, Some(3));
+            }
+            _ => panic!("Expected UnoBalances variant"),
+        }
+        verify_size_response(&response);
+    }
+
+    #[test]
+    fn test_response_uno_balances_kind() {
+        let response = StepResponse::UnoBalances(Vec::new(), Some(4));
+        assert_eq!(response.kind(), StepKind::UnoBalance);
+    }
+
+    // ========================================================================
+    // TOS Extension page validation tests
+    // ========================================================================
+
+    #[test]
+    fn test_response_tos_page_zero_rejected() {
+        // Test that page=0 is rejected for TOS extension variants
+        let test_cases: Vec<(&str, u8)> = vec![("TnsNames", 22), ("UnoBalances", 25)];
+
+        for (name, id) in test_cases {
+            let mut bytes = Vec::new();
+            {
+                let mut writer = Writer::new(&mut bytes);
+                writer.write_u8(id);
+                writer.write_u16(0); // empty collection
+                                     // page = Some(0) which is invalid
+                1u8.write(&mut writer); // Some variant
+                0u64.write(&mut writer); // page = 0
+            }
+            let mut reader = Reader::new(&bytes);
+            let result = StepResponse::read(&mut reader);
+            assert!(
+                result.is_err(),
+                "Expected page=0 to be rejected for {} (ID {})",
+                name,
+                id
+            );
+        }
+    }
+
+    #[test]
+    fn test_response_tos_too_many_items_rejected() {
+        // Test that more than MAX_ITEMS_PER_PAGE is rejected
+        let test_cases: Vec<(&str, u8)> = vec![("TnsNames", 22), ("UnoBalances", 25)];
+
+        for (name, id) in test_cases {
+            let mut bytes = Vec::new();
+            {
+                let mut writer = Writer::new(&mut bytes);
+                writer.write_u8(id);
+                writer.write_u16((MAX_ITEMS_PER_PAGE + 1) as u16);
+            }
+            let mut reader = Reader::new(&bytes);
+            let result = StepResponse::read(&mut reader);
+            assert!(
+                result.is_err(),
+                "Expected too many items to be rejected for {} (ID {})",
+                name,
+                id
+            );
+        }
+    }
+
+    // ========================================================================
+    // TOS Extension wire ID verification tests
+    // ========================================================================
+
+    #[test]
+    fn test_request_tos_extension_wire_ids() {
+        // Verify that each TOS extension request serializes with the correct wire ID
+        let test_cases: Vec<(StepRequest, u8)> = vec![
+            (StepRequest::TnsNames(None), 22),
+            (
+                StepRequest::UnoBalances(
+                    Cow::Owned(PublicKey::from_bytes(&[0u8; 32]).unwrap()),
+                    Cow::Owned(test_hash(1)),
+                    0,
+                    None,
+                ),
+                25,
+            ),
+        ];
+
+        for (request, expected_id) in test_cases {
+            let mut bytes = Vec::new();
+            {
+                let mut writer = Writer::new(&mut bytes);
+                request.write(&mut writer);
+            }
+            assert_eq!(
+                bytes[0],
+                expected_id,
+                "Wire ID mismatch for {:?}",
+                request.kind()
+            );
+        }
+    }
+
+    #[test]
+    fn test_response_tos_extension_wire_ids() {
+        // Verify that each TOS extension response serializes with the correct wire ID
+        let test_cases: Vec<(StepResponse, u8)> = vec![
+            (StepResponse::TnsNames(IndexMap::new(), None), 22),
+            (StepResponse::UnoBalances(Vec::new(), None), 25),
+        ];
+
+        for (response, expected_id) in test_cases {
+            let mut bytes = Vec::new();
+            {
+                let mut writer = Writer::new(&mut bytes);
+                response.write(&mut writer);
+            }
+            assert_eq!(
+                bytes[0],
+                expected_id,
+                "Wire ID mismatch for {:?}",
+                response.kind()
+            );
+        }
+    }
+
+    // ========================================================================
+    // StepKind transition tests for TOS extensions
+    // ========================================================================
+
+    #[test]
+    fn test_step_kind_tos_transitions() {
+        assert_eq!(StepKind::Tns.next(), Some(StepKind::UnoBalance));
+        assert_eq!(StepKind::UnoBalance.next(), Some(StepKind::BlocksMetadata));
+        assert_eq!(StepKind::BlocksMetadata.next(), None);
+    }
+
+    #[test]
+    fn test_step_kind_tos_request_kind_mapping() {
+        assert_eq!(StepRequest::TnsNames(None).kind(), StepKind::Tns);
+        assert_eq!(
+            StepRequest::UnoBalances(
+                Cow::Owned(PublicKey::from_bytes(&[0u8; 32]).unwrap()),
+                Cow::Owned(test_hash(1)),
+                0,
+                None
+            )
+            .kind(),
+            StepKind::UnoBalance
+        );
+    }
+}
