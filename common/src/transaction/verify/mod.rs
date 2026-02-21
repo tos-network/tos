@@ -1,4 +1,3 @@
-pub mod agent_account;
 mod contract;
 mod error;
 mod state;
@@ -19,17 +18,13 @@ use tos_kernel::ModuleValidator;
 
 use super::{ContractDeposit, Role, Transaction, TransactionType};
 use crate::{
-    account::{AgentAccountMeta, SessionKey},
     config::{
         BURN_PER_CONTRACT, MAX_GAS_USAGE_PER_TX, MIN_SHIELD_TOS_AMOUNT, TOS_ASSET, UNO_ASSET,
         UNO_BURN_FEE_PER_TRANSFER,
     },
     contract::ContractProvider,
     crypto::{
-        elgamal::{
-            Ciphertext, CompressedPublicKey, DecompressionError, DecryptHandle, PedersenCommitment,
-            PublicKey,
-        },
+        elgamal::{Ciphertext, DecompressionError, DecryptHandle, PedersenCommitment, PublicKey},
         hash,
         proofs::{BatchCollector, ProofVerificationError, BP_GENS, BULLET_PROOF_SIZE, PC_GENS},
         Hash, ProtocolTranscript,
@@ -37,12 +32,11 @@ use crate::{
     serializer::Serializer,
     tokio::spawn_blocking_safe,
     transaction::{
-        payload::{AgentAccountPayload, UnoTransferPayload, UnshieldTransferPayload},
+        payload::{UnoTransferPayload, UnshieldTransferPayload},
         TxVersion, EXTRA_DATA_LIMIT_SIZE, EXTRA_DATA_LIMIT_SUM_SIZE, MAX_DEPOSIT_PER_INVOKE_CALL,
         MAX_MULTISIG_PARTICIPANTS, MAX_TRANSFER_COUNT,
     },
 };
-use agent_account::{is_zero_key, verify_agent_account_payload};
 use contract::InvokeContract;
 
 pub use error::*;
@@ -114,58 +108,6 @@ fn add_uno_balance<E>(
     Ok(())
 }
 
-#[derive(Clone)]
-enum AgentAuthKind {
-    Owner,
-    Controller,
-    Session(SessionKey),
-}
-
-#[derive(Clone)]
-struct AgentAuthContext {
-    meta: AgentAccountMeta,
-    kind: AgentAuthKind,
-}
-
-impl AgentAuthContext {
-    fn is_owner(&self) -> bool {
-        matches!(self.kind, AgentAuthKind::Owner)
-    }
-
-    fn session_key(&self) -> Option<&SessionKey> {
-        match &self.kind {
-            AgentAuthKind::Session(key) => Some(key),
-            _ => None,
-        }
-    }
-}
-
-fn is_agent_admin_payload(payload: &AgentAccountPayload) -> bool {
-    matches!(
-        payload,
-        AgentAccountPayload::UpdatePolicy { .. }
-            | AgentAccountPayload::RotateController { .. }
-            | AgentAccountPayload::SetStatus { .. }
-            | AgentAccountPayload::SetSessionKeyRoot { .. }
-            | AgentAccountPayload::AddSessionKey { .. }
-            | AgentAccountPayload::RevokeSessionKey { .. }
-    )
-}
-
-fn is_agent_admin_tx(tx_type: &TransactionType) -> bool {
-    match tx_type {
-        TransactionType::AgentAccount(payload) => is_agent_admin_payload(payload),
-        _ => false,
-    }
-}
-
-struct AgentPolicyView {
-    targets: Vec<CompressedPublicKey>,
-    assets: Vec<Hash>,
-    total_spend: u64,
-    has_hidden_amounts: bool,
-}
-
 impl Transaction {
     pub fn has_valid_version_format(&self) -> bool {
         match self.version {
@@ -177,7 +119,6 @@ impl Transaction {
                     | TransactionType::MultiSig(_)
                     | TransactionType::InvokeContract(_)
                     | TransactionType::DeployContract(_)
-                    | TransactionType::AgentAccount(_)
                     | TransactionType::UnoTransfers(_)
                     | TransactionType::ShieldTransfers(_)
                     | TransactionType::UnshieldTransfers(_)
@@ -278,265 +219,6 @@ impl Transaction {
         true
     }
 
-    fn collect_agent_policy_view<E>(&self) -> Result<AgentPolicyView, VerificationError<E>> {
-        let mut targets = Vec::new();
-        let mut assets = Vec::new();
-        let mut total_spend = 0u64;
-        let mut has_hidden_amounts = false;
-
-        let mut push_asset = |asset: &Hash| {
-            if !assets.contains(asset) {
-                assets.push(asset.clone());
-            }
-        };
-
-        let mut push_target = |target: &CompressedPublicKey| {
-            if !targets.contains(target) {
-                targets.push(target.clone());
-            }
-        };
-
-        let mut add_spend = |amount: u64| -> Result<(), VerificationError<E>> {
-            total_spend = total_spend
-                .checked_add(amount)
-                .ok_or(VerificationError::Overflow)?;
-            Ok(())
-        };
-
-        match &self.data {
-            TransactionType::Transfers(transfers) => {
-                for transfer in transfers {
-                    push_target(transfer.get_destination());
-                    push_asset(transfer.get_asset());
-                    add_spend(transfer.get_amount())?;
-                }
-            }
-            TransactionType::Burn(payload) => {
-                push_asset(&payload.asset);
-                add_spend(payload.amount)?;
-            }
-            TransactionType::InvokeContract(payload) => {
-                let target = PublicKey::from_hash(&payload.contract).compress();
-                push_target(&target);
-                for (asset, deposit) in &payload.deposits {
-                    let amount = deposit
-                        .get_amount()
-                        .map_err(|e| VerificationError::AnyError(anyhow!(e)))?;
-                    push_asset(asset);
-                    add_spend(amount)?;
-                }
-                if payload.max_gas > 0 {
-                    push_asset(&TOS_ASSET);
-                    add_spend(payload.max_gas)?;
-                }
-            }
-            TransactionType::DeployContract(payload) => {
-                let bytecode = payload
-                    .module
-                    .get_bytecode()
-                    .map(|b| b.to_vec())
-                    .unwrap_or_default();
-                let contract_address =
-                    crate::crypto::compute_deterministic_contract_address(&self.source, &bytecode);
-                let target = PublicKey::from_hash(&contract_address).compress();
-                push_target(&target);
-
-                push_asset(&TOS_ASSET);
-                add_spend(BURN_PER_CONTRACT)?;
-
-                if let Some(invoke) = &payload.invoke {
-                    for (asset, deposit) in &invoke.deposits {
-                        let amount = deposit
-                            .get_amount()
-                            .map_err(|e| VerificationError::AnyError(anyhow!(e)))?;
-                        push_asset(asset);
-                        add_spend(amount)?;
-                    }
-                    if invoke.max_gas > 0 {
-                        push_asset(&TOS_ASSET);
-                        add_spend(invoke.max_gas)?;
-                    }
-                }
-            }
-            TransactionType::UnoTransfers(transfers) => {
-                for transfer in transfers {
-                    push_target(transfer.get_destination());
-                    push_asset(transfer.get_asset());
-                }
-                has_hidden_amounts = true;
-            }
-            TransactionType::ShieldTransfers(transfers) => {
-                for transfer in transfers {
-                    push_target(transfer.get_destination());
-                    push_asset(transfer.get_asset());
-                    add_spend(transfer.get_amount())?;
-                }
-            }
-            TransactionType::UnshieldTransfers(transfers) => {
-                for transfer in transfers {
-                    push_target(transfer.get_destination());
-                    push_asset(transfer.get_asset());
-                    add_spend(transfer.get_amount())?;
-                }
-            }
-            TransactionType::MultiSig(_)
-            | TransactionType::AgentAccount(_)
-            | TransactionType::RegisterName(_) => {}
-        }
-
-        Ok(AgentPolicyView {
-            targets,
-            assets,
-            total_spend,
-            has_hidden_amounts,
-        })
-    }
-
-    async fn resolve_agent_auth<'a, E, B: BlockchainVerificationState<'a, E> + Send>(
-        &'a self,
-        state: &mut B,
-        signing_bytes: &[u8],
-        source_decompressed: &PublicKey,
-    ) -> Result<Option<AgentAuthContext>, VerificationError<E>> {
-        let meta = state
-            .get_agent_account_meta(&self.source)
-            .await
-            .map_err(VerificationError::State)?;
-
-        let Some(meta) = meta else {
-            if !self.signature.verify(signing_bytes, source_decompressed) {
-                if log::log_enabled!(log::Level::Debug) {
-                    debug!("transaction signature is invalid");
-                }
-                return Err(VerificationError::InvalidSignature);
-            }
-            return Ok(None);
-        };
-
-        if meta.owner != self.source {
-            return Err(VerificationError::AgentAccountInvalidParameter);
-        }
-        if is_zero_key(&meta.owner) {
-            return Err(VerificationError::AgentAccountInvalidParameter);
-        }
-        if is_zero_key(&meta.controller) {
-            return Err(VerificationError::AgentAccountInvalidController);
-        }
-
-        if self.signature.verify(signing_bytes, source_decompressed) {
-            return Ok(Some(AgentAuthContext {
-                meta,
-                kind: AgentAuthKind::Owner,
-            }));
-        }
-
-        let controller = meta
-            .controller
-            .decompress()
-            .map_err(|err| VerificationError::Proof(err.into()))?;
-        if self.signature.verify(signing_bytes, &controller) {
-            return Ok(Some(AgentAuthContext {
-                meta,
-                kind: AgentAuthKind::Controller,
-            }));
-        }
-
-        let current_topoheight = state.get_verification_topoheight();
-        for key in state
-            .get_session_keys_for_account(&self.source)
-            .await
-            .map_err(VerificationError::State)?
-        {
-            let public_key = key
-                .public_key
-                .decompress()
-                .map_err(|err| VerificationError::Proof(err.into()))?;
-            if self.signature.verify(signing_bytes, &public_key) {
-                if current_topoheight >= key.expiry_topoheight {
-                    return Err(VerificationError::AgentAccountSessionKeyExpired);
-                }
-                return Ok(Some(AgentAuthContext {
-                    meta,
-                    kind: AgentAuthKind::Session(key),
-                }));
-            }
-        }
-
-        if log::log_enabled!(log::Level::Debug) {
-            debug!("transaction signature is invalid");
-        }
-        Err(VerificationError::InvalidSignature)
-    }
-
-    async fn enforce_agent_rules<'a, E, B: BlockchainVerificationState<'a, E> + Send>(
-        &'a self,
-        _state: &mut B,
-        auth: &AgentAuthContext,
-    ) -> Result<(), VerificationError<E>> {
-        let is_frozen = auth.meta.status == 1;
-        let is_admin_tx = is_agent_admin_tx(&self.data);
-
-        if is_frozen && !(is_admin_tx && auth.is_owner()) {
-            return Err(VerificationError::AgentAccountFrozen);
-        }
-
-        if is_admin_tx && !auth.is_owner() {
-            return Err(VerificationError::AgentAccountUnauthorized);
-        }
-
-        if let Some(session_key) = auth.session_key() {
-            if auth.meta.session_key_root.is_some() {
-                return Err(VerificationError::AgentAccountPolicyViolation);
-            }
-
-            let mut policy_view = self.collect_agent_policy_view()?;
-
-            if self.fee > 0 {
-                if !policy_view.assets.contains(&TOS_ASSET) {
-                    policy_view.assets.push(TOS_ASSET);
-                }
-                policy_view.total_spend = policy_view
-                    .total_spend
-                    .checked_add(self.fee)
-                    .ok_or(VerificationError::Overflow)?;
-            }
-
-            if policy_view.has_hidden_amounts && session_key.max_value_per_window > 0 {
-                return Err(VerificationError::AgentAccountPolicyViolation);
-            }
-
-            if !session_key.allowed_targets.is_empty() {
-                if policy_view.targets.is_empty() {
-                    return Err(VerificationError::AgentAccountPolicyViolation);
-                }
-                for target in &policy_view.targets {
-                    if !session_key.allowed_targets.contains(target) {
-                        return Err(VerificationError::AgentAccountPolicyViolation);
-                    }
-                }
-            }
-
-            if !session_key.allowed_assets.is_empty() {
-                if policy_view.assets.is_empty() {
-                    return Err(VerificationError::AgentAccountPolicyViolation);
-                }
-                for asset in &policy_view.assets {
-                    if !session_key.allowed_assets.contains(asset) {
-                        return Err(VerificationError::AgentAccountPolicyViolation);
-                    }
-                }
-            }
-
-            if session_key.max_value_per_window > 0
-                && policy_view.total_spend > session_key.max_value_per_window
-            {
-                return Err(VerificationError::AgentAccountPolicyViolation);
-            }
-        }
-
-        Ok(())
-    }
-
     /// Get the total sender output ciphertext for Unshield transfers
     /// This is used to calculate the total spending from encrypted balance
     fn get_unshield_sender_output_ct(
@@ -588,6 +270,57 @@ impl Transaction {
         }
 
         true
+    }
+
+    async fn verify_signature_and_multisig<'a, E, B: BlockchainVerificationState<'a, E> + Send>(
+        &'a self,
+        state: &mut B,
+        source_decompressed: &PublicKey,
+    ) -> Result<(), VerificationError<E>> {
+        let bytes = self.get_signing_bytes();
+        if !self.signature.verify(&bytes, source_decompressed) {
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("transaction signature is invalid");
+            }
+            return Err(VerificationError::InvalidSignature);
+        }
+
+        if let Some(config) = state
+            .get_multisig_state(&self.source)
+            .await
+            .map_err(VerificationError::State)?
+        {
+            let Some(multisig) = self.get_multisig() else {
+                return Err(VerificationError::MultiSigNotFound);
+            };
+
+            if (config.threshold as usize) != multisig.len()
+                || multisig.len() > MAX_MULTISIG_PARTICIPANTS
+            {
+                return Err(VerificationError::MultiSigParticipants);
+            }
+
+            let multisig_bytes = self.get_multisig_signing_bytes();
+            let hash_val = hash(&multisig_bytes);
+            for sig in multisig.get_signatures() {
+                let index = sig.id as usize;
+                let Some(key) = config.participants.get_index(index) else {
+                    return Err(VerificationError::MultiSigParticipants);
+                };
+
+                let decompressed = key.decompress().map_err(ProofVerificationError::from)?;
+                if !sig.signature.verify(hash_val.as_bytes(), &decompressed) {
+                    if log::log_enabled!(log::Level::Debug) {
+                        debug!("Multisig signature verification failed for participant {index}");
+                    }
+                    return Err(VerificationError::InvalidSignature);
+                }
+            }
+        } else if self.get_multisig().is_some() {
+            return Err(VerificationError::MultiSigNotConfigured);
+        }
+
+        Ok(())
     }
 
     // This method previously decompressed private contract deposits for proof verification
@@ -703,12 +436,11 @@ impl Transaction {
             .map_err(|err| VerificationError::Proof(err.into()))?;
 
         let bytes = self.get_signing_bytes();
-        let agent_auth = self
-            .resolve_agent_auth(state, &bytes, &source_decompressed)
-            .await?;
-
-        if let Some(auth) = agent_auth.as_ref() {
-            self.enforce_agent_rules(state, auth).await?;
+        if !self.signature.verify(&bytes, &source_decompressed) {
+            if log::log_enabled!(log::Level::Debug) {
+                debug!("transaction signature is invalid");
+            }
+            return Err(VerificationError::InvalidSignature);
         }
 
         match &self.data {
@@ -765,9 +497,6 @@ impl Transaction {
                 validator
                     .verify()
                     .map_err(|err| VerificationError::ModuleError(format!("{err:#}")))?;
-            }
-            TransactionType::AgentAccount(_) => {
-                // Signature and payload validation happens in pre_verify
             }
             TransactionType::UnoTransfers(transfers) => {
                 // UNO transfers: privacy-preserving transfers with ZKP proofs
@@ -988,9 +717,7 @@ impl Transaction {
                         .ok_or(VerificationError::Overflow)?;
                 }
             }
-            TransactionType::MultiSig(_)
-            // KYC transactions don't spend assets directly (only fee)
-            | TransactionType::AgentAccount(_) => {
+            TransactionType::MultiSig(_) => {
                 // No asset spending for these types
             }
             TransactionType::UnoTransfers(_)
@@ -1022,7 +749,6 @@ impl Transaction {
 
         // Add fee to TOS spending
         if self.fee > 0 {
-            let _ = agent_auth;
             let current = spending_per_asset.entry(TOS_ASSET.clone()).or_insert(0);
             *current = current
                 .checked_add(self.fee)
@@ -1270,93 +996,8 @@ impl Transaction {
             self.nonce,
         );
 
-        // Verify signature (Agent accounts can use controller or session keys)
-        let bytes = self.get_signing_bytes();
-        let agent_auth = self
-            .resolve_agent_auth(state, &bytes, &source_decompressed)
+        self.verify_signature_and_multisig(state, &source_decompressed)
             .await?;
-
-        if let Some(auth) = agent_auth.as_ref() {
-            self.enforce_agent_rules(state, auth).await?;
-        }
-
-        // Verify multisig (owner-only for agent accounts)
-        if let Some(auth) = agent_auth.as_ref() {
-            if auth.is_owner() {
-                if let Some(config) = state
-                    .get_multisig_state(&self.source)
-                    .await
-                    .map_err(VerificationError::State)?
-                {
-                    let Some(multisig) = self.get_multisig() else {
-                        return Err(VerificationError::MultiSigNotFound);
-                    };
-
-                    if (config.threshold as usize) != multisig.len()
-                        || multisig.len() > MAX_MULTISIG_PARTICIPANTS
-                    {
-                        return Err(VerificationError::MultiSigParticipants);
-                    }
-
-                    let multisig_bytes = self.get_multisig_signing_bytes();
-                    let hash_val = hash(&multisig_bytes);
-                    for sig in multisig.get_signatures() {
-                        let index = sig.id as usize;
-                        let Some(key) = config.participants.get_index(index) else {
-                            return Err(VerificationError::MultiSigParticipants);
-                        };
-
-                        let decompressed =
-                            key.decompress().map_err(ProofVerificationError::from)?;
-                        if !sig.signature.verify(hash_val.as_bytes(), &decompressed) {
-                            if log::log_enabled!(log::Level::Debug) {
-                                debug!(
-                                    "Multisig signature verification failed for participant {index}"
-                                );
-                            }
-                            return Err(VerificationError::InvalidSignature);
-                        }
-                    }
-                } else if self.get_multisig().is_some() {
-                    return Err(VerificationError::MultiSigNotConfigured);
-                }
-            } else if self.get_multisig().is_some() {
-                return Err(VerificationError::AgentAccountUnauthorized);
-            }
-        } else if let Some(config) = state
-            .get_multisig_state(&self.source)
-            .await
-            .map_err(VerificationError::State)?
-        {
-            let Some(multisig) = self.get_multisig() else {
-                return Err(VerificationError::MultiSigNotFound);
-            };
-
-            if (config.threshold as usize) != multisig.len()
-                || multisig.len() > MAX_MULTISIG_PARTICIPANTS
-            {
-                return Err(VerificationError::MultiSigParticipants);
-            }
-
-            let multisig_bytes = self.get_multisig_signing_bytes();
-            let hash_val = hash(&multisig_bytes);
-            for sig in multisig.get_signatures() {
-                let index = sig.id as usize;
-                let Some(key) = config.participants.get_index(index) else {
-                    return Err(VerificationError::MultiSigParticipants);
-                };
-
-                let decompressed = key.decompress().map_err(ProofVerificationError::from)?;
-                if !sig.signature.verify(hash_val.as_bytes(), &decompressed) {
-                    if log::log_enabled!(log::Level::Debug) {
-                        debug!("Multisig signature verification failed for participant {index}");
-                    }
-                    return Err(VerificationError::InvalidSignature);
-                }
-            }
-        } else if self.get_multisig().is_some() {
-            return Err(VerificationError::MultiSigNotConfigured);
-        }
 
         // 1. Verify CommitmentEqProofs for source balances
         if log::log_enabled!(log::Level::Trace) {
@@ -1600,93 +1241,8 @@ impl Transaction {
             self.nonce,
         );
 
-        // Verify signature (Agent accounts can use controller or session keys)
-        let bytes = self.get_signing_bytes();
-        let agent_auth = self
-            .resolve_agent_auth(state, &bytes, &source_decompressed)
+        self.verify_signature_and_multisig(state, &source_decompressed)
             .await?;
-
-        if let Some(auth) = agent_auth.as_ref() {
-            self.enforce_agent_rules(state, auth).await?;
-        }
-
-        // Verify multisig (owner-only for agent accounts)
-        if let Some(auth) = agent_auth.as_ref() {
-            if auth.is_owner() {
-                if let Some(config) = state
-                    .get_multisig_state(&self.source)
-                    .await
-                    .map_err(VerificationError::State)?
-                {
-                    let Some(multisig) = self.get_multisig() else {
-                        return Err(VerificationError::MultiSigNotFound);
-                    };
-
-                    if (config.threshold as usize) != multisig.len()
-                        || multisig.len() > MAX_MULTISIG_PARTICIPANTS
-                    {
-                        return Err(VerificationError::MultiSigParticipants);
-                    }
-
-                    let multisig_bytes = self.get_multisig_signing_bytes();
-                    let hash_val = hash(&multisig_bytes);
-                    for sig in multisig.get_signatures() {
-                        let index = sig.id as usize;
-                        let Some(key) = config.participants.get_index(index) else {
-                            return Err(VerificationError::MultiSigParticipants);
-                        };
-
-                        let decompressed =
-                            key.decompress().map_err(ProofVerificationError::from)?;
-                        if !sig.signature.verify(hash_val.as_bytes(), &decompressed) {
-                            if log::log_enabled!(log::Level::Debug) {
-                                debug!(
-                                    "Multisig signature verification failed for participant {index}"
-                                );
-                            }
-                            return Err(VerificationError::InvalidSignature);
-                        }
-                    }
-                } else if self.get_multisig().is_some() {
-                    return Err(VerificationError::MultiSigNotConfigured);
-                }
-            } else if self.get_multisig().is_some() {
-                return Err(VerificationError::AgentAccountUnauthorized);
-            }
-        } else if let Some(config) = state
-            .get_multisig_state(&self.source)
-            .await
-            .map_err(VerificationError::State)?
-        {
-            let Some(multisig) = self.get_multisig() else {
-                return Err(VerificationError::MultiSigNotFound);
-            };
-
-            if (config.threshold as usize) != multisig.len()
-                || multisig.len() > MAX_MULTISIG_PARTICIPANTS
-            {
-                return Err(VerificationError::MultiSigParticipants);
-            }
-
-            let multisig_bytes = self.get_multisig_signing_bytes();
-            let hash_val = hash(&multisig_bytes);
-            for sig in multisig.get_signatures() {
-                let index = sig.id as usize;
-                let Some(key) = config.participants.get_index(index) else {
-                    return Err(VerificationError::MultiSigParticipants);
-                };
-
-                let decompressed = key.decompress().map_err(ProofVerificationError::from)?;
-                if !sig.signature.verify(hash_val.as_bytes(), &decompressed) {
-                    if log::log_enabled!(log::Level::Debug) {
-                        debug!("Multisig signature verification failed for participant {index}");
-                    }
-                    return Err(VerificationError::InvalidSignature);
-                }
-            }
-        } else if self.get_multisig().is_some() {
-            return Err(VerificationError::MultiSigNotConfigured);
-        }
 
         // IMPORTANT: Proof verification order MUST match proof generation order in build_unshield_unsigned!
         // Generation order: 1) CiphertextValidityProofs for transfers, 2) CommitmentEqProof for source
@@ -2032,9 +1588,6 @@ impl Transaction {
                     .verify()
                     .map_err(|err| VerificationError::ModuleError(format!("{err:#}")))?;
             }
-            TransactionType::AgentAccount(_) => {
-                // Handled after signature validation
-            }
             TransactionType::UnoTransfers(transfers) => {
                 // UNO transfers: privacy-preserving transfers with ZKP proofs
                 if transfers.len() > MAX_TRANSFER_COUNT || transfers.is_empty() {
@@ -2208,105 +1761,13 @@ impl Transaction {
             }
         }
 
-        // 0.b Verify Signature (Agent accounts can use controller or session keys)
+        // 0.b Verify signature and multisig requirements
         let source_decompressed = self
             .source
             .decompress()
             .map_err(|err| VerificationError::Proof(err.into()))?;
-        let bytes = self.get_signing_bytes();
-        let agent_auth = self
-            .resolve_agent_auth(state, &bytes, &source_decompressed)
+        self.verify_signature_and_multisig(state, &source_decompressed)
             .await?;
-
-        if let Some(auth) = agent_auth.as_ref() {
-            self.enforce_agent_rules(state, auth).await?;
-        }
-
-        // 0.c Verify multisig (owner-only for agent accounts)
-        if let Some(auth) = agent_auth.as_ref() {
-            if auth.is_owner() {
-                if let Some(config) = state
-                    .get_multisig_state(&self.source)
-                    .await
-                    .map_err(VerificationError::State)?
-                {
-                    let Some(multisig) = self.get_multisig() else {
-                        return Err(VerificationError::MultiSigNotFound);
-                    };
-
-                    if (config.threshold as usize) != multisig.len()
-                        || multisig.len() > MAX_MULTISIG_PARTICIPANTS
-                    {
-                        return Err(VerificationError::MultiSigParticipants);
-                    }
-
-                    let multisig_bytes = self.get_multisig_signing_bytes();
-                    let hash = hash(&multisig_bytes);
-                    for sig in multisig.get_signatures() {
-                        let index = sig.id as usize;
-                        let Some(key) = config.participants.get_index(index) else {
-                            return Err(VerificationError::MultiSigParticipants);
-                        };
-
-                        let decompressed =
-                            key.decompress().map_err(ProofVerificationError::from)?;
-                        if !sig.signature.verify(hash.as_bytes(), &decompressed) {
-                            if log::log_enabled!(log::Level::Debug) {
-                                debug!(
-                                    "Multisig signature verification failed for participant {index}"
-                                );
-                            }
-                            return Err(VerificationError::InvalidSignature);
-                        }
-                    }
-                } else if self.get_multisig().is_some() {
-                    return Err(VerificationError::MultiSigNotConfigured);
-                }
-            } else if self.get_multisig().is_some() {
-                return Err(VerificationError::AgentAccountUnauthorized);
-            }
-        } else {
-            let config = state
-                .get_multisig_state(&self.source)
-                .await
-                .map_err(VerificationError::State)?;
-            if let Some(config) = config {
-                let Some(multisig) = self.get_multisig() else {
-                    return Err(VerificationError::MultiSigNotFound);
-                };
-
-                if (config.threshold as usize) != multisig.len()
-                    || multisig.len() > MAX_MULTISIG_PARTICIPANTS
-                {
-                    return Err(VerificationError::MultiSigParticipants);
-                }
-
-                let multisig_bytes = self.get_multisig_signing_bytes();
-                let hash = hash(&multisig_bytes);
-                for sig in multisig.get_signatures() {
-                    let index = sig.id as usize;
-                    let Some(key) = config.participants.get_index(index) else {
-                        return Err(VerificationError::MultiSigParticipants);
-                    };
-
-                    let decompressed = key.decompress().map_err(ProofVerificationError::from)?;
-                    if !sig.signature.verify(hash.as_bytes(), &decompressed) {
-                        if log::log_enabled!(log::Level::Debug) {
-                            debug!(
-                                "Multisig signature verification failed for participant {index}"
-                            );
-                        }
-                        return Err(VerificationError::InvalidSignature);
-                    }
-                }
-            } else if self.get_multisig().is_some() {
-                return Err(VerificationError::MultiSigNotConfigured);
-            }
-        }
-
-        if let TransactionType::AgentAccount(payload) = &self.data {
-            verify_agent_account_payload(payload, &self.source, state).await?;
-        }
 
         // Balance verification handled by plaintext balance system
         if log::log_enabled!(log::Level::Trace) {
@@ -2390,10 +1851,6 @@ impl Transaction {
                         .map_err(VerificationError::State)?;
                 }
             }
-            // KYC transaction types
-            TransactionType::AgentAccount(_) => {
-                // KYC transactions are logged at execution time
-            }
             TransactionType::UnoTransfers(_)
             | TransactionType::ShieldTransfers(_)
             | TransactionType::UnshieldTransfers(_) => {
@@ -2472,9 +1929,7 @@ impl Transaction {
                         .ok_or(VerificationError::Overflow)?;
                 }
             }
-            TransactionType::MultiSig(_)
-            // KYC transactions don't spend assets directly (only fee)
-            | TransactionType::AgentAccount(_) => {
+            TransactionType::MultiSig(_) => {
                 // No asset spending for these types
             }
             TransactionType::UnoTransfers(_) => {
@@ -2507,7 +1962,6 @@ impl Transaction {
 
         // Add fee to TOS spending
         if self.fee > 0 {
-            let _ = agent_auth;
             let current = spending_per_asset.entry(TOS_ASSET.clone()).or_insert(0);
             *current = current
                 .checked_add(self.fee)
@@ -2823,9 +2277,7 @@ impl Transaction {
                         .ok_or(VerificationError::Overflow)?;
                 }
             }
-            TransactionType::MultiSig(_)
-            // KYC transactions don't spend assets directly (only fee)
-            | TransactionType::AgentAccount(_) => {
+            TransactionType::MultiSig(_) => {
                 // No asset spending for these types
             }
             TransactionType::UnoTransfers(_) => {
@@ -3010,9 +2462,6 @@ impl Transaction {
                     .set_multisig_state(&self.source, payload)
                     .await
                     .map_err(VerificationError::State)?;
-            }
-            TransactionType::AgentAccount(payload) => {
-                verify_agent_account_payload(payload, &self.source, state).await?;
             }
             TransactionType::InvokeContract(payload) => {
                 if self.is_contract_available(state, &payload.contract).await? {
@@ -3287,9 +2736,7 @@ impl Transaction {
                         .ok_or(VerificationError::Overflow)?;
                 }
             }
-            TransactionType::MultiSig(_)
-            // KYC transactions don't spend assets directly (only fee)
-            | TransactionType::AgentAccount(_) => {
+            TransactionType::MultiSig(_) => {
                 // No asset spending for these types
             }
             TransactionType::UnoTransfers(_) => {

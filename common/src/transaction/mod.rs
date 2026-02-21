@@ -53,7 +53,6 @@ pub enum TransactionType {
     MultiSig(MultiSigPayload),
     InvokeContract(InvokeContractPayload),
     DeployContract(DeployContractPayload),
-    AgentAccount(AgentAccountPayload),
     /// UNO privacy transfers (encrypted amounts)
     UnoTransfers(Vec<UnoTransferPayload>),
     /// Shield transfers: TOS (plaintext) -> UNO (encrypted)
@@ -347,7 +346,7 @@ impl Transaction {
                     }
                 }
             }
-            // MultiSig and agent/account-like payloads don't have explicit assets
+            // MultiSig-like payloads don't have explicit assets
             _ => {}
         }
 
@@ -455,10 +454,6 @@ impl Serializer for TransactionType {
                 writer.write_u8(4);
                 module.write(writer);
             }
-            TransactionType::AgentAccount(payload) => {
-                writer.write_u8(23);
-                payload.write(writer);
-            }
             TransactionType::UnoTransfers(transfers) => {
                 writer.write_u8(18);
                 let len: u16 = transfers.len() as u16;
@@ -545,7 +540,6 @@ impl Serializer for TransactionType {
                 TransactionType::UnshieldTransfers(txs)
             }
             21 => TransactionType::RegisterName(RegisterNamePayload::read(reader)?),
-            23 => TransactionType::AgentAccount(AgentAccountPayload::read(reader)?),
             _ => return Err(ReaderError::InvalidValue),
         })
     }
@@ -567,7 +561,6 @@ impl Serializer for TransactionType {
             }
             TransactionType::InvokeContract(payload) => payload.size(),
             TransactionType::DeployContract(module) => module.size(),
-            TransactionType::AgentAccount(payload) => payload.size(),
             TransactionType::UnoTransfers(txs) => {
                 let mut size = 2;
                 for tx in txs {

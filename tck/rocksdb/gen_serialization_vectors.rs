@@ -854,49 +854,6 @@ fn generate_contract_vectors() -> Vec<ContractTestVector> {
 }
 
 // ============================================================================
-// AgentAccountMetaPointer Serialization
-// Structure: has_meta (bool as u8: 0x00 or 0x01)
-// ============================================================================
-
-#[derive(Serialize)]
-struct AgentAccountMetaPointerTestVector {
-    name: String,
-    description: String,
-    has_meta: bool,
-    serialized_hex: String,
-    serialized_len: usize,
-}
-
-fn serialize_agent_meta(has_meta: bool) -> Vec<u8> {
-    vec![if has_meta { 0x01 } else { 0x00 }]
-}
-
-fn generate_agent_meta_vectors() -> Vec<AgentAccountMetaPointerTestVector> {
-    vec![
-        {
-            let s = serialize_agent_meta(false);
-            AgentAccountMetaPointerTestVector {
-                name: "agent_meta_false".to_string(),
-                description: "No agent metadata".to_string(),
-                has_meta: false,
-                serialized_hex: to_hex(&s),
-                serialized_len: s.len(),
-            }
-        },
-        {
-            let s = serialize_agent_meta(true);
-            AgentAccountMetaPointerTestVector {
-                name: "agent_meta_true".to_string(),
-                description: "Has agent metadata".to_string(),
-                has_meta: true,
-                serialized_hex: to_hex(&s),
-                serialized_len: s.len(),
-            }
-        },
-    ]
-}
-
-// ============================================================================
 // TopoHeightMetadata Serialization
 // Structure: rewards (u64) + emitted_supply (u64) + burned_supply (u64)
 // ============================================================================
@@ -1194,7 +1151,6 @@ struct SerializationTestVectors {
     versioned_balance_vectors: Vec<VersionedBalanceTestVector>,
     asset_vectors: Vec<AssetTestVector>,
     contract_vectors: Vec<ContractTestVector>,
-    agent_meta_vectors: Vec<AgentAccountMetaPointerTestVector>,
     topo_metadata_vectors: Vec<TopoHeightMetadataTestVector>,
     varuint_vectors: Vec<VarUintTestVector>,
     block_difficulty_vectors: Vec<BlockDifficultyTestVector>,
@@ -1208,14 +1164,13 @@ fn main() {
     let balance_vectors = generate_versioned_balance_vectors();
     let asset_vectors = generate_asset_vectors();
     let contract_vectors = generate_contract_vectors();
-    let agent_meta_vectors = generate_agent_meta_vectors();
     let topo_metadata_vectors = generate_topo_metadata_vectors();
     let varuint_vectors = generate_varuint_vectors();
     let block_difficulty_vectors = generate_block_difficulty_vectors();
 
     let total = be_vectors.len() + opt_vectors.len() + acc_vectors.len()
         + nonce_vectors.len() + balance_vectors.len()
-        + asset_vectors.len() + contract_vectors.len() + agent_meta_vectors.len()
+        + asset_vectors.len() + contract_vectors.len()
         + topo_metadata_vectors.len() + varuint_vectors.len()
         + block_difficulty_vectors.len();
 
@@ -1231,7 +1186,6 @@ fn main() {
         versioned_balance_vectors: balance_vectors,
         asset_vectors,
         contract_vectors,
-        agent_meta_vectors,
         topo_metadata_vectors,
         varuint_vectors,
         block_difficulty_vectors,
@@ -1255,7 +1209,6 @@ fn main() {
     println!("  Asset/Contract Types:");
     println!("    - {} asset vectors", vectors.asset_vectors.len());
     println!("    - {} contract vectors", vectors.contract_vectors.len());
-    println!("    - {} agent_meta vectors", vectors.agent_meta_vectors.len());
     println!("  Block Types:");
     println!("    - {} topo_metadata vectors", vectors.topo_metadata_vectors.len());
     println!("    - {} block_difficulty vectors", vectors.block_difficulty_vectors.len());

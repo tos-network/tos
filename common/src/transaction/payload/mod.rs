@@ -1,4 +1,3 @@
-mod agent_account;
 mod burn;
 mod contract;
 mod multisig;
@@ -8,7 +7,6 @@ mod transfer;
 mod uno_transfer;
 mod unshield_transfer;
 
-pub use agent_account::*;
 pub use burn::*;
 pub use contract::*;
 pub use multisig::*;

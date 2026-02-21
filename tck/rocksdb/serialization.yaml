@@ -565,17 +565,6 @@ contract_vectors:
   module_pointer: 0
   serialized_hex: '0000000000003039010000000000000000'
   serialized_len: 17
-agent_meta_vectors:
-- name: agent_meta_false
-  description: No agent metadata
-  has_meta: false
-  serialized_hex: '00'
-  serialized_len: 1
-- name: agent_meta_true
-  description: Has agent metadata
-  has_meta: true
-  serialized_hex: '01'
-  serialized_len: 1
 topo_metadata_vectors:
 - name: topo_meta_genesis
   description: Genesis block metadata (all zeros)

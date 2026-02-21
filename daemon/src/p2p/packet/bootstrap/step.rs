@@ -9,7 +9,7 @@ use indexmap::{IndexMap, IndexSet};
 use log::debug;
 use std::borrow::Cow;
 use tos_common::{
-    account::{AccountSummary, AgentAccountMeta, Balance, Nonce, UnoBalance},
+    account::{AccountSummary, Balance, Nonce, UnoBalance},
     asset::AssetData,
     block::TopoHeight,
     contract::{ScheduledExecution, MAX_KEY_SIZE, MAX_VALUE_SIZE},
@@ -49,7 +49,6 @@ pub enum StepKind {
     Contracts,
     Tns,
     UnoBalance,
-    Agent,
     BlocksMetadata,
 }
 
@@ -64,8 +63,7 @@ impl StepKind {
             Self::MultiSigs => Self::Contracts,
             Self::Contracts => Self::Tns,
             Self::Tns => Self::UnoBalance,
-            Self::UnoBalance => Self::Agent,
-            Self::Agent => Self::BlocksMetadata,
+            Self::UnoBalance => Self::BlocksMetadata,
             Self::BlocksMetadata => return None,
         })
     }
@@ -112,8 +110,6 @@ pub enum StepRequest<'a> {
     TnsNames(Option<u64>),
     // UNO balances per key/asset, key, asset, topoheight, pagination
     UnoBalances(Cow<'a, PublicKey>, Cow<'a, Hash>, TopoHeight, Option<u64>),
-    // Agent account data, pagination
-    AgentData(Option<u64>),
     // UNO balance keys discovery (list all key+asset pairs), pagination
     UnoBalanceKeys(Option<u64>),
 
@@ -138,7 +134,6 @@ impl<'a> StepRequest<'a> {
             Self::ContractsExecutions(_, _, _) => StepKind::Contracts,
             Self::TnsNames(_) => StepKind::Tns,
             Self::UnoBalances(_, _, _, _) => StepKind::UnoBalance,
-            Self::AgentData(_) => StepKind::Agent,
             Self::UnoBalanceKeys(_) => StepKind::UnoBalance,
             Self::BlocksMetadata(_) => StepKind::BlocksMetadata,
         }
@@ -364,7 +359,6 @@ impl Serializer for StepRequest<'_> {
                 let page = Option::read(reader)?;
                 Self::UnoBalances(Cow::Owned(key), Cow::Owned(asset), topo, page)
             }
-            26 => Self::AgentData(Option::read(reader)?),
             29 => Self::UnoBalanceKeys(Option::read(reader)?),
             id => {
                 if log::log_enabled!(log::Level::Debug) {
@@ -462,10 +456,6 @@ impl Serializer for StepRequest<'_> {
                 writer.write_u64(topo);
                 page.write(writer);
             }
-            Self::AgentData(page) => {
-                writer.write_u8(26);
-                page.write(writer);
-            }
             Self::UnoBalanceKeys(page) => {
                 writer.write_u8(29);
                 page.write(writer);
@@ -503,7 +493,6 @@ impl Serializer for StepRequest<'_> {
             Self::UnoBalances(key, asset, topo, page) => {
                 key.size() + asset.size() + topo.size() + page.size()
             }
-            Self::AgentData(page) => page.size(),
             Self::UnoBalanceKeys(page) => page.size(),
             Self::BlocksMetadata(topoheight) => topoheight.size(),
         };
@@ -551,8 +540,6 @@ pub enum StepResponse {
     TnsNames(IndexMap<Hash, PublicKey>, Option<u64>),
     // UNO balance entries, pagination
     UnoBalances(Vec<UnoBalance>, Option<u64>),
-    // Agent account entries, pagination
-    AgentData(IndexMap<PublicKey, AgentAccountMeta>, Option<u64>),
     // UNO balance keys discovery (key, asset pairs), pagination
     UnoBalanceKeys(Vec<(PublicKey, Hash)>, Option<u64>),
 
@@ -577,7 +564,6 @@ impl StepResponse {
             Self::ContractsExecutions(_, _) => StepKind::Contracts,
             Self::TnsNames(_, _) => StepKind::Tns,
             Self::UnoBalances(_, _) => StepKind::UnoBalance,
-            Self::AgentData(_, _) => StepKind::Agent,
             Self::UnoBalanceKeys(_, _) => StepKind::UnoBalance,
             Self::BlocksMetadata(_) => StepKind::BlocksMetadata,
         }
@@ -899,38 +885,6 @@ impl Serializer for StepResponse {
                 }
                 Self::UnoBalances(entries, page)
             }
-            26 => {
-                let len = reader.read_u16()?;
-                if len > MAX_ITEMS_PER_PAGE as u16 {
-                    if log::log_enabled!(log::Level::Debug) {
-                        debug!("Invalid agent data response length: {}", len);
-                    }
-                    return Err(ReaderError::InvalidValue);
-                }
-
-                let mut entries = IndexMap::with_capacity(len as usize);
-                for _ in 0..len {
-                    let key = PublicKey::read(reader)?;
-                    let value = AgentAccountMeta::read(reader)?;
-                    if entries.insert(key, value).is_some() {
-                        if log::log_enabled!(log::Level::Debug) {
-                            debug!("Duplicated public key in AgentData Step Response");
-                        }
-                        return Err(ReaderError::InvalidValue);
-                    }
-                }
-
-                let page = Option::read(reader)?;
-                if let Some(page_number) = &page {
-                    if *page_number == 0 {
-                        if log::log_enabled!(log::Level::Debug) {
-                            debug!("Invalid page number (0) in Step Response");
-                        }
-                        return Err(ReaderError::InvalidValue);
-                    }
-                }
-                Self::AgentData(entries, page)
-            }
             29 => {
                 let len = reader.read_u16()?;
                 if len > MAX_ITEMS_PER_PAGE as u16 {
@@ -1058,11 +1012,6 @@ impl Serializer for StepResponse {
                 entries.write(writer);
                 page.write(writer);
             }
-            Self::AgentData(entries, page) => {
-                writer.write_u8(26);
-                entries.write(writer);
-                page.write(writer);
-            }
             Self::UnoBalanceKeys(entries, page) => {
                 writer.write_u8(29);
                 writer.write_u16(entries.len() as u16);
@@ -1097,7 +1046,6 @@ impl Serializer for StepResponse {
             Self::ContractsExecutions(executions, page) => executions.size() + page.size(),
             Self::TnsNames(entries, page) => entries.size() + page.size(),
             Self::UnoBalances(entries, page) => entries.size() + page.size(),
-            Self::AgentData(entries, page) => entries.size() + page.size(),
             Self::UnoBalanceKeys(entries, page) => {
                 2 + entries
                     .iter()
@@ -1111,7 +1059,6 @@ impl Serializer for StepResponse {
         size + 1
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1891,17 +1838,6 @@ mod tests {
         verify_size_request(&request);
     }
 
-    #[test]
-    fn test_request_agent_data_round_trip() {
-        let request = StepRequest::AgentData(None);
-        let decoded = round_trip_request(&request);
-        match decoded {
-            StepRequest::AgentData(page) => assert_eq!(page, None),
-            _ => panic!("Expected AgentData variant"),
-        }
-        verify_size_request(&request);
-    }
-
     // ========================================================================
     // TOS Extension StepResponse tests
     // ========================================================================
@@ -2005,54 +1941,6 @@ mod tests {
         assert_eq!(response.kind(), StepKind::UnoBalance);
     }
 
-    #[test]
-    fn test_response_agent_data_empty() {
-        let response = StepResponse::AgentData(IndexMap::new(), None);
-        let decoded = round_trip_response(&response);
-        match decoded {
-            StepResponse::AgentData(entries, page) => {
-                assert!(entries.is_empty());
-                assert_eq!(page, None);
-            }
-            _ => panic!("Expected AgentData variant"),
-        }
-        verify_size_response(&response);
-    }
-
-    #[test]
-    fn test_response_agent_data_with_entry() {
-        let key = PublicKey::from_bytes(&[1u8; 32]).unwrap();
-        let meta = AgentAccountMeta {
-            owner: key.clone(),
-            controller: PublicKey::from_bytes(&[2u8; 32]).unwrap(),
-            policy_hash: test_hash(10),
-            status: 0,
-            session_key_root: None,
-        };
-        let mut entries = IndexMap::new();
-        entries.insert(key.clone(), meta);
-
-        let response = StepResponse::AgentData(entries, Some(1));
-        let decoded = round_trip_response(&response);
-        match decoded {
-            StepResponse::AgentData(decoded_entries, page) => {
-                assert_eq!(decoded_entries.len(), 1);
-                assert_eq!(page, Some(1));
-                let decoded_meta = decoded_entries.get(&key).unwrap();
-                assert_eq!(decoded_meta.status, 0);
-                assert_eq!(decoded_meta.policy_hash, test_hash(10));
-            }
-            _ => panic!("Expected AgentData variant"),
-        }
-        verify_size_response(&response);
-    }
-
-    #[test]
-    fn test_response_agent_data_kind() {
-        let response = StepResponse::AgentData(IndexMap::new(), None);
-        assert_eq!(response.kind(), StepKind::Agent);
-    }
-
     // ========================================================================
     // TOS Extension page validation tests
     // ========================================================================
@@ -2060,8 +1948,7 @@ mod tests {
     #[test]
     fn test_response_tos_page_zero_rejected() {
         // Test that page=0 is rejected for TOS extension variants
-        let test_cases: Vec<(&str, u8)> =
-            vec![("TnsNames", 22), ("UnoBalances", 25), ("AgentData", 26)];
+        let test_cases: Vec<(&str, u8)> = vec![("TnsNames", 22), ("UnoBalances", 25)];
 
         for (name, id) in test_cases {
             let mut bytes = Vec::new();
@@ -2087,8 +1974,7 @@ mod tests {
     #[test]
     fn test_response_tos_too_many_items_rejected() {
         // Test that more than MAX_ITEMS_PER_PAGE is rejected
-        let test_cases: Vec<(&str, u8)> =
-            vec![("TnsNames", 22), ("UnoBalances", 25), ("AgentData", 26)];
+        let test_cases: Vec<(&str, u8)> = vec![("TnsNames", 22), ("UnoBalances", 25)];
 
         for (name, id) in test_cases {
             let mut bytes = Vec::new();
@@ -2126,7 +2012,6 @@ mod tests {
                 ),
                 25,
             ),
-            (StepRequest::AgentData(None), 26),
         ];
 
         for (request, expected_id) in test_cases {
@@ -2150,7 +2035,6 @@ mod tests {
         let test_cases: Vec<(StepResponse, u8)> = vec![
             (StepResponse::TnsNames(IndexMap::new(), None), 22),
             (StepResponse::UnoBalances(Vec::new(), None), 25),
-            (StepResponse::AgentData(IndexMap::new(), None), 26),
         ];
 
         for (response, expected_id) in test_cases {
@@ -2175,8 +2059,7 @@ mod tests {
     #[test]
     fn test_step_kind_tos_transitions() {
         assert_eq!(StepKind::Tns.next(), Some(StepKind::UnoBalance));
-        assert_eq!(StepKind::UnoBalance.next(), Some(StepKind::Agent));
-        assert_eq!(StepKind::Agent.next(), Some(StepKind::BlocksMetadata));
+        assert_eq!(StepKind::UnoBalance.next(), Some(StepKind::BlocksMetadata));
         assert_eq!(StepKind::BlocksMetadata.next(), None);
     }
 
@@ -2193,6 +2076,5 @@ mod tests {
             .kind(),
             StepKind::UnoBalance
         );
-        assert_eq!(StepRequest::AgentData(None).kind(), StepKind::Agent);
     }
 }

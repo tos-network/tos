@@ -17,10 +17,10 @@ use crate::{
     crypto::{Address, Hash, Signature},
     serializer::Serializer,
     transaction::{
-        extra_data::UnknownExtraDataFormat, multisig::MultiSig, AgentAccountPayload, BurnPayload,
-        DeployContractPayload, FeeType, InvokeContractPayload, MultiSigPayload, Reference,
-        RegisterNamePayload, ShieldTransferPayload, Transaction, TransactionType, TransferPayload,
-        TxVersion, UnoTransferPayload, UnshieldTransferPayload,
+        extra_data::UnknownExtraDataFormat, multisig::MultiSig, BurnPayload, DeployContractPayload,
+        FeeType, InvokeContractPayload, MultiSigPayload, Reference, RegisterNamePayload,
+        ShieldTransferPayload, Transaction, TransactionType, TransferPayload, TxVersion,
+        UnoTransferPayload, UnshieldTransferPayload,
     },
 };
 pub use data::*;
@@ -71,7 +71,6 @@ pub enum RPCTransactionType<'a> {
     MultiSig(Cow<'a, MultiSigPayload>),
     InvokeContract(Cow<'a, InvokeContractPayload>),
     DeployContract(Cow<'a, DeployContractPayload>),
-    AgentAccount(Cow<'a, AgentAccountPayload>),
     // UNO (Privacy Balance) transaction types
     UnoTransfers(Cow<'a, Vec<UnoTransferPayload>>),
     ShieldTransfers(Cow<'a, Vec<ShieldTransferPayload>>),
@@ -103,7 +102,6 @@ impl<'a> RPCTransactionType<'a> {
             TransactionType::DeployContract(payload) => {
                 Self::DeployContract(Cow::Borrowed(payload))
             }
-            TransactionType::AgentAccount(payload) => Self::AgentAccount(Cow::Borrowed(payload)),
             TransactionType::UnoTransfers(transfers) => {
                 Self::UnoTransfers(Cow::Borrowed(transfers))
             }
@@ -136,9 +134,6 @@ impl From<RPCTransactionType<'_>> for TransactionType {
             }
             RPCTransactionType::DeployContract(payload) => {
                 TransactionType::DeployContract(payload.into_owned())
-            }
-            RPCTransactionType::AgentAccount(payload) => {
-                TransactionType::AgentAccount(payload.into_owned())
             }
             RPCTransactionType::UnoTransfers(transfers) => {
                 TransactionType::UnoTransfers(transfers.into_owned())

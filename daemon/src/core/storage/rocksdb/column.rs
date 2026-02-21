@@ -54,12 +54,6 @@ pub enum Column {
 
     // {account_key} => {account}
     Account,
-    // Agent account metadata
-    // {account_key} => {AgentAccountMeta}
-    AgentAccountMeta,
-    // Agent session keys
-    // {account_key}{key_id} => {SessionKey}
-    AgentSessionKeys,
     // Column used as a "versioned" as its
     // prefixed with a topoheight to have
     // easier search per topoheight
@@ -187,9 +181,6 @@ impl Column {
             // Priority index: prefix by exec_topoheight (8 bytes)
             DelayedExecutionPriority => Some(PREFIX_TOPOHEIGHT_LEN),
 
-            // Agent session keys: prefix by account public key (32 bytes)
-            AgentSessionKeys => Some(32),
-
             _ => None,
         }
     }
@@ -203,10 +194,10 @@ mod tests {
     #[test]
     fn test_column_family_alignment() {
         // Verify total CF count
-        assert_eq!(Column::iter().count(), 45);
+        assert_eq!(Column::iter().count(), 43);
 
         // Verify the first and last known CFs for sanity
         assert_eq!(Column::Transactions as usize, 0);
-        assert_eq!(Column::TnsAccountToName as usize, 44);
+        assert_eq!(Column::TnsAccountToName as usize, 42);
     }
 }
